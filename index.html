@@ -1,0 +1,1205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#05090F">
+<title>Liquidity Radar — BTCUSDT Perp Microstructure</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#05090F;
+  --card:#0B1521;
+  --surface:#101C2A;
+  --border:#1C3042;
+  --yellow:#FFD000;
+  --green:#00E8A9;
+  --pink:#FF2D78;
+  --cyan:#18D4DF;
+  --blue:#4DA3FF;
+  --amber:#FFB820;
+  --text:#E8ECF1;
+  --dim:#5A6A7E;
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html{-webkit-text-size-adjust:100%}
+body{
+  background:var(--bg);
+  color:var(--text);
+  font-family:'Inter',system-ui,sans-serif;
+  font-size:13px;
+  line-height:1.45;
+  min-height:100vh;
+  overflow-x:hidden;
+}
+.mono{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums}
+.main{
+  max-width:480px;
+  margin:0 auto;
+  padding:calc(68px + env(safe-area-inset-top)) 16px calc(112px + env(safe-area-inset-bottom));
+}
+.section{margin-bottom:14px}
+
+/* ---------- HEADER ---------- */
+.header{
+  position:fixed;top:0;left:0;right:0;z-index:50;
+  background:rgba(2,5,9,.92);
+  backdrop-filter:blur(14px);
+  -webkit-backdrop-filter:blur(14px);
+  border-bottom:1px solid rgba(28,48,66,.55);
+}
+.header-inner{
+  max-width:480px;margin:0 auto;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:calc(10px + env(safe-area-inset-top)) 16px 10px;
+}
+.icon-btn{
+  border:none;background:none;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  color:var(--text);position:relative;
+}
+.burger{
+  width:38px;height:38px;border-radius:50%;
+  background:var(--yellow);
+  flex-direction:column;gap:4px;
+  box-shadow:0 0 16px rgba(255,208,0,.28);
+}
+.burger span{display:block;width:15px;height:2px;background:#071018;border-radius:2px}
+.header-right{display:flex;align-items:center;gap:12px}
+.avatar{
+  width:38px;height:38px;border-radius:50%;
+  background:var(--yellow);
+  box-shadow:0 0 16px rgba(255,208,0,.28);
+}
+.avatar svg{stroke:#071018}
+.avatar-dot{
+  position:absolute;right:-1px;bottom:-1px;
+  width:11px;height:11px;border-radius:50%;
+  background:var(--yellow);
+  border:2px solid #020509;
+}
+.bell{width:36px;height:36px;color:var(--dim)}
+.bell:hover{color:var(--text)}
+.badge-count{
+  position:absolute;top:-3px;right:-4px;
+  min-width:16px;height:16px;padding:0 4px;
+  border-radius:999px;background:var(--yellow);color:#071018;
+  font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;
+  display:flex;align-items:center;justify-content:center;
+  border:2px solid #020509;
+}
+
+/* ---------- TITLE ---------- */
+.title-block{padding:6px 0 14px}
+.title-block h1{
+  font-size:30px;font-weight:800;letter-spacing:-.02em;line-height:1.1;
+}
+.title-block h1 em{color:var(--yellow);font-style:italic}
+.title-meta{display:flex;align-items:center;gap:10px;margin-top:7px;flex-wrap:wrap}
+.subtitle{
+  font-family:'JetBrains Mono',monospace;
+  font-size:10px;letter-spacing:.14em;color:var(--dim);font-weight:500;
+}
+.live-badge{
+  display:inline-flex;align-items:center;gap:5px;
+  font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;
+  letter-spacing:.16em;color:var(--green);
+  background:rgba(0,232,169,.08);
+  border:1px solid rgba(0,232,169,.35);
+  padding:3px 8px;border-radius:4px;
+}
+.pulse-dot{width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulse 1.8s infinite}
+@keyframes pulse{
+  0%{box-shadow:0 0 0 0 rgba(0,232,169,.55)}
+  70%{box-shadow:0 0 0 6px rgba(0,232,169,0)}
+  100%{box-shadow:0 0 0 0 rgba(0,232,169,0)}
+}
+.divider{
+  height:2px;margin-top:14px;border-radius:2px;
+  background:linear-gradient(90deg,var(--yellow) 0%,rgba(255,208,0,.25) 70%,rgba(255,208,0,0) 100%);
+  box-shadow:0 0 10px rgba(255,208,0,.35);
+}
+
+/* ---------- METRICS BAR ---------- */
+.metrics-bar{
+  display:grid;grid-template-columns:repeat(4,1fr);
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:10px;
+  overflow:hidden;
+}
+.metric{padding:10px 6px;text-align:center;border-right:1px solid var(--border)}
+.metric:last-child{border-right:none}
+.metric-label{font-size:8px;font-weight:700;letter-spacing:.12em;color:var(--dim);text-transform:uppercase;margin-bottom:4px}
+.metric-value{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700}
+.v-green{color:var(--green)}
+.v-pink{color:var(--pink)}
+.v-cyan{color:var(--cyan)}
+
+/* ---------- CARDS ---------- */
+.card{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:14px;
+}
+.card-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.card-title{font-size:10px;font-weight:700;letter-spacing:.16em;color:var(--dim);text-transform:uppercase;display:flex;align-items:center;gap:7px}
+.card-title .t-dot{width:5px;height:5px;border-radius:1px;background:var(--yellow)}
+.chip{
+  display:inline-flex;align-items:center;gap:5px;
+  font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;letter-spacing:.1em;
+  padding:3px 8px;border-radius:4px;text-transform:uppercase;
+}
+.chip-demo{color:var(--amber);background:rgba(255,184,32,.08);border:1px solid rgba(255,184,32,.35)}
+.chip-bearish{color:var(--pink);background:rgba(255,45,120,.1);border:1px solid rgba(255,45,120,.45)}
+.chip-green{color:var(--green);background:rgba(0,232,169,.08);border:1px solid rgba(0,232,169,.35)}
+.chip-pink{color:var(--pink);background:rgba(255,45,120,.1);border:1px solid rgba(255,45,120,.4)}
+.chip-amber{color:var(--amber);background:rgba(255,184,32,.08);border:1px solid rgba(255,184,32,.4)}
+.chip-yellow-solid{color:#071018;background:var(--yellow);border:1px solid var(--yellow)}
+
+/* ---------- HERO MARKET CARD ---------- */
+.card.hero{
+  border-color:rgba(0,232,169,.45);
+  box-shadow:0 0 0 1px rgba(0,232,169,.12),0 0 30px rgba(0,232,169,.1),inset 0 0 50px rgba(0,232,169,.03);
+}
+.pair-name{font-size:11px;font-weight:700;letter-spacing:.12em;color:var(--text)}
+.hero-price-row{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin:2px 0 10px}
+.hero-price{font-family:'JetBrains Mono',monospace;font-size:40px;font-weight:800;letter-spacing:-.02em;line-height:1}
+.change-chip{
+  font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;
+  color:var(--pink);background:rgba(255,45,120,.1);
+  border:1px solid rgba(255,45,120,.35);
+  padding:3px 9px;border-radius:5px;
+}
+.conf-row{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.conf-label{font-size:9px;font-weight:700;letter-spacing:.14em;color:var(--dim);text-transform:uppercase;white-space:nowrap}
+.conf-track{flex:1;height:6px;background:var(--surface);border-radius:3px;overflow:hidden}
+.conf-fill{height:100%;width:64%;border-radius:3px;background:linear-gradient(90deg,rgba(0,232,169,.5),var(--green));box-shadow:0 0 8px rgba(0,232,169,.4)}
+.conf-val{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;color:var(--green)}
+.hero-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;border-top:1px solid var(--border);padding-top:12px}
+.stat{text-align:left}
+.stat-label{font-size:8px;font-weight:700;letter-spacing:.12em;color:var(--dim);text-transform:uppercase;margin-bottom:3px}
+.stat-value{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700}
+
+/* ---------- BIAS CARD ---------- */
+.bias-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px}
+.bias-score{display:flex;align-items:baseline;gap:5px}
+.bias-num{font-family:'JetBrains Mono',monospace;font-size:34px;font-weight:800;line-height:1;color:var(--pink)}
+.bias-den{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600;color:var(--dim)}
+.bias-caption{font-size:9px;font-weight:700;letter-spacing:.14em;color:var(--dim);text-transform:uppercase;margin-top:4px}
+.bias-bar{display:flex;height:10px;border-radius:5px;overflow:hidden;background:var(--surface)}
+.bias-buy{width:30.7%;background:var(--green)}
+.bias-sell{width:69.3%;background:var(--pink)}
+.bias-labels{display:flex;justify-content:space-between;margin-top:6px;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700}
+.bl-buy{color:var(--green)}
+.bl-sell{color:var(--pink)}
+
+/* ---------- LIQUIDITY SUMMARY ---------- */
+.liq-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.liq-cell{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px}
+.liq-cell.magnet{border-top:2px solid var(--amber)}
+.liq-cell.target{border-top:2px solid var(--cyan)}
+.liq-title{font-size:8.5px;font-weight:700;letter-spacing:.14em;color:var(--dim);text-transform:uppercase;margin-bottom:8px;display:flex;align-items:center;gap:5px}
+.liq-value{font-family:'JetBrains Mono',monospace;font-size:20px;font-weight:800;line-height:1;margin-bottom:9px}
+.kv{display:flex;justify-content:space-between;align-items:center;padding:3px 0}
+.kv-key{font-size:8.5px;font-weight:700;letter-spacing:.1em;color:var(--dim);text-transform:uppercase}
+.kv-val{font-family:'JetBrains Mono',monospace;font-size:10.5px;font-weight:700}
+
+/* ---------- ORDER BOOK ---------- */
+.ob-head,.ob-row{display:grid;grid-template-columns:1.1fr 1fr .95fr;gap:4px;align-items:center}
+.ob-head{padding:0 8px 6px;font-size:8px;font-weight:700;letter-spacing:.12em;color:var(--dim);text-transform:uppercase}
+.ob-head span:nth-child(2),.ob-head span:nth-child(3){text-align:right}
+.ob-row{
+  position:relative;
+  padding:3.5px 8px;
+  font-family:'JetBrains Mono',monospace;font-size:10.5px;font-weight:600;
+}
+.ob-row .depth{position:absolute;top:1.5px;bottom:1.5px;z-index:0;border-radius:2px}
+.ob-row.ask .depth{right:0;background:rgba(255,45,120,.09);border-right:2px solid rgba(255,45,120,.55)}
+.ob-row.bid .depth{left:0;background:rgba(0,232,169,.09);border-left:2px solid rgba(0,232,169,.55)}
+.ob-row span{position:relative;z-index:1}
+.px-ask{color:var(--pink)}
+.px-bid{color:var(--green)}
+.q-dim{color:#8FA0B3;text-align:right;font-weight:500}
+.spread-row{
+  display:flex;align-items:center;gap:10px;
+  padding:8px;margin:4px 0;
+  background:var(--surface);
+  border-top:1px solid var(--border);border-bottom:1px solid var(--border);
+}
+.spread-line{flex:1;height:1px;background:var(--border)}
+.spread-val{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;color:var(--yellow);letter-spacing:.08em;white-space:nowrap}
+
+/* ---------- HEATMAP ---------- */
+.hm-wrap{position:relative}
+.hm-row{display:grid;grid-template-columns:58px 1fr;gap:8px;align-items:center;height:24px}
+.hm-price{font-family:'JetBrains Mono',monospace;font-size:9.5px;font-weight:600;color:var(--dim);text-align:right}
+.hm-row.is-current .hm-price,.hm-row.is-wall .hm-price{color:var(--text);font-weight:700}
+.hm-track{position:relative;height:11px;background:var(--surface);border-radius:2px;overflow:visible}
+.hm-fill{position:absolute;left:0;top:0;bottom:0;border-radius:2px}
+.f-ask{background:linear-gradient(90deg,rgba(255,45,120,.14),rgba(255,45,120,.6))}
+.f-bid{background:linear-gradient(90deg,rgba(0,232,169,.14),rgba(0,232,169,.6))}
+.f-wall{background:linear-gradient(90deg,rgba(255,184,32,.35),var(--amber));box-shadow:0 0 10px rgba(255,184,32,.35)}
+.wall-tag{
+  position:absolute;right:3px;top:50%;transform:translateY(-50%);
+  font-family:'JetBrains Mono',monospace;font-size:7.5px;font-weight:700;letter-spacing:.08em;
+  color:var(--amber);background:rgba(255,184,32,.14);
+  border:1px solid rgba(255,184,32,.55);
+  padding:1px 5px;border-radius:3px;white-space:nowrap;
+}
+.hm-marker{position:absolute;left:0;right:0;top:37.5%;pointer-events:none;z-index:2}
+.hm-marker .m-line{border-top:1px dashed rgba(232,236,241,.75);box-shadow:0 0 6px rgba(232,236,241,.25)}
+.hm-marker .m-tag{
+  position:absolute;right:0;top:0;transform:translateY(-50%);
+  font-family:'JetBrains Mono',monospace;font-size:8.5px;font-weight:700;
+  color:#05090F;background:var(--text);
+  padding:1px 6px;border-radius:3px;letter-spacing:.06em;
+}
+.legend{
+  margin-top:10px;padding-top:9px;border-top:1px solid var(--border);
+  font-family:'JetBrains Mono',monospace;font-size:8.5px;font-weight:600;letter-spacing:.1em;color:var(--dim);text-align:center;
+}
+
+/* ---------- VOLUME PROFILE ---------- */
+.vp-row{display:grid;grid-template-columns:64px 1fr 44px;gap:8px;align-items:center;height:21px}
+.vp-price{font-family:'JetBrains Mono',monospace;font-size:9.5px;font-weight:600;color:var(--dim);text-align:right}
+.vp-track{position:relative;height:10px;background:var(--surface);border-radius:2px}
+.vp-fill{position:absolute;left:0;top:0;bottom:0;border-radius:2px;background:rgba(0,232,169,.32)}
+.vp-vol{font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:600;color:var(--dim);text-align:right}
+.vp-row.poc .vp-price{color:var(--yellow);font-weight:700}
+.vp-row.poc .vp-fill{background:linear-gradient(90deg,rgba(255,208,0,.4),var(--yellow));box-shadow:0 0 10px rgba(255,208,0,.3)}
+.vp-row.poc .vp-vol{color:var(--yellow);font-weight:700}
+.star{color:var(--yellow);margin-right:2px}
+
+/* ---------- EVENTS TABLE ---------- */
+.ev-grid{display:grid;grid-template-columns:1.15fr .75fr 1.05fr .95fr .6fr;gap:4px;align-items:center}
+.ev-head{padding:0 6px 7px;font-size:8px;font-weight:700;letter-spacing:.12em;color:var(--dim);text-transform:uppercase}
+.ev-head span:nth-child(n+3){text-align:right}
+.ev-row{padding:5px 6px;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;border-top:1px solid rgba(28,48,66,.45)}
+.ev-row span:nth-child(n+3){text-align:right}
+.ev-type{letter-spacing:.06em;font-weight:700}
+.t-appear{color:var(--blue)}
+.t-increase{color:var(--amber)}
+.t-partial{color:var(--cyan)}
+.t-filled{color:var(--green)}
+.t-cancel{color:var(--pink)}
+.side-buy{color:var(--green);font-weight:700}
+.side-sell{color:var(--pink);font-weight:700}
+.ev-age{color:var(--dim)}
+
+/* ---------- STRENGTH GAUGE ---------- */
+.strength-body{display:flex;flex-direction:column;align-items:center;padding:6px 0 2px}
+.gauge{
+  width:128px;height:128px;border-radius:50%;
+  background:conic-gradient(var(--amber) 0% 48%,#16232F 48% 100%);
+  position:relative;
+  box-shadow:0 0 24px rgba(255,184,32,.12);
+}
+.gauge::before{content:'';position:absolute;inset:11px;border-radius:50%;background:var(--card)}
+.gauge-center{
+  position:absolute;inset:0;z-index:1;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
+}
+.gauge-num{font-family:'JetBrains Mono',monospace;font-size:30px;font-weight:800;line-height:1;color:var(--amber)}
+.gauge-of{font-family:'JetBrains Mono',monospace;font-size:9.5px;font-weight:600;color:var(--dim);letter-spacing:.1em}
+.strength-chip{margin-top:14px}
+.strength-desc{margin-top:9px;font-size:11px;color:var(--dim);text-align:center}
+
+/* ---------- SWEEP ---------- */
+.sweep-desc{font-size:12px;color:var(--text);margin-bottom:11px}
+.sweep-kv{display:grid;grid-template-columns:1fr 1fr;gap:10px;border-top:1px solid var(--border);padding-top:10px}
+
+/* ---------- RISK BARS ---------- */
+.risk-row{margin-bottom:11px}
+.risk-row:last-child{margin-bottom:0}
+.risk-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px}
+.risk-label{font-size:9px;font-weight:700;letter-spacing:.13em;color:var(--dim);text-transform:uppercase}
+.risk-val{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700}
+.risk-track{height:7px;background:var(--surface);border-radius:4px;overflow:hidden}
+.risk-fill{height:100%;border-radius:4px}
+.rf-green{background:var(--green);box-shadow:0 0 8px rgba(0,232,169,.4)}
+.rf-pink{background:var(--pink);box-shadow:0 0 8px rgba(255,45,120,.4)}
+.rf-amber{background:var(--amber);box-shadow:0 0 8px rgba(255,184,32,.4)}
+.rf-cyan{background:var(--cyan);box-shadow:0 0 8px rgba(24,212,223,.4)}
+
+/* ---------- SPOOF ---------- */
+.spoof-facts{margin-bottom:12px}
+.spoof-fact{
+  display:flex;align-items:center;gap:8px;
+  padding:5px 0;font-family:'JetBrains Mono',monospace;font-size:10.5px;font-weight:600;
+  border-bottom:1px solid rgba(28,48,66,.4);
+}
+.spoof-fact:last-child{border-bottom:none}
+.f-bullet{width:5px;height:5px;border-radius:1px;background:var(--pink);flex-shrink:0}
+.hist{display:flex;align-items:flex-end;gap:3px;height:46px;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:6px}
+.hbar{flex:1;border-radius:2px 2px 0 0;background:rgba(77,163,255,.35)}
+.hbar.h-pink{background:var(--pink);box-shadow:0 0 8px rgba(255,45,120,.4)}
+.hbar.h-amber{background:var(--amber);box-shadow:0 0 8px rgba(255,184,32,.35)}
+.disclaimer-note{
+  margin-top:10px;font-size:9.5px;line-height:1.55;color:var(--dim);
+  border-left:2px solid var(--border);padding-left:9px;
+}
+
+/* ---------- FUNDING / OI ---------- */
+.fund-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.fund-cell{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px}
+.fund-value{font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:800;margin-top:4px}
+.mini-bar{margin-top:7px;height:4px;background:rgba(5,9,15,.7);border-radius:2px;overflow:hidden}
+.mini-fill{height:100%;border-radius:2px;background:var(--amber);box-shadow:0 0 6px rgba(255,184,32,.4)}
+
+/* ---------- CVD ---------- */
+.cvd-chart{
+  position:relative;
+  display:flex;align-items:stretch;gap:3px;
+  height:58px;background:var(--surface);
+  border:1px solid var(--border);border-radius:6px;
+  padding:5px;margin-bottom:11px;
+}
+.cvd-chart::before{
+  content:'';position:absolute;left:4px;right:4px;top:50%;
+  border-top:1px dashed rgba(90,106,126,.5);
+}
+.cvd-col{flex:1;position:relative;z-index:1}
+.cvd-bar{position:absolute;left:0;right:0;border-radius:1.5px}
+.cvb-up{bottom:50%;background:var(--green);opacity:.85}
+.cvb-down{top:50%;background:var(--pink);opacity:.85}
+.cvd-stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.cvd-stat-label{font-size:8px;font-weight:700;letter-spacing:.12em;color:var(--dim);text-transform:uppercase;margin-bottom:3px}
+.cvd-stat-value{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;word-break:break-all;line-height:1.3}
+
+/* ---------- TARGET ZONES ---------- */
+.zone-row{
+  display:grid;grid-template-columns:20px 1fr auto auto;
+  gap:10px;align-items:center;
+  padding:8px 4px;border-top:1px solid rgba(28,48,66,.45);
+}
+.zone-row:first-of-type{border-top:none;padding-top:2px}
+.zone-arrow{font-size:11px;font-weight:800;text-align:center}
+.za-sell{color:var(--amber)}
+.za-buy{color:var(--blue)}
+.zone-main{min-width:0}
+.zone-type{font-size:8px;font-weight:700;letter-spacing:.13em;text-transform:uppercase}
+.zt-sell{color:var(--amber)}
+.zt-buy{color:var(--blue)}
+.zone-price{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;margin-top:1px}
+.zone-size{font-family:'JetBrains Mono',monospace;font-size:10.5px;font-weight:600;color:var(--dim);white-space:nowrap}
+.zone-conf{display:flex;align-items:center;gap:6px}
+.zc-track{width:44px;height:4px;background:var(--surface);border-radius:2px;overflow:hidden}
+.zc-fill{height:100%;border-radius:2px;background:var(--yellow)}
+.zc-pct{font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;color:var(--dim)}
+
+/* ---------- ALERTS ---------- */
+.alerts-feed{max-height:360px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding-right:2px}
+.alerts-feed::-webkit-scrollbar{width:4px}
+.alerts-feed::-webkit-scrollbar-track{background:transparent}
+.alerts-feed::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.alert-item{
+  background:var(--surface);
+  border:1px solid var(--border);border-left-width:3px;
+  border-radius:8px;padding:9px 11px;
+}
+.a-critical{border-left-color:var(--pink)}
+.a-high{border-left-color:var(--amber)}
+.a-medium{border-left-color:var(--cyan)}
+.a-low{border-left-color:var(--blue)}
+.a-info{border-left-color:var(--dim)}
+.alert-top{display:flex;align-items:center;gap:7px;margin-bottom:4px}
+.sev-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.sd-critical{background:var(--pink);box-shadow:0 0 7px rgba(255,45,120,.55)}
+.sd-high{background:var(--amber);box-shadow:0 0 7px rgba(255,184,32,.55)}
+.sd-medium{background:var(--cyan);box-shadow:0 0 7px rgba(24,212,223,.55)}
+.sd-low{background:var(--blue);box-shadow:0 0 7px rgba(77,163,255,.55)}
+.sd-info{background:var(--dim)}
+.alert-title{font-size:10px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;flex:1}
+.alert-age{font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:600;color:var(--dim);white-space:nowrap}
+.alert-desc{font-size:10.5px;color:#8FA0B3;line-height:1.45;margin-bottom:5px}
+.alert-meta{font-family:'JetBrains Mono',monospace;font-size:8.5px;font-weight:600;letter-spacing:.08em;color:var(--dim)}
+.alert-meta b{color:var(--text);font-weight:700}
+
+/* ---------- DISCLAIMER ---------- */
+.bottom-disclaimer{
+  text-align:center;font-size:10px;line-height:1.6;color:var(--dim);
+  padding:16px 12px 4px;
+}
+
+/* ---------- BOTTOM NAV ---------- */
+.bottom-nav{
+  position:fixed;bottom:0;left:0;right:0;z-index:50;
+  background:rgba(2,5,9,.94);
+  backdrop-filter:blur(14px);
+  -webkit-backdrop-filter:blur(14px);
+  border-top:1px solid rgba(28,48,66,.55);
+  border-radius:18px 18px 0 0;
+}
+.nav-inner{
+  max-width:480px;margin:0 auto;
+  display:flex;align-items:center;justify-content:space-around;
+  padding:9px 8px calc(9px + env(safe-area-inset-bottom));
+}
+.nav-item{
+  display:flex;flex-direction:column;align-items:center;gap:4px;
+  text-decoration:none;color:var(--dim);
+  font-size:8px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
+  padding:6px 12px;border-radius:999px;
+}
+.nav-item svg{display:block}
+.nav-item.active{
+  background:var(--yellow);color:#05090F;
+  font-weight:800;
+  box-shadow:0 0 20px rgba(255,208,0,.3);
+}
+</style>
+</head>
+<body>
+
+<header class="header">
+  <div class="header-inner">
+    <button class="icon-btn burger" aria-label="Menu">
+      <span></span><span></span><span></span>
+    </button>
+    <div class="header-right">
+      <button class="icon-btn bell" aria-label="Notifications">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+        <span class="badge-count">3</span>
+      </button>
+      <button class="icon-btn avatar" aria-label="Profile">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#071018" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        <span class="avatar-dot"></span>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main class="main">
+
+  <!-- TITLE -->
+  <div class="title-block">
+    <h1>Liquidity <em>Radar.</em></h1>
+    <div class="title-meta">
+      <span class="subtitle">BTCUSDT PERP · BINANCE FUTURES</span>
+      <span class="live-badge"><span class="pulse-dot"></span>LIVE</span>
+    </div>
+    <div class="divider"></div>
+  </div>
+
+  <!-- METRICS BAR -->
+  <div class="section metrics-bar">
+    <div class="metric">
+      <div class="metric-label">Open Interest</div>
+      <div class="metric-value">$8.15B</div>
+    </div>
+    <div class="metric">
+      <div class="metric-label">Funding Rate</div>
+      <div class="metric-value v-green">+0.0054%</div>
+    </div>
+    <div class="metric">
+      <div class="metric-label">Spread</div>
+      <div class="metric-value v-cyan">$0.3</div>
+    </div>
+    <div class="metric">
+      <div class="metric-label">Trades</div>
+      <div class="metric-value">500</div>
+    </div>
+  </div>
+
+  <!-- PRIMARY MARKET CARD -->
+  <div class="section card hero">
+    <div class="card-head">
+      <span class="pair-name">BTC / USDT</span>
+      <span class="chip chip-demo">DEMO DATA</span>
+    </div>
+    <div class="hero-price-row">
+      <span class="hero-price" id="live-price">$77,360</span>
+      <span class="change-chip" id="live-change">-0.09%</span>
+    </div>
+    <div class="conf-row">
+      <span class="conf-label">Confidence</span>
+      <div class="conf-track"><div class="conf-fill"></div></div>
+      <span class="conf-val mono">64</span>
+    </div>
+    <div class="hero-stats">
+      <div class="stat">
+        <div class="stat-label">24h High</div>
+        <div class="stat-value">$61,931</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">24h Low</div>
+        <div class="stat-value">$59,060</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Volume</div>
+        <div class="stat-value">$18.83B</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MARKET BIAS -->
+  <div class="section card">
+    <div class="bias-top">
+      <div>
+        <div class="bias-score">
+          <span class="bias-num">30.7</span>
+          <span class="bias-den">/100</span>
+        </div>
+        <div class="bias-caption">Composite Bias Score</div>
+      </div>
+      <span class="chip chip-bearish">BEARISH</span>
+    </div>
+    <div class="bias-bar">
+      <div class="bias-buy"></div>
+      <div class="bias-sell"></div>
+    </div>
+    <div class="bias-labels">
+      <span class="bl-buy">BUY 30.7%</span>
+      <span class="bl-sell">69.3% SELL</span>
+    </div>
+  </div>
+
+  <!-- LIQUIDITY SUMMARY -->
+  <div class="section liq-grid">
+    <div class="liq-cell magnet">
+      <div class="liq-title"><span class="t-dot" style="background:var(--amber)"></span>Liquidity Magnet</div>
+      <div class="liq-value">$78,400</div>
+      <div class="kv"><span class="kv-key">Distance</span><span class="kv-val v-amber-mono" style="color:var(--amber)">1.34%</span></div>
+      <div class="kv"><span class="kv-key">Cluster</span><span class="kv-val">$5.0M</span></div>
+    </div>
+    <div class="liq-cell target">
+      <div class="liq-title"><span class="t-dot" style="background:var(--cyan)"></span>Likely Target</div>
+      <div class="liq-value">$76,400</div>
+      <div class="kv"><span class="kv-key">Score</span><span class="kv-val" style="color:var(--cyan)">97/100</span></div>
+      <div class="kv"><span class="kv-key">Type</span><span class="kv-val" style="color:var(--cyan)">Support Sweep</span></div>
+    </div>
+  </div>
+
+  <!-- ORDER BOOK -->
+  <div class="section card">
+    <div class="card-head">
+      <span class="card-title"><span class="t-dot"></span>Order Book</span>
+      <span class="live-badge"><span class="pulse-dot"></span>LIVE</span>
+    </div>
+    <div class="ob-head">
+      <span>Price</span><span>Qty (BTC)</span><span>Total ($)</span>
+    </div>
+    <div class="ob-row ask"><div class="depth" style="width:22%"></div><span class="px-ask">77,394.0</span><span class="q-dim">1.204</span><span class="q-dim">93,182</span></div>
+    <div class="ob-row ask"><div class="depth" style="width:31%"></div><span class="px-ask">77,391.5</span><span class="q-dim">0.862</span><span class="q-dim">66,711</span></div>
+    <div class="ob-row ask"><div class="depth" style="width:58%"></div><span class="px-ask">77,389.0</span><span class="q-dim">2.441</span><span class="q-dim">188,893</span></div>
+    <div class="ob-row ask"><div class="depth" style="width:17%"></div><span class="px-ask">77,386.5</span><span class="q-dim">0.512</span><span class="q-dim">39,622</span></div>
+    <div class="ob-row ask"><div class="depth" style="width:74%"></div><span class="px-ask">77,384.0</span><span class="q-dim">3.108</span><span class="q-dim">240,468</span></div>
+    <div class="ob-row ask"><div class="depth" style="width:26%"></div><span class="px-ask">77,381.5</span><span class="q-dim">1.036</span><span class="q-dim">80,088</span></div>
+    <div class="ob-row ask"><div class="depth" style="width:19%"></div><span class="px-ask">77,379.0</span><span class="q-dim">0.748</span><span class="q-dim">57,879</span></div>
+    <div class="spread-row">
+      <div class="spread-line"></div>
+      <span class="spread-val">SPREAD $0.3 · 0.0004%</span>
+      <div class="spread-line"></div>
+    </div>
+    <div class="ob-row bid"><div class="depth" style="width:29%"></div><span class="px-bid">77,376.5</span><span class="q-dim">1.512</span><span class="q-dim">117,013</span></div>
+    <div class="ob-row bid"><div class="depth" style="width:21%"></div><span class="px-bid">77,374.0</span><span class="q-dim">0.934</span><span class="q-dim">72,269</span></div>
+    <div class="ob-row bid"><div class="depth" style="width:82%"></div><span class="px-bid">77,371.5</span><span class="q-dim">4.206</span><span class="q-dim">325,338</span></div>
+    <div class="ob-row bid"><div class="depth" style="width:24%"></div><span class="px-bid">77,369.0</span><span class="q-dim">1.288</span><span class="q-dim">99,654</span></div>
+    <div class="ob-row bid"><div class="depth" style="width:15%"></div><span class="px-bid">77,366.5</span><span class="q-dim">0.664</span><span class="q-dim">51,373</span></div>
+    <div class="ob-row bid"><div class="depth" style="width:64%"></div><span class="px-bid">77,364.0</span><span class="q-dim">2.902</span><span class="q-dim">224,541</span></div>
+    <div class="ob-row bid"><div class="depth" style="width:23%"></div><span class="px-bid">77,361.5</span><span class="q-dim">1.146</span><span class="q-dim">88,684</span></div>
+  </div>
+
+  <!-- HEATMAP -->
+  <div class="section card">
+    <div class="card-head">
+      <span class="card-title"><span class="t-dot"></span>Order Book Heatmap</span>
+      <span class="chip chip-demo">DEPTH MAP</span>
+    </div>
+    <div class="hm-wrap">
+      <div class="hm-marker">
+        <div class="m-line"></div>
+        <div class="m-tag">$77,400</div>
+      </div>
+      <div class="hm-row"><span class="hm-price">77,600</span><div class="hm-track"><div class="hm-fill f-ask" style="width:22%"></div></div></div>
+      <div class="hm-row"><span class="hm-price">77,550</span><div class="hm-track"><div class="hm-fill f-ask" style="width:35%"></div></div></div>
+      <div class="hm-row"><span class="hm-price">77,500</span><div class="hm-track"><div class="hm-fill f-ask" style="width:18%"></div></div></div>
+      <div class="hm-row"><span class="hm-price">77,450</span><div class="hm-track"><div class="hm-fill f-ask" style="width:46%"></div></div></div>
+      <div class="hm-row is-current"><span class="hm-price">77,400</span><div class="hm-track"><div class="hm-fill f-ask" style="width:12%"></div></div></div>
+      <div class="hm-row is-wall"><span class="hm-price">77,350</span><div class="hm-track"><div class="hm-fill f-wall" style="width:88%"></div><span class="wall-tag">16.5 BTC WALL</span></div></div>
+      <div class="hm-row"><span class="hm-price">77,300</span><div class="hm-track"><div class="hm-fill f-bid" style="width:58%"></div></div></div>
+      <div class="hm-row"><span class="hm-price">77,250</span><div class="hm-track"><div class="hm-fill f-bid" style="width:42%"></div></div></div>
+      <div class="hm-row"><span class="hm-price">77,200</span><div class="hm-track"><div class="hm-fill f-bid" style="width:76%"></div></div></div>
+      <div class="hm-row"><span class="hm-price">77,150</span><div class="hm-track"><div class="hm-fill f-bid" style="width:34%"></div></div></div>
+      <div class="hm-row"><span class="hm-price">77,100</span><div class="hm-track"><div class="hm-fill f-bid" style="width:52%"></div></div></div>
+      <div class="hm-row"><span class="hm-price">77,050</span><div class="hm-track"><div class="hm-fill f-bid" style="width:26%"></div></div></div>
+    </div>
+    <div class="legend">AMBER = WALL · GREEN/RED = DEPTH</div>
+  </div>
+
+  <!-- VOLUME PROFILE -->
+  <div class="section card">
+    <div class="card-head">
+      <span class="card-title"><span class="t-dot"></span>Volume Profile</span>
+      <span class="chip chip-demo">SESSION</span>
+    </div>
+    <div class="vp-row"><span class="vp-price">78,000</span><div class="vp-track"><div class="vp-fill" style="width:12%"></div></div><span class="vp-vol">320</span></div>
+    <div class="vp-row"><span class="vp-price">77,900</span><div class="vp-track"><div class="vp-fill" style="width:18%"></div></div><span class="vp-vol">510</span></div>
+    <div class="vp-row"><span class="vp-price">77,800</span><div class="vp-track"><div class="vp-fill" style="width:26%"></div></div><span class="vp-vol">780</span></div>
+    <div class="vp-row"><span class="vp-price">77,700</span><div class="vp-track"><div class="vp-fill" style="width:41%"></div></div><span class="vp-vol">1.2K</span></div>
+    <div class="vp-row"><span class="vp-price">77,600</span><div class="vp-track"><div class="vp-fill" style="width:55%"></div></div><span class="vp-vol">1.9K</span></div>
+    <div class="vp-row"><span class="vp-price">77,500</span><div class="vp-track"><div class="vp-fill" style="width:63%"></div></div><span class="vp-vol">2.3K</span></div>
+    <div class="vp-row"><span class="vp-price">77,400</span><div class="vp-track"><div class="vp-fill" style="width:74%"></div></div><span class="vp-vol">3.1K</span></div>
+    <div class="vp-row poc"><span class="vp-price"><span class="star">★</span>77,350</span><div class="vp-track"><div class="vp-fill" style="width:96%"></div></div><span class="vp-vol">4.6K</span></div>
+    <div class="vp-row"><span class="vp-price">77,300</span><div class="vp-track"><div class="vp-fill" style="width:81%"></div></div><span class="vp-vol">2.9K</span></div>
+    <div class="vp-row"><span class="vp-price">77,200</span><div class="vp-track"><div class="vp-fill" style="width:58%"></div></div><span class="vp-vol">1.7K</span></div>
+    <div class="vp-row"><span class="vp-price">77,100</span><div class="vp-track"><div class="vp-fill" style="width:37%"></div></div><span class="vp-vol">980</span></div>
+    <div class="vp-row"><span class="vp-price">77,000</span><div class="vp-track"><div class="vp-fill" style="width:21%"></div></div><span class="vp-vol">540</span></div>
+  </div>
+
+  <!-- LARGE ORDER EVENTS -->
+  <div class="section card">
+    <div class="card-head">
+      <span class="card-title"><span class="t-dot"></span>Large Order Events</span>
+      <span class="chip chip-demo">TAPE</span>
+    </div>
+    <div class="ev-grid ev-head">
+      <span>Event</span><span>Side</span><span>Price</span><span>Qty</span><span>Age</span>
+    </div>
+    <div class="ev-grid ev-row"><span class="ev-type t-appear">APPEAR</span><span class="side-buy">BUY</span><span>$77,371.5</span><span>4.20 BTC</span><span class="ev-age">2s</span></div>
+    <div class="ev-grid ev-row"><span class="ev-type t-increase">INCREASE</span><span class="side-sell">SELL</span><span>$77,389.0</span><span>2.44 BTC</span><span class="ev-age">5s</span></div>
+    <div class="ev-grid ev-row"><span class="ev-type t-partial">PARTIAL</span><span class="side-buy">BUY</span><span>$77,364.0</span><span>1.32 BTC</span><span class="ev-age">9s</span></div>
+    <div class="ev-grid ev-row"><span class="ev-type t-filled">FILLED</span><span class="side-sell">SELL</span><span>$77,394.0</span><span>1.20 BTC</span><span class="ev-age">14s</span></div>
+    <div class="ev-grid ev-row"><span class="ev-type t-cancel">CANCEL</span><span class="side-buy">BUY</span><span>$77,203.0</span><span>30.4 BTC</span><span class="ev-age">0s</span></div>
+    <div class="ev-grid ev-row"><span class="ev-type t-appear">APPEAR</span><span class="side-sell">SELL</span><span>$77,450.0</span><span>3.10 BTC</span><span class="ev-age">18s</span></div>
+    <div class="ev-grid ev-row"><span class="ev-type t-increase">INCREASE</span><span class="side-buy">BUY</span><span>$77,350.0</span><span>16.5 BTC</span><span class="ev-age">22s</span></div>
+    <div class="ev-grid ev-row"><span class="ev-type t-filled">FILLED</span><span class="side-buy">BUY</span><span>$77,361.5</span><span>1.15 BTC</span><span class="ev-age">27s</span></div>
+    <div class="ev-grid ev-row"><span class="ev-type t-cancel">CANCEL</span><span class="side-sell">SELL</span><span>$77,520.0</span><span>8.60 BTC</span><span class="ev-age">31s</span></div>
+    <div class="ev-grid ev-row"><span class="ev-type t-appear">APPEAR</span><span class="side-buy">BUY</span><span>$77,180.0</span><span>6.75 BTC</span><span class="ev-age">36s</span></div>
+  </div>
+
+  <!-- MARKET STRENGTH -->
+  <div class="section card">
+    <div class="card-head">
+      <span class="card-title"><span class="t-dot"></span>Market Strength</span>
+    </div>
+    <div class="strength-body">
+      <div class="gauge">
+        <div class="gauge-center">
+          <span class="gauge-num">48</span>
+          <span class="gauge-of">/ 100</span>
+        </div>
+      </div>
+      <span class="chip chip-amber strength-chip">MODERATE</span>
+      <div class="strength-desc">Mixed signals — monitor closely.</div>
+    </div>
+  </div>
+
+  <!-- LAST LIQUIDITY SWEEP -->
+  <div class="section card">
+    <div class="card-head">
+      <span class="card-title"><span class="t-dot"></span>Last Liquidity Sweep</span>
+    </div>
+    <div style="margin-bottom:10px"><span class="chip chip-pink">STRONG BEARISH SWEEP</span></div>
+    <div class="sweep-desc">Price swept $77,466 highs, rejected</div>
+    <div class="sweep-kv">
+      <div class="kv"><span class="kv-key">Confidence</span><span class="kv-val" style="color:var(--pink)">67/100</span></div>
+      <div class="kv"><span class="kv-key">Age</span><span class="kv-val">0s ago</span></div>
+    </div>
+  </div>
+
+  <!-- TRAP & SQUEEZE RISK -->
+  <div class="section card">
+    <div class="card-head">
+      <span class="card-title"><span class="t-dot"></span>Trap &amp; Squeeze Risk</span>
+    </div>
+    <div class="risk-row">
+      <div class="risk-top"><span class="risk-label">Bull Trap</span><span class="risk-val">0</span></div>
+      <div class="risk-track"><div class="risk-fill rf-green" style="width:0%"></div></div>
+    </div>
+    <div class="risk-row">
+      <div class="risk-top"><span class="risk-label">Bear Trap</span><span class="risk-val">0</span></div>
+      <div class="risk-track"><div class="risk-fill rf-pink" style="width:0%"></div></div>
+    </div>
+    <div class="risk-row">
+      <div class="risk-top"><span class="risk-label">Short Squeeze</span><span class="risk-val" style="color:var(--amber)">30</span></div>
+      <div class="risk-track"><div class="risk-fill rf-amber" style="width:30%"></div></div>
+    </div>
+    <div class="risk-row">
+      <div class="risk-top"><span class="risk-label">Long Squeeze</span><span class="risk-val" style="color:var(--cyan)">35</span></div>
+      <div class="risk-track"><div class="risk-fill rf-cyan" style="width:35%"></div></div>
+    </div>
+  </div>
+
+  <!-- POSSIBLE SPOOFING -->
+  <div class="section card">
+    <div class="card-head">
+      <span class="card-title"><span class="t-dot"></span>Possible Spoofing</span>
+      <span class="chip chip-pink">SCORE 98/100</span>
+    </div>
+    <div class="spoof-facts">
+      <div class="spoof-fact"><span class="f-bullet"></span>$30.4 BTC bid wall at $77,203</div>
+      <div class="spoof-fact"><span class="f-bullet"></span>Cancelled after 0.2s</div>
+      <div class="spoof-fact"><span class="f-bullet"></span>0% filled</div>
+    </div>
+    <div class="hist">
+      <div class="hbar" style="height:20%"></div>
+      <div class="hbar" style="height:32%"></div>
+      <div class="hbar" style="height:18%"></div>
+      <div class="hbar h-amber" style="height:60%"></div>
+      <div class="hbar" style="height:26%"></div>
+      <div class="hbar" style="height:44%"></div>
+      <div class="hbar" style="height:22%"></div>
+      <div class="hbar" style="height:36%"></div>
+      <div class="hbar h-pink" style="height:88%"></div>
+      <div class="hbar" style="height:30%"></div>
+      <div class="hbar" style="height:52%"></div>
+      <div class="hbar" style="height:24%"></div>
+      <div class="hbar" style="height:40%"></div>
+      <div class="hbar" style="height:16%"></div>
+      <div class="hbar" style="height:36%"></div>
+      <div class="hbar" style="height:28%"></div>
+    </div>
+    <div class="disclaimer-note">Probability estimate only. Never confirmed — do not trade on this alone.</div>
+  </div>
+
+  <!-- FUNDING + OPEN INTEREST -->
+  <div class="section card">
+    <div class="card-head">
+      <span class="card-title"><span class="t-dot"></span>Funding Rate &amp; Open Interest</span>
+    </div>
+    <div class="fund-grid">
+      <div class="fund-cell">
+        <div class="kv-key">Funding Rate</div>
+        <div class="fund-value v-green">+0.0054%</div>
+      </div>
+      <div class="fund-cell">
+        <div class="kv-key">Open Interest</div>
+        <div class="fund-value">$8.13B</div>
+      </div>
+      <div class="fund-cell">
+        <div class="kv-key">OI Change (24h)</div>
+        <div class="fund-value v-pink">-0.15%</div>
+      </div>
+      <div class="fund-cell">
+        <div class="kv-key">Next Sweep Prob</div>
+        <div class="fund-value" style="color:var(--amber)">76%</div>
+        <div class="mini-bar"><div class="mini-fill" style="width:76%"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CVD -->
+  <div class="section card">
+    <div class="card-head">
+      <span class="card-title"><span class="t-dot"></span>CVD — Volume Delta</span>
+      <span class="chip chip-green">TREND BULL ↑</span>
+    </div>
+    <div class="cvd-chart">
+      <div class="cvd-col"><div class="cvd-bar cvb-down" style="height:55%"></div></div>
+      <div class="cvd-col"><div class="cvd-bar cvb-down" style="height:30%"></div></div>
+      <div class="cvd-col"><div class="cvd-bar cvb-down" style="height:65%"></div></div>
+      <div class="cvd-col"><div class="cvd-bar cvb-down" style="height:40%"></div></div>
+      <div class="cvd-col"><div class="cvd-bar cvb-down" style="height:20%"></div></div>
+      <div class="cvd-col"><div class="cvd-bar cvb-down" style="height:50%"></div></div>
+      <div class="cvd-col"><div class="cvd-bar cvb-down" style="height:25%"></div></div>
+      <div class="cvd-col"><div class="cvd-bar cvb-down" style="height:35%"></div></div>
+      <div class="cvd-col"><div class="cvd-bar cvb-down" style="height:15%"></div></div>
+      <div class="cvd-col"><div class="cvd-bar cvb-up" style="height:12%"></div></div>
+      <div class="cvd-col"><div class="cvd-bar cvb-up" style="height:22%"></div></div>
+      <div class="cvd-col"><div class="cvd-bar cvb-up" style="height:16%"></div></div>
+      <div class="cvd-col"><div class="cvd-bar cvb-up" style="height:30%"></div></div>
+      <div class="cvd-col"><div class="cvd-bar cvb-up" style="height:20%"></div></div>
+      <div class="cvd-col"><div class="cvd-bar cvb-up" style="height:38%"></div></div>
+      <div class="cvd-col"><div class="cvd-bar cvb-up" style="height:26%"></div></div>
+      <div class="cvd-col"><div class="cvd-bar cvb-up" style="height:44%"></div></div>
+      <div class="cvd-col"><div class="cvd-bar cvb-up" style="height:32%"></div></div>
+    </div>
+    <div class="cvd-stats">
+      <div>
+        <div class="cvd-stat-label">Buy</div>
+        <div class="cvd-stat-value v-green">2,815,477.78 BTC</div>
+      </div>
+      <div>
+        <div class="cvd-stat-label">Sell</div>
+        <div class="cvd-stat-value v-pink">2,849,040.22 BTC</div>
+      </div>
+      <div>
+        <div class="cvd-stat-label">Delta</div>
+        <div class="cvd-stat-value v-pink">-33,562.44</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- LIQUIDITY TARGET ZONES -->
+  <div class="section card">
+    <div class="card-head">
+      <span class="card-title"><span class="t-dot"></span>Liquidity Target Zones</span>
+      <span class="chip chip-demo">6 LEVELS</span>
+    </div>
+    <div class="zone-row">
+      <span class="zone-arrow za-sell">▲</span>
+      <div class="zone-main">
+        <div class="zone-type zt-sell">Sell Wall</div>
+        <div class="zone-price">$78,400</div>
+      </div>
+      <span class="zone-size">$5.0M</span>
+      <div class="zone-conf"><div class="zc-track"><div class="zc-fill" style="width:92%"></div></div><span class="zc-pct">92%</span></div>
+    </div>
+    <div class="zone-row">
+      <span class="zone-arrow za-sell">▲</span>
+      <div class="zone-main">
+        <div class="zone-type zt-sell">Sell Wall</div>
+        <div class="zone-price">$78,150</div>
+      </div>
+      <span class="zone-size">$3.2M</span>
+      <div class="zone-conf"><div class="zc-track"><div class="zc-fill" style="width:84%"></div></div><span class="zc-pct">84%</span></div>
+    </div>
+    <div class="zone-row">
+      <span class="zone-arrow za-sell">▲</span>
+      <div class="zone-main">
+        <div class="zone-type zt-sell">Sell Wall</div>
+        <div class="zone-price">$77,850</div>
+      </div>
+      <span class="zone-size">$2.1M</span>
+      <div class="zone-conf"><div class="zc-track"><div class="zc-fill" style="width:71%"></div></div><span class="zc-pct">71%</span></div>
+    </div>
+    <div class="zone-row">
+      <span class="zone-arrow za-buy">▼</span>
+      <div class="zone-main">
+        <div class="zone-type zt-buy">Buy Wall</div>
+        <div class="zone-price">$77,203</div>
+      </div>
+      <span class="zone-size">$4.6M</span>
+      <div class="zone-conf"><div class="zc-track"><div class="zc-fill" style="width:88%"></div></div><span class="zc-pct">88%</span></div>
+    </div>
+    <div class="zone-row">
+      <span class="zone-arrow za-buy">▼</span>
+      <div class="zone-main">
+        <div class="zone-type zt-buy">Buy Wall</div>
+        <div class="zone-price">$76,800</div>
+      </div>
+      <span class="zone-size">$6.2M</span>
+      <div class="zone-conf"><div class="zc-track"><div class="zc-fill" style="width:76%"></div></div><span class="zc-pct">76%</span></div>
+    </div>
+    <div class="zone-row">
+      <span class="zone-arrow za-buy">▼</span>
+      <div class="zone-main">
+        <div class="zone-type zt-buy">Buy Wall</div>
+        <div class="zone-price">$76,200</div>
+      </div>
+      <span class="zone-size">$9.4M</span>
+      <div class="zone-conf"><div class="zc-track"><div class="zc-fill" style="width:93%"></div></div><span class="zc-pct">93%</span></div>
+    </div>
+  </div>
+
+  <!-- ALERTS -->
+  <div class="section card">
+    <div class="card-head">
+      <span class="card-title"><span class="t-dot"></span>Alerts</span>
+      <span class="chip chip-yellow-solid">9 ACTIVE</span>
+    </div>
+    <div class="alerts-feed">
+
+      <div class="alert-item a-critical">
+        <div class="alert-top">
+          <span class="sev-dot sd-critical"></span>
+          <span class="alert-title" style="color:var(--pink)">Spoofing Detected</span>
+          <span class="alert-age">0s ago</span>
+        </div>
+        <div class="alert-desc">$30.4 BTC bid wall at $77,203 cancelled after 0.2s · 0% filled</div>
+        <div class="alert-meta">SEVERITY: CRITICAL · CONF <b>98%</b></div>
+      </div>
+
+      <div class="alert-item a-critical">
+        <div class="alert-top">
+          <span class="sev-dot sd-critical"></span>
+          <span class="alert-title" style="color:var(--pink)">Strong Bearish Sweep</span>
+          <span class="alert-age">0s ago</span>
+        </div>
+        <div class="alert-desc">Price swept $77,466 highs and rejected immediately</div>
+        <div class="alert-meta">SEVERITY: HIGH · CONF <b>67%</b></div>
+      </div>
+
+      <div class="alert-item a-high">
+        <div class="alert-top">
+          <span class="sev-dot sd-high"></span>
+          <span class="alert-title" style="color:var(--amber)">Major Wall Formed</span>
+          <span class="alert-age">4s ago</span>
+        </div>
+        <div class="alert-desc">16.5 BTC bid wall built at $77,350 — defending local lows</div>
+        <div class="alert-meta">SEVERITY: HIGH · CONF <b>91%</b></div>
+      </div>
+
+      <div class="alert-item a-high">
+        <div class="alert-top">
+          <span class="sev-dot sd-high"></span>
+          <span class="alert-title" style="color:var(--amber)">Short Squeeze Risk Rising</span>
+          <span class="alert-age">12s ago</span>
+        </div>
+        <div class="alert-desc">Short squeeze probability climbed to 30/100</div>
+        <div class="alert-meta">SEVERITY: MEDIUM · CONF <b>62%</b></div>
+      </div>
+
+      <div class="alert-item a-medium">
+        <div class="alert-top">
+          <span class="sev-dot sd-medium"></span>
+          <span class="alert-title" style="color:var(--cyan)">Long Squeeze Building</span>
+          <span class="alert-age">15s ago</span>
+        </div>
+        <div class="alert-desc">Long squeeze risk at 35/100 — downside fuel accumulating</div>
+        <div class="alert-meta">SEVERITY: MEDIUM · CONF <b>58%</b></div>
+      </div>
+
+      <div class="alert-item a-medium">
+        <div class="alert-top">
+          <span class="sev-dot sd-medium"></span>
+          <span class="alert-title" style="color:var(--pink)">Bearish Bias Confirmed</span>
+          <span class="alert-age">21s ago</span>
+        </div>
+        <div class="alert-desc">Composite bias score dropped to 30.7/100</div>
+        <div class="alert-meta">SEVERITY: MEDIUM · CONF <b>73%</b></div>
+      </div>
+
+      <div class="alert-item a-low">
+        <div class="alert-top">
+          <span class="sev-dot sd-low"></span>
+          <span class="alert-title" style="color:var(--blue)">Large Order Appeared</span>
+          <span class="alert-age">26s ago</span>
+        </div>
+        <div class="alert-desc">BUY 4.20 BTC resting at $77,371.5</div>
+        <div class="alert-meta">SEVERITY: LOW · CONF <b>81%</b></div>
+      </div>
+
+      <div class="alert-item a-info">
+        <div class="alert-top">
+          <span class="sev-dot sd-low" style="background:var(--green);box-shadow:0 0 7px rgba(0,232,169,.55)"></span>
+          <span class="alert-title" style="color:var(--green)">CVD Trend Flip</span>
+          <span class="alert-age">34s ago</span>
+        </div>
+        <div class="alert-desc">Cumulative delta recovering — short-term trend Bull ↑</div>
+        <div class="alert-meta">SEVERITY: LOW · CONF <b>55%</b></div>
+      </div>
+
+      <div class="alert-item a-info">
+        <div class="alert-top">
+          <span class="sev-dot sd-info"></span>
+          <span class="alert-title">Liquidity Target Set</span>
+          <span class="alert-age">41s ago</span>
+        </div>
+        <div class="alert-desc">Likely target updated to $76,400 support sweep · score 97/100</div>
+        <div class="alert-meta">SEVERITY: INFO · CONF <b>97%</b></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- DISCLAIMER -->
+  <div class="bottom-disclaimer">
+    Liquidity Radar is market research software, not financial advice.<br>Demo data shown.
+  </div>
+
+</main>
+
+<nav class="bottom-nav">
+  <div class="nav-inner">
+    <a href="#" class="nav-item">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 20V10"/><path d="M12 20V4"/><path d="M18 20v-7"/></svg>
+      Analytics
+    </a>
+    <a href="#" class="nav-item">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg>
+      Market
+    </a>
+    <a href="#" class="nav-item">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h16"/><path d="M4 12h10"/><path d="M4 18h13"/></svg>
+      Order Book
+    </a>
+    <a href="#" class="nav-item">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      Trend
+    </a>
+    <a href="#" class="nav-item active">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/><path d="M12 12l5.5-5.5"/></svg>
+      Radar
+    </a>
+  </div>
+</nav>
+
+<script>
+// ===== DATA =====
+const BASE = 77360;
+const $ = s => document.querySelector(s);
+const $$ = s => document.querySelectorAll(s);
+function rnd(a,b){return Math.random()*(b-a)+a}
+function pick(a){return a[Math.floor(Math.random()*a.length)]}
+function fmt$(n){return n.toLocaleString(undefined,{maximumFractionDigits:2})}
+function fmtB(n){return'$'+(n/1e9).toFixed(2)+'B'}
+
+// ===== TAB NAVIGATION =====
+$$('.nav-item').forEach(btn=>{
+  btn.addEventListener('click',e=>{
+    e.preventDefault();
+    $$('.nav-item').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+  });
+});
+
+// ===== LIVE PRICE UPDATE =====
+function updatePrice(){
+  const p=BASE+rnd(-200,200);
+  const chg=rnd(-2,2);
+  const el=$('#live-price');
+  if(el)el.textContent='$'+fmt$(p);
+  const chgEl=$('#live-change');
+  if(chgEl){
+    chgEl.textContent=(chg>=0?'+':'')+chg.toFixed(2)+'%';
+    chgEl.className=chg>=0?'price-change up':'price-change down';
+  }
+}
+
+// ===== ORDER BOOK LIVE =====
+function updateOrderBook(){
+  const bidsEl=$('#ob-bids');
+  const asksEl=$('#ob-asks');
+  if(!bidsEl||!asksEl)return;
+  
+  let bids='',asks='';
+  let bTotal=0,aTotal=0;
+  const maxVol=12;
+  
+  for(let i=0;i<8;i++){
+    const bp=BASE-i*rnd(5,20);
+    const bq=rnd(0.1,8);
+    bTotal+=bq;
+    const bw=(bq/maxVol)*100;
+    bids+=`<div class="ob-row"><div class="ob-depth bid" style="width:${bw}%"></div><span class="ob-price bid">${fmt$(bp)}</span><span class="ob-qty">${bq.toFixed(3)}</span><span class="ob-total">${bTotal.toFixed(3)}</span></div>`;
+  }
+  
+  for(let i=0;i<8;i++){
+    const ap=BASE+i*rnd(5,20);
+    const aq=rnd(0.1,8);
+    aTotal+=aq;
+    const aw=(aq/maxVol)*100;
+    asks+=`<div class="ob-row"><div class="ob-depth ask" style="width:${aw}%"></div><span class="ob-price ask">${fmt$(ap)}</span><span class="ob-qty">${aq.toFixed(3)}</span><span class="ob-total">${aTotal.toFixed(3)}</span></div>`;
+  }
+  
+  bidsEl.innerHTML=bids;
+  asksEl.innerHTML=asks;
+  
+  const spreadEl=$('#ob-spread');
+  if(spreadEl)spreadEl.textContent='$'+rnd(0.1,0.8).toFixed(2);
+}
+
+// ===== METRICS UPDATE =====
+function updateMetrics(){
+  const m=[
+    {el:'m-oi',v:'$'+(8.13+rnd(-.3,.3)).toFixed(2)+'B'},
+    {el:'m-fr',v:'+'+(0.005+rnd(-.002,.003)).toFixed(4)+'%'},
+    {el:'m-sp',v:'$'+rnd(0.1,0.8).toFixed(1)},
+    {el:'m-tr',v:Math.round(rnd(300,700)).toString()},
+  ];
+  m.forEach(x=>{
+    const el=$('#'+x.el);
+    if(el)el.textContent=x.v;
+  });
+}
+
+// ===== LARGE ORDERS LIVE =====
+let orderCount=0;
+const EVENTS=['APPEAR','INCREASE','PARTIAL','FILLED','CANCEL'];
+const SIDES=['BUY','SELL'];
+function addLargeOrder(){
+  orderCount++;
+  const ev=pick(EVENTS);
+  const side=pick(SIDES);
+  const price=BASE+rnd(-500,500);
+  const qty=rnd(2,30).toFixed(2);
+  const rows=$('#lo-rows');
+  if(!rows)return;
+  
+  const cls=ev==='FILLED'?'ev-filled':ev==='CANCEL'?'ev-cancel':ev==='APPEAR'?'ev-appear':'ev-other';
+  const sideCls=side==='BUY'?'side-buy':'side-sell';
+  const row=document.createElement('div');
+  row.className='lo-row animate-in';
+  row.innerHTML=`<span class="lo-event ${cls}">${ev}</span><span class="${sideCls}">${side}</span><span class="lo-price">$${fmt$(price)}</span><span class="lo-qty">${qty}</span><span class="lo-age">${Math.round(rnd(0,30))}s ago</span>`;
+  rows.prepend(row);
+  if(rows.children.length>15)rows.lastChild.remove();
+}
+
+// ===== SPOOFING HISTOGRAM =====
+function updateSpoofing(){
+  const bars=$('#spoof-hist');
+  if(!bars)return;
+  bars.innerHTML='';
+  for(let i=0;i<12;i++){
+    const h=document.createElement('div');
+    h.className='spoof-bar';
+    h.style.height=rnd(10,100)+'%';
+    bars.appendChild(h);
+  }
+}
+
+// ===== CVD HISTOGRAM =====
+function updateCVD(){
+  const bars=$('#cvd-hist');
+  if(!bars)return;
+  bars.innerHTML='';
+  for(let i=0;i<20;i++){
+    const h=document.createElement('div');
+    h.className=Math.random()>0.5?'cvd-bar buy':'cvd-bar sell';
+    h.style.height=rnd(20,100)+'%';
+    bars.appendChild(h);
+  }
+}
+
+// ===== ALERT FEED =====
+function addAlert(){
+  const feed=$('#alert-feed');
+  if(!feed)return;
+  
+  const types=[
+    {t:'Liquidity Target Forming',s:'info',i:'🎯',d:'New liquidity cluster detected above current price'},
+    {t:'Weak Bullish Sweep',s:'bull',i:'🟢',d:'Minor sweep of sell-side liquidity'},
+    {t:'Strong Bearish Sweep',s:'bear',i:'🔴',d:'Major sweep of buy-side liquidity'},
+    {t:'Possible Spoofing',s:'warn',i:'⚠️',d:'Large bid wall appeared and was cancelled'},
+    {t:'Large Wall Appeared',s:'info',i:'🧱',d:'Significant liquidity wall detected'},
+    {t:'Funding Anomaly',s:'warn',i:'📊',d:'Funding rate deviating from average'},
+    {t:'CVD Divergence',s:'info',i:'📈',d:'CVD divergence with price detected'},
+    {t:'Squeeze Risk',s:'warn',i:'⚡',d:'Open interest rising while price consolidates'},
+  ];
+  const al=pick(types);
+  const el=document.createElement('div');
+  el.className='alert-item animate-in sev-'+al.s;
+  el.innerHTML=`<div class="alert-head"><span class="alert-icon">${al.i}</span><span class="alert-title">${al.t}</span><span class="alert-conf">${Math.round(rnd(60,95))}%</span></div><p class="alert-desc">${al.d}</p><div class="alert-meta"><span>$${fmt$(BASE+rnd(-500,500))}</span><span>${Math.round(rnd(0,120))}s ago</span></div>`;
+  feed.prepend(el);
+  if(feed.children.length>10)feed.lastChild.remove();
+  
+  const badge=$('#alert-badge');
+  if(badge){
+    const c=parseInt(badge.textContent||'0')+1;
+    badge.textContent=c;
+    badge.style.display='flex';
+  }
+}
+
+// ===== UPDATE ALL =====
+function tick(){
+  updatePrice();
+  updateMetrics();
+  updateOrderBook();
+}
+
+// Initial
+tick();
+updateSpoofing();
+updateCVD();
+
+// Auto-refresh
+setInterval(tick,3000);
+setInterval(addLargeOrder,2000);
+setInterval(updateSpoofing,8000);
+setInterval(updateCVD,8000);
+setInterval(addAlert,12000);
+
+// Initial large orders
+for(let i=0;i<5;i++)addLargeOrder();
+for(let i=0;i<3;i++)addAlert();
+</script>
+
+</body>
+</html>
