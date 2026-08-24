@@ -115,20 +115,8 @@
 [data-theme="light"] .ni-title{color:#1F2937}
 [data-theme="light"] .whale-amt{color:#1F2937}
 [data-theme="light"] .trend-chip .tr-rank{color:#7C3AED}
-  --primary:#2962FF;
-  --green:#00E676;
-  --red:#FF1744;
-  --amber:#FFB300;
-  --cyan:#00E5FF;
-  --purple:#B388FF;
-  --pink:#FF4081;
-  --txt:#E8EEF9;
-  --muted:#8FA3BF;
-  --dim:#5A6E8F;
-  --ch:280px;
-  --rad:14px;
-  --mono:'JetBrains Mono',monospace;
-}
+[data-theme="light"] .msg.ai b{color:#1F2937}
+[data-theme="light"] #chart canvas{filter:none}
 *{margin:0;padding:0;box-sizing:border-box}
 html{scroll-behavior:smooth}
 body{
@@ -692,7 +680,7 @@ footer{border-top:1px solid var(--border);margin-top:26px;padding:18px 14px;text
       <div class="metric"><div class="ml"><span>Open Interest (notional)</span></div><div class="mv" id="liqOI">—</div><div class="ms">USD · perpetual futures</div></div>
       <div class="metric"><div class="ml"><span>Mark Price</span></div><div class="mv" id="liqMark">—</div><div class="ms">fapi premium index</div></div>
       <div class="metric"><div class="ml"><span>ATR (14×15m)</span></div><div class="mv" id="liqATR">—</div><div class="ms">average true range</div></div>
-      <div class="metric"><div class="ml"><span>Leverage Warning</span></div><div class="mv" style="font-size:15px" id="liqLev">—</div><div class="ms">est. move to wipe 25x</div></div>
+      <div class="metric"><div class="ml"><span>Support Distance</span></div><div class="mv" style="font-size:15px" id="liqLev">—</div><div class="ms">distance to major support</div></div>
     </div>
     <div class="liq-zone">
       <div class="liq-zh"><span class="badge b-red">SHORT LIQUIDATION CLUSTER</span><span class="fc-note" style="margin:0">above swing high</span></div>
@@ -873,8 +861,8 @@ const COIN_ALIASES={
   INJ:['injective','inj'],
   TIA:['celestia','tia'],
   SEI:['sei network','sei'],
-  NEIRO:['neiro','neirocoin'],
-  TREMP:['tremp','meme of trump']
+  NEIRO:['neiro','neirocoin','neiro eth'],
+  TREMP:['tremp','meme of trump','dark maga']
 };
 
 function findCoin(text){
@@ -1356,7 +1344,8 @@ function renderAnalysis(){
     const leLong=oiN*0.22,leShort=oiN*0.16;
     $('liqLongEst').textContent='estimated trapped-notional magnet: '+cfmt(leLong)+' ('+(((lz.hi/mark)-1)*100).toFixed(2)+'% below mark)';
     $('liqShortEst').textContent='estimated trapped-notional magnet: '+cfmt(leShort)+' ('+(((sz.lo/mark)-1)*100).toFixed(2)+'% above mark)';
-    $('liqLev').textContent=(mark*0.038/mark*100).toFixed(2)+'%';
+    const srDist=((sr.sup-mark)/mark*100).toFixed(2);
+    $('liqLev').textContent=Math.abs(srDist)+'% below support at $'+pfmt(sr.sup);
     state._liq={lz:lz,sz:sz,oiN:oiN};
   }
   if(!state.candles.length)return;
@@ -1716,7 +1705,9 @@ async function generateReply(raw){
       return '📉 Worst of the tracked 16: <b>'+COINS[w.k].icon+' '+w.k+'</b> '+chip(w.t.pct.toFixed(2)+'%','hl-r')+' at '+chip('$'+pfmt(w.t.last))+'. Rotation day.';
     }
     const b=ts[0];
-    return '[GAIN] Today\'s leader of the tracked 16: <b>'+COINS[b.k].icon+' '+b.k+'</b> '+chip('+'+b.t.pct.toFixed(2)+'%','hl-g')+' at '+chip('$'+pfmt(b.t.last))+' · vol '+chip(cfmt(b.t.qvol))+'<br><br>Runner-up: '+ts[1].k+' ('+ts[1].t.pct.toFixed(2)+'%). Say <i>"analyze '+b.k.toLowerCase()+'"</i> for the full workup.';
+    let out='[GAIN] Today\'s leader of the tracked 16: <b>'+COINS[b.k].icon+' '+b.k+'</b> '+chip('+'+b.t.pct.toFixed(2)+'%','hl-g')+' at '+chip('$'+pfmt(b.t.last))+' · vol '+chip(cfmt(b.t.qvol));
+    if(ts.length>=2)out+='<br><br>Runner-up: '+ts[1].k+' ('+ts[1].t.pct.toFixed(2)+'%). Say <i>"analyze '+b.k.toLowerCase()+'"</i> for the full workup.';else out+='<br><br>Say <i>"analyze '+b.k.toLowerCase()+'"</i> for the full workup.';
+    return out;
   }
 
   if(has('whale')||has('block trade')||has('smart money')||has('onchain')||has('on chain')){
@@ -1824,14 +1815,21 @@ function switchTab(tab){
   window.scrollTo({top:0});
 }
 async function setSymbol(sym){
-  if(!COIN_ALIASESHas(sym))return;
+  if(!sym)return;
   if(state.symbol===sym){switchTab('radar');return}
   state.symbol=sym;
   Object.keys(state.ctxCache).forEach(k=>delete state.ctxCache[k]);
   state._liq=null;state._sr=null;state._ai=null;state.whales=[];
   $('heroPrice').textContent='—';$('heroPrice').dataset.p='0';
   $('wsKlineState').textContent='SYNCING';$('wsKlineState').className='badge b-amber';
-  $('symSelect').value=sym;
+  var sel=$('symSelect');
+  if(!sel.querySelector('option[value="'+sym+'"]')){
+    var base=sym.replace(/USDT$/,'');
+    var opt=document.createElement('option');
+    opt.value=sym;opt.textContent=base+'/USDT';
+    sel.appendChild(opt);
+  }
+  sel.value=sym;
   renderTicker();
   switchTab('radar');
   await Promise.all([fetchKlines(sym),fetchOB(),fetchFR(),fetchOI(),fetchWhales()]);
@@ -1906,13 +1904,11 @@ function init(){
 
   setInterval(fetchTickers,20000);
   setInterval(fetchWhales,10000);
-  setInterval(fetchOB,3000);
   setInterval(fetchFR,30000);
   setInterval(fetchOI,30000);
   setInterval(fetchFG,300000);
   setInterval(fetchNews,180000);
   setInterval(fetchForexEvents,600000);
-  setInterval(()=>{if(document.hidden)return;fetchTickers();},60000);
 }
 
 function initTheme(){
@@ -1967,7 +1963,16 @@ async function fetchForexEvents(){
     const now=new Date();
     const upcoming=r.filter(e=>{
       if(!e.date)return false;
-      const d=new Date(e.date+'T'+(e.time||'00:00')+':00');
+      var t=e.time||'00:00';
+      t=t.toLowerCase().replace(/(am|pm)/,function(m){return ' '+m});
+      var parts=t.match(/(\d{1,2}):(\d{2})\s*(am|pm)?/);
+      if(parts){
+        var h=parseInt(parts[1],10),m=parseInt(parts[2],10),ap=(parts[3]||'').toLowerCase();
+        if(ap==='pm'&&h<12)h+=12;
+        if(ap==='am'&&h===12)h=0;
+        t=String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
+      }
+      var d=new Date(e.date+'T'+t+':00');
       return d>=now;
     }).slice(0,15);
     if(!upcoming.length){
