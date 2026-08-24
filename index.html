@@ -560,6 +560,20 @@ footer{border-top:1px solid var(--border);margin-top:26px;padding:18px 14px;text
 .signal-card .sc-conf-bar{height:5px;border-radius:3px;background:rgba(26,45,74,.6);overflow:hidden}
 .signal-card .sc-conf-fill{height:100%;border-radius:3px}
 .sc-actions{display:flex;gap:6px;margin-top:8px}
+.sc-tf-row{display:flex;gap:5px;margin:6px 0;flex-wrap:wrap}
+.sc-tf-badge{font-family:var(--mono);font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;border:1px solid var(--border);background:var(--bg)}
+.sc-tf-badge.tf-buy{border-color:var(--green);color:var(--green);background:rgba(0,230,118,.08)}
+.sc-tf-badge.tf-sell{border-color:var(--red);color:var(--red);background:rgba(255,23,68,.08)}
+.sc-tf-badge.tf-wait{border-color:var(--amber);color:var(--amber);background:rgba(255,179,0,.08)}
+.sc-master{display:flex;align-items:center;gap:8px;margin-top:8px;padding:8px 10px;border-radius:8px;background:var(--bg);border:1px solid var(--border)}
+.sc-master-label{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--dim);font-weight:600}
+.sc-master-signal{font-family:var(--mono);font-size:13px;font-weight:800}
+.sc-whale{font-size:11px;color:var(--muted);margin-top:6px;padding:6px 8px;border-left:3px solid var(--border);background:rgba(6,11,24,.3);border-radius:0 6px 6px 0}
+.sc-whale.whale-buy{border-left-color:var(--green)}
+.sc-whale.whale-sell{border-left-color:var(--red)}
+.sc-forecast{font-size:11px;color:var(--muted);margin-top:6px;font-family:var(--mono)}
+.sc-forecast b{color:var(--cyan)}
+.sc-learning{font-size:10px;color:var(--dim);margin-top:5px;font-style:italic}
 .sc-action-btn{background:var(--primary);color:#fff;border:none;border-radius:7px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;transition:all .15s}
 .sc-action-btn:hover{opacity:.85}
 .sc-action-btn.active{background:var(--green);color:#052e1a}
@@ -1737,15 +1751,18 @@ async function generateReply(raw){
   if(has('thank'))return 'Anytime — Radar never sleeps.';
 
   if(has('signal')||has('scanner')||has('show signal')){
-    const top3=signalData.slice(0,3);
+    var top3=signalData.slice(0,3);
     if(!top3.length)return 'Signal scanner is warming up — give me 30 seconds and ask again.';
-    let s='<b>Live Signal Scanner — Top 3:</b><br><br>';
+    var s='<b>Multi-Timeframe Signal Scanner — Top 3:</b><br><br>';
     top3.forEach(function(sig){
-      const type=sig.score>20?'BUY':sig.score<-20?'SELL':'WAIT';
-      const cls=sig.score>20?'hl-g':sig.score<-20?'hl-r':'hl-a';
-      s+='&bull; <b>'+baseOf(sig.sym)+'</b>: <span class="'+cls+'">'+type+'</span> ('+(sig.score>0?'+':'')+sig.score+') — '+sig.reasons.join(', ')+'<br>';
+      var type=sig.master.type;
+      var cls=type==='BUY'?'hl-g':type==='SELL'?'hl-r':'hl-a';
+      var tfStr=sig.master.breakdown.map(function(b){return b.tf+':'+b.type}).join(' ');
+      s+='&bull; <b>'+baseOf(sig.sym)+'</b>: <span class="'+cls+'">'+type+'</span> ('+(sig.score>0?'+':'')+sig.score+')<br>';
+      s+='&nbsp;&nbsp;'+tfStr+'<br>';
+      if(sig.whaleText)s+='&nbsp;&nbsp;<span style="color:var(--muted)">'+esc(sig.whaleText)+'</span><br>';
     });
-    s+='<br>Full scanner on the <b>Signals tab</b> — 20 coins scanned every 2 minutes.';
+    s+='<br>Each signal covers 15m, 1H, 4H, 1D timeframes weighted into a Master signal. Whale flow and auto-learning included.';
     return s;
   }
 
@@ -1754,14 +1771,24 @@ async function generateReply(raw){
     try{
       return safeCtx(patBase).then(function(ctx){
         var patterns=detectPatterns(ctx.closes,state.candles.map(function(c){return c.v}));
-        var s='<b>Pattern scan — '+patBase+'</b><br><br>';
+        var s='<b>Multi-TF Pattern Scan — '+patBase+'</b><br><br>';
         if(!patterns.length)s+='No notable patterns detected right now — market may be in consolidation.';
         else patterns.forEach(function(p){
           var icon=p.type==='bullish'?'[BULL]':'[BEAR]';
           var cls=p.type==='bullish'?'hl-g':'hl-r';
           s+='<span class="'+cls+'">'+icon+' '+p.text+'</span> (strength: '+p.strength+'%)<br>';
         });
-        s+='<br>Patterns combine RSI divergence, MACD crossovers, Bollinger band position, volume spikes, and swing structure.';
+        var sig=signalData.find(function(x){return x.sym===patBase+'USDT'});
+        if(sig){
+          s+='<br><b>Multi-TF signal:</b> ';
+          sig.master.breakdown.forEach(function(b){
+            var cls2=b.type==='BUY'?'hl-g':b.type==='SELL'?'hl-r':'hl-a';
+            s+=b.tf+'=<span class="'+cls2+'">'+b.type+'</span> ';
+          });
+          s+='<br>Master: <b>'+sig.master.type+' ('+(sig.score>0?'+':'')+sig.score+')</b>';
+          if(sig.whaleText)s+='<br>Whale: '+esc(sig.whaleText);
+        }
+        s+='<br><br>Patterns combine RSI divergence, MACD crossovers, Bollinger band position, volume spikes, and swing structure across 15m/1H/4H/1D.';
         return s;
       });
     }catch(e){return 'Pattern scan unavailable right now.'}
@@ -2432,75 +2459,218 @@ function renderPaper(){
 
 // ===== SIGNAL SCANNER =====
 const SIGNAL_COINS=['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT','DOGEUSDT','XRPUSDT','ADAUSDT','AVAXUSDT','DOTUSDT','LINKUSDT','UNIUSDT','TRUMPUSDT','PEPEUSDT','WIFUSDT','FLOKIUSDT','SHIBUSDT','BONKUSDT','SUIUSDT','ARBUSDT','OPUSDT'];
+const TF_LIST=[{key:'15m',label:'15m',limit:100,weight:0.15},{key:'1h',label:'1H',limit:100,weight:0.30},{key:'4h',label:'4H',limit:100,weight:0.30},{key:'1d',label:'1D',limit:60,weight:0.25}];
 let signalData=[];
+let whaleFlowCache={};
+let patternHistory={};
+let modelWeights={rsi:25,macdCross:30,macdTrend:10,ema:12,bb:18,vol:5,diverge:20,whale:15,forecast:10};
+
+function loadPatternHistory(){
+  try{var d=JSON.parse(localStorage.getItem('lr-patternHist'));if(d)patternHistory=d}catch(e){}
+}
+function savePatternHistory(){
+  try{localStorage.setItem('lr-patternHist',JSON.stringify(patternHistory))}catch(e){}
+}
+function loadModelWeights(){
+  try{var d=JSON.parse(localStorage.getItem('lr-modelW'));if(d)Object.keys(d).forEach(function(k){if(modelWeights[k]!==undefined)modelWeights[k]=d[k]})}catch(e){}
+}
+function saveModelWeights(){try{localStorage.setItem('lr-modelW',JSON.stringify(modelWeights))}catch(e){}}
+
+function recordPatternOutcome(key,wrong){
+  if(!patternHistory[key])patternHistory[key]={correct:0,total:0};
+  patternHistory[key].total++;
+  if(!wrong)patternHistory[key].correct++;
+  if(patternHistory[key].total%10===0)adjustWeights();
+  savePatternHistory();
+}
+
+function adjustWeights(){
+  var totalPatterns=Object.keys(patternHistory).length;
+  if(totalPatterns<5)return;
+  Object.keys(patternHistory).forEach(function(k){
+    var h=patternHistory[k];
+    if(h.total<5)return;
+    var hitRate=h.correct/h.total;
+    if(hitRate>0.7){modelWeights[k]=Math.min(40,modelWeights[k]*1.05)}
+    else if(hitRate<0.4){modelWeights[k]=Math.max(5,modelWeights[k]*0.92)}
+  });
+  saveModelWeights();
+}
+
+function scoreTimeframe(candles){
+  var closes=candles.map(function(c){return c.c});
+  var vols=candles.map(function(c){return c.v});
+  if(closes.length<30)return null;
+  var a=aiComposite(candles,closes,vols);
+  var fc=forecastFrom(closes);
+  var last=closes[closes.length-1];
+  var reasons=[];
+  var score=0;
+  if(a.rsi<30){reasons.push('RSI oversold ('+a.rsi.toFixed(0)+')');score+=modelWeights.rsi}
+  else if(a.rsi>70){reasons.push('RSI overbought ('+a.rsi.toFixed(0)+')');score-=modelWeights.rsi}
+  else if(a.rsi<45){reasons.push('RSI bearish ('+a.rsi.toFixed(0)+')');score+=Math.round(modelWeights.rsi*0.3)}
+  else if(a.rsi>55){reasons.push('RSI bullish ('+a.rsi.toFixed(0)+')');score-=Math.round(modelWeights.rsi*0.3)}
+  if(a.macd.hist>0&&closes[closes.length-2]<closes[closes.length-3]){reasons.push('MACD bullish cross');score+=modelWeights.macdCross}
+  else if(a.macd.hist<0&&closes[closes.length-2]>closes[closes.length-3]){reasons.push('MACD bearish cross');score-=modelWeights.macdCross}
+  else if(a.macd.hist>0){reasons.push('MACD bullish');score+=modelWeights.macdTrend}
+  else{reasons.push('MACD bearish');score-=modelWeights.macdTrend}
+  if(last>a.e20){reasons.push('Above EMA20');score+=modelWeights.ema}
+  else{reasons.push('Below EMA20');score-=modelWeights.ema}
+  if(a.bb.pctB<10){reasons.push('Lower BB touch');score+=modelWeights.bb}
+  else if(a.bb.pctB>90){reasons.push('Upper BB stretch');score-=modelWeights.bb}
+  if(a.vt==='RISING'){reasons.push('Volume rising');score+=modelWeights.vol}
+  else if(a.vt==='FALLING'){reasons.push('Volume falling');score-=modelWeights.vol}
+  var prev10=closes.slice(-20,-10);
+  var last10=closes.slice(-10);
+  if(prev10.length>=10&&last10.length>=10){
+    var rsi1=calcRSI(prev10),rsi2=calcRSI(last10);
+    if(rsi1>rsi2&&last>closes[closes.length-11]){reasons.push('Bearish RSI div');score-=modelWeights.diverge}
+    else if(rsi1<rsi2&&last<closes[closes.length-11]){reasons.push('Bullish RSI div');score+=modelWeights.diverge}
+  }
+  var swingH=Math.max.apply(null,closes.slice(-20));
+  var swingL=Math.min.apply(null,closes.slice(-20));
+  if(last>swingH*0.995){reasons.push('Near resistance $'+pfmt(swingH));score-=5}
+  if(last<swingL*1.005){reasons.push('Near support $'+pfmt(swingL));score+=5}
+  score=Math.max(-100,Math.min(100,score));
+  return{score:score,reasons:reasons.slice(0,4),ai:a,fc:fc,last:last};
+}
+
+function getWhaleFlow(sym){
+  var cached=whaleFlowCache[sym];
+  if(cached&&Date.now()-cached.ts<30000)return cached;
+  return jget('https://api.binance.com/api/v3/trades?symbol='+sym+'&limit=500').then(function(trades){
+    var buys=0,sells=0,buyUsd=0,sellUsd=0;
+    trades.forEach(function(t){
+      var usd=+t.price*+t.qty;
+      if(usd<1000)return;
+      if(t.isBuyerMaker){sells++;sellUsd+=usd}else{buys++;buyUsd+=usd}
+    });
+    var imbalance=(buyUsd-sellUsd)/(buyUsd+sellUsd+1);
+    var result={buys:buys,sells:sells,buyUsd:buyUsd,sellUsd:sellUsd,imbalance:imbalance,ts:Date.now()};
+    whaleFlowCache[sym]=result;
+    return result;
+  }).catch(function(){return{buys:0,sells:0,buyUsd:0,sellUsd:0,imbalance:0,ts:Date.now()}});
+}
+
+function forecastScore(fc){
+  if(!fc||!fc.rows)return 0;
+  var pred24=fc.rows[3];
+  var pred1h=fc.rows[0];
+  var bias=0;
+  if(pred24.dp>1)bias+=5;else if(pred24.dp<-1)bias-=5;
+  if(pred1h.dp>0.5)bias+=3;else if(pred1h.dp<-0.5)bias-=3;
+  if(pred24.conf>55)bias*=1.2;
+  return Math.round(Math.max(-modelWeights.forecast,Math.min(modelWeights.forecast,bias)));
+}
+
+function masterSignal(tfScores){
+  var totalWeight=0;
+  var weighted=0;
+  var breakdown=[];
+  tfScores.forEach(function(ts){
+    if(!ts)return;
+    var w=TF_LIST.find(function(f){return f.key===ts.tf}).weight;
+    totalWeight+=w;
+    weighted+=ts.score*w;
+    breakdown.push({tf:ts.tf,score:ts.score,type:ts.score>15?'BUY':ts.score<-15?'SELL':'WAIT'});
+  });
+  if(totalWeight===0)return{score:0,type:'WAIT',breakdown:breakdown};
+  var base=Math.round(weighted/totalWeight);
+  return{score:base,type:base>15?'BUY':base<-15?'SELL':'WAIT',breakdown:breakdown};
+}
 
 function scanSignals(){
-  const promises=SIGNAL_COINS.map(function(sym){
-    return jget('https://api.binance.com/api/v3/klines?symbol='+sym+'&interval=1h&limit=100').then(function(data){
-      const candles=data.map(function(k){return{t:k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]}});
-      const closes=candles.map(function(c){return c.c});
-      const vols=candles.map(function(c){return c.v});
-      if(closes.length<30)return null;
-      const a=aiComposite(candles,closes,vols);
-      const fc=forecastFrom(closes);
-      const rsi14=a.rsi;
-      const macdHist=a.macd.hist;
-      const last=closes[closes.length-1];
-      const ema20=a.e20;
-      const bb=a.bb;
-      const vt=a.vt;
-      let reasons=[];
-      let score=0;
-      if(rsi14<30){reasons.push('RSI oversold ('+rsi14.toFixed(0)+')');score+=25}
-      else if(rsi14>70){reasons.push('RSI overbought ('+rsi14.toFixed(0)+')');score-=25}
-      else if(rsi14<45){reasons.push('RSI below 50');score+=8}
-      else if(rsi14>55){reasons.push('RSI above 50');score-=8}
-      if(macdHist>0&&closes[closes.length-2]<closes[closes.length-3]){reasons.push('MACD bullish crossover');score+=30}
-      else if(macdHist<0&&closes[closes.length-2]>closes[closes.length-3]){reasons.push('MACD bearish crossover');score-=30}
-      else if(macdHist>0){reasons.push('MACD positive');score+=10}
-      else{reasons.push('MACD negative');score-=10}
-      if(last>ema20){reasons.push('Price above EMA20');score+=12}
-      else{reasons.push('Price below EMA20');score-=12}
-      if(bb.pctB<10){reasons.push('Near lower Bollinger band');score+=18}
-      else if(bb.pctB>90){reasons.push('Near upper Bollinger band');score-=18}
-      if(vt==='RISING'){reasons.push('Volume rising');score+=5}
-      else if(vt==='FALLING'){reasons.push('Volume falling');score-=5}
-      const prev10=closes.slice(-20,-10);
-      const last10=closes.slice(-10);
-      const rsi1=calcRSI(prev10);
-      const rsi2=calcRSI(last10);
-      if(rsi1>rsi2&&last>closes[closes.length-11]){reasons.push('Bearish RSI divergence');score-=20}
-      else if(rsi1<rsi2&&last<closes[closes.length-11]){reasons.push('Bullish RSI divergence');score+=20}
-      const mom=closes.slice(-3);
-      if(mom[2]>mom[1]&&mom[1]>mom[0])reasons.push('3-bar uptrend');
-      else if(mom[2]<mom[1]&&mom[1]<mom[0])reasons.push('3-bar downtrend');
-      score=Math.max(-100,Math.min(100,score));
-      const t=state.tickers[sym];
-      return{sym:sym,score:score,reasons:reasons.slice(0,4),t:t,fc:fc,rsi:rsi14,macdH:macdHist};
+  var promises=SIGNAL_COINS.map(function(sym){
+    var tfPromises=TF_LIST.map(function(tf){
+      return jget('https://api.binance.com/api/v3/klines?symbol='+sym+'&interval='+tf.key+'&limit='+tf.limit).then(function(data){
+        var candles=data.map(function(k){return{t:k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]}});
+        return scoreTimeframe(candles);
+      }).catch(function(){return null});
+    });
+    var whalePromise=getWhaleFlow(sym);
+    return Promise.all(tfPromises.concat([whalePromise])).then(function(results){
+      var tfScores=results.slice(0,4);
+      var whale=results[4];
+      var master=masterSignal(tfScores);
+      var whaleScore=0;
+      var whaleText='';
+      if(whale&&whale.imbalance){
+        whaleScore=Math.round(whale.imbalance*modelWeights.whale);
+        if(whale.imbalance>0.15)whaleText='Whale accumulation (buy '+cfmt(whale.buyUsd)+' vs sell '+cfmt(whale.sellUsd)+')';
+        else if(whale.imbalance<-0.15)whaleText='Whale distribution (sell '+cfmt(whale.sellUsd)+' vs buy '+cfmt(whale.buyUsd)+')';
+        else whaleText='Whale flow balanced (buy '+cfmt(whale.buyUsd)+' / sell '+cfmt(whale.sellUsd)+')';
+      }
+      var finalScore=Math.max(-100,Math.min(100,master.score+whaleScore));
+      var allReasons=[];
+      tfScores.forEach(function(ts){if(ts&&ts.reasons.length)allReasons.push(ts.reasons[0])});
+      var t=state.tickers[sym];
+      var fc1h=tfScores[1]?tfScores[1].fc:null;
+      var fcForecast=fc1h?fc1h.rows[3]:null;
+      return{sym:sym,score:finalScore,master:master,tfScores:tfScores,whale:whale,whaleText:whaleText,t:t,fc:fcForecast,reasons:allReasons.slice(0,4)};
     }).catch(function(){return null});
   });
   Promise.all(promises).then(function(results){
     signalData=results.filter(Boolean);
     signalData.sort(function(a,b){return Math.abs(b.score)-Math.abs(a.score)});
     renderSignals();
+    recordSignalOutcomes();
   });
 }
 
+function recordSignalOutcomes(){
+  if(!signalData.length)return;
+  var prevSignals=JSON.parse(localStorage.getItem('lr-lastSignals')||'{}');
+  signalData.forEach(function(s){
+    if(prevSignals[s.sym]){
+      var old=prevSignals[s.sym];
+      var t=state.tickers[s.sym];
+      if(t){
+        var moved=t.pct;
+        var correct=(old.type==='BUY'&&moved>0)||(old.type==='SELL'&&moved<0);
+        if(Math.abs(moved)>0.5)recordPatternOutcome('master_'+old.type,correct?0:1);
+      }
+    }
+  });
+  var current={};
+  signalData.forEach(function(s){current[s.sym]={type:s.master.type,score:s.score,ts:Date.now()}});
+  localStorage.setItem('lr-lastSignals',JSON.stringify(current));
+}
+
 function renderSignals(){
-  $('sigCount').textContent=signalData.length+' COINS SCANNED';
+  $('sigCount').textContent=signalData.length+' COINS · 4 TIMEFRAMES';
+  var totalHits=0,totalPreds=0;
+  Object.keys(patternHistory).forEach(function(k){totalHits+=patternHistory[k].correct;totalPreds+=patternHistory[k].total});
+  var hitRate=totalPreds>10?Math.round(totalHits/totalPreds*100):null;
   $('signalGrid').innerHTML=signalData.map(function(s){
-    const type=s.score>20?'BUY':s.score<-20?'SELL':'WAIT';
-    const typeCls=s.score>20?'sig-buy':s.score<-20?'sig-sell':'sig-wait';
-    const badgeCls=s.score>20?'buy':s.score<-20?'sell':'wait';
-    const conf=Math.abs(s.score);
-    const confColor=s.score>20?'var(--green)':s.score<-20?'var(--red)':'var(--amber)';
-    const t=s.t;
-    const price=t?'$'+pfmt(t.last):'--';
-    const chg=t?chgHtml(t.pct):'';
+    var ms=s.master;
+    var type=ms.type;
+    var typeCls=type==='BUY'?'sig-buy':type==='SELL'?'sig-sell':'sig-wait';
+    var badgeCls=type==='BUY'?'buy':type==='SELL'?'sell':'wait';
+    var conf=Math.abs(s.score);
+    var confColor=type==='BUY'?'var(--green)':type==='SELL'?'var(--red)':'var(--amber)';
+    var t=s.t;
+    var price=t?'$'+pfmt(t.last):'--';
+    var chg=t?chgHtml(t.pct):'';
+    var tfBadges=ms.breakdown.map(function(b){
+      var cls=b.type==='BUY'?'tf-buy':b.type==='SELL'?'tf-sell':'tf-wait';
+      return'<span class="sc-tf-badge '+cls+'">'+b.tf+': '+b.type+(b.score>0?'+':'')+b.score+'</span>';
+    }).join('');
+    var whaleClass=s.whaleText.indexOf('accumulation')!==-1?'whale-buy':s.whaleText.indexOf('distribution')!==-1?'whale-sell':'';
+    var forecastHtml='';
+    if(s.fc){
+      var fCol=s.fc.dp>=0?'var(--green)':'var(--red)';
+      forecastHtml='<div class="sc-forecast">1H forecast: <b>$'+pfmt(s.fc.pred)+'</b> ('+((s.fc.dp>0)?'+':'')+s.fc.dp.toFixed(2)+'%) · 24H: <b>$'+pfmt(s.fc.pred)+'</b></div>';
+    }
+    var learnHtml=hitRate?'<div class="sc-learning">Model accuracy: '+hitRate+'% across '+totalPreds+' predictions</div>':'';
     return'<div class="signal-card '+typeCls+'">'
       +'<div class="sc-head"><span class="sc-coin">'+baseOf(s.sym)+'/USDT '+price+' '+chg+'</span><span class="sc-type '+badgeCls+'">'+type+'</span></div>'
-      +'<div class="sc-conf"><div class="sc-conf-bar"><div class="sc-conf-fill" style="width:'+conf+'%;background:'+confColor+'"></div></div></div>'
+      +'<div class="sc-tf-row">'+tfBadges+'</div>'
+      +'<div class="sc-conf"><div class="sc-conf-bar"><div class="sc-conf-fill" style="width:'+Math.min(100,conf)+'%;background:'+confColor+'"></div></div></div>'
       +'<div class="sc-reasons">'+s.reasons.map(function(r){return'&bull; '+esc(r)}).join('<br>')+'</div>'
+      +(s.whaleText?'<div class="sc-whale '+whaleClass+'">'+esc(s.whaleText)+'</div>':'')
+      +forecastHtml
+      +learnHtml
+      +'<div class="sc-master"><span class="sc-master-label">Master</span><span class="sc-master-signal" style="color:'+(type==='BUY'?'var(--green)':type==='SELL'?'var(--red)':'var(--amber)')+'">'+type+' ('+(s.score>0?'+':'')+s.score+')</span></div>'
       +'<div class="sc-actions"><button class="sc-action-btn" onclick="setSymbol(\''+s.sym+'\');switchTab(\'radar\')">View Chart</button><button class="sc-action-btn" onclick="paperQuickTrade(\''+s.sym+'\',\''+type+'\')">Quick Trade</button></div>'
       +'</div>';
   }).join('');
@@ -2588,6 +2758,8 @@ function generateSignalSummary(base,ai,fc){
 // ===== AUTO-SCAN TIMER =====
 let autoScanInterval=null;
 function startAutoScan(){
+  loadPatternHistory();
+  loadModelWeights();
   scanSignals();
   autoScanInterval=setInterval(scanSignals,120000);
 }
