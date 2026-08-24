@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Liquidity Radar â€” Crypto Microstructure Terminal</title>
+<title>Liquidity Radar — Crypto Microstructure Terminal</title>
 <meta name="description" content="Real-time crypto microstructure terminal: order flow, liquidity heatmap, whale tracker, AI analysis and ML forecasts.">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>ðŸ“¡</text></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📡</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -17,6 +17,104 @@
   --card2:#101C33;
   --border:#1A2D4A;
   --border2:#22385E;
+  --primary:#2962FF;
+  --green:#00E676;
+  --red:#FF1744;
+  --amber:#FFB300;
+  --cyan:#00E5FF;
+  --purple:#B388FF;
+  --pink:#FF4081;
+  --txt:#E8EEF9;
+  --muted:#8FA3BF;
+  --dim:#5A6E8F;
+  --ch:280px;
+  --rad:14px;
+  --mono:'JetBrains Mono',monospace;
+}
+[data-theme="light"]{
+  --bg:#F0F2F5;
+  --card:#FFFFFF;
+  --card2:#F8F9FA;
+  --border:#D1D5DB;
+  --border2:#9CA3AF;
+  --primary:#2563EB;
+  --green:#16A34A;
+  --red:#DC2626;
+  --amber:#D97706;
+  --cyan:#0891B2;
+  --purple:#7C3AED;
+  --pink:#DB2777;
+  --txt:#1F2937;
+  --muted:#6B7280;
+  --dim:#9CA3AF;
+}
+[data-theme="light"] body{
+  background:#F0F2F5;
+  background-image:none;
+}
+[data-theme="light"] header.top{
+  background:rgba(240,242,245,.92);
+  border-bottom-color:#D1D5DB;
+}
+[data-theme="light"] .tickerbar{
+  background:rgba(255,255,255,.85);
+  border-bottom-color:#D1D5DB;
+}
+[data-theme="light"] .tickerbar::before{background:linear-gradient(90deg,#F0F2F5,transparent)}
+[data-theme="light"] .tickerbar::after{background:linear-gradient(-90deg,#F0F2F5,transparent)}
+[data-theme="light"] .card{
+  background:linear-gradient(180deg,#FFFFFF,#F8F9FA);
+  border-color:#D1D5DB;
+}
+[data-theme="light"] .card:hover{border-color:#9CA3AF}
+[data-theme="light"] .hero-card{
+  background:linear-gradient(180deg,#FFFFFF,#F8F9FA);
+  border-color:#93C5FD;
+  box-shadow:0 0 40px rgba(37,99,235,.08);
+}
+[data-theme="light"] .hero-price{color:#1F2937}
+[data-theme="light"] .hstat{background:rgba(243,244,246,.8);border-color:#D1D5DB}
+[data-theme="light"] .metric{
+  background:linear-gradient(180deg,#FFFFFF,#F8F9FA);
+  border-color:#D1D5DB;
+}
+[data-theme="light"] .metric:hover{border-color:#93C5FD}
+[data-theme="light"] .ob-spread{background:rgba(217,119,6,.06);border-color:rgba(217,119,6,.3)}
+[data-theme="light"] .hm-barzone{background:rgba(209,213,219,.5)}
+[data-theme="light"] .legend{background:rgba(255,255,255,.88);border-color:#D1D5DB}
+[data-theme="light"] .msg.ai{background:#F3F4F6;border-color:#D1D5DB}
+[data-theme="light"] .msg.user{background:linear-gradient(135deg,#2563EB,#1D4ED8)}
+[data-theme="light"] .chip{background:rgba(37,99,235,.08);border-color:#D1D5DB;color:#1D4ED8}
+[data-theme="light"] .chip:hover{background:rgba(37,99,235,.16);border-color:#2563EB}
+[data-theme="light"] .chat-input-row input{background:#FFFFFF;border-color:#D1D5DB;color:#1F2937}
+[data-theme="light"] .chat-input-row input:focus{border-color:#2563EB;box-shadow:0 0 0 3px rgba(37,99,235,.1)}
+[data-theme="light"] .send-btn{background:linear-gradient(135deg,#2563EB,#1D4ED8)}
+[data-theme="light"] .score-track{background:linear-gradient(90deg,rgba(220,38,38,.4),#E5E7EB 48%,#E5E7EB 52%,rgba(22,163,74,.4))}
+[data-theme="light"] .breaking-box{border-color:rgba(220,38,38,.4);background:linear-gradient(90deg,rgba(220,38,38,.06),rgba(220,38,38,.01))}
+[data-theme="light"] .news-item:hover{background:rgba(37,99,235,.04)}
+[data-theme="light"] .celeb-card{background:linear-gradient(180deg,#FFFFFF,#F8F9FA);border-color:#D1D5DB}
+[data-theme="light"] .celeb-card:hover{border-color:#2563EB;box-shadow:0 8px 24px rgba(37,99,235,.12)}
+[data-theme="light"] .fc-bias{background:rgba(243,244,246,.8);border-color:#D1D5DB}
+[data-theme="light"] .fc-note{color:#6B7280}
+[data-theme="light"] .liq-zone{border-color:#D1D5DB;background:rgba(243,244,246,.5)}
+[data-theme="light"] .disclaimer{border-left-color:#D97706;background:rgba(217,119,6,.04)}
+[data-theme="light"] .toast{background:#FFFFFF;border-color:#DC2626;color:#1F2937}
+[data-theme="light"] .ob-row .fill.ask{background:linear-gradient(270deg,rgba(220,38,38,.15),rgba(220,38,38,.02))}
+[data-theme="light"] .ob-row .fill.bid{background:linear-gradient(90deg,rgba(22,163,74,.12),rgba(22,163,74,.01))}
+[data-theme="light"] .coins-table tbody tr:hover{background:rgba(37,99,235,.04)}
+[data-theme="light"] .trend-chip{border-color:#D1D5DB;background:rgba(243,244,246,.5)}
+[data-theme="light"] .trend-chip:hover{border-color:#7C3AED}
+[data-theme="light"] ::-webkit-scrollbar-thumb{background:#CBD5E1;border-color:#F0F2F5}
+[data-theme="light"] ::-webkit-scrollbar-thumb:hover{background:#94A3B8}
+[data-theme="light"] .sec-title::before{background:#2563EB;box-shadow:0 0 8px #2563EB}
+[data-theme="light"] .tab-btn.active{text-shadow:none;color:#1F2937}
+[data-theme="light"] footer{color:#9CA3AF}
+[data-theme="light"] .chart-toolbar select{background:#FFFFFF;border-color:#D1D5DB;color:#1F2937}
+[data-theme="light"] .whale-item{border-bottom-color:rgba(209,213,219,.8)}
+[data-theme="light"] .ind-row{border-bottom-color:rgba(209,213,219,.5)}
+[data-theme="light"] .ni-title{color:#1F2937}
+[data-theme="light"] .whale-amt{color:#1F2937}
+[data-theme="light"] .trend-chip .tr-rank{color:#7C3AED}
   --primary:#2962FF;
   --green:#00E676;
   --red:#FF1744;
@@ -62,6 +160,8 @@ header.top{
   border-bottom:1px solid var(--border);
 }
 .top-inner{max-width:1400px;margin:0 auto;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;gap:10px}
+.theme-btn{background:var(--card);border:1px solid var(--border2);color:var(--txt);border-radius:9px;padding:7px 10px;font-size:15px;cursor:pointer;transition:all .2s;display:grid;place-items:center;width:36px;height:36px}
+.theme-btn:hover{border-color:var(--primary);box-shadow:0 0 10px rgba(41,98,255,.3)}
 .logo{display:flex;align-items:center;gap:10px;font-weight:800;font-size:18px;letter-spacing:.06em}
 .logo .dish{
   width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font-size:17px;
@@ -387,6 +487,34 @@ footer{border-top:1px solid var(--border);margin-top:26px;padding:18px 14px;text
   .desktop-grid{grid-template-columns:repeat(4,1fr)}
   .whale-list{columns:2;column-gap:22px}
 }
+
+.search-wrap{position:relative;max-width:1400px;margin:0 auto;padding:10px 14px 0}
+.search-box{
+  width:100%;background:var(--card);border:1px solid var(--border2);border-radius:12px;
+  color:var(--txt);padding:11px 15px 11px 42px;font-size:14px;outline:none;transition:border-color .2s;
+  font-family:'Inter',sans-serif;
+}
+.search-box:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(41,98,255,.15)}
+.search-box::placeholder{color:var(--dim)}
+.search-icon{position:absolute;left:26px;top:50%;transform:translateY(-50%);color:var(--dim);font-size:16px;pointer-events:none}
+.search-results{
+  position:absolute;top:100%;left:14px;right:14px;z-index:80;
+  background:var(--card);border:1px solid var(--border2);border-radius:12px;
+  max-height:320px;overflow-y:auto;display:none;
+  box-shadow:0 12px 40px rgba(0,0,0,.5);
+}
+.search-results.show{display:block}
+.search-item{
+  display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;
+  font-family:var(--mono);font-size:13px;transition:background .12s;border-bottom:1px solid var(--border);
+}
+.search-item:last-child{border-bottom:none}
+.search-item:hover{background:rgba(41,98,255,.1)}
+.search-item .si-sym{font-weight:700;min-width:90px}
+.search-item .si-name{color:var(--muted);flex:1}
+.search-item .si-price{color:var(--txt);text-align:right;min-width:90px}
+.search-item .si-chg{text-align:right;min-width:70px}
+.search-count{font-size:10px;color:var(--dim);padding:6px 14px;border-top:1px solid var(--border);font-family:var(--mono)}
 </style>
 </head>
 
@@ -394,18 +522,27 @@ footer{border-top:1px solid var(--border);margin-top:26px;padding:18px 14px;text
 
 <header class="top">
   <div class="top-inner">
-    <div class="logo"><span class="dish">ðŸ“¡</span><span><b>LIQUIDITY</b>&nbsp;RADAR</span></div>
-    <div class="status-pill" id="statusPill"><span class="dot"></span><span id="statusTxt">CONNECTINGâ€¦</span></div>
+    <div class="logo"><span class="dish">📡</span><span><b>LIQUIDITY</b>&nbsp;RADAR</span></div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <button class="theme-btn" id="themeBtn" title="Toggle day/night mode">🌙</button>
+      <div class="status-pill" id="statusPill"><span class="dot"></span><span id="statusTxt">CONNECTING…</span></div>
+    </div>
   </div>
   <div class="tickerbar"><div class="ticker-track" id="tickerTrack"></div></div>
   <nav class="tabs">
-    <button class="tab-btn active" data-tab="radar">ðŸŽ¯ Radar</button>
-    <button class="tab-btn" data-tab="market">ðŸ“Š Market</button>
-    <button class="tab-btn" data-tab="analysis">ðŸ§ª Analysis</button>
-    <button class="tab-btn" data-tab="news">ðŸ“° News</button>
-    <button class="tab-btn" data-tab="chat">ðŸ¤– AI Chat</button>
+    <button class="tab-btn active" data-tab="radar">🎯 Radar</button>
+    <button class="tab-btn" data-tab="market">📊 Market</button>
+    <button class="tab-btn" data-tab="analysis">🧪 Analysis</button>
+    <button class="tab-btn" data-tab="news">📰 News</button>
+    <button class="tab-btn" data-tab="chat">🤖 AI Chat</button>
   </nav>
 </header>
+
+<div class="search-wrap">
+  <span class="search-icon">🔍</span>
+  <input class="search-box" id="coinSearch" type="text" placeholder="Search any coin... (e.g. PEPE, SOL, DOGE, PEPEPE, TRUMP)" autocomplete="off" maxlength="50">
+  <div class="search-results" id="searchResults"></div>
+</div>
 
 <div class="container">
 <main>
@@ -414,47 +551,47 @@ footer{border-top:1px solid var(--border);margin-top:26px;padding:18px 14px;text
   <div class="card hero-card">
     <div class="hero-main">
       <div class="hero-id">
-        <div class="hero-icon" id="heroIcon">â‚¿</div>
+        <div class="hero-icon" id="heroIcon">₿</div>
         <div>
           <div class="hero-name" id="heroName">Bitcoin</div>
-          <div class="hero-pair" id="heroPair">BTCUSDT Â· BINANCE SPOT</div>
+          <div class="hero-pair" id="heroPair">BTCUSDT · BINANCE SPOT</div>
         </div>
       </div>
       <div class="hero-price-block">
-        <div class="hero-price" id="heroPrice">â€”</div>
-        <div class="hero-sub"><span id="heroChg">â€”</span><span id="heroUpdated"></span></div>
+        <div class="hero-price" id="heroPrice">—</div>
+        <div class="hero-sub"><span id="heroChg">—</span><span id="heroUpdated"></span></div>
       </div>
     </div>
     <div class="hero-stats">
-      <div class="hstat"><div class="hl">24h High</div><div class="hv" id="hsHigh">â€”</div></div>
-      <div class="hstat"><div class="hl">24h Low</div><div class="hv" id="hsLow">â€”</div></div>
-      <div class="hstat"><div class="hl">24h Volume (USDT)</div><div class="hv" id="hsVol">â€”</div></div>
-      <div class="hstat"><div class="hl">24h Trades</div><div class="hv" id="hsTrades">â€”</div></div>
-      <div class="hstat"><div class="hl">Mark Price</div><div class="hv" id="hsMark">â€”</div></div>
+      <div class="hstat"><div class="hl">24h High</div><div class="hv" id="hsHigh">—</div></div>
+      <div class="hstat"><div class="hl">24h Low</div><div class="hv" id="hsLow">—</div></div>
+      <div class="hstat"><div class="hl">24h Volume (USDT)</div><div class="hv" id="hsVol">—</div></div>
+      <div class="hstat"><div class="hl">24h Trades</div><div class="hv" id="hsTrades">—</div></div>
+      <div class="hstat"><div class="hl">Mark Price</div><div class="hv" id="hsMark">—</div></div>
     </div>
   </div>
 
   <div class="metric-grid">
-    <div class="metric"><div class="ml"><span>Funding Rate</span><span class="badge b-purple">PERP</span></div><div class="mv" id="mFR">â€”</div><div class="ms" id="mFRNext">â€”</div></div>
-    <div class="metric"><div class="ml"><span>Open Interest</span><span class="badge b-cyan">LIVE</span></div><div class="mv" id="mOI">â€”</div><div class="ms" id="mOISub">â€”</div></div>
-    <div class="metric"><div class="ml"><span>RSI (14)</span><span class="badge b-gray" id="mRSIZone">â€”</span></div><div class="mv" id="mRSI">â€”</div><div class="ms">15m closes Â· Wilder</div></div>
-    <div class="metric"><div class="ml"><span>MACD Signal</span><span class="badge b-gray" id="mMACDZone">â€”</span></div><div class="mv" id="mMACD">â€”</div><div class="ms">12/26/9 histogram</div></div>
-    <div class="metric"><div class="ml"><span>AI Composite</span><span class="badge b-gray" id="mAIZone">â€”</span></div><div class="mv" id="mAIScore">â€”</div><div class="score-track"><div class="score-marker" id="mAIMarker" style="left:calc(50% - 2px)"></div></div></div>
-    <div class="metric"><div class="ml"><span>Volatility (24H est)</span><span class="badge b-amber">RISK</span></div><div class="mv" id="mVol">â€”</div><div class="ms">realized Â· 96Ã—15m</div></div>
-    <div class="metric"><div class="ml"><span>EMA (20)</span><span class="badge b-gray" id="mEMAZone">â€”</span></div><div class="mv" id="mEMA">â€”</div><div class="ms" id="mEMASub">â€”</div></div>
-    <div class="metric"><div class="ml"><span>Bollinger %B</span><span class="badge b-gray" id="mBBZone">â€”</span></div><div class="mv" id="mBB">â€”</div><div class="ms">20, 2Ïƒ band position</div></div>
+    <div class="metric"><div class="ml"><span>Funding Rate</span><span class="badge b-purple">PERP</span></div><div class="mv" id="mFR">—</div><div class="ms" id="mFRNext">—</div></div>
+    <div class="metric"><div class="ml"><span>Open Interest</span><span class="badge b-cyan">LIVE</span></div><div class="mv" id="mOI">—</div><div class="ms" id="mOISub">—</div></div>
+    <div class="metric"><div class="ml"><span>RSI (14)</span><span class="badge b-gray" id="mRSIZone">—</span></div><div class="mv" id="mRSI">—</div><div class="ms">15m closes · Wilder</div></div>
+    <div class="metric"><div class="ml"><span>MACD Signal</span><span class="badge b-gray" id="mMACDZone">—</span></div><div class="mv" id="mMACD">—</div><div class="ms">12/26/9 histogram</div></div>
+    <div class="metric"><div class="ml"><span>AI Composite</span><span class="badge b-gray" id="mAIZone">—</span></div><div class="mv" id="mAIScore">—</div><div class="score-track"><div class="score-marker" id="mAIMarker" style="left:calc(50% - 2px)"></div></div></div>
+    <div class="metric"><div class="ml"><span>Volatility (24H est)</span><span class="badge b-amber">RISK</span></div><div class="mv" id="mVol">—</div><div class="ms">realized · 96×15m</div></div>
+    <div class="metric"><div class="ml"><span>EMA (20)</span><span class="badge b-gray" id="mEMAZone">—</span></div><div class="mv" id="mEMA">—</div><div class="ms" id="mEMASub">—</div></div>
+    <div class="metric"><div class="ml"><span>Bollinger %B</span><span class="badge b-gray" id="mBBZone">—</span></div><div class="mv" id="mBB">—</div><div class="ms">20, 2σ band position</div></div>
   </div>
 
   <div class="card">
     <div class="sec-head">
-      <div class="sec-title">Price Action Â· 15m Candles</div>
+      <div class="sec-title">Price Action · 15m Candles</div>
       <div class="chart-toolbar">
         <select id="symSelect"></select>
         <span class="badge b-cyan" id="wsKlineState">WS SYNCING</span>
       </div>
     </div>
     <div class="chart-wrap">
-      <div class="legend" id="legendOHLC">Loading chartâ€¦</div>
+      <div class="legend" id="legendOHLC">Loading chart…</div>
       <div id="chart"></div>
     </div>
   </div>
@@ -462,30 +599,30 @@ footer{border-top:1px solid var(--border);margin-top:26px;padding:18px 14px;text
   <div class="desktop-grid">
     <div class="card">
       <div class="sec-head"><div class="sec-title">Technical Indicators</div><span class="badge b-purple">AI FUSED</span></div>
-      <div class="ind-row"><div><div class="ind-name">RSI (14)</div><div class="ind-sub">overbought &gt;70 / oversold &lt;30</div></div><div style="text-align:right"><div class="ind-val" id="indRSI">â€”</div><span class="badge b-gray" id="indRSIb">â€”</span></div></div>
-      <div class="ind-row"><div><div class="ind-name">MACD (12,26,9)</div><div class="ind-sub">bullish when histogram &gt; 0</div></div><div style="text-align:right"><div class="ind-val" id="indMACD">â€”</div><span class="badge b-gray" id="indMACDb">â€”</span></div></div>
-      <div class="ind-row"><div><div class="ind-name">EMA (20)</div><div class="ind-sub">trend filter baseline</div></div><div style="text-align:right"><div class="ind-val" id="indEMA">â€”</div><span class="badge b-gray" id="indEMAb">â€”</span></div></div>
-      <div class="ind-row"><div><div class="ind-name">Bollinger Bands (20,2)</div><div class="ind-sub" id="indBBs">%B band position</div></div><div style="text-align:right"><div class="ind-val" id="indBB">â€”</div><span class="badge b-gray" id="indBBb">â€”</span></div></div>
-      <div class="ind-row"><div><div class="ind-name">Volume Trend</div><div class="ind-sub">last 10 vs prior 10 bars</div></div><div style="text-align:right"><div class="ind-val" id="indVT">â€”</div><span class="badge b-gray" id="indVTb">â€”</span></div></div>
+      <div class="ind-row"><div><div class="ind-name">RSI (14)</div><div class="ind-sub">overbought &gt;70 / oversold &lt;30</div></div><div style="text-align:right"><div class="ind-val" id="indRSI">—</div><span class="badge b-gray" id="indRSIb">—</span></div></div>
+      <div class="ind-row"><div><div class="ind-name">MACD (12,26,9)</div><div class="ind-sub">bullish when histogram &gt; 0</div></div><div style="text-align:right"><div class="ind-val" id="indMACD">—</div><span class="badge b-gray" id="indMACDb">—</span></div></div>
+      <div class="ind-row"><div><div class="ind-name">EMA (20)</div><div class="ind-sub">trend filter baseline</div></div><div style="text-align:right"><div class="ind-val" id="indEMA">—</div><span class="badge b-gray" id="indEMAb">—</span></div></div>
+      <div class="ind-row"><div><div class="ind-name">Bollinger Bands (20,2)</div><div class="ind-sub" id="indBBs">%B band position</div></div><div style="text-align:right"><div class="ind-val" id="indBB">—</div><span class="badge b-gray" id="indBBb">—</span></div></div>
+      <div class="ind-row"><div><div class="ind-name">Volume Trend</div><div class="ind-sub">last 10 vs prior 10 bars</div></div><div style="text-align:right"><div class="ind-val" id="indVT">—</div><span class="badge b-gray" id="indVTb">—</span></div></div>
       <div class="score-bar-wrap">
-        <div class="ob-head" style="padding-bottom:4px"><span>AI COMPOSITE SCORE</span><span id="indScoreLbl" style="color:var(--muted)">â€”</span></div>
+        <div class="ob-head" style="padding-bottom:4px"><span>AI COMPOSITE SCORE</span><span id="indScoreLbl" style="color:var(--muted)">—</span></div>
         <div class="score-track"><div class="score-marker" id="indScoreMarker" style="left:calc(50% - 2px)"></div></div>
         <div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:9.5px;color:var(--dim);margin-top:4px"><span>-100 SELL</span><span>0</span><span>+100 BUY</span></div>
       </div>
     </div>
 
     <div class="card">
-      <div class="sec-head"><div class="sec-title">Order Book</div><span class="badge b-green">DEPTH Â±15</span></div>
+      <div class="sec-head"><div class="sec-title">Order Book</div><span class="badge b-green">DEPTH ±15</span></div>
       <div class="ob-head"><span>Price</span><span>Size</span></div>
       <div id="obAsks"></div>
-      <div class="ob-spread"><span id="obSpreadV">spread â€”</span><span id="obMid">mid â€”</span></div>
+      <div class="ob-spread"><span id="obSpreadV">spread —</span><span id="obMid">mid —</span></div>
       <div id="obBids"></div>
     </div>
 
     <div class="card">
-      <div class="sec-head"><div class="sec-title">Liquidity Heatmap</div><span class="badge b-red" id="hmSym">â€”</span></div>
+      <div class="sec-head"><div class="sec-title">Liquidity Heatmap</div><span class="badge b-red" id="hmSym">—</span></div>
       <div id="hmAsks"></div>
-      <div class="hm-sep" id="hmMid">â€”â€” SPREAD â€”â€”</div>
+      <div class="hm-sep" id="hmMid">—— SPREAD ——</div>
       <div id="hmBids"></div>
     </div>
 
@@ -494,45 +631,45 @@ footer{border-top:1px solid var(--border);margin-top:26px;padding:18px 14px;text
       <div class="fng-wrap">
         <canvas id="gauge" width="130" height="130" style="width:130px;height:130px"></canvas>
         <div class="fng-meta">
-          <div class="fng-big" id="fngVal">â€”</div>
-          <div class="fng-class" id="fngClass">loadingâ€¦</div>
+          <div class="fng-big" id="fngVal">—</div>
+          <div class="fng-class" id="fngClass">loading…</div>
           <div class="fng-note" id="fngNote">Aggregated crypto market sentiment from alternative.me</div>
         </div>
       </div>
     </div>
 
     <div class="card full">
-      <div class="sec-head"><div class="sec-title">ML Price Forecast</div><span class="badge b-cyan">LINREG Â· 20P WINDOW</span></div>
+      <div class="sec-head"><div class="sec-title">ML Price Forecast</div><span class="badge b-cyan">LINREG · 20P WINDOW</span></div>
       <div class="fc-bias">
-        <div><div class="fb-l">Direction Bias</div><div class="fb-v" id="fcBias">â€”</div></div>
-        <div style="text-align:right"><div class="fb-l">Model Confidence (24H)</div><div class="fb-v" id="fcConf">â€”</div></div>
+        <div><div class="fb-l">Direction Bias</div><div class="fb-v" id="fcBias">—</div></div>
+        <div style="text-align:right"><div class="fb-l">Model Confidence (24H)</div><div class="fb-v" id="fcConf">—</div></div>
       </div>
       <div class="table-scroll">
       <table class="fc-table">
-        <thead><tr><th>Horizon</th><th>Target</th><th>Î”%</th><th>Range (Ïƒ band)</th><th>Confidence</th></tr></thead>
+        <thead><tr><th>Horizon</th><th>Target</th><th>Δ%</th><th>Range (σ band)</th><th>Confidence</th></tr></thead>
         <tbody id="fcRows"></tbody>
       </table>
       </div>
-      <div class="fc-note">Ordinary least squares regression on the last 20 Ã— 15m closes, projected forward with damping. Ïƒ bands = realized per-bar volatility scaled by âˆšhorizon. Statistical estimate â€” not financial advice.</div>
+      <div class="fc-note">Ordinary least squares regression on the last 20 × 15m closes, projected forward with damping. σ bands = realized per-bar volatility scaled by √horizon. Statistical estimate — not financial advice.</div>
     </div>
 
     <div class="card full">
-      <div class="sec-head"><div class="sec-title">Whale Order Tracker</div><span class="badge b-amber" id="whaleCount">â‰¥ $50,000</span></div>
-      <div class="whale-list" id="whaleList"><div class="fc-note">Scanning tape for block tradesâ€¦</div></div>
+      <div class="sec-head"><div class="sec-title">Whale Order Tracker</div><span class="badge b-amber" id="whaleCount">≥ $50,000</span></div>
+      <div class="whale-list" id="whaleList"><div class="fc-note">Scanning tape for block trades…</div></div>
     </div>
   </div>
 </section>
 
 <section class="tab-section" id="tab-market">
   <div class="mo-strip">
-    <div class="metric"><div class="ml"><span>Tracked Volume</span></div><div class="mv" id="moVol">â€”</div><div class="ms">sum of 16 majors (24h)</div></div>
-    <div class="metric"><div class="ml"><span>Advancers</span></div><div class="mv" style="color:var(--green)" id="moAdv">â€”</div><div class="ms">of tracked set</div></div>
-    <div class="metric"><div class="ml"><span>Decliners</span></div><div class="mv" style="color:var(--red)" id="moDec">â€”</div><div class="ms">of tracked set</div></div>
-    <div class="metric"><div class="ml"><span>Fear &amp; Greed</span></div><div class="mv" id="moFG">â€”</div><div class="ms" id="moFGc">market sentiment</div></div>
+    <div class="metric"><div class="ml"><span>Tracked Volume</span></div><div class="mv" id="moVol">—</div><div class="ms">sum of 16 majors (24h)</div></div>
+    <div class="metric"><div class="ml"><span>Advancers</span></div><div class="mv" style="color:var(--green)" id="moAdv">—</div><div class="ms">of tracked set</div></div>
+    <div class="metric"><div class="ml"><span>Decliners</span></div><div class="mv" style="color:var(--red)" id="moDec">—</div><div class="ms">of tracked set</div></div>
+    <div class="metric"><div class="ml"><span>Fear &amp; Greed</span></div><div class="mv" id="moFG">—</div><div class="ms" id="moFGc">market sentiment</div></div>
   </div>
 
   <div class="card">
-    <div class="sec-head"><div class="sec-title">Top Coins</div><span class="badge b-cyan" id="topCoinsUpd">LIVE Â· BINANCE</span></div>
+    <div class="sec-head"><div class="sec-title">Top Coins</div><span class="badge b-cyan" id="topCoinsUpd">LIVE · BINANCE</span></div>
     <div class="table-scroll">
       <table class="coins-table">
         <thead><tr><th>Coin</th><th>Last Price</th><th>24h Change</th><th>24h Volume</th><th>Signal</th></tr></thead>
@@ -544,7 +681,7 @@ footer{border-top:1px solid var(--border);margin-top:26px;padding:18px 14px;text
   <div class="card">
     <div class="sec-head"><div class="sec-title">Celebrity &amp; Meme Coins</div><span class="badge b-pink">HIGH VOLATILITY</span></div>
     <div class="celeb-grid" id="celebGrid"></div>
-    <div class="disclaimer">Meme assets routinely draw down 30â€“80%. Position sizes should reflect that these trade on narrative flow, not cash flows.</div>
+    <div class="disclaimer">Meme assets routinely draw down 30–80%. Position sizes should reflect that these trade on narrative flow, not cash flows.</div>
   </div>
 </section>
 
@@ -552,30 +689,30 @@ footer{border-top:1px solid var(--border);margin-top:26px;padding:18px 14px;text
   <div class="card">
     <div class="sec-head"><div class="sec-title">Liquidation Heat Zones</div><span class="badge b-amber" id="liqSym">BTCUSDT</span></div>
     <div class="metric-grid" style="margin-bottom:13px">
-      <div class="metric"><div class="ml"><span>Open Interest (notional)</span></div><div class="mv" id="liqOI">â€”</div><div class="ms">USD Â· perpetual futures</div></div>
-      <div class="metric"><div class="ml"><span>Mark Price</span></div><div class="mv" id="liqMark">â€”</div><div class="ms">fapi premium index</div></div>
-      <div class="metric"><div class="ml"><span>ATR (14Ã—15m)</span></div><div class="mv" id="liqATR">â€”</div><div class="ms">average true range</div></div>
-      <div class="metric"><div class="ml"><span>Leverage Warning</span></div><div class="mv" style="font-size:15px" id="liqLev">â€”</div><div class="ms">est. move to wipe 25x</div></div>
+      <div class="metric"><div class="ml"><span>Open Interest (notional)</span></div><div class="mv" id="liqOI">—</div><div class="ms">USD · perpetual futures</div></div>
+      <div class="metric"><div class="ml"><span>Mark Price</span></div><div class="mv" id="liqMark">—</div><div class="ms">fapi premium index</div></div>
+      <div class="metric"><div class="ml"><span>ATR (14×15m)</span></div><div class="mv" id="liqATR">—</div><div class="ms">average true range</div></div>
+      <div class="metric"><div class="ml"><span>Leverage Warning</span></div><div class="mv" style="font-size:15px" id="liqLev">—</div><div class="ms">est. move to wipe 25x</div></div>
     </div>
     <div class="liq-zone">
       <div class="liq-zh"><span class="badge b-red">SHORT LIQUIDATION CLUSTER</span><span class="fc-note" style="margin:0">above swing high</span></div>
-      <div class="liq-range" id="liqShortRange">â€”</div>
+      <div class="liq-range" id="liqShortRange">—</div>
       <div class="liq-bar"><i id="liqShortBar" style="width:100%;background:linear-gradient(90deg,rgba(255,23,68,.15),var(--red))"></i></div>
-      <div class="liq-est" id="liqShortEst">estimated magnet: â€”</div>
+      <div class="liq-est" id="liqShortEst">estimated magnet: —</div>
     </div>
     <div class="liq-zone">
       <div class="liq-zh"><span class="badge b-green">LONG LIQUIDATION CLUSTER</span><span class="fc-note" style="margin:0">below swing low</span></div>
-      <div class="liq-range" id="liqLongRange">â€”</div>
+      <div class="liq-range" id="liqLongRange">—</div>
       <div class="liq-bar"><i id="liqLongBar" style="width:100%;background:linear-gradient(90deg,var(--green),rgba(0,230,118,.15))"></i></div>
-      <div class="liq-est" id="liqLongEst">estimated magnet: â€”</div>
+      <div class="liq-est" id="liqLongEst">estimated magnet: —</div>
     </div>
-    <div class="disclaimer">Zones are heuristic estimates derived from swing structure + ATR offsets applied to open interest â€” Binance does not expose public liquidation heatmaps on REST. Treat magnitudes as directional intuition only.</div>
+    <div class="disclaimer">Zones are heuristic estimates derived from swing structure + ATR offsets applied to open interest — Binance does not expose public liquidation heatmaps on REST. Treat magnitudes as directional intuition only.</div>
   </div>
 
   <div class="card">
-    <div class="sec-head"><div class="sec-title">Volume Profile</div><span class="badge b-cyan" id="vpSym">BTCUSDT Â· 96 BARS</span></div>
+    <div class="sec-head"><div class="sec-title">Volume Profile</div><span class="badge b-cyan" id="vpSym">BTCUSDT · 96 BARS</span></div>
     <div id="vpList"></div>
-    <div class="fc-note">Distribution of traded volume across price bins over the last 96 Ã— 15m candles. â˜… POC = Point of Control (highest-volume node) â€” historically acts as a magnet price.</div>
+    <div class="fc-note">Distribution of traded volume across price bins over the last 96 × 15m candles. ★ POC = Point of Control (highest-volume node) — historically acts as a magnet price.</div>
   </div>
 </section>
 
@@ -586,12 +723,18 @@ footer{border-top:1px solid var(--border);margin-top:26px;padding:18px 14px;text
   </div>
   <div class="news-grid">
     <div class="card">
-      <div class="sec-head"><div class="sec-title">Latest News</div><span class="badge b-cyan" id="newsCount">â€”</span></div>
-      <div id="newsList"><div class="fc-note">Loading feedâ€¦</div></div>
+      <div class="sec-head"><div class="sec-title">Latest News</div><span class="badge b-cyan" id="newsCount">—</span></div>
+      <div id="newsList"><div class="fc-note">Loading feed…</div></div>
     </div>
-    <div class="card">
-      <div class="sec-head"><div class="sec-title">Trending Now</div><span class="badge b-purple">HEAT</span></div>
-      <div id="trendingList"><div class="fc-note">Loading trendsâ€¦</div></div>
+    <div>
+      <div class="card">
+        <div class="sec-head"><div class="sec-title">Forex Factory Events</div><span class="badge b-amber">MACRO</span></div>
+        <div id="forexList"><div class="fc-note">Loading events…</div></div>
+      </div>
+      <div class="card">
+        <div class="sec-head"><div class="sec-title">Trending Now</div><span class="badge b-purple">HEAT</span></div>
+        <div id="trendingList"><div class="fc-note">Loading trends…</div></div>
+      </div>
     </div>
   </div>
 </section>
@@ -599,35 +742,35 @@ footer{border-top:1px solid var(--border);margin-top:26px;padding:18px 14px;text
 <section class="tab-section" id="tab-chat">
   <div class="card chat-card">
     <div class="chat-head">
-      <div class="ai-avatar">ðŸ¤–</div>
+      <div class="ai-avatar">🤖</div>
       <div>
         <div style="font-weight:800">Radar AI Assistant</div>
-        <div style="font-size:11px;color:var(--muted)">Knows 29 coins live Â· indicators Â· whales Â· sentiment â€” ask anything</div>
+        <div style="font-size:11px;color:var(--muted)">Knows 29 coins live · indicators · whales · sentiment — ask anything</div>
       </div>
       <span class="badge b-green" style="margin-left:auto">ONLINE</span>
     </div>
     <div class="chat-log" id="chatLog"></div>
     <div class="chips" id="chatChips">
-      <button class="chip" data-q="Analyze BTC">ðŸ“ˆ Analyze BTC</button>
-      <button class="chip" data-q="What is RSI?">ðŸ§  What is RSI?</button>
-      <button class="chip" data-q="Should I buy pepe?">ðŸ¸ Should I buy PEPE?</button>
-      <button class="chip" data-q="Elon musk coins">ðŸš€ Elon coins</button>
-      <button class="chip" data-q="Fear and greed now">ðŸ˜¨ Fear &amp; Greed</button>
-      <button class="chip" data-q="Best performer today">ðŸ† Top gainer today</button>
-      <button class="chip" data-q="Whale activity?">ðŸ‹ Whale watch</button>
-      <button class="chip" data-q="What can you do">â“ Help</button>
+      <button class="chip" data-q="Analyze BTC">📈 Analyze BTC</button>
+      <button class="chip" data-q="What is RSI?">🧠 What is RSI?</button>
+      <button class="chip" data-q="Should I buy pepe?">Buy PEPE?</button>
+      <button class="chip" data-q="Elon musk coins">Elon coins</button>
+      <button class="chip" data-q="Fear and greed now">Fear &amp; Greed</button>
+      <button class="chip" data-q="Best performer today">Top gainer today</button>
+      <button class="chip" data-q="Whale activity?">Whale watch</button>
+      <button class="chip" data-q="What can you do">Help</button>
     </div>
     <form class="chat-input-row" id="chatForm">
-      <input type="text" id="chatInput" placeholder="Ask about any coin, indicator, whale movesâ€¦" autocomplete="off" maxlength="300">
-      <button class="send-btn" type="submit" id="sendBtn">Send âž¤</button>
+      <input type="text" id="chatInput" placeholder="Ask about any coin, indicator, whale moves…" autocomplete="off" maxlength="300">
+      <button class="send-btn" type="submit" id="sendBtn">Send ➤</button>
     </form>
   </div>
 </section>
 
 </main>
 <footer>
-  LIQUIDITY RADAR Â· microstructure terminal Â· data: Binance Spot &amp; Futures WS/REST Â· sentiment: alternative.me Â· news: cryptocurrency.cv<br>
-  Everything on this page is informational tooling â€” not financial advice. Trade at your own risk.
+  LIQUIDITY RADAR · microstructure terminal · data: Binance Spot &amp; Futures WS/REST · sentiment: alternative.me · news: cryptocurrency.cv<br>
+  Everything on this page is informational tooling — not financial advice. Trade at your own risk.
 </footer>
 </div>
 
@@ -638,35 +781,35 @@ footer{border-top:1px solid var(--border);margin-top:26px;padding:18px 14px;text
 'use strict';
 
 const COINS={
-  BTC:{sym:'BTCUSDT',name:'Bitcoin',icon:'â‚¿',color:'#F7931A'},
-  ETH:{sym:'ETHUSDT',name:'Ethereum',icon:'â—†',color:'#627EEA'},
-  SOL:{sym:'SOLUSDT',name:'Solana',icon:'â—Ž',color:'#9945FF'},
-  BNB:{sym:'BNBUSDT',name:'BNB',icon:'â¬¡',color:'#F3BA2F'},
-  DOGE:{sym:'DOGEUSDT',name:'Dogecoin',icon:'ðŸ•',color:'#C2A633'},
-  XRP:{sym:'XRPUSDT',name:'XRP',icon:'âœ•',color:'#25A0E0'},
-  ADA:{sym:'ADAUSDT',name:'Cardano',icon:'ðŸ”¹',color:'#0033AD'},
-  AVAX:{sym:'AVAXUSDT',name:'Avalanche',icon:'ðŸ”º',color:'#E84142'},
-  DOT:{sym:'DOTUSDT',name:'Polkadot',icon:'âšª',color:'#E6007A'},
-  LINK:{sym:'LINKUSDT',name:'Chainlink',icon:'ðŸ”—',color:'#2A5ADA'},
-  UNI:{sym:'UNIUSDT',name:'Uniswap',icon:'ðŸ¦„',color:'#FF007A'},
-  TRUMP:{sym:'TRUMPUSDT',name:'OFFICIAL TRUMP',icon:'ðŸŽ©',color:'#D4AF37'},
-  PEPE:{sym:'PEPEUSDT',name:'Pepe',icon:'ðŸ¸',color:'#4CAF50'},
-  WIF:{sym:'WIFUSDT',name:'dogwifhat',icon:'ðŸ§¢',color:'#C08A53'},
-  FLOKI:{sym:'FLOKIUSDT',name:'Floki',icon:'âš”ï¸',color:'#E6B800'},
-  SHIB:{sym:'SHIBUSDT',name:'Shiba Inu',icon:'ðŸ¶',color:'#FFA409'},
-  BONK:{sym:'BONKUSDT',name:'Bonk',icon:'ðŸ”¨',color:'#FF6600'},
-  POL:{sym:'POLUSDT',name:'Polygon',icon:'â¬¢',color:'#8247E5'},
-  ARB:{sym:'ARBUSDT',name:'Arbitrum',icon:'ðŸ”„',color:'#28A0F0'},
-  OP:{sym:'OPUSDT',name:'Optimism',icon:'ðŸ”´',color:'#FF0420'},
-  SUI:{sym:'SUIUSDT',name:'Sui',icon:'ðŸ’§',color:'#4DA2FF'},
-  APT:{sym:'APTUSDT',name:'Aptos',icon:'ðŸŒ€',color:'#6FDBC2'},
-  NEAR:{sym:'NEARUSDT',name:'NEAR Protocol',icon:'â—',color:'#00C1DE'},
-  FIL:{sym:'FILUSDT',name:'Filecoin',icon:'ðŸ“¦',color:'#0090FF'},
-  AAVE:{sym:'AAVEUSDT',name:'Aave',icon:'ðŸ‘»',color:'#B6509E'},
-  MKR:{sym:'MKRUSDT',name:'Maker',icon:'ðŸ§±',color:'#1AAB9B'},
-  INJ:{sym:'INJUSDT',name:'Injective',icon:'ðŸ’‰',color:'#00BFFF'},
-  TIA:{sym:'TIAUSDT',name:'Celestia',icon:'â˜„ï¸',color:'#7B2BF9'},
-  SEI:{sym:'SEIUSDT',name:'Sei',icon:'ðŸŒŠ',color:'#9E1F19'}
+  BTC:{sym:'BTCUSDT',name:'Bitcoin',icon:'₿',color:'#F7931A'},
+  ETH:{sym:'ETHUSDT',name:'Ethereum',icon:'◆',color:'#627EEA'},
+  SOL:{sym:'SOLUSDT',name:'Solana',icon:'◎',color:'#9945FF'},
+  BNB:{sym:'BNBUSDT',name:'BNB',icon:'⬡',color:'#F3BA2F'},
+  DOGE:{sym:'DOGEUSDT',name:'Dogecoin',icon:'D',color:'#C2A633'},
+  XRP:{sym:'XRPUSDT',name:'XRP',icon:'✕',color:'#25A0E0'},
+  ADA:{sym:'ADAUSDT',name:'Cardano',icon:'🔹',color:'#0033AD'},
+  AVAX:{sym:'AVAXUSDT',name:'Avalanche',icon:'🔺',color:'#E84142'},
+  DOT:{sym:'DOTUSDT',name:'Polkadot',icon:'⚪',color:'#E6007A'},
+  LINK:{sym:'LINKUSDT',name:'Chainlink',icon:'🔗',color:'#2A5ADA'},
+  UNI:{sym:'UNIUSDT',name:'Uniswap',icon:'🦄',color:'#FF007A'},
+  TRUMP:{sym:'TRUMPUSDT',name:'OFFICIAL TRUMP',icon:'🎩',color:'#D4AF37'},
+  PEPE:{sym:'PEPEUSDT',name:'Pepe',icon:'P',color:'#4CAF50'},
+  WIF:{sym:'WIFUSDT',name:'dogwifhat',icon:'🧢',color:'#C08A53'},
+  FLOKI:{sym:'FLOKIUSDT',name:'Floki',icon:'F',color:'#E6B800'},
+  SHIB:{sym:'SHIBUSDT',name:'Shiba Inu',icon:'S',color:'#FFA409'},
+  BONK:{sym:'BONKUSDT',name:'Bonk',icon:'🔨',color:'#FF6600'},
+  POL:{sym:'POLUSDT',name:'Polygon',icon:'⬢',color:'#8247E5'},
+  ARB:{sym:'ARBUSDT',name:'Arbitrum',icon:'🔄',color:'#28A0F0'},
+  OP:{sym:'OPUSDT',name:'Optimism',icon:'🔴',color:'#FF0420'},
+  SUI:{sym:'SUIUSDT',name:'Sui',icon:'💧',color:'#4DA2FF'},
+  APT:{sym:'APTUSDT',name:'Aptos',icon:'🌀',color:'#6FDBC2'},
+  NEAR:{sym:'NEARUSDT',name:'NEAR Protocol',icon:'N',color:'#00C1DE'},
+  FIL:{sym:'FILUSDT',name:'Filecoin',icon:'📦',color:'#0090FF'},
+  AAVE:{sym:'AAVEUSDT',name:'Aave',icon:'👻',color:'#B6509E'},
+  MKR:{sym:'MKRUSDT',name:'Maker',icon:'🧱',color:'#1AAB9B'},
+  INJ:{sym:'INJUSDT',name:'Injective',icon:'💉',color:'#00BFFF'},
+  TIA:{sym:'TIAUSDT',name:'Celestia',icon:'T',color:'#7B2BF9'},
+  SEI:{sym:'SEIUSDT',name:'Sei',icon:'🌊',color:'#9E1F19'}
 };
 const TOP16=['BTC','ETH','SOL','BNB','DOGE','XRP','ADA','AVAX','DOT','LINK','UNI','TRUMP','PEPE','WIF','FLOKI','SHIB'];
 const CELEBS=['TRUMP','DOGE','PEPE','WIF','FLOKI','SHIB','BONK'];
@@ -689,10 +832,10 @@ const state={
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-function fmt(n,d){d=d==null?2:d;if(!isFinite(n))return'â€”';return n.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d})}
-function pfmt(p){if(!isFinite(p))return'â€”';let d=p>=100?2:p>=1?4:p>=0.01?5:p>=0.0001?6:8;return fmt(p,d)}
-function cfmt(n){if(!isFinite(n))return'â€”';const a=Math.abs(n);if(a>=1e9)return'$'+fmt(n/1e9,2)+'B';if(a>=1e6)return'$'+fmt(n/1e6,2)+'M';if(a>=1e3)return'$'+fmt(n/1e3,1)+'K';return'$'+fmt(n,0)}
-function nfmt(n){if(!isFinite(n))return'â€”';const a=Math.abs(n);if(a>=1e9)return fmt(n/1e9,2)+'B';if(a>=1e6)return fmt(n/1e6,2)+'M';if(a>=1e3)return fmt(n/1e3,1)+'K';return fmt(n,2)}
+function fmt(n,d){d=d==null?2:d;if(!isFinite(n))return'—';return n.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d})}
+function pfmt(p){if(!isFinite(p))return'—';let d=p>=100?2:p>=1?4:p>=0.01?5:p>=0.0001?6:8;return fmt(p,d)}
+function cfmt(n){if(!isFinite(n))return'—';const a=Math.abs(n);if(a>=1e9)return'$'+fmt(n/1e9,2)+'B';if(a>=1e6)return'$'+fmt(n/1e6,2)+'M';if(a>=1e3)return'$'+fmt(n/1e3,1)+'K';return'$'+fmt(n,0)}
+function nfmt(n){if(!isFinite(n))return'—';const a=Math.abs(n);if(a>=1e9)return fmt(n/1e9,2)+'B';if(a>=1e6)return fmt(n/1e6,2)+'M';if(a>=1e3)return fmt(n/1e3,1)+'K';return fmt(n,2)}
 function timeAgo(ts){const s=Math.max(1,Math.floor((Date.now()-ts)/1000));if(s<60)return s+'s ago';const m=Math.floor(s/60);if(m<60)return m+'m ago';const h=Math.floor(m/60);if(h<24)return h+'h '+(m%60)+'m ago';return Math.floor(h/24)+'d ago'}
 function chgCls(p){return p>0.005?'up':p<-0.005?'down':'flat'}
 function chgHtml(p){return '<span class="chg '+chgCls(p)+'">'+(p>0?'+':'')+p.toFixed(2)+'%</span>'}
@@ -701,10 +844,10 @@ function showToast(msg){const t=$('toast');t.textContent=msg;t.classList.add('sh
 async function jget(url,to){to=to||12000;const c=new AbortController();const h=setTimeout(()=>c.abort(),to);try{const r=await fetch(url,{signal:c.signal});if(!r.ok)throw new Error('HTTP '+r.status);return await r.json()}finally{clearTimeout(h)}}
 
 const COIN_ALIASES={
-  BTC:['bitcoin','btc','btcusdt','satoshi','digital gold'],
-  ETH:['ethereum','eth','ether','ethusdt','vitalik'],
+  BTC:['bitcoin','btc','btcusdt','satoshi','digital gold','xapo'],
+  ETH:['ethereum','eth','ether','ethusdt','vitalik','buterin'],
   SOL:['solana','sol','solusdt'],
-  BNB:['bnb','binance coin','binance','bsc'],
+  BNB:['bnb','binance coin','binance','bsc','binance smart chain'],
   DOGE:['dogecoin','doge'],
   XRP:['xrp','ripple'],
   ADA:['cardano','ada'],
@@ -713,12 +856,12 @@ const COIN_ALIASES={
   LINK:['chainlink','link'],
   UNI:['uniswap','uni'],
   POL:['polygon','matic','pol'],
-  TRUMP:['trump','trumpcoin','donald','maga','officialtrump','official trump'],
-  PEPE:['pepe','peppe','peppy','pepecoin'],
-  WIF:['dogwifhat','wif','dogwithhat','wifhat','dog wif hat'],
-  FLOKI:['floki','flokiinu'],
-  SHIB:['shiba','shib','shibainu','shiba inu'],
-  BONK:['bonk'],
+  TRUMP:['trump','trumpcoin','donald','maga','officialtrump','official trump','trump coin','donald trump'],
+  PEPE:['pepe','peppe','peppy','pepecoin','pepe coin'],
+  WIF:['dogwifhat','wif','dogwithhat','wifhat','dog wif hat','dogwif'],
+  FLOKI:['floki','flokiinu','floki inu'],
+  SHIB:['shiba','shib','shibainu','shiba inu','shiba inu token'],
+  BONK:['bonk','bonkcoin','bonk coin'],
   ARB:['arbitrum','arb'],
   OP:['optimism','op'],
   SUI:['sui'],
@@ -729,7 +872,9 @@ const COIN_ALIASES={
   MKR:['maker','mkr'],
   INJ:['injective','inj'],
   TIA:['celestia','tia'],
-  SEI:['sei network','sei']
+  SEI:['sei network','sei'],
+  NEIRO:['neiro','neirocoin'],
+  TREMP:['tremp','meme of trump']
 };
 
 function findCoin(text){
@@ -840,7 +985,7 @@ function forecastFrom(closes){
     const conf=Math.max(20,baseConf[idx]+(sigOK?6:-14));
     return{label:def[1],pred:pred,lo:pred-band,hi:pred+band,dp:dp,conf:conf};
   });
-  const bias=rows[3].dp>=0?'UP â–²':'DOWN â–¼';
+  const bias=rows[3].dp>=0?'UP ▲':'DOWN ▼';
   return{rows:rows,bias:bias};
 }
 function supportResistance(candles){
@@ -922,9 +1067,9 @@ function runAnalytics(){
   const above=last>a.e20;
   $('mEMA').textContent=pfmt(a.e20);
   $('mEMAZone').textContent=above?'PRICE ABOVE':'PRICE BELOW';$('mEMAZone').className='badge '+(above?'b-green':'b-red');
-  $('mEMASub').textContent=(above?'uptrend bias':'downtrend bias')+' Â· Î” '+(((last/a.e20)-1)*100).toFixed(2)+'%';
+  $('mEMASub').textContent=(above?'uptrend bias':'downtrend bias')+' · Δ '+(((last/a.e20)-1)*100).toFixed(2)+'%';
   $('indEMA').textContent=pfmt(a.e20);
-  $('indEMAb').textContent=above?'ABOVE âœ“':'BELOW âœ•';$('indEMAb').className='badge '+(above?'b-green':'b-red');
+  $('indEMAb').textContent=above?'ABOVE ✓':'BELOW ✕';$('indEMAb').className='badge '+(above?'b-green':'b-red');
 
   const pb=a.bb.pctB;
   const bbZone=pb>95?['UPPER BREAK','b-amber']:pb>70?['HIGH','b-green']:pb<5?['LOWER BREAK','b-amber']:pb<30?['LOW','b-red']:['MID RANGE','b-gray'];
@@ -932,10 +1077,10 @@ function runAnalytics(){
   $('mBBZone').textContent=bbZone[0];$('mBBZone').className='badge '+bbZone[1];
   $('indBB').textContent=pb.toFixed(1)+'%';
   $('indBBb').textContent=bbZone[0];$('indBBb').className='badge '+bbZone[1];
-  $('indBBs').textContent='bands '+pfmt(a.bb.lo)+' â€“ '+pfmt(a.bb.up);
+  $('indBBs').textContent='bands '+pfmt(a.bb.lo)+' – '+pfmt(a.bb.up);
 
   $('indVT').textContent=a.vt;
-  const vtc=a.vt==='RISING'?['RISING â†‘','b-green']:a.vt==='FALLING'?['FALLING â†“','b-red']:['FLAT â†’','b-gray'];
+  const vtc=a.vt==='RISING'?['RISING ↑','b-green']:a.vt==='FALLING'?['FALLING ↓','b-red']:['FLAT →','b-gray'];
   $('indVTb').textContent=vtc[0];$('indVTb').className='badge '+vtc[1];
 
   $('mAIScore').textContent=(a.score>0?'+':'')+a.score;
@@ -944,7 +1089,7 @@ function runAnalytics(){
   const mkPos=50+a.score/2;
   $('mAIMarker').style.left='calc('+mkPos+'% - 2px)';
   $('indScoreMarker').style.left='calc('+mkPos+'% - 2px)';
-  $('indScoreLbl').textContent=(a.score>0?'+':'')+a.score+' Â· '+a.label;
+  $('indScoreLbl').textContent=(a.score>0?'+':'')+a.score+' · '+a.label;
   $('indScoreLbl').style.color=a.color;
 
   const rets=[];
@@ -962,7 +1107,7 @@ function runAnalytics(){
   $('fcRows').innerHTML=fc.rows.map(r=>{
     const cls=r.dp>=0?'hl-g':'hl-r';
     const col=r.dp>=0?'var(--green)':'var(--red)';
-    return'<tr><td>'+r.label+'</td><td><b>'+pfmt(r.pred)+'</b></td><td style="color:'+col+'">'+(r.dp>0?'+':'')+r.dp.toFixed(2)+'%</td><td>'+pfmt(r.lo)+' â€“ '+pfmt(r.hi)+'</td><td>'+r.conf+'%<span class="conf-bar"><i style="width:'+r.conf+'%"></i></span></td></tr>';
+    return'<tr><td>'+r.label+'</td><td><b>'+pfmt(r.pred)+'</b></td><td style="color:'+col+'">'+(r.dp>0?'+':'')+r.dp.toFixed(2)+'%</td><td>'+pfmt(r.lo)+' – '+pfmt(r.hi)+'</td><td>'+r.conf+'%<span class="conf-bar"><i style="width:'+r.conf+'%"></i></span></td></tr>';
   }).join('');
 
   const sr=supportResistance(state.candles);
@@ -970,10 +1115,10 @@ function runAnalytics(){
   state._atr=calcATR(state.candles);
   state._ai=a;
   renderAnalysis();
-  document.title=baseOf(state.symbol)+' '+pfmt(last)+' Â· Liquidity Radar';
+  document.title=baseOf(state.symbol)+' '+pfmt(last)+' · Liquidity Radar';
 }
 function baseOf(sym){for(const k in COINS)if(COINS[k].sym===sym)return k;return sym.replace('USDT','')}
-function coinMeta(sym){const b=baseOf(sym);return COINS[b]||{sym:sym,name:b,icon:'ðŸª™',color:'#2962FF'}}
+function coinMeta(sym){const b=baseOf(sym);return COINS[b]||{sym:sym,name:b,icon:'🪙',color:'#2962FF'}}
 
 function renderOB(){
   const bids=state.ob.bids,asks=state.ob.asks;
@@ -994,7 +1139,7 @@ function renderOB(){
   $('obBids').innerHTML=rows(bids.slice(0,10),'bid');
   renderHeatmap();
   function renderHeatmap(){
-    $('hmSym').textContent=baseOf(state.symbol)+' Â±15 LEVELS';
+    $('hmSym').textContent=baseOf(state.symbol)+' ±15 LEVELS';
     const all=asks.slice(0,8).concat(bids.slice(0,8));
     const maxN=Math.max.apply(null,all.map(x=>x[0]*x[1]))||1;
     const hm=function(arr,side){
@@ -1006,7 +1151,7 @@ function renderOB(){
     };
     $('hmAsks').innerHTML=hm(asks.slice(0,8).reverse(),'ask');
     $('hmBids').innerHTML=hm(bids.slice(0,8),'bid');
-    $('hmMid').textContent='â€”â€” MID '+pfmt(mid)+' â€”â€”';
+    $('hmMid').textContent='—— MID '+pfmt(mid)+' ——';
   }
 }
 
@@ -1016,7 +1161,7 @@ function renderHero(){
   $('heroIcon').textContent=meta.icon;
   $('heroIcon').style.borderColor=meta.color+'55';
   $('heroName').textContent=meta.name;
-  $('heroPair').textContent=meta.sym+' Â· BINANCE SPOT';
+  $('heroPair').textContent=meta.sym+' · BINANCE SPOT';
   if(!t)return;
   const el=$('heroPrice');
   const prev=parseFloat(el.dataset.p||'0');
@@ -1030,7 +1175,7 @@ function renderHero(){
   }
   el.dataset.p=cur;
   $('heroChg').innerHTML=chgHtml(t.pct)+' <span style="color:var(--dim)">24h</span>';
-  $('heroUpdated').textContent='Â· '+new Date().toLocaleTimeString();
+  $('heroUpdated').textContent='· '+new Date().toLocaleTimeString();
   $('hsHigh').textContent='$'+pfmt(t.high);
   $('hsLow').textContent='$'+pfmt(t.low);
   $('hsVol').textContent=cfmt(t.qvol);
@@ -1041,8 +1186,8 @@ function renderHero(){
 function renderTicker(){
   const items=TICKER_COINS.map(k=>{
     const c=COINS[k],t=state.tickers[c.sym];
-    const pr=t?'$'+pfmt(t.last):'â€¦';
-    const ch=t?chgHtml(t.pct):'<span class="chg flat">â€”</span>';
+    const pr=t?'$'+pfmt(t.last):'…';
+    const ch=t?chgHtml(t.pct):'<span class="chg flat">—</span>';
     return'<span class="tick'+(c.sym===state.symbol?' active':'')+'" data-sym="'+c.sym+'"><span class="ts" style="color:'+c.color+'">'+c.icon+' '+k+'</span><span class="tp">'+pr+'</span>'+ch+'</span>';
   }).join('');
   $('tickerTrack').innerHTML=items+items;
@@ -1104,7 +1249,7 @@ function renderFG(){
   $('fngVal').style.color=fngColor(v);
   $('fngClass').textContent=state.fg.classification.toUpperCase();
   $('fngClass').style.color=fngColor(v);
-  const map={'Extreme Fear':'Capitulation zone â€” historically where contrarian entries print.','Fear':'Anxious tape â€” sellers still in control but exhaustion nears.','Neutral':'Balanced sentiment â€” trend and structure lead from here.','Greed':'Risk appetite building â€” momentum tends to extend.','Extreme Greed':'Euphoria â€” statistically a poor zone to chase breakouts.'};
+  const map={'Extreme Fear':'Capitulation zone — historically where contrarian entries print.','Fear':'Anxious tape — sellers still in control but exhaustion nears.','Neutral':'Balanced sentiment — trend and structure lead from here.','Greed':'Risk appetite building — momentum tends to extend.','Extreme Greed':'Euphoria — statistically a poor zone to chase breakouts.'};
   $('fngNote').textContent=map[state.fg.classification]||'';
 }
 
@@ -1146,7 +1291,7 @@ function renderTopCoins(){
     const top=sorted[0],bot=sorted[sorted.length-1];
     const topKey=Object.keys(COINS).find(k=>state.tickers[COINS[k].sym]===top);
     const botKey=Object.keys(COINS).find(k=>state.tickers[COINS[k].sym]===bot);
-    $('moFGc').innerHTML=topKey?('leader <span style="color:var(--green)">'+topKey+' '+(top.pct>0?'+':'')+top.pct.toFixed(1)+'%</span> Â· laggard <span style="color:var(--red)">'+botKey+' '+bot.pct.toFixed(1)+'%</span>'):'';
+    $('moFGc').innerHTML=topKey?('leader <span style="color:var(--green)">'+topKey+' '+(top.pct>0?'+':'')+top.pct.toFixed(1)+'%</span> · laggard <span style="color:var(--red)">'+botKey+' '+bot.pct.toFixed(1)+'%</span>'):'';
   }
   if(state.fg){
     $('moFG').textContent=state.fg.value;
@@ -1156,19 +1301,19 @@ function renderTopCoins(){
 
 function renderWhales(){
   const list=state.whales;
-  $('whaleCount').textContent=list.length+' BLOCK TRADES Â· â‰¥ $50,000';
-  if(!list.length){$('whaleList').innerHTML='<div class="fc-note">No block trades â‰¥ $50k in the recent tape. Quiet book.</div>';return}
+  $('whaleCount').textContent=list.length+' BLOCK TRADES · ≥ $50,000';
+  if(!list.length){$('whaleList').innerHTML='<div class="fc-note">No block trades ≥ $50k in the recent tape. Quiet book.</div>';return}
   $('whaleList').innerHTML=list.slice(0,24).map(w=>{
     const buy=!w.maker;
     return'<div class="whale-item">'
-      +'<div class="whale-ic '+(buy?'wi-buy':'wi-sell')+'">ðŸ‹</div>'
+      +'<div class="whale-ic '+(buy?'wi-buy':'wi-sell')+'">'+(buy?'B':'S')+'</div>'
       +'<div class="whale-info">'
       +'<div class="whale-line1">'
       +'<span class="side-tag '+(buy?'side-buy':'side-sell')+'">'+(buy?'BUY':'SELL')+'</span>'
       +'<span class="whale-amt" style="color:'+(buy?'var(--green)':'var(--red)')+'">'+cfmt(w.usd)+'</span>'
       +'<span class="whale-sub">@ '+pfmt(w.price)+'</span>'
       +'</div>'
-      +'<div class="whale-sub">'+nfmt(w.qty)+' '+baseOf(state.symbol)+' Â· tape print</div>'
+      +'<div class="whale-sub">'+nfmt(w.qty)+' '+baseOf(state.symbol)+' · tape print</div>'
       +'</div>'
       +'<div class="whale-time">'+timeAgo(w.time)+'</div>'
       +'</div>';
@@ -1179,7 +1324,7 @@ function renderAnalysis(){
   const base=baseOf(state.symbol);
   const mark=state.fr?parseFloat(state.fr.markPrice):(state._ai?state._ai.last:null);
   $('liqSym').textContent=state.symbol;
-  $('vpSym').textContent=state.symbol+' Â· 96 BARS';
+  $('vpSym').textContent=state.symbol+' · 96 BARS';
   if(mark!=null)$('liqMark').textContent='$'+pfmt(mark);
   if(state.fr){
     const rate=parseFloat(state.fr.lastFundingRate);
@@ -1191,7 +1336,7 @@ function renderAnalysis(){
         const ms=state.fr.nextFundingTime-Date.now();
         if(ms<0)return;
         const hh=Math.floor(ms/3600000),mm=Math.floor((ms%3600000)/60000),ss=Math.floor((ms%60000)/1000);
-        $('mFRNext').textContent=(rate>0?'longs pay Â· ':'shorts pay Â· ')+String(hh).padStart(2,'0')+':'+String(mm).padStart(2,'0')+':'+String(ss).padStart(2,'0')+' to funding';
+        $('mFRNext').textContent=(rate>0?'longs pay · ':'shorts pay · ')+String(hh).padStart(2,'0')+':'+String(mm).padStart(2,'0')+':'+String(ss).padStart(2,'0')+' to funding';
       };
       upd();clearInterval(state._frTimer);state._frTimer=setInterval(upd,1000);
     }
@@ -1206,8 +1351,8 @@ function renderAnalysis(){
     const sr=state._sr||{sup:mark*0.97,res:mark*1.03};
     const lz={lo:sr.sup-1.1*atr,hi:sr.sup-0.3*atr};
     const sz={lo:sr.res+0.3*atr,hi:sr.res+1.1*atr};
-    $('liqLongRange').textContent='$'+pfmt(lz.lo)+' â€” $'+pfmt(lz.hi);
-    $('liqShortRange').textContent='$'+pfmt(sz.lo)+' â€” $'+pfmt(sz.hi);
+    $('liqLongRange').textContent='$'+pfmt(lz.lo)+' — $'+pfmt(lz.hi);
+    $('liqShortRange').textContent='$'+pfmt(sz.lo)+' — $'+pfmt(sz.hi);
     const leLong=oiN*0.22,leShort=oiN*0.16;
     $('liqLongEst').textContent='estimated trapped-notional magnet: '+cfmt(leLong)+' ('+(((lz.hi/mark)-1)*100).toFixed(2)+'% below mark)';
     $('liqShortEst').textContent='estimated trapped-notional magnet: '+cfmt(leShort)+' ('+(((sz.lo/mark)-1)*100).toFixed(2)+'% above mark)';
@@ -1233,7 +1378,7 @@ function renderAnalysis(){
     const midP=pl+((hi-lo)/bins)/2;
     const wpct=buckets[i]/maxB*100;
     const isPoc=i===pocIdx,isCur=lastP>=pl&&lastP<=pl+((hi-lo)/bins);
-    html+='<div class="vp-row'+(isPoc?' poc':'')+(isCur?' cur':'')+'"><span class="vp-lbl">'+pfmt(midP)+'</span><span class="vp-zone"><span class="vp-bar" style="width:'+Math.max(2,wpct).toFixed(1)+'%"></span></span><span class="vp-val">'+nfmt(buckets[i])+'</span><span class="vp-flag">'+(isPoc?'â˜…POC':isCur?'â—€ LIVE':'')+'</span></div>';
+    html+='<div class="vp-row'+(isPoc?' poc':'')+(isCur?' cur':'')+'"><span class="vp-lbl">'+pfmt(midP)+'</span><span class="vp-zone"><span class="vp-bar" style="width:'+Math.max(2,wpct).toFixed(1)+'%"></span></span><span class="vp-val">'+nfmt(buckets[i])+'</span><span class="vp-flag">'+(isPoc?'★POC':isCur?'◀ LIVE':'')+'</span></div>';
   }
   $('vpList').innerHTML=html;
 }
@@ -1247,7 +1392,7 @@ async function fetchTickers(){
       state.tickers[d.symbol]={last:+d.lastPrice,pct:+d.priceChangePercent,high:+d.highPrice,low:+d.lowPrice,qvol:+d.quoteVolume,trades:+d.count};
     });
     renderTicker();renderHero();renderTopCoins();
-    $('topCoinsUpd').textContent='LIVE Â· '+new Date().toLocaleTimeString();
+    $('topCoinsUpd').textContent='LIVE · '+new Date().toLocaleTimeString();
   }catch(e){console.warn('tickers',e)}
 }
 async function fetchKlines(sym){
@@ -1255,7 +1400,7 @@ async function fetchKlines(sym){
     const data=await jget('https://api.binance.com/api/v3/klines?symbol='+sym+'&interval=15m&limit=200');
     state.candles=data.map(k=>({t:k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]}));
     updateChartData();runAnalytics();
-  }catch(e){console.warn('klines',e);showToast('Klines unavailable â€” check network/Binance access')}
+  }catch(e){console.warn('klines',e);showToast('Klines unavailable — check network/Binance access')}
 }
 async function fetchOB(){
   try{
@@ -1296,7 +1441,7 @@ async function fetchWhales(){
 }
 async function fetchNews(){
   try{
-    const d=await jget('https://cryptocurrency.cv/api/news?limit=20');
+    const d=await jget('https://cryptocurrency.cv/api/news?limit=40');
     const items=Array.isArray(d)?d:(d.articles||d.news||[]);
     if(!items.length)throw new Error('empty');
     $('newsList').innerHTML=items.map(n=>{
@@ -1345,7 +1490,7 @@ async function fetchBreaking(){
 function setWsStatus(){
   const ok=state.wsOpen>0;
   $('statusPill').classList.toggle('off',!ok);
-  $('statusTxt').textContent=ok?('LIVE Â· '+state.wsOpen+' STREAMS'):'RECONNECTINGâ€¦';
+  $('statusTxt').textContent=ok?('LIVE · '+state.wsOpen+' STREAMS'):'RECONNECTING…';
 }
 let wsTk=null,wsKl=null,wsDp=null;
 function closeWS(ws){if(ws){ws._dead=true;try{ws.close()}catch(e){}}}
@@ -1434,30 +1579,30 @@ async function ensureAnalysis(base){
 function chip(txt,cls){return'<span class="kv '+(cls||'')+'">'+txt+'</span>'}
 
 function coinBrief(base,d){
-  const meta=COINS[base]||{name:base,icon:'ðŸª™'};
+  const meta=COINS[base]||{name:base,icon:'🪙'};
   const t=state.tickers[(COINS[base]||{}).sym];
   const a=d.ai,fc=d.fc;
   let s='<b>'+(meta.icon||'')+' '+esc(meta.name||base)+' ('+base+')</b><br>';
-  if(t)s+='Live: '+chip('$'+pfmt(t.last))+' Â· 24h '+chip((t.pct>0?'+':'')+t.pct.toFixed(2)+'%',t.pct>=0?'hl-g':'hl-r')+' Â· Vol '+chip(cfmt(t.qvol))+'<br>24h range: '+chip(pfmt(t.low)+' â€“ '+pfmt(t.high))+'<br><br>';
-  s+='<b>Indicators (15m):</b><br>â€¢ RSI(14): <span class="'+(a.rsi>70?'hl-r':a.rsi<30?'hl-g':'')+'">'+a.rsi.toFixed(1)+'</span> '+(a.rsi>70?'â€” overbought':a.rsi<30?'â€” oversold':'â€” neutral zone')+'<br>';
-  s+='â€¢ MACD(12,26,9): histogram <span class="'+(a.macd.hist>0?'hl-g':'hl-r')+'">'+(a.macd.hist>0?'positive â€” bullish momentum':'negative â€” bearish momentum')+'</span><br>';
-  s+='â€¢ EMA(20): price trading <b>'+(a.last>a.e20?'above âœ…':'below â›”')+'</b> ('+pfmt(a.e20)+')<br>';
-  s+='â€¢ Bollinger %B: '+a.bb.pctB.toFixed(0)+'% of band<br>';
-  s+='â€¢ Volume: '+a.vt.toLowerCase()+'<br><br>';
-  s+='<b>AI composite:</b> <span class="'+(a.score>15?'hl-g':a.score<-15?'hl-r':'hl-a')+'">'+(a.score>0?'+':'')+a.score+' â€” '+a.label+'</span><br>';
+  if(t)s+='Live: '+chip('$'+pfmt(t.last))+' · 24h '+chip((t.pct>0?'+':'')+t.pct.toFixed(2)+'%',t.pct>=0?'hl-g':'hl-r')+' · Vol '+chip(cfmt(t.qvol))+'<br>24h range: '+chip(pfmt(t.low)+' – '+pfmt(t.high))+'<br><br>';
+  s+='<b>Indicators (15m):</b><br>• RSI(14): <span class="'+(a.rsi>70?'hl-r':a.rsi<30?'hl-g':'')+'">'+a.rsi.toFixed(1)+'</span> '+(a.rsi>70?'— overbought':a.rsi<30?'— oversold':'— neutral zone')+'<br>';
+  s+='• MACD(12,26,9): histogram <span class="'+(a.macd.hist>0?'hl-g':'hl-r')+'">'+(a.macd.hist>0?'positive — bullish momentum':'negative — bearish momentum')+'</span><br>';
+  s+='• EMA(20): price trading <b>'+(a.last>a.e20?'above ✅':'below ⛔')+'</b> ('+pfmt(a.e20)+')<br>';
+  s+='• Bollinger %B: '+a.bb.pctB.toFixed(0)+'% of band<br>';
+  s+='• Volume: '+a.vt.toLowerCase()+'<br><br>';
+  s+='<b>AI composite:</b> <span class="'+(a.score>15?'hl-g':a.score<-15?'hl-r':'hl-a')+'">'+(a.score>0?'+':'')+a.score+' — '+a.label+'</span><br>';
   const fcCol=fc.bias.indexOf('UP')===0?'hl-g':'hl-r';
-  s+='<b>ML bias (linreg):</b> <span class="'+fcCol+'">'+fc.bias+'</span> Â· 1H target ~'+chip('$'+pfmt(fc.rows[0].pred))+', 24H ~'+chip('$'+pfmt(fc.rows[3].pred));
+  s+='<b>ML bias (linreg):</b> <span class="'+fcCol+'">'+fc.bias+'</span> · 1H target ~'+chip('$'+pfmt(fc.rows[0].pred))+', 24H ~'+chip('$'+pfmt(fc.rows[3].pred));
   return s;
 }
 
 const IND_EXPLAIN={
-  rsi:'<b>RSI â€” Relative Strength Index (14)</b><br>Momentum oscillator built from average gains vs losses over 14 bars. Reads 0â€“100.<br>â€¢ <span class="hl-r">&gt;70 overbought</span> â€” hot, pullback risk<br>â€¢ <span class="hl-g">&lt;30 oversold</span> â€” washed out, bounce risk<br>â€¢ 40â€“60 = chop/noise. Best used as confluence, never solo.',
-  macd:'<b>MACD (12,26,9)</b><br>Difference between fast EMA(12) and slow EMA(26), plus a 9-period signal line of that difference.<br>â€¢ Histogram <span class="hl-g">&gt; 0</span>: bullish momentum expanding<br>â€¢ Histogram <span class="hl-r">&lt; 0</span>: bearish momentum<br>â€¢ Crossovers flag regime shifts; divergence with price is the highest-value signal.',
-  ema:'<b>EMA â€” Exponential Moving Average (20)</b><br>A weighted mean that reacts faster than SMA because recent bars count more. Price above EMA20 = short-term uptrend bias; below = downtrend bias. Traders stack EMA20/50/200 as dynamic support/resistance.',
-  sma:'<b>SMA â€” Simple Moving Average</b><br>The flat arithmetic mean of the last N closes. Slower but smoother than EMA. The SMA50/SMA200 "golden cross / death cross" is the classic long-cycle regime signal.',
-  bollinger:'<b>Bollinger Bands (20, 2Ïƒ)</b><br>A moving-average envelope at Â±2 standard deviations â€” ~95% of price action lands inside.<br>â€¢ Touching the upper band = stretched (not automatically a sell)<br>â€¢ Squeeze (narrow bands) precedes volatility expansion<br>â€¢ %B tells you exactly where price sits within the band.',
+  rsi:'<b>RSI — Relative Strength Index (14)</b><br>Momentum oscillator built from average gains vs losses over 14 bars. Reads 0–100.<br>• <span class="hl-r">&gt;70 overbought</span> — hot, pullback risk<br>• <span class="hl-g">&lt;30 oversold</span> — washed out, bounce risk<br>• 40–60 = chop/noise. Best used as confluence, never solo.',
+  macd:'<b>MACD (12,26,9)</b><br>Difference between fast EMA(12) and slow EMA(26), plus a 9-period signal line of that difference.<br>• Histogram <span class="hl-g">&gt; 0</span>: bullish momentum expanding<br>• Histogram <span class="hl-r">&lt; 0</span>: bearish momentum<br>• Crossovers flag regime shifts; divergence with price is the highest-value signal.',
+  ema:'<b>EMA — Exponential Moving Average (20)</b><br>A weighted mean that reacts faster than SMA because recent bars count more. Price above EMA20 = short-term uptrend bias; below = downtrend bias. Traders stack EMA20/50/200 as dynamic support/resistance.',
+  sma:'<b>SMA — Simple Moving Average</b><br>The flat arithmetic mean of the last N closes. Slower but smoother than EMA. The SMA50/SMA200 "golden cross / death cross" is the classic long-cycle regime signal.',
+  bollinger:'<b>Bollinger Bands (20, 2σ)</b><br>A moving-average envelope at ±2 standard deviations — ~95% of price action lands inside.<br>• Touching the upper band = stretched (not automatically a sell)<br>• Squeeze (narrow bands) precedes volatility expansion<br>• %B tells you exactly where price sits within the band.',
   bb:null,
-  atr:'<b>ATR â€” Average True Range</b><br>The mean bar range including gaps. A pure volatility gauge â€” used for stop sizing (e.g., a 2Ã—ATR trailing stop) rather than direction.'
+  atr:'<b>ATR — Average True Range</b><br>The mean bar range including gaps. A pure volatility gauge — used for stop sizing (e.g., a 2×ATR trailing stop) rather than direction.'
 };
 IND_EXPLAIN.bb=IND_EXPLAIN.bollinger;
 
@@ -1466,19 +1611,19 @@ async function generateReply(raw){
   const has=function(w){return new RegExp('\\b'+w.replace(/ /g,'\\s+')+'\\b').test(text)};
 
   if(/^(hi|hello|hey|yo|sup|gm|good morning)\s/.test(text)||has('help')||has('what can you do')||has('commands')){
-    return 'ðŸ‘‹ I\'m <b>Radar AI</b>, your microstructure co-pilot. Try me with:<br><br>â€¢ Any coin â€” <i>"analyze solana"</i>, <i>"pepe price"</i>, <i>"should I buy trump?"</i><br>â€¢ Indicators â€” <i>"explain rsi"</i>, <i>"current macd"</i>, <i>"bollinger squeeze?"</i><br>â€¢ Derivatives â€” <i>"funding rate"</i>, <i>"open interest"</i>, <i>"liquidation zones"</i><br>â€¢ Flow â€” <i>"whale activity"</i>, <i>"support and resistance"</i>, <i>"breakout levels"</i><br>â€¢ Sentiment â€” <i>"fear and greed"</i>, <i>"are we in a bull run?"</i><br>â€¢ Concepts â€” <i>defi, staking, gas, leverage, hodl, rektâ€¦</i><br><br>I know 29 coins by name, every nickname and most misspellings ðŸ‘€';
+    return '👋 I\'m <b>Radar AI</b>, your microstructure co-pilot. Try me with:<br><br>• Any coin — <i>"analyze solana"</i>, <i>"pepe price"</i>, <i>"should I buy trump?"</i><br>• Indicators — <i>"explain rsi"</i>, <i>"current macd"</i>, <i>"bollinger squeeze?"</i><br>• Derivatives — <i>"funding rate"</i>, <i>"open interest"</i>, <i>"liquidation zones"</i><br>• Flow — <i>"whale activity"</i>, <i>"support and resistance"</i>, <i>"breakout levels"</i><br>• Sentiment — <i>"fear and greed"</i>, <i>"are we in a bull run?"</i><br>• Concepts — <i>defi, staking, gas, leverage, hodl, rekt…</i><br><br>I know 29 coins by name, every nickname and most misspellings 👀';
   }
-  if(has('thank'))return 'Anytime ðŸ«¡ Radar never sleeps â€” ping me when the tape gets interesting.';
+  if(has('thank'))return 'Anytime 🫡 Radar never sleeps — ping me when the tape gets interesting.';
 
   if(has('elon')||has('musk')){
-    let s='ðŸš€ <b>Elon Musk watchlist</b> â€” his posts historically move:<br>';
+    let s='🚀 <b>Elon Musk watchlist</b> — his posts historically move:<br>';
     for(const k of ['DOGE','FLOKI','SHIB']){
       const t=state.tickers[COINS[k].sym];
       let extra='';
-      try{const d=await safeCtx(k);extra=' Â· RSI '+d.ai.rsi.toFixed(0)}catch(e){}
-      s+='â€¢ <b>'+COINS[k].icon+' '+k+'</b> '+(t?chip('$'+pfmt(t.last))+chip((t.pct>0?'+':'')+t.pct.toFixed(2)+'%',t.pct>=0?'hl-g':'hl-r'):'')+extra+'<br>';
+      try{const d=await safeCtx(k);extra=' · RSI '+d.ai.rsi.toFixed(0)}catch(e){}
+      s+='• <b>'+COINS[k].icon+' '+k+'</b> '+(t?chip('$'+pfmt(t.last))+chip((t.pct>0?'+':'')+t.pct.toFixed(2)+'%',t.pct>=0?'hl-g':'hl-r'):'')+extra+'<br>';
     }
-    s+='<br>DOGE is the canonical "Elon coin"; FLOKI and SHIB ride the same dog-themed beta. One tweet â‰  due diligence â€” size accordingly.';
+    s+='<br>DOGE is the canonical "Elon coin"; FLOKI and SHIB ride the same dog-themed beta. One tweet ≠ due diligence — size accordingly.';
     return s;
   }
 
@@ -1486,14 +1631,14 @@ async function generateReply(raw){
     if(state.fg){
       const v=parseInt(state.fg.value,10);
       let interp;
-      if(v<25)interp='<span class="hl-r">Extreme Fear</span> â€” capitulation vibes. Historically decent accumulation zones, terrible for leverage longs.';
-      else if(v<45)interp='<span class="hl-a">Fear</span> â€” cautious tape. Watch whether price holds higher lows while sentiment stays soft.';
-      else if(v<=55)interp='Gray zone â€” pure neutral. Structure and flow matter more than sentiment here.';
-      else if(v<75)interp='<span class="hl-g">Greed</span> â€” risk appetite building. Momentum strategies tend to keep working until they don\'t.';
-      else interp='<span class="hl-g">Extreme Greed</span> â€” euphoria readings cluster near local tops. Tighten stops, trim into strength.';
-      return 'ðŸ˜±/ðŸ¤‘ <b>Fear &amp; Greed Index: <span style="color:'+fngColor(v)+'">'+v+' â€” '+state.fg.classification.toUpperCase()+'</span></b><br><br>'+interp+'<br><br>The full gauge lives on the <b>Radar tab</b> ðŸŽ¯';
+      if(v<25)interp='<span class="hl-r">Extreme Fear</span> — capitulation vibes. Historically decent accumulation zones, terrible for leverage longs.';
+      else if(v<45)interp='<span class="hl-a">Fear</span> — cautious tape. Watch whether price holds higher lows while sentiment stays soft.';
+      else if(v<=55)interp='Gray zone — pure neutral. Structure and flow matter more than sentiment here.';
+      else if(v<75)interp='<span class="hl-g">Greed</span> — risk appetite building. Momentum strategies tend to keep working until they don\'t.';
+      else interp='<span class="hl-g">Extreme Greed</span> — euphoria readings cluster near local tops. Tighten stops, trim into strength.';
+      return '😱/🤑 <b>Fear &amp; Greed Index: <span style="color:'+fngColor(v)+'">'+v+' — '+state.fg.classification.toUpperCase()+'</span></b><br><br>'+interp+'<br><br>The full gauge lives on the <b>Radar tab</b> 🎯';
     }
-    return 'Sentiment feed is unreachable right now â€” check the gauge widget later. General rule: extreme fear favors staged accumulation, extreme greed favors trimming.';
+    return 'Sentiment feed is unreachable right now — check the gauge widget later. General rule: extreme fear favors staged accumulation, extreme greed favors trimming.';
   }
 
   const indMatch=['rsi','macd','bollinger','ema','sma','atr'].find(has);
@@ -1506,12 +1651,12 @@ async function generateReply(raw){
       const d=(coin||(state.candles.length<30))?await safeCtx(focus):{ai:state._ai};
       if(d&&d.ai){
         const a=d.ai;
-        s+='<br><br><b>Live read â€” '+focus+' (15m):</b><br>';
-        if(indMatch==='rsi')s+='RSI = '+chip(a.rsi.toFixed(1))+' â†’ '+(a.rsi>70?'<span class="hl-r">overbought</span>':a.rsi<30?'<span class="hl-g">oversold</span>':'neutral');
-        else if(indMatch==='macd'){const last=a.last;s+='Histogram = '+chip((a.macd.hist>0?'+':'')+a.macd.hist.toFixed(last>100?2:6))+' â†’ '+(a.macd.hist>0?'<span class="hl-g">bullish</span>':'<span class="hl-r">bearish</span>')}
-        else if(indMatch==='ema'||indMatch==='sma')s+='EMA20 = '+chip('$'+pfmt(a.e20))+', price '+pfmt(a.last)+' â†’ trading <b>'+(a.last>a.e20?'above':'below')+'</b>';
-        else if(indMatch==='bollinger'||indMatch==='bb')s+='%B = '+chip(a.bb.pctB.toFixed(0)+'%')+' â†’ '+(a.bb.pctB>80?'stretched upper':a.bb.pctB<20?'stretched lower':'mid-range');
-        else s+='ATR(14Ã—15m) context available on the Analysis tab';
+        s+='<br><br><b>Live read — '+focus+' (15m):</b><br>';
+        if(indMatch==='rsi')s+='RSI = '+chip(a.rsi.toFixed(1))+' → '+(a.rsi>70?'<span class="hl-r">overbought</span>':a.rsi<30?'<span class="hl-g">oversold</span>':'neutral');
+        else if(indMatch==='macd'){const last=a.last;s+='Histogram = '+chip((a.macd.hist>0?'+':'')+a.macd.hist.toFixed(last>100?2:6))+' → '+(a.macd.hist>0?'<span class="hl-g">bullish</span>':'<span class="hl-r">bearish</span>')}
+        else if(indMatch==='ema'||indMatch==='sma')s+='EMA20 = '+chip('$'+pfmt(a.e20))+', price '+pfmt(a.last)+' → trading <b>'+(a.last>a.e20?'above':'below')+'</b>';
+        else if(indMatch==='bollinger'||indMatch==='bb')s+='%B = '+chip(a.bb.pctB.toFixed(0)+'%')+' → '+(a.bb.pctB>80?'stretched upper':a.bb.pctB<20?'stretched lower':'mid-range');
+        else s+='ATR(14×15m) context available on the Analysis tab';
       }
     }catch(e){}
     return s;
@@ -1520,29 +1665,29 @@ async function generateReply(raw){
   if(has('funding')){
     if(state.fr&&!coin){
       const rate=parseFloat(state.fr.lastFundingRate);
-      return 'ðŸ’¸ <b>'+baseOf(state.symbol)+' perpetual funding:</b> '+chip((rate*100).toFixed(4)+'%')+' '+(rate>0?'â€” <span class="hl-g">longs pay shorts</span> (crowd leans long)':rate<0?'â€” <span class="hl-r">shorts pay longs</span> (crowd leans short)':'â€” flat')+'<br>Annualized â‰ˆ '+chip((rate*3*365*100).toFixed(1)+'%')+(state.fr.nextFundingTime?' Â· next payout ~<span class="hl-c">'+new Date(state.fr.nextFundingTime).toUTCString().slice(17,22)+' UTC</span>':'')+'.<br><br>Persistently positive funding = crowded long side = fuel for long squeezes.';
+      return '💸 <b>'+baseOf(state.symbol)+' perpetual funding:</b> '+chip((rate*100).toFixed(4)+'%')+' '+(rate>0?'— <span class="hl-g">longs pay shorts</span> (crowd leans long)':rate<0?'— <span class="hl-r">shorts pay longs</span> (crowd leans short)':'— flat')+'<br>Annualized ≈ '+chip((rate*3*365*100).toFixed(1)+'%')+(state.fr.nextFundingTime?' · next payout ~<span class="hl-c">'+new Date(state.fr.nextFundingTime).toUTCString().slice(17,22)+' UTC</span>':'')+'.<br><br>Persistently positive funding = crowded long side = fuel for long squeezes.';
     }
-    return 'ðŸ’¸ Funding = periodic payments between perp longs &amp; shorts anchoring futures to spot.<br>â€¢ Positive â†’ longs pay (crowded long side)<br>â€¢ Negative â†’ shorts pay (crowded short side)<br>Live rates sit on the Radar metrics strip â€” ask again while viewing any chart.';
+    return '💸 Funding = periodic payments between perp longs &amp; shorts anchoring futures to spot.<br>• Positive → longs pay (crowded long side)<br>• Negative → shorts pay (crowded short side)<br>Live rates sit on the Radar metrics strip — ask again while viewing any chart.';
   }
   if(has('oi')||has('open interest')){
     if(state.oi&&state.fr&&!coin){
       const mark=parseFloat(state.fr.markPrice);
       const oiN=parseFloat(state.oi.openInterest)*mark;
-      return 'ðŸ§Š <b>'+baseOf(state.symbol)+' open interest:</b> '+chip(cfmt(oiN))+' across '+chip(nfmt(parseFloat(state.oi.openInterest))+' contracts')+'<br><br>OI rising + price rising = fresh longs confirming trend. OI falling into a rally = short covering (weaker hands). OI is also the fuel gauge for liquidation cascades.';
+      return '🧊 <b>'+baseOf(state.symbol)+' open interest:</b> '+chip(cfmt(oiN))+' across '+chip(nfmt(parseFloat(state.oi.openInterest))+' contracts')+'<br><br>OI rising + price rising = fresh longs confirming trend. OI falling into a rally = short covering (weaker hands). OI is also the fuel gauge for liquidation cascades.';
     }
-    return 'ðŸ§Š Open Interest = total value of outstanding derivative contracts. Rising OI validates trends; collapsing OI signals deleveraging. The live figure is in the Radar metrics strip.';
+    return '🧊 Open Interest = total value of outstanding derivative contracts. Rising OI validates trends; collapsing OI signals deleveraging. The live figure is in the Radar metrics strip.';
   }
   if(has('liquidation')||has('liquidated')||has('liq zones')){
     const base=coin||baseOf(state.symbol);
     try{
       await ensureAnalysis(base);
       const L=(base===baseOf(state.symbol)&&state._liq)?state._liq:null;
-      if(L)return 'ðŸ’¥ <b>'+base+' liquidation clusters (heuristic):</b><br>â€¢ Long liqs: '+chip('$'+pfmt(L.lz.lo)+' â€“ $'+pfmt(L.lz.hi))+' <span class="hl-g">below swing low</span><br>â€¢ Short liqs: '+chip('$'+pfmt(L.sz.lo)+' â€“ $'+pfmt(L.sz.hi))+' <span class="hl-r">above swing high</span><br>â€¢ Open interest at play: '+chip(cfmt(L.oiN))+'<br><br>Price gravitates toward dense liquidation pools ("liquidity magnets"). Full breakdown: <b>Analysis tab</b>.';
+      if(L)return '💥 <b>'+base+' liquidation clusters (heuristic):</b><br>• Long liqs: '+chip('$'+pfmt(L.lz.lo)+' – $'+pfmt(L.lz.hi))+' <span class="hl-g">below swing low</span><br>• Short liqs: '+chip('$'+pfmt(L.sz.lo)+' – $'+pfmt(L.sz.hi))+' <span class="hl-r">above swing high</span><br>• Open interest at play: '+chip(cfmt(L.oiN))+'<br><br>Price gravitates toward dense liquidation pools ("liquidity magnets"). Full breakdown: <b>Analysis tab</b>.';
     }catch(e){}
-    return 'ðŸ’¥ Liquidation = forced closure when margin can\'t cover losses. Clusters form where over-leveraged positions sit; price often wicks into them before reversing. See the Analysis tab for estimated zones on the active symbol.';
+    return '💥 Liquidation = forced closure when margin can\'t cover losses. Clusters form where over-leveraged positions sit; price often wicks into them before reversing. See the Analysis tab for estimated zones on the active symbol.';
   }
   if(has('leverage')){
-    return 'âš–ï¸ <b>Leverage reality check:</b><br>â€¢ 10x â†’ ~9.5% adverse move liquidates you<br>â€¢ 25x â†’ ~3.8%<br>â€¢ 50x â†’ ~1.9% (one bad candle)<br>Crypto 15m volatility alone can exceed those numbers on alts. Pros use low leverage with wide ATR-sized stops â€” not max leverage plus hope.';
+    return '[BAL] <b>Leverage reality check:</b><br>• 10x → ~9.5% adverse move liquidates you<br>• 25x → ~3.8%<br>• 50x → ~1.9% (one bad candle)<br>Crypto 15m volatility alone can exceed those numbers on alts. Pros use low leverage with wide ATR-sized stops — not max leverage plus hope.';
   }
 
   if(has('support')||has('resistance')||has('breakout')||has('levels')){
@@ -1557,41 +1702,41 @@ async function generateReply(raw){
       }
       const px=state.tickers[(COINS[base]||{}).sym];
       const last=px?px.last:(state._ai?state._ai.last:null);
-      return 'ðŸ“ <b>'+base+' key levels (96Ã—15m structure):</b><br>â€¢ Resistance: <span class="hl-r">'+chip('$'+pfmt(sr.res))+'</span>'+(last?' (+'+((sr.res/last-1)*100).toFixed(2)+'%)':'')+'<br>â€¢ Support: <span class="hl-g">'+chip('$'+pfmt(sr.sup))+'</span>'+(last?' ('+((sr.sup/last-1)*100).toFixed(2)+'%)':'')+'<br><br><b>Breakout playbook:</b> wait for a 15m candle to <i>close</i> beyond the level with expanding volume â€” wicks through don\'t count. Failed breakdowns that reclaim support are among the highest-probability reversals there are.';
+      return '[LVL] <b>'+base+' key levels (96x15m structure):</b><br>• Resistance: <span class="hl-r">'+chip('$'+pfmt(sr.res))+'</span>'+(last?' (+'+((sr.res/last-1)*100).toFixed(2)+'%)':'')+'<br>• Support: <span class="hl-g">'+chip('$'+pfmt(sr.sup))+'</span>'+(last?' ('+((sr.sup/last-1)*100).toFixed(2)+'%)':'')+'<br><br><b>Breakout playbook:</b> wait for a 15m candle to <i>close</i> beyond the level with expanding volume — wicks through don\'t count. Failed breakdowns that reclaim support are among the highest-probability reversals there are.';
     }catch(e){}
-    return 'ðŸ“ Support/resistance are zones where pending orders historically absorb flow. Real breakouts need candle-close confirmation + volume expansion. Load a chart on the Radar tab and ask again for exact numbers.';
+    return '[S/R] Support/resistance are zones where pending orders historically absorb flow. Real breakouts need candle-close confirmation + volume expansion. Load a chart on the Radar tab and ask again for exact numbers.';
   }
 
   if(has('best performer')||has('top gainer')||has('biggest gainer')||has('worst performer')||has('biggest loser')){
     const ts=TOP16.map(k=>({k:k,t:state.tickers[COINS[k].sym]})).filter(x=>x.t);
-    if(!ts.length)return 'Market snapshot still loading â€” give me a few seconds and ask again.';
+    if(!ts.length)return 'Market snapshot still loading — give me a few seconds and ask again.';
     ts.sort((a,b)=>b.t.pct-a.t.pct);
     if(has('worst')||has('loser')){
       const w=ts[ts.length-1];
-      return 'ðŸ“‰ Worst of the tracked 16: <b>'+COINS[w.k].icon+' '+w.k+'</b> '+chip(w.t.pct.toFixed(2)+'%','hl-r')+' at '+chip('$'+pfmt(w.t.last))+'. Rotation day.';
+      return '📉 Worst of the tracked 16: <b>'+COINS[w.k].icon+' '+w.k+'</b> '+chip(w.t.pct.toFixed(2)+'%','hl-r')+' at '+chip('$'+pfmt(w.t.last))+'. Rotation day.';
     }
     const b=ts[0];
-    return 'ðŸ† Today\'s leader of the tracked 16: <b>'+COINS[b.k].icon+' '+b.k+'</b> '+chip('+'+b.t.pct.toFixed(2)+'%','hl-g')+' at '+chip('$'+pfmt(b.t.last))+' Â· vol '+chip(cfmt(b.t.qvol))+'<br><br>Runner-up: '+ts[1].k+' ('+ts[1].t.pct.toFixed(2)+'%). Say <i>"analyze '+b.k.toLowerCase()+'"</i> for the full workup.';
+    return '[GAIN] Today\'s leader of the tracked 16: <b>'+COINS[b.k].icon+' '+b.k+'</b> '+chip('+'+b.t.pct.toFixed(2)+'%','hl-g')+' at '+chip('$'+pfmt(b.t.last))+' · vol '+chip(cfmt(b.t.qvol))+'<br><br>Runner-up: '+ts[1].k+' ('+ts[1].t.pct.toFixed(2)+'%). Say <i>"analyze '+b.k.toLowerCase()+'"</i> for the full workup.';
   }
 
   if(has('whale')||has('block trade')||has('smart money')||has('onchain')||has('on chain')){
     const w=state.whales;
-    let s='ðŸ‹ <b>Whale radar â€” '+baseOf(state.symbol)+'</b><br>';
+    let s='[W] <b>Whale radar — '+baseOf(state.symbol)+'</b><br>';
     if(w.length){
       const buys=w.filter(x=>!x.maker),sell=w.filter(x=>x.maker);
       const buyUsd=buys.reduce((a,x)=>a+x.usd,0),sellUsd=sell.reduce((a,x)=>a+x.usd,0);
-      s+=w.length+' block trades â‰¥$50k in recent tape.<br>â€¢ Buy-side flow: <span class="hl-g">'+cfmt(buyUsd)+'</span> ('+buys.length+' prints)<br>â€¢ Sell-side flow: <span class="hl-r">'+cfmt(sellUsd)+'</span> ('+sell.length+' prints)<br>â€¢ Largest print: '+chip(cfmt(Math.max.apply(null,w.map(x=>x.usd))))+' '+(w[0].maker?'SELL':'BUY')+' '+timeAgo(w[0].time)+'<br><br>Net read: <b>'+(buyUsd>sellUsd?'<span class="hl-g">accumulative tilt</span>':'<span class="hl-r">distribution tilt</span>')+'</b>. Live feed on the Radar tab refreshes every 10s.';
+      s+=w.length+' block trades ≥$50k in recent tape.<br>• Buy-side flow: <span class="hl-g">'+cfmt(buyUsd)+'</span> ('+buys.length+' prints)<br>• Sell-side flow: <span class="hl-r">'+cfmt(sellUsd)+'</span> ('+sell.length+' prints)<br>• Largest print: '+chip(cfmt(Math.max.apply(null,w.map(x=>x.usd))))+' '+(w[0].maker?'SELL':'BUY')+' '+timeAgo(w[0].time)+'<br><br>Net read: <b>'+(buyUsd>sellUsd?'<span class="hl-g">accumulative tilt</span>':'<span class="hl-r">distribution tilt</span>')+'</b>. Live feed on the Radar tab refreshes every 10s.';
     }else{
-      s+='No â‰¥$50k prints detected recently â€” either a quiet book or you\'re early. The tracker rescans every 10 seconds.<br><br>Note: this watches exchange tape flow. True on-chain whale wallets need blockchain indexing â€” different discipline, same paranoia.';
+      s+='No ≥$50k prints detected recently — either a quiet book or you\'re early. The tracker rescans every 10 seconds.<br><br>Note: this watches exchange tape flow. True on-chain whale wallets need blockchain indexing — different discipline, same paranoia.';
     }
     return s;
   }
   if(has('gas')||has('gwei')){
-    return 'â›½ <b>Gas / Gwei 101:</b><br>Gwei = a tiny fraction of ETH (1 ETH = 10â¹ gwei) pricing Ethereum computation. Gas spikes with mempool congestion â€” NFT mints, airdrop claims, on-chain liquidation cascades. High gas â‰  bullish; it means urgent demand for blockspace. For perp traders it matters mostly during DeFi liquidation waves.';
+    return '[GAS] <b>Gas / Gwei 101:</b><br>Gwei = a tiny fraction of ETH (1 ETH = 10^9 gwei) pricing Ethereum computation. Gas spikes with mempool congestion — NFT mints, airdrop claims, on-chain liquidation cascades. High gas ≠ bullish; it means urgent demand for blockspace. For perp traders it matters mostly during DeFi liquidation waves.';
   }
 
   if(has('defi')||has('dex')||has('lending')||has('yield')||has('staking')||has('tvl')||has('dao')||has('liquidity mining')){
-    return 'ðŸ›ï¸ <b>DeFi quick glossary:</b><br>â€¢ <b>DEX</b> â€” on-chain AMM swaps (Uniswap etc.); no orderbook, pools price assets<br>â€¢ <b>Lending</b> â€” supply collateral, borrow against it (Aave, Compound)<br>â€¢ <b>Yield farming</b> â€” earning tokens for providing liquidity; APYs inversely correlate with sustainability ðŸ˜…<br>â€¢ <b>Staking</b> â€” securing PoS networks for emission rewards<br>â€¢ <b>TVL</b> â€” total value locked; the sector\'s core health metric<br>â€¢ <b>DAO</b> â€” token-voted governance over a treasury<br><br>This terminal tracks the derivatives layer â€” where DeFi tokens like UNI, AAVE &amp; MKR play the same whale games as everything else.';
+    return '[DEFI] <b>DeFi quick glossary:</b><br>• <b>DEX</b> — on-chain AMM swaps (Uniswap etc.); no orderbook, pools price assets<br>• <b>Lending</b> — supply collateral, borrow against it (Aave, Compound)<br>• <b>Yield farming</b> — earning tokens for providing liquidity; APYs inversely correlate with sustainability<br>• <b>Staking</b> — securing PoS networks for emission rewards<br>• <b>TVL</b> — total value locked; the sector\'s core health metric<br>• <b>DAO</b> — token-voted governance over a treasury<br><br>This terminal tracks the derivatives layer — where DeFi tokens like UNI, AAVE &amp; MKR play the same whale games as everything else.';
   }
 
   if(has('should i buy')||has('should i sell')||has('long')||has('short')||has('entry')||has('trade plan')||((has('buy')||has('sell'))&&!coin)){
@@ -1602,9 +1747,9 @@ async function generateReply(raw){
       const px=state.tickers[(COINS[base]||{}).sym];
       const dir=a.score>15?'LONG bias':a.score<-15?'SHORT bias':'NO-TRADE / wait';
       const cls=a.score>15?'hl-g':a.score<-15?'hl-r':'hl-a';
-      return 'ðŸŽ¯ <b>'+base+' tactical read:</b> '+(px?'spot '+chip('$'+pfmt(px.last)):'')+'<br>â€¢ AI composite: <span class="'+cls+'">'+(a.score>0?'+':'')+a.score+' ('+a.label+')</span><br>â€¢ Trend: price '+(a.last>a.e20?'<span class="hl-g">above</span>':'<span class="hl-r">below</span>')+' EMA20 Â· MACD '+(a.macd.hist>0?'<span class="hl-g">positive</span>':'<span class="hl-r">negative</span>')+' Â· volume '+a.vt.toLowerCase()+'<br>â€¢ ML projection: <span class="'+cls+'">'+fc.bias+'</span> (1H â‰ˆ $'+pfmt(fc.rows[0].pred)+')<br><br><b>Framework, not a tip:</b> the stack suggests <span class="'+cls+'">'+dir+'</span>. If trading it: define invalidation at the 96-bar swing, size so the stop â‰¤1% of account, and skip if funding is already crowded your way.<br><br><span class="hl-a">âš  Not financial advice â€” markets can invalidate any model instantly.</span>';
+      return '🎯 <b>'+base+' tactical read:</b> '+(px?'spot '+chip('$'+pfmt(px.last)):'')+'<br>• AI composite: <span class="'+cls+'">'+(a.score>0?'+':'')+a.score+' ('+a.label+')</span><br>• Trend: price '+(a.last>a.e20?'<span class="hl-g">above</span>':'<span class="hl-r">below</span>')+' EMA20 · MACD '+(a.macd.hist>0?'<span class="hl-g">positive</span>':'<span class="hl-r">negative</span>')+' · volume '+a.vt.toLowerCase()+'<br>• ML projection: <span class="'+cls+'">'+fc.bias+'</span> (1H ≈ $'+pfmt(fc.rows[0].pred)+')<br><br><b>Framework, not a tip:</b> the stack suggests <span class="'+cls+'">'+dir+'</span>. If trading it: define invalidation at the 96-bar swing, size so the stop ≤1% of account, and skip if funding is already crowded your way.<br><br><span class="hl-a">⚠ Not financial advice — markets can invalidate any model instantly.</span>';
     }catch(e){
-      return 'Couldn\'t pull live context for that one â€” try again shortly. Standing disclaimer: I provide analysis frameworks, not financial advice.';
+      return 'Couldn\'t pull live context for that one — try again shortly. Standing disclaimer: I provide analysis frameworks, not financial advice.';
     }
   }
 
@@ -1613,44 +1758,44 @@ async function generateReply(raw){
     try{
       const d=await safeCtx(base);
       const a=d.ai;
-      return coinBrief(base,d)+'<br><br><span class="hl-a">âš  Analysis only â€” never financial advice.</span>';
+      return coinBrief(base,d)+'<br><br><span class="hl-a">⚠ Analysis only — never financial advice.</span>';
     }catch(e){}
   }
 
   if(has('pump')||has('mooning')||has('moon')||has('to the moon')){
     if(coin){
       const t=state.tickers[COINS[coin].sym];
-      if(t)return 'ðŸŒ™ '+COINS[coin].icon+' <b>'+coin+'</b> is '+(t.pct>5?'<span class="hl-g">pumping +'+t.pct.toFixed(1)+'%</span> right now':t.pct>0?'up '+t.pct.toFixed(2)+'% â€” drifting, not mooning':t.pct>-5?'flat-ish ('+t.pct.toFixed(2)+'%) â€” rocket still on the pad':'<span class="hl-r">dumping '+t.pct.toFixed(1)+'% today</span> â€” more lunar debris than launch')+'. Chasing green candles after +10% is how bags get made (the wrong kind). Ask <i>"analyze '+coin.toLowerCase()+'"</i> first.';
+      if(t)return '🌙 '+COINS[coin].icon+' <b>'+coin+'</b> is '+(t.pct>5?'<span class="hl-g">pumping +'+t.pct.toFixed(1)+'%</span> right now':t.pct>0?'up '+t.pct.toFixed(2)+'% — drifting, not mooning':t.pct>-5?'flat-ish ('+t.pct.toFixed(2)+'%) — rocket still on the pad':'<span class="hl-r">dumping '+t.pct.toFixed(1)+'% today</span> — more lunar debris than launch')+'. Chasing green candles after +10% is how bags get made (the wrong kind). Ask <i>"analyze '+coin.toLowerCase()+'"</i> first.';
     }
-    return 'ðŸŒ™ "To the moon" energy is fun; portfolio math is survival. Name a coin and I\'ll tell you whether it\'s actually moving or just trending on X.';
+    return '🌙 "To the moon" energy is fun; portfolio math is survival. Name a coin and I\'ll tell you whether it\'s actually moving or just trending on X.';
   }
   if(has('dump')||has('crash')||has('rekt')||has('rug')){
     const t=state.tickers[state.symbol];
-    return 'ðŸ’€ Dump/rekt checklist:<br>â€¢ Is 24h change worse than âˆ’8%? '+(t&&t.pct<-8?'<span class="hl-r">Yes â€” active flush on '+baseOf(state.symbol)+'</span>':'Not currently on the active chart')+'<br>â€¢ Volume spike + close back inside range = capitulation wick, sometimes a gift<br>â€¢ No-bid slow bleed = worse than violent dumps<br><br>Anti-rekt protocol: hard stops pre-placed, no averaging into falling knives without a thesis, never leverage a meme. <span class="hl-a">Survive first, profit second.</span>';
+    return '💀 Dump/rekt checklist:<br>• Is 24h change worse than −8%? '+(t&&t.pct<-8?'<span class="hl-r">Yes — active flush on '+baseOf(state.symbol)+'</span>':'Not currently on the active chart')+'<br>• Volume spike + close back inside range = capitulation wick, sometimes a gift<br>• No-bid slow bleed = worse than violent dumps<br><br>Anti-rekt protocol: hard stops pre-placed, no averaging into falling knives without a thesis, never leverage a meme. <span class="hl-a">Survive first, profit second.</span>';
   }
   if(has('hodl')||has('diamond hands')){
-    return 'ðŸ’ŽðŸ™Œ <b>HODL doctrine:</b> fine for spot BTC/ETH with a multi-year horizon and money you don\'t need. Fatal when applied to leveraged positions or low-liquidity memes â€” those need exits because they can go structurally to zero. HODL is a strategy for assets, not an excuse for absent risk management.';
+    return '💎🙌 <b>HODL doctrine:</b> fine for spot BTC/ETH with a multi-year horizon and money you don\'t need. Fatal when applied to leveraged positions or low-liquidity memes — those need exits because they can go structurally to zero. HODL is a strategy for assets, not an excuse for absent risk management.';
   }
   if(has('ath')||has('all time high')){
     const t=state.tickers[coin?COINS[coin].sym:state.symbol];
-    return 'ðŸ”ï¸ <b>All-time high</b> = the highest price ever printed. Psychologically massive â€” old bagholders sell into it, breakout traders buy through it.'+(t?'<br><br>'+(coin||baseOf(state.symbol))+' 24h high: '+chip('$'+pfmt(t.high))+' â€” current '+chip('$'+pfmt(t.last))+' sits '+(((t.last/t.high)-1)*100).toFixed(2)+'% from it. (Full ATH history needs longer lookbacks than this terminal\'s feeds.)':'');
+    return '[ATH] <b>All-time high</b> = the highest price ever printed. Psychologically massive — old bagholders sell into it, breakout traders buy through it.'+(t?'<br><br>'+(coin||baseOf(state.symbol))+' 24h high: '+chip('$'+pfmt(t.high))+' — current '+chip('$'+pfmt(t.last))+' sits '+(((t.last/t.high)-1)*100).toFixed(2)+'% from it. (Full ATH history needs longer lookbacks than this terminal\'s feeds.)':'');
   }
   if(has('atl')||has('all time low')){
-    return 'ðŸ•³ï¸ All-time lows mark maximum pessimism. Some become generational entries; others become delistings. The tell: does volume dry up at the lows (seller exhaustion) or keep accelerating (no floor yet)?';
+    return '[ATL] All-time lows mark maximum pessimism. Some become generational entries; others become delistings. The tell: does volume dry up at the lows (seller exhaustion) or keep accelerating (no floor yet)?';
   }
   if(has('bull run')||has('bull market')||has('bullish cycle')){
     const v=state.fg?parseInt(state.fg.value,10):null;
-    return 'ðŸ‚ <b>Bull run dashboard:</b><br>â€¢ Sentiment: '+(v!=null?'Fear &amp; Greed at <span style="color:'+fngColor(v)+'">'+v+' ('+state.fg.classification+')</span>':'unavailable')+'<br>â€¢ Breadth: check advancers vs decliners on the Market tab<br>â€¢ Structure test: are 15m pullbacks holding above prior highs?<br><br>Textbook bulls: price above rising EMA20/50, funding positive-but-not-extreme, alt breadth expanding. Extreme greed + vertical candles = late-stage, not early-stage.';
+    return '[BULL] <b>Bull run dashboard:</b><br>• Sentiment: '+(v!=null?'Fear &amp; Greed at <span style="color:'+fngColor(v)+'">'+v+' ('+state.fg.classification+')</span>':'unavailable')+'<br>• Breadth: check advancers vs decliners on the Market tab<br>• Structure test: are 15m pullbacks holding above prior highs?<br><br>Textbook bulls: price above rising EMA20/50, funding positive-but-not-extreme, alt breadth expanding. Extreme greed + vertical candles = late-stage, not early-stage.';
   }
   if(has('bear market')||has('bearish cycle')||(has('bear')&&!coin)){
-    return 'ðŸ» Bear-market tells: lower highs stacking on higher timeframes, rallies sold within days, funding pinned negative while OI decays, blue chips bleeding slower than alts. Survival kit: smaller size, fewer trades, stablecoin yield starts outcompeting delta. Every bear in history has been someone\'s buying opportunity eventually.';
+    return '[BEAR] Bear-market tells: lower highs stacking on higher timeframes, rallies sold within days, funding pinned negative while OI decays, blue chips bleeding slower than alts. Survival kit: smaller size, fewer trades, stablecoin yield starts outcompeting delta. Every bear in history has been someone\'s buying opportunity eventually.';
   }
   if(has('dip')||has('buy the dip')){
     const a=state._ai;
     const base=coin||baseOf(state.symbol);
     let extra='';
-    if(a&&!coin)extra='<br><br>Active chart ('+base+'): RSI '+a.rsi.toFixed(0)+' â€” '+(a.rsi<35?'<span class="hl-g">technically dipped into value zone</span>':a.rsi>65?'this isn\'t a dip, it\'s a summit':'mid-range, not a dip by oscillator standards')+'.';
-    return 'ðŸ©¸ <b>"Buy the dip"</b> only works with definitions:<br>1. Dip to <i>what</i>? Prior resistance-turned-support or a measured level â€” not just "red"<br>2. Confirmation: selling volume exhausting while price holds the level<br>3. Invalidation pre-defined â€” if the level breaks, the dip was actually a trend change'+extra+'<br><br>Catching knives without levels is called donating.';
+    if(a&&!coin)extra='<br><br>Active chart ('+base+'): RSI '+a.rsi.toFixed(0)+' — '+(a.rsi<35?'<span class="hl-g">technically dipped into value zone</span>':a.rsi>65?'this isn\'t a dip, it\'s a summit':'mid-range, not a dip by oscillator standards')+'.';
+    return '🩸 <b>"Buy the dip"</b> only works with definitions:<br>1. Dip to <i>what</i>? Prior resistance-turned-support or a measured level — not just "red"<br>2. Confirmation: selling volume exhausting while price holds the level<br>3. Invalidation pre-defined — if the level breaks, the dip was actually a trend change'+extra+'<br><br>Catching knives without levels is called donating.';
   }
 
   if(coin){
@@ -1659,17 +1804,17 @@ async function generateReply(raw){
       return coinBrief(coin,d);
     }catch(e){
       const t=state.tickers[COINS[coin].sym];
-      if(t)return COINS[coin].icon+' <b>'+coin+'</b>: '+chip('$'+pfmt(t.last))+' Â· 24h '+chip((t.pct>0?'+':'')+t.pct.toFixed(2)+'%',t.pct>=0?'hl-g':'hl-r')+' (deeper analytics temporarily unavailable)';
+      if(t)return COINS[coin].icon+' <b>'+coin+'</b>: '+chip('$'+pfmt(t.last))+' · 24h '+chip((t.pct>0?'+':'')+t.pct.toFixed(2)+'%',t.pct>=0?'hl-g':'hl-r')+' (deeper analytics temporarily unavailable)';
       return 'I recognize <b>'+coin+'</b> but couldn\'t reach the API just now.';
     }
   }
 
   if(has('price')||has('chart')||has('analysis')||has('market')||has('crypto')){
     const t=state.tickers[state.symbol];
-    return 'You\'re looking for specifics â€” give me a ticker! Try <i>"bitcoin"</i>, <i>"solana"</i>, <i>"trump coin"</i>, <i>"wif"</i>â€¦ or ask for <i>"best performer today"</i>.'+(t?' Meanwhile: '+baseOf(state.symbol)+' is '+chip('$'+pfmt(t.last))+' '+chip((t.pct>0?'+':'')+t.pct.toFixed(2)+'%',t.pct>=0?'hl-g':'hl-r')+'.':'');
+    return 'You\'re looking for specifics — give me a ticker! Try <i>"bitcoin"</i>, <i>"solana"</i>, <i>"trump coin"</i>, <i>"wif"</i>… or ask for <i>"best performer today"</i>.'+(t?' Meanwhile: '+baseOf(state.symbol)+' is '+chip('$'+pfmt(t.last))+' '+chip((t.pct>0?'+':'')+t.pct.toFixed(2)+'%',t.pct>=0?'hl-g':'hl-r')+'.':'');
   }
 
-  return 'ðŸ¤” Didn\'t catch that one. I\'m sharpest on:<br>â€¢ <b>Coins</b> â€” btc, eth, sol, doge, pepe, trump, wif, floki, shib, bonk + 20 more (nicknames &amp; typos welcome)<br>â€¢ <b>Indicators</b> â€” rsi, macd, bollinger, ema, atr<br>â€¢ <b>Microstructure</b> â€” whales, funding, open interest, liquidations, support/resistance<br>â€¢ <b>Sentiment</b> â€” fear &amp; greed, bull/bear calls<br><br>Rephrase and fire again ðŸ”';
+  return '🤔 Didn\'t catch that one. I\'m sharpest on:<br>• <b>Coins</b> — btc, eth, sol, doge, pepe, trump, wif, floki, shib, bonk + 20 more (nicknames &amp; typos welcome)<br>• <b>Indicators</b> — rsi, macd, bollinger, ema, atr<br>• <b>Microstructure</b> — whales, funding, open interest, liquidations, support/resistance<br>• <b>Sentiment</b> — fear &amp; greed, bull/bear calls<br><br>Rephrase and fire again';
 }
 
 function switchTab(tab){
@@ -1684,7 +1829,7 @@ async function setSymbol(sym){
   state.symbol=sym;
   Object.keys(state.ctxCache).forEach(k=>delete state.ctxCache[k]);
   state._liq=null;state._sr=null;state._ai=null;state.whales=[];
-  $('heroPrice').textContent='â€”';$('heroPrice').dataset.p='0';
+  $('heroPrice').textContent='—';$('heroPrice').dataset.p='0';
   $('wsKlineState').textContent='SYNCING';$('wsKlineState').className='badge b-amber';
   $('symSelect').value=sym;
   renderTicker();
@@ -1716,7 +1861,7 @@ async function sendChat(text){
     const reply=await generateReply(text);
     typing.innerHTML=reply;
   }catch(e){
-    typing.innerHTML='Connection hiccup â€” try again in a moment.';
+    typing.innerHTML='Connection hiccup — try again in a moment.';
   }
   chatLog.scrollTop=chatLog.scrollHeight;
   chatBusy=false;sendBtn.disabled=false;
@@ -1737,12 +1882,12 @@ $('symSelect').addEventListener('change',e=>setSymbol(e.target.value));
 
 function init(){
   const sel=$('symSelect');
-  sel.innerHTML=Object.keys(COINS).map(k=>'<option value="'+COINS[k].sym+'">'+k+'/USDT â€” '+esc(COINS[k].name)+'</option>').join('');
+  sel.innerHTML=Object.keys(COINS).map(k=>'<option value="'+COINS[k].sym+'">'+k+'/USDT — '+esc(COINS[k].name)+'</option>').join('');
   sel.value=state.symbol;
 
   initChart();
 
-  pushMsg('ðŸ‘‹ Welcome to <b>Liquidity Radar</b>. I track order flow, whales, funding and sentiment in real time. Ask me about any coin â€” <i>"analyze eth"</i>, <i>"trump coin"</i>, <i>"should i long sol?"</i> â€” or hit a chip below.','ai');
+  pushMsg('Welcome to <b>Liquidity Radar</b>. I track order flow, whales, funding and sentiment in real time. Ask me about any coin — <i>"analyze eth"</i>, <i>"trump coin"</i>, <i>"should i long sol?"</i> — or hit a chip below.','ai');
 
   fetchTickers();
   fetchFG();
@@ -1755,6 +1900,9 @@ function init(){
   fetchOI();
   fetchWhales();
   connectStreams();
+  initSearch();
+  initTheme();
+  fetchForexEvents();
 
   setInterval(fetchTickers,20000);
   setInterval(fetchWhales,10000);
@@ -1763,7 +1911,80 @@ function init(){
   setInterval(fetchOI,30000);
   setInterval(fetchFG,300000);
   setInterval(fetchNews,180000);
+  setInterval(fetchForexEvents,600000);
   setInterval(()=>{if(document.hidden)return;fetchTickers();},60000);
+}
+
+function initTheme(){
+  const saved=localStorage.getItem('lr-theme');
+  if(saved){document.documentElement.setAttribute('data-theme',saved);$('themeBtn').textContent=saved==='light'?'dark':'light'}
+  $('themeBtn').addEventListener('click',function(){
+    const cur=document.documentElement.getAttribute('data-theme');
+    const next=cur==='light'?'dark':'light';
+    document.documentElement.setAttribute('data-theme',next);
+    localStorage.setItem('lr-theme',next);
+    $('themeBtn').textContent=next==='light'?'dark':'light';
+  });
+}
+
+let allBinanceSymbols=[];
+async function initSearch(){
+  try{
+    const r=await fetch('https://api.binance.com/api/v3/exchangeInfo');
+    const d=await r.json();
+    allBinanceSymbols=d.symbols.filter(s=>s.status==='TRADING'&&s.symbol.endsWith('USDT')).map(s=>({sym:s.symbol,base:s.baseAsset,quote:s.quoteAsset,prec:s.filters.find(f=>f.filterType==='PRICE_FILTER')?s.filters.find(f=>f.filterType==='PRICE_FILTER').tickSize:'0.01'}));
+    allBinanceSymbols.sort((a,b)=>a.base.localeCompare(b.base));
+  }catch(e){}
+  const input=$('coinSearch');
+  const results=$('searchResults');
+  input.addEventListener('input',function(){
+    const q=this.value.trim().toLowerCase();
+    if(q.length<1){results.classList.remove('show');return}
+    const matches=allBinanceSymbols.filter(s=>s.base.toLowerCase().indexOf(q)!==-1||s.sym.toLowerCase().indexOf(q)!==-1).slice(0,30);
+    if(!matches.length){results.innerHTML='<div class="search-count">No matches for "'+esc(q)+'"</div>';results.classList.add('show');return}
+    results.innerHTML=matches.map(s=>{
+      const t=state.tickers[s.sym];
+      const price=t?'$'+pfmt(t.last):'—';
+      const chg=t?chgHtml(t.pct):'<span class="chg flat">—</span>';
+      const known=COIN_ALIASES[s.base.toUpperCase()];
+      const isPopular=known||TOP16.indexOf(s.base.toUpperCase())!==-1;
+      return'<div class="search-item" data-sym="'+s.sym+'"><span class="si-sym" style="color:'+(isPopular?'var(--cyan)':'var(--muted)')+'">'+s.base+'</span><span class="si-name">'+s.base+'/USDT</span><span class="si-price">'+price+'</span><span class="si-chg">'+chg+'</span></div>';
+    }).join('')+'<div class="search-count">'+matches.length+' pairs found</div>';
+    results.classList.add('show');
+  });
+  input.addEventListener('focus',function(){if(this.value.trim().length>=1)results.classList.add('show')});
+  results.addEventListener('click',function(e){
+    const item=e.target.closest('.search-item');
+    if(item){setSymbol(item.dataset.sym);input.value='';results.classList.remove('show')}
+  });
+  document.addEventListener('click',function(e){if(!e.target.closest('.search-wrap'))results.classList.remove('show')});
+}
+
+async function fetchForexEvents(){
+  try{
+    const r=await jget('https://nfs.faireconomy.media/ff_calendar_thisweek.json');
+    if(!r||!r.length){$('forexList').innerHTML='<div class="fc-note">No events this week</div>';return}
+    const now=new Date();
+    const upcoming=r.filter(e=>{
+      if(!e.date)return false;
+      const d=new Date(e.date+'T'+(e.time||'00:00')+':00');
+      return d>=now;
+    }).slice(0,15);
+    if(!upcoming.length){
+      const recent=r.slice(-10).reverse();
+      $('forexList').innerHTML=recent.map(function(e){
+        const impact=e.impact==='High'?'b-red':e.impact==='Medium'?'b-amber':'b-gray';
+        return'<div style="display:flex;gap:10px;align-items:center;padding:8px 4px;border-bottom:1px dashed var(--border);font-size:12.5px"><span class="badge '+impact+'">'+esc(e.impact||'Low')+'</span><span style="min-width:60px;color:var(--dim);font-family:var(--mono)">'+esc(e.date||'')+'</span><span style="min-width:50px;color:var(--muted);font-family:var(--mono)">'+esc(e.time||'')+'</span><span style="flex:1;font-weight:600">'+esc(e.title||e.event||'Unknown')+'</span><span style="color:var(--dim);font-family:var(--mono)">'+esc(e.currency||'')+'</span></div>';
+      }).join('');
+      return;
+    }
+    $('forexList').innerHTML=upcoming.map(function(e){
+      const impact=e.impact==='High'?'b-red':e.impact==='Medium'?'b-amber':'b-gray';
+      return'<div style="display:flex;gap:10px;align-items:center;padding:8px 4px;border-bottom:1px dashed var(--border);font-size:12.5px"><span class="badge '+impact+'">'+esc(e.impact||'Low')+'</span><span style="min-width:60px;color:var(--dim);font-family:var(--mono)">'+esc(e.date||'')+'</span><span style="min-width:50px;color:var(--muted);font-family:var(--mono)">'+esc(e.time||'')+'</span><span style="flex:1;font-weight:600">'+esc(e.title||e.event||'Unknown')+'</span><span style="color:var(--dim);font-family:var(--mono)">'+esc(e.currency||'')+'</span></div>';
+    }).join('');
+  }catch(e){
+    $('forexList').innerHTML='<div class="fc-note">Forex Factory unavailable — will retry</div>';
+  }
 }
 init();
 </script>
