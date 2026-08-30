@@ -2971,7 +2971,7 @@ const TF_LIST=[{key:'1h',label:'1H',limit:100,weight:0.50},{key:'1d',label:'1D',
 let signalData=[];
 let whaleFlowCache={};
 let patternHistory={};
-let modelWeights={rsi:25,macdCross:30,macdTrend:10,ema:12,bb:18,vol:5,diverge:20,whale:15,forecast:10};
+let modelWeights={rsi:25,macdCross:30,macdTrend:10,ema:12,bb:18,vol:5,diverge:20,whale:15,forecast:10,master:30};
 
 function loadPatternHistory(){
   try{var d=JSON.parse(localStorage.getItem('lr-patternHist'));if(d)patternHistory=d}catch(e){}
@@ -2999,8 +2999,11 @@ function adjustWeights(){
     var h=patternHistory[k];
     if(h.total<5)return;
     var hitRate=h.correct/h.total;
-    if(hitRate>0.7){modelWeights[k]=Math.min(40,modelWeights[k]*1.05)}
-    else if(hitRate<0.4){modelWeights[k]=Math.max(5,modelWeights[k]*0.92)}
+    // map outcome keys like "master_BUY" / "rsi_15m" back to a valid model-weight key
+    var wKey=k.split('_')[0];
+    if(modelWeights[wKey]===undefined)return;
+    if(hitRate>0.6){modelWeights[wKey]=Math.min(45,(modelWeights[wKey]||1)*1.06)}
+    else if(hitRate<0.42){modelWeights[wKey]=Math.max(5,(modelWeights[wKey]||1)*0.94)}
   });
   saveModelWeights();
 }
@@ -3103,21 +3106,23 @@ function scanSignals(){
       var tfScores=results.slice(0,TF_LIST.length);
       var whale=results[TF_LIST.length];
       var master=masterSignal(tfScores);
-      var whaleScore=0;
       var whaleText='';
+      var whaleAdj=0;
       if(whale&&whale.imbalance){
-        whaleScore=Math.round(whale.imbalance*modelWeights.whale);
+        whaleAdj=Math.round(whale.imbalance*modelWeights.whale);
         if(whale.imbalance>0.15)whaleText='Whale accumulation (buy '+cfmt(whale.buyUsd)+' vs sell '+cfmt(whale.sellUsd)+')';
         else if(whale.imbalance<-0.15)whaleText='Whale distribution (sell '+cfmt(whale.sellUsd)+' vs buy '+cfmt(whale.buyUsd)+')';
         else whaleText='Whale flow balanced (buy '+cfmt(whale.buyUsd)+' / sell '+cfmt(whale.sellUsd)+')';
       }
-      var finalScore=Math.max(-100,Math.min(100,master.score+whaleScore));
+      // blend master with whale flow and learning-adjusted master weight
+      var blend=Math.max(-100,Math.min(100,Math.round(master.score*((modelWeights.master||30)/30)+whaleAdj)));
       var allReasons=[];
       tfScores.forEach(function(ts){if(ts&&ts.reasons.length)allReasons.push(ts.reasons[0])});
       var t=state.tickers[sym];
-      var fc1h=tfScores[0]?tfScores[0].fc:null;
-      var fcForecast=fc1h?fc1h.rows[3]:null;
-      return{sym:sym,score:finalScore,master:master,tfScores:tfScores,whale:whale,whaleText:whaleText,t:t,fc:fcForecast,reasons:allReasons.slice(0,4)};
+      var fcObj=null;
+      var s1=tfScores[0]?tfScores[0].fc:null;
+      if(s1&&s1.rows){fcObj={rows:s1.rows,pUp:1/(1+Math.exp(-blend/45))}}
+      return{sym:sym,score:blend,master:master,tfScores:tfScores,whale:whale,whaleText:whaleText,t:t,fc:fcObj,reasons:allReasons.slice(0,4)};
     }).catch(function(){return null});
   });
   Promise.all(promises).then(function(results){
@@ -3136,19 +3141,28 @@ function scanSignals(){
 function recordSignalOutcomes(){
   if(!signalData.length)return;
   var prevSignals=JSON.parse(localStorage.getItem('lr-lastSignals')||'{}');
+  var touched=0;
   signalData.forEach(function(s){
-    if(prevSignals[s.sym]){
-      var old=prevSignals[s.sym];
-      var t=state.tickers[s.sym];
-      if(t){
-        var moved=t.pct;
-        var correct=(old.type==='BUY'&&moved>0)||(old.type==='SELL'&&moved<0);
-        if(Math.abs(moved)>0.5)recordPatternOutcome('master_'+old.type,correct?0:1);
-      }
+    var old=prevSignals[s.sym];
+    var t=state.tickers[s.sym];
+    if(!old||!t)return;
+    var px=t.last;
+    if(!(old.price>0)||!(px>0))return;
+    var moved=((px-old.price)/old.price)*100;
+    // require a meaningful move over the scan window (1H/4H horizon)
+    if(Math.abs(moved)<0.3)return;
+    if(old.type==='BUY'||old.type==='SELL'){
+      var correct=(old.type==='BUY'&&moved>0)||(old.type==='SELL'&&moved<0);
+      recordPatternOutcome('master_'+old.type,correct?0:1);
+      touched++;
     }
   });
+  if(touched){adjustWeights();saveModelWeights()}
   var current={};
-  signalData.forEach(function(s){current[s.sym]={type:s.master.type,score:s.score,ts:Date.now()}});
+  signalData.forEach(function(s){
+    var px=(s.t&&s.t.last)?s.t.last:0;
+    current[s.sym]={type:s.master.type,score:s.score,ts:Date.now(),price:px};
+  });
   localStorage.setItem('lr-lastSignals',JSON.stringify(current));
 }
 
@@ -3173,9 +3187,15 @@ function renderSignals(){
     }).join('');
     var whaleClass=s.whaleText.indexOf('accumulation')!==-1?'whale-buy':s.whaleText.indexOf('distribution')!==-1?'whale-sell':'';
     var forecastHtml='';
-    if(s.fc){
-      var fCol=s.fc.dp>=0?'var(--green)':'var(--red)';
-      forecastHtml='<div class="sc-forecast">1H forecast: <b>$'+pfmt(s.fc.pred)+'</b> ('+((s.fc.dp>0)?'+':'')+s.fc.dp.toFixed(2)+'%) · 24H: <b>$'+pfmt(s.fc.pred)+'</b></div>';
+    if(s.fc&&s.fc.rows){
+      var r1h=s.fc.rows[0];
+      var r24=s.fc.rows[3];
+      var cGreen='var(--green)',cRed='var(--red)';
+      var pct=(function(d){return(( d>0)?'+':'')+ (d?d.toFixed(2):'0.00')+'%'});
+      forecastHtml='<div class="sc-forecast">'
+        +'<div>1H <b style="color:'+(r1h.dp>=0?cGreen:cRed)+'">$'+pfmt(r1h.pred)+'</b> ('+pct(r1h.dp)+')</div>'
+        +'<div>24H <b style="color:'+(r24.dp>=0?cGreen:cRed)+'">$'+pfmt(r24.pred)+'</b> ('+pct(r24.dp)+')'+(s.fc.pUp!=null?(' | P(up) '+Math.round(s.fc.pUp*100)+'%'):'')+'</div>'
+        +'</div>';
     }
     var learnHtml=hitRate?'<div class="sc-learning">Model accuracy: '+hitRate+'% across '+totalPreds+' predictions</div>':'';
     return'<div class="signal-card '+typeCls+'">'
