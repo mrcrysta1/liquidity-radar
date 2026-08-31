@@ -573,6 +573,7 @@ footer{border-top:1px solid var(--border);margin-top:26px;padding:18px 14px;text
 @media(max-width:420px){
   .top-inner{padding:10px}
   .logo .dish{width:30px;height:30px;font-size:15px}
+  .logo .logo-text{display:none}
   .logo{font-size:15px;letter-spacing:.02em}
   .hero-price{font-size:30px}
   .hero-icon{width:46px;height:46px;font-size:22px}
@@ -609,6 +610,9 @@ footer{border-top:1px solid var(--border);margin-top:26px;padding:18px 14px;text
 }
 
 /* Large phones / small tablets */
+@media(min-width:421px) and (max-width:479px){
+  .logo .logo-text{display:none}
+}
 @media(min-width:421px) and (max-width:639px){
   .metric-grid{grid-template-columns:repeat(2,1fr)}
   .fng-wrap{gap:12px}
@@ -783,7 +787,7 @@ footer{border-top:1px solid var(--border);margin-top:26px;padding:18px 14px;text
 
 <header class="top">
   <div class="top-inner">
-    <div class="logo"><span class="dish">📡</span><span><b>LIQUIDITY</b>&nbsp;RADAR</span></div>
+    <div class="logo"><span class="dish">📡</span><span class="logo-text"><b>LIQUIDITY</b>&nbsp;RADAR</span></div>
     <div style="display:flex;align-items:center;gap:8px">
       <button class="theme-btn" id="alertBtn" title="Price alerts (desktop notifications)" style="font-size:13px;font-weight:800;font-family:var(--mono)">AL</button>
       <button class="theme-btn" id="themeBtn" title="Toggle dark/light mode" style="font-size:12px;font-weight:800;font-family:var(--mono)">D</button>
