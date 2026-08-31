@@ -1,0 +1,188 @@
+==============================================================
+  LIQUIDITY RADAR - COMPLETE TECH DOCUMENTATION
+  Project: Liquidity Radar (liquidity-radar)
+  Tech: Single-file HTML5 app (index.html)
+==============================================================
+
+--------------------------------------------------------------
+SECTION 1: FEATURES (FEATURES ADDED IN THIS PROJECT)
+--------------------------------------------------------------
+
+[A] DATA & LIVE CONNECTIVITY
+  1. Real-time Binance Spot + Futures data (REST + WebSocket)
+  2. Live kline/candle streaming via WebSocket (auto-reconnect)
+  3. 24hr ticker, order book depth, funding rate, open interest
+  4. Fear & Greed Index (alternative.me)
+  5. Crypto news feed (cryptocurrency.cv)
+  6. Trending topics feed (cryptocurrency.cv)
+  7. Forex economic events calendar
+  8. Whale block-trade scanner (>= $50,000)
+
+[B] CHARTING
+  9. Main candlestick chart (lightweight-charts library)
+  10. Main-chart TIMEFRAME SWITCHER (1m/5m/15m/1h/4h/1d)
+  11. Multi-chart workspace (multiple coins, multiple intervals)
+  12. ML Price Forecast panel (1H/4H/8H/24H with confidence bands)
+  13. Volume histogram + OHLC legend on hover
+  14. DARK/LIGHT theme with theme-aware chart colors (chartTheme())
+
+[C] TECHNICAL ANALYSIS MODULE
+  15. RSI (14) with overbought/oversold zones
+  16. MACD (12,26,9) with signal + histogram
+  17. EMA (20) trend filter
+  18. Bollinger Bands (20,2) with %B position
+  19. ATR (14) volatility
+  20. Volume Trend (rising/falling)
+  21. Support/Resistance detection
+  22. Pattern detection (RSI div, MACD cross, BB touch, volume)
+  23. AI Composite indicator score (-100 to +100)
+
+[D] LIQUIDITY / ORDER FLOW
+  24. Order Book depth with spread + mid price
+  25. Liquidity Heatmap (ask/bid mass)
+  26. Liquidation Zones estimator (long/short trapped notional)
+  27. Volume Profile (96 bars)
+
+[E] AUTO-SIGNAL SCANNER (FIXED & ENHANCED)
+  28. Scans 10 coins x 2 timeframes (1H, 1D) every 2 min
+  29. Master BUY/SELL/WAIT signal with confidence bars
+  30. Whale flow integration into signal score
+  31. AUTO-LEARNING model (online weight adjustment)
+      - now actually trains on realized outcomes (was broken)
+  32. Robust blended score (TF + whale + learning weight)
+  33. Forecast with distinct 1H & 24H targets + P(up) probability
+      (was mislabeled/broken, now fixed)
+
+[F] AI CHATBOT (Rule-based Radar AI)
+  34. 29 coin live context (about YOUR selected coin)
+  35. Handlers: economics, crypto basics, trading, news,
+      forex events, conversations, jokes, price/indicators
+  36. Signals/patterns/whale/meme-coin queries
+  37. AI CONVERSATION MEMORY (remembers last coin + questions)
+
+[G] PORTFOLIO TRACKER (NEW)
+  38. Add positions (symbol, quantity, avg cost)
+  39. Live unrealized PnL + 24h change (localStorage persisted)
+
+[H] PRICE ALERTS (NEW)
+  40. Above/Below price alerts per symbol
+  41. Desktop notifications (Notification API) + toasts
+
+[I] UI / UX / PRODUCTION
+  42. Keyboard shortcuts (R/C/S/M/A/N/P/T tabs, / search,
+      ? help, Esc close modals)
+  43. Accessibility (aria-labels, roles, aria-selected)
+  44. PWA meta tags (theme-color, mobile-web-app-capable)
+  45. Ticker tape, search bar with autocomplete, top coins
+  46. Responsive desktop-grid layout
+
+--------------------------------------------------------------
+SECTION 2: ALGORITHMS / TECHNIQUES USED (TECHNICALLY)
+--------------------------------------------------------------
+
+1. RSI (Relative Strength Index) - Wilder's smoothing
+   rsi = 100 - 100/(1 + avgGain/avgLoss)
+
+2. MACD - EMA(12) - EMA(26), signal = EMA(9) of line
+
+3. EMA (Exponential Moving Average)
+   ema = price*k + prev*(1-k), k = 2/(period+1)
+
+4. Bollinger Bands - mean +/- 2*stddev (20 periods)
+   %B = (last - lower)/(upper - lower) * 100
+
+5. ATR (Average True Range) - true range over 14 bars
+
+6. Linear Regression (least squares) for the ML Forecast
+   slope/intercept = (n*Sxy - Sx*Sy)/(n*Sxx - Sx^2)
+   Projection: pred = last + slope * horizonSteps * damping
+
+7. Volatility scaling: realized per-bar std deviation,
+   bands = price * sd * sqrt(horizon) * 1.28 (80% CI)
+
+8. Composite AI Score (-100..+100):
+   weighted blend of RSI, MACD hist, EMA distance,
+   Bollinger %B, volume trend, price-from-mean
+
+9. Logistic / Sigmoid for direction probability:
+   P(up) = 1 / (1 + exp(-score/45))
+
+10. Multi-timeframe weighted ensemble:
+    weightedScore = SUM(tf.score * tf.weight) / SUM(tf.weight)
+
+11. Online auto-learning (gradient-free adaptive weights):
+    - outcome key -> weight-key mapping (master_BUY -> master)
+    - hitRate > 0.6  => increase weight (max clamp)
+    - hitRate < 0.42 => decrease weight (min clamp)
+    - weights persisted in localStorage (lr-modelW)
+    - accuracy tracker persisted (lr-patternHist)
+
+12. Whale flow imbalance:
+    imb = (buyUsd - sellUsd)/(buyUsd + sellUsd)
+
+13. Pattern detection:
+    - RSI divergence (price new high vs RSI lower)
+    - MACD crossovers
+    - Bollinger band touch
+    - volume spikes
+    - swing support/resistance proximity
+
+14. Liquidation zone estimation from OI + ATR:
+    longZone = support - 1.1*ATR .. support - 0.3*ATR
+
+15. Data structures: hash maps (tickers), promise.all for
+    parallel scanning, localStorage for persistence
+
+NOTE: The model uses a lightweight, deterministic
+      adaptive-weighted approach (not a hand-written
+      backprop neural net) for reliability/speed.
+
+--------------------------------------------------------------
+SECTION 3: MODULES IN THE PROJECT
+--------------------------------------------------------------
+
+1. HEADER/TICKER BAR module (ticker tape, search, status)
+2. HERO / METRICS module (price, 24h stats, funding, OI,
+   RSI, MACD, AI score, volatility, EMA, BB)
+3. MAIN CHART module (candles + volume + timeframe switch)
+4. TECHNICAL INDICATORS panel (AI Composite + RSI/MACD/BB)
+5. ORDER BOOK module (depths, spread, mid)
+6. LIQUIDITY HEATMAP module
+7. FEAR & GREED GAUGE module (canvas)
+8. ML FORECAST module (linreg projections)
+9. WHALE TRACKER module
+10. LIQUIDATION ZONES module
+11. SIGNAL SCANNER module (auto-scan + LLM-ish display)
+12. SIGNAL COIN ANALYSIS module (search + multi-TF verdict +
+    news + whale + chart)
+13. MULTI-CHART WORKSPACE module (N charts via WS)
+14. MARKET / TOP COINS module
+15. ANALYSIS module (search-based analysis)
+16. NEWS module (feed + breaking)
+17. TRENDING module
+18. FOREX EVENTS module
+19. PORTFOLIO module (NEW)
+20. PRICE ALERTS module (NEW)
+21. AI CHAT module (with memory)
+22. MEME COIN UNIVERSE module
+23. THEME engine (dark/light + chartTheme)
+24. SEARCH engine (autocomplete)
+25. NOTIFICATIONS + TOAST module
+26. MODAL system (add position, price alerts)
+
+--------------------------------------------------------------
+TECH STACK SUMMARY
+--------------------------------------------------------------
+- HTML5 + CSS3 (dark/light themes, responsive grid)
+- Vanilla JavaScript (ES6+), single-file no-build
+- lightweight-charts (TradingView) library via CDN
+- Binance REST + WebSocket APIs
+- alternative.me (Fear & Greed)
+- cryptocurrency.cv (news/trending)
+- localStorage (portfolio, alerts, model weights, theme,
+  pattern history)
+- Notification API (desktop alerts)
+- ResizeObserver, Canvas 2D (gauge), WebSocket auto-reconnect
+
+FILE: index.html (single self-contained app)
+==============================================================

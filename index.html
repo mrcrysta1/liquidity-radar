@@ -69,7 +69,7 @@
   background:linear-gradient(180deg,#FFFFFF,#F8F9FA);
   border-color:#D1D5DB;
 }
-[data-theme="light"] .card:hover{border-color:#9CA3AF}
+[data-theme="light"] .card:hover{border-color:#9CA3AF;box-shadow:0 10px 30px rgba(15,23,42,.08)}
 [data-theme="light"] .hero-card{
   background:linear-gradient(180deg,#FFFFFF,#F8F9FA);
   border-color:#93C5FD;
@@ -168,6 +168,7 @@ body{
   font-size:14px;
   line-height:1.45;
   min-height:100vh;
+  overflow-x:clip;
   background-image:
     radial-gradient(1200px 500px at 80% -10%, rgba(41,98,255,.08), transparent 60%),
     radial-gradient(900px 400px at -10% 20%, rgba(0,229,255,.05), transparent 60%);
@@ -244,14 +245,40 @@ main{padding-top:14px}
 .tab-section{display:none;animation:fadeUp .3s ease}
 .tab-section.active{display:block}
 @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.tab-section.active .card,
+.tab-section.active .metric,
+.tab-section.active .hstat,
+.tab-section.active .signal-card{animation:cardIn .45s cubic-bezier(.2,.8,.2,1) backwards}
+@keyframes cardIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+.tab-section.active .metric:nth-child(2){animation-delay:.04s}
+.tab-section.active .metric:nth-child(3){animation-delay:.08s}
+.tab-section.active .metric:nth-child(4){animation-delay:.12s}
+.tab-section.active .metric:nth-child(5){animation-delay:.16s}
+.tab-section.active .metric:nth-child(6){animation-delay:.2s}
+.tab-section.active .metric:nth-child(7){animation-delay:.24s}
+.tab-section.active .metric:nth-child(8){animation-delay:.28s}
+
+/* ---------- Global motion polish ---------- */
+@media (prefers-reduced-motion: reduce){
+  *{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important;scroll-behavior:auto!important}
+}
+*{scrollbar-width:thin;scrollbar-color:#1E3357 transparent}
+::selection{background:rgba(41,98,255,.35);color:#fff}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+section.tab-section{scroll-margin-top:120px}
 
 .card{
   background:linear-gradient(180deg,var(--card2),var(--card));
   border:1px solid var(--border);border-radius:var(--rad);
   padding:16px;margin-bottom:14px;
   transition:border-color .25s, transform .25s, box-shadow .25s;
+  will-change:transform;
 }
-.card:hover{border-color:var(--border2)}
+.card:hover{
+  border-color:var(--border2);
+  transform:translateY(-2px);
+  box-shadow:0 10px 30px rgba(0,0,0,.25);
+}
 .sec-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:13px}
 .sec-title{font-size:13px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:8px}
 .sec-title::before{content:'';width:3px;height:14px;border-radius:2px;background:var(--primary);box-shadow:0 0 8px var(--primary)}
@@ -442,6 +469,7 @@ main{padding-top:14px}
 .vp-flag{width:34px;text-align:center;flex-shrink:0;font-size:9px}
 
 .breaking-box{border:1px solid rgba(255,23,68,.4);background:linear-gradient(90deg,rgba(255,23,68,.1),rgba(255,23,68,.02));border-radius:12px;padding:13px 15px;margin-bottom:14px}
+#forexList{overflow-x:auto}
 .bb-item{display:flex;gap:10px;align-items:baseline;padding:5px 0}
 .bb-live{font-family:var(--mono);font-size:10px;font-weight:800;color:#fff;background:var(--red);border-radius:5px;padding:2px 7px;letter-spacing:.1em;animation:pulse2 1.2s infinite;flex-shrink:0;align-self:center}
 @keyframes pulse2{50%{opacity:.55}}
@@ -540,6 +568,57 @@ footer{border-top:1px solid var(--border);margin-top:26px;padding:18px 14px;text
 .al-tgt{color:var(--purple);font-family:var(--mono);font-weight:700}
 .al-cur{color:var(--dim);font-family:var(--mono)}
 
+/* ===================== Responsive breakpoints ===================== */
+/* Small phones */
+@media(max-width:420px){
+  .top-inner{padding:10px}
+  .logo .dish{width:30px;height:30px;font-size:15px}
+  .logo{font-size:15px;letter-spacing:.02em}
+  .hero-price{font-size:30px}
+  .hero-icon{width:46px;height:46px;font-size:22px}
+  .card{padding:13px}
+  .sec-head{flex-wrap:wrap}
+  .status-pill{padding:4px 9px}
+  .chat-card{height:calc(100vh - 150px);min-height:420px}
+  .metric-grid,.mo-strip{grid-template-columns:repeat(1,1fr)}
+  .pf-summary{grid-template-columns:repeat(2,1fr)}
+  .sig-tf-grid{grid-template-columns:repeat(2,1fr)}
+  .fng-wrap{gap:10px}
+  .hero-main{gap:10px}
+  .hero-id{min-width:0;flex:1}
+  .hero-price-block{min-width:0;flex-basis:100%}
+  .search-item{flex-wrap:wrap;row-gap:4px}
+  .search-item .si-sym{flex-basis:auto}
+  .search-item .si-name{flex-basis:calc(100% - 140px)}
+  .search-item .si-price,.search-item .si-chg{min-width:60px}
+  .chart-toolbar{gap:6px}
+  .tf-btn{padding:4px 7px;font-size:10.5px}
+  .tf-switch{overflow-x:auto;scrollbar-width:none;max-width:100%}
+  .tf-switch::-webkit-scrollbar{display:none}
+  .hero-stats{grid-template-columns:repeat(2,1fr)}
+  .fc-bias{flex-direction:column;align-items:flex-start;gap:8px}
+  .fc-bias>div{width:100%;display:flex;justify-content:space-between}
+  .news-grid{grid-template-columns:1fr}
+  .sig-ana-head{flex-direction:column;align-items:flex-start}
+  .nav.tabs{padding-left:10px;padding-right:10px}
+  .tab-btn{padding:9px 12px;font-size:12.5px}
+  .send-btn{padding:0 14px;font-size:12.5px}
+  .chat-input-row input{padding:10px 12px;font-size:13.5px}
+  .chat-head{padding:12px 14px}
+  .msg{max-width:92%}
+}
+
+/* Large phones / small tablets */
+@media(min-width:421px) and (max-width:639px){
+  .metric-grid{grid-template-columns:repeat(2,1fr)}
+  .fng-wrap{gap:12px}
+}
+
+/* Tablets */
+@media(min-width:640px){
+  .metric-grid{grid-template-columns:repeat(3,1fr)}
+  .mo-strip{grid-template-columns:repeat(4,1fr)}
+}
 @media(min-width:768px){
   :root{--ch:340px}
   .desktop-grid{grid-template-columns:repeat(2,1fr)}
@@ -549,15 +628,34 @@ footer{border-top:1px solid var(--border);margin-top:26px;padding:18px 14px;text
   .news-grid{grid-template-columns:1.7fr 1fr}
   .hero-price{font-size:44px}
 }
+
+/* Laptops */
 @media(min-width:1024px){
-  :root{--ch:380px}
+  :root{--ch:360px}
   .desktop-grid{grid-template-columns:repeat(3,1fr)}
   .hero-stats{grid-template-columns:repeat(5,1fr)}
+  .container{padding:0 18px 44px}
+  .top-inner,.nav.tabs,.search-wrap{padding-left:18px;padding-right:18px}
 }
+
+/* Desktop */
 @media(min-width:1280px){
-  :root{--ch:420px}
+  :root{--ch:400px}
   .desktop-grid{grid-template-columns:repeat(4,1fr)}
   .whale-list{columns:2;column-gap:22px}
+}
+
+/* 4K / ultra-wide */
+@media(min-width:1700px){
+  :root{--ch:440px}
+  .container,.top-inner{max-width:1600px}
+  .desktop-grid{grid-template-columns:repeat(4,1fr)}
+}
+
+/* Safe-area inset for notched phones (landscape housing) */
+@supports(padding:max(0px)){
+  .container{padding-left:max(14px,env(safe-area-inset-left));padding-right:max(14px,env(safe-area-inset-right))}
+  header.top{padding-left:max(0px,env(safe-area-inset-left));padding-right:max(0px,env(safe-area-inset-right));padding-top:max(0px,env(safe-area-inset-top))}
 }
 
 .search-wrap{position:relative;max-width:1400px;margin:0 auto;padding:10px 14px 0}
@@ -582,10 +680,10 @@ footer{border-top:1px solid var(--border);margin-top:26px;padding:18px 14px;text
 }
 .search-item:last-child{border-bottom:none}
 .search-item:hover{background:rgba(41,98,255,.1)}
-.search-item .si-sym{font-weight:700;min-width:90px}
-.search-item .si-name{color:var(--muted);flex:1}
-.search-item .si-price{color:var(--txt);text-align:right;min-width:90px}
-.search-item .si-chg{text-align:right;min-width:70px}
+.search-item .si-sym{font-weight:700;min-width:44px;flex-shrink:0}
+.search-item .si-name{color:var(--muted);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.search-item .si-price{color:var(--txt);text-align:right;min-width:70px;flex-shrink:0}
+.search-item .si-chg{text-align:right;min-width:52px;flex-shrink:0}
 .search-count{font-size:10px;color:var(--dim);padding:6px 14px;border-top:1px solid var(--border);font-family:var(--mono)}
 
 .multi-chart-grid{display:grid;grid-template-columns:1fr;gap:10px}
@@ -3409,14 +3507,33 @@ function masterSignal(tfScores){
   return{score:base,type:base>15?'BUY':base<-15?'SELL':'WAIT',breakdown:breakdown};
 }
 
+// Cached kline fetch for the scanner: 1H/1D candles change slowly, so
+// reuse the in-memory candle cache across the 2-minute scans instead of
+// firing ~20 kline requests each cycle. TTL is generous but safe for these TF.
+var scanCache={};
+function scanKlineFetch(sym,tfKey){
+  var key=sym+'|'+tfKey;
+  var hit=scanCache[key];
+  if(hit&&Date.now()-hit.ts<60000)return Promise.resolve(hit.candles);
+  // also prefer the main chart's current candles for the active symbol
+  if(md.series.symbol===sym&&mdTf(md.series.tf)===tfKey&&state.candles&&state.candles.length>2){
+    scanCache[key]={ts:Date.now(),candles:state.candles.slice()};
+    return Promise.resolve(scanCache[key].candles);
+  }
+  return jget('https://api.binance.com/api/v3/klines?symbol='+sym+'&interval='+tfKey+'&limit=60').then(function(data){
+    var candles=data.map(function(k){return{t:k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]}}).filter(mdVal.candle);
+    if(candles.length)scanCache[key]={ts:Date.now(),candles:candles};
+    return candles;
+  });
+}
+
 function scanSignals(){
   var badge=$('sigCount');
   if(badge)badge.textContent='SCANNING...';
   if(badge)badge.style.background='rgba(41,98,255,.15)';
   var promises=SIGNAL_COINS.map(function(sym){
     var tfPromises=TF_LIST.map(function(tf){
-      return jget('https://api.binance.com/api/v3/klines?symbol='+sym+'&interval='+tf.key+'&limit='+tf.limit).then(function(data){
-        var candles=data.map(function(k){return{t:k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]}});
+      return scanKlineFetch(sym,tf.key).then(function(candles){
         return scoreTimeframe(candles);
       }).catch(function(){return null});
     });
