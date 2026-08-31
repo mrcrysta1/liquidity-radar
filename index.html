@@ -1114,6 +1114,231 @@ const state={
   mem:{lastCoin:null,topics:[]}
 };
 
+// ============================================================
+// PHASE 1 — MARKET DATA FOUNDATION
+// Centralized store, validation, adapter, rate-limit, health,
+// candle cache, symbol/timeframe normalization, diagnostics.
+// Existing `state.*` and consumers are preserved unchanged.
+// ============================================================
+
+// --- Symbol / timeframe normalization -----------------------
+const mdTfs=['1m','5m','15m','1h','4h','1d'];
+function mdSym(s){
+  if(!s)return null;
+  s=String(s).trim().toUpperCase().replace(/-/g,'');
+  if(!/USDT$/.test(s))s=s+'USDT';
+  return s;
+}
+function mdTf(t){
+  if(!t)return '15m';
+  t=String(t).toLowerCase().trim();
+  if(t==='60m'||t==='60')return '1h';
+  if(t==='24h'||t==='1d'||t==='d')return '1d';
+  if(t==='240'||t==='4h')return '4h';
+  if(mdTfs.indexOf(t)!==-1)return t;
+  return '15m';
+}
+function mdFlat(c){if(!c)return null;return{t:c.t,o:+c.o,h:+c.h,l:+c.l,c:+c.c,v:+c.v}}
+function mdFromK(k){
+  if(!k||!Array.isArray(k))return null;
+  return{t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]};
+}
+
+// --- Data validation ----------------------------------------
+const mdVal={
+  num(v){return typeof v==='number'&&isFinite(v)&&Math.abs(v)<1e15},
+  pos(v){return mdVal.num(v)&&v>=0},
+  price(p){return mdVal.pos(p)&&p>0&&p<1e9},
+  obj(x){return x&&typeof x==='object'},
+  sym(s){return typeof s==='string'&&/^[A-Z0-9]{4,20}$/.test(s)&&/USDT$/.test(s)},
+  candle(c){
+    return mdVal.obj(c)&&mdVal.pos(c.t)
+      &&mdVal.price(c.o)&&mdVal.price(c.h)&&mdVal.price(c.l)&&mdVal.price(c.c)
+      &&mdVal.pos(c.v)
+      &&Math.min(c.o,c.c)>=c.l&&Math.max(c.o,c.c)<=c.h+0.000001
+      &&c.h>=c.l;
+  },
+  wsMsg(d){
+    if(!mdVal.obj(d))return false;
+    if(d.e==='kline'){return d.k&&mdVal.candle(mdFlat(d.k))}
+    if(d.e==='24hrTicker'){return mdVal.price(+d.c)}
+    if(d.e==='depthUpdate'||d.e==='depth'){
+      return Array.isArray(d.bids)&&Array.isArray(d.asks)
+        &&d.bids.length>0&&d.asks.length>0;
+    }
+    // unknown stream type -> reject (defensive; kinds we know pass through)
+    return d.e!==undefined||d.k!==undefined||d.c!==undefined||d.bids!==undefined;
+  }
+};
+
+// --- Centralized market data store --------------------------
+const md={
+  // normalized view (mirrors state.* but validated/normalized)
+  tickers:{},candles:{},ob:{},fr:{},oi:{},
+  lastUpdate:{tickers:0,candles:0,ob:0,fr:0,oi:0,whales:0,fg:0},
+  conn:{ws:{up:false,reconnects:0,streams:0,age:0},rest:{ok:true,errors:0,lastOk:0}},
+  series:{symbol:'',tf:''}
+};
+function mdStoreTicker(sym,t){
+  if(!mdVal.sym(sym)||!mdVal.obj(t)||!mdVal.price(t.last))return false;
+  md.tickers[sym]=t;
+  md.lastUpdate.tickers=Date.now();
+  return true;
+}
+function mdStoreCandles(sym,tf,arr){
+  if(!mdVal.sym(sym)||!mdTf(tf)||!Array.isArray(arr)||!arr.length)return false;
+  const ok=arr.filter(mdVal.candle);
+  if(ok.length<Math.min(2,arr.length))return false;
+  const key=sym+'|'+mdTf(tf);
+  md.candles[key]=ok;
+  md.lastUpdate.candles=Date.now();
+  return true;
+}
+function mdStoreOB(sym,ob){
+  if(!mdVal.sym(sym)||!mdVal.obj(ob)||!Array.isArray(ob.bids)||!Array.isArray(ob.asks)
+    ||!ob.bids.length||!ob.asks.length)return false;
+  const good=mdVal.price(+ob.bids[0][0])&&mdVal.price(+ob.asks[0][0])&&+ob.bids[0][0]<+ob.asks[0][0];
+  if(!good)return false;
+  md.ob[sym]={bids:ob.bids.map(b=>[+b[0],+b[1]]),asks:ob.asks.map(a=>[+a[0],+a[1]])};
+  md.lastUpdate.ob=Date.now();
+  return true;
+}
+function mdDataAge(kind){
+  const t=md.lastUpdate[kind]||0;
+  if(!t)return null;
+  return Date.now()-t;
+}
+// staleness thresholds (ms)
+const mdStale={tickers:6000,candles:90000,ob:6000,fr:45000,oi:45000,whales:30000,fg:360000};
+
+// --- REST adapter: dedup + throttling + retry/backoff -------
+const rl={map:{},queue:0,minGap:90,last:0};
+function rlThrottle(url){
+  const now=Date.now();
+  if(now-rl.last>=rl.minGap){rl.last=now;rl.queue=0;return true}
+  rl.queue++;
+  return false;
+}
+async function rawFetch(url,to){
+  const c=new AbortController();const h=setTimeout(()=>c.abort(),to||12000);
+  try{const r=await fetch(url,{signal:c.signal});if(!r.ok)throw new Error('HTTP '+r.status);return await r.json()}
+  finally{clearTimeout(h)}
+}
+const mdReqs={};
+async function jget2(url,opts){
+  opts=opts||{};
+  const retries=opts.retries!=null?opts.retries:1;
+  const to=opts.to||12000;
+  // dedup: coalesce concurrent identical in-flight requests
+  if(opts.dedup!==false&&mdReqs[url]){
+    return mdReqs[url];
+  }
+  const doFetch=function(){
+    try{return rawFetch(url,to)}catch(e){throw new Error('network')}
+  };
+  if(opts.dedup!==false){
+    mdReqs[url]=doFetch().catch(err=>{delete mdReqs[url];throw err});
+  }
+  let attempt=0,delay=600;
+  const run=opts.dedup!==false?mdReqs[url]:doFetch();
+  const p=run.then(res=>{
+    if(opts.dedup!==false)delete mdReqs[url];
+    return res;
+  }).catch(function(err){
+    if(attempt>=retries)throw err;
+    attempt++;
+    return new Promise(function(r2){setTimeout(r2,delay+(attempt*250))}).then(function(){
+      if(opts.dedup!==false)delete mdReqs[url];
+      return rawFetch(url,to);
+    });
+  });
+  return p;
+}
+// throttle wrapper (fire-and-forget; dropped calls simply wait for next poll)
+function rlSchedule(fn){
+  if(rlThrottle())fn();
+  else setTimeout(fn,Math.max(0,rl.minGap-(Date.now()-rl.last)));
+}
+// health integration for REST
+function mdRestOk(){md.conn.rest.ok=true;md.conn.rest.lastOk=Date.now();md.conn.rest.errors=0}
+function mdRestErr(){md.conn.rest.ok=false;md.conn.rest.errors++}
+
+// --- Lightweight historical candle cache --------------------
+const mdCache={data:{},ttl:45000};
+function mdCacheGet(sym,tf){
+  const k=sym+'|'+mdTf(tf);
+  const e=mdCache.data[k];
+  if(e&&Date.now()-e.ts<mdCache.ttl)return e.candles;
+  return null;
+}
+function mdCachePut(sym,tf,arr){
+  if(!Array.isArray(arr)||!arr.length)return;
+  mdCache.data[sym+'|'+mdTf(tf)]={ts:Date.now(),candles:arr};
+}
+
+// --- Health monitor -----------------------------------------
+const mdHealth={
+  wsUp:false,wsStreams:0,wsReconnects:0,restOk:true,restErrors:0,
+  lastWsMsg:0,lastRestOk:0,staleWarn:[]
+};
+function mdHearbeat(kind){
+  if(kind==='ws'){mdHealth.lastWsMsg=Date.now();mdHealth.wsUp=true}
+  else if(kind==='rest'){mdHealth.lastRestOk=Date.now();mdHealth.restOk=true}
+}
+function mdRefreshHealth(){
+  const now=Date.now();
+  mdHealth.staleWarn.length=0;
+  if(md.conn.ws.streams>0&&now-mdHealth.lastWsMsg>8000)mdHealth.staleWarn.push('WS stalled');
+  if(mdHealth.lastWsMsg===0)mdHealth.staleWarn.push('no live stream');
+  // report ages per data kind
+  Object.keys(mdStale).forEach(function(k){
+    const a=mdDataAge(k);
+    if(a!=null&&a>mdStale[k])mdHealth.staleWarn.push(k+' stale '+Math.round(a/1000)+'s');
+  });
+  return mdHealth;
+}
+// non-disruptive UI: augment the existing status pill (no new layout)
+function mdPill(){
+  const pill=$('statusPill'),txt=$('statusTxt');
+  if(!pill||!txt)return;
+  const h=mdRefreshHealth();
+  const live=md.conn.ws.streams>0;
+  const stale=h.staleWarn.length>0;
+  pill.classList.toggle('off',!live||stale);
+  if(!live){txt.textContent='CONNECTING…';return}
+  if(stale){txt.textContent='RECONNECTING…';return}
+  txt.textContent='LIVE · '+md.conn.ws.streams+' STREAMS';
+}
+
+// --- Diagnostics / debug mode --------------------------------
+const mdDebug={
+  on:(function(){try{return /[?&]debug=1/.test(location.search)||localStorage.getItem('lr-debug')==='1'}catch(e){return false}})(),
+  log:null,
+  snapshot:function(){
+    return{
+      ws:mdHealth,
+      conn:md.conn,
+      lastUpdate:md.lastUpdate,
+      age:{tickers:mdDataAge('tickers'),candles:mdDataAge('candles'),ob:mdDataAge('ob'),fr:mdDataAge('fr'),oi:mdDataAge('oi')},
+      series:md.series,
+      cacheKeys:Object.keys(mdCache.data).length,
+      stateSymbol:state.symbol,stateTf:state.tf
+    };
+  }
+};
+mdDebug.log=function(kind,msg){if(mdDebug.on){try{console.log('[md:'+kind+']',msg)}catch(e){}}};
+function mdToggleDebug(){
+  try{
+    mdDebug.on=!mdDebug.on;
+    localStorage.setItem('lr-debug',mdDebug.on?'1':'0');
+  }catch(e){}
+  if(mdDebug.on)console.log('[md] debug ON',mdDebug.snapshot());
+  return mdDebug.on;
+}
+window.mdDebug=mdDebug;
+window.mdSnapshot=function(){return mdDebug.snapshot()};
+window.mdToggleDebug=mdToggleDebug;
+
 const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function fmt(n,d){d=d==null?2:d;if(!isFinite(n))return'—';return n.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d})}
@@ -1127,7 +1352,18 @@ function sigOf(p){return p>3?['STRONG BUY','b-green']:p>0.8?['BUY','b-green']:p>
 function showToast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),3200)}
 function openModal(id){const m=$(id);if(m){m.classList.add('open')}}
 function closeModal(id){const m=$(id);if(m){m.classList.remove('open')}}
-async function jget(url,to){to=to||12000;const c=new AbortController();const h=setTimeout(()=>c.abort(),to);try{const r=await fetch(url,{signal:c.signal});if(!r.ok)throw new Error('HTTP '+r.status);return await r.json()}finally{clearTimeout(h)}}
+async function jget(url,to){
+  to=to||12000;
+  const isBinance=/binance\.com/.test(url);
+  try{
+    const res=await jget2(url,{to:to,retries:isBinance?1:0,dedup:true});
+    if(isBinance)mdRestOk();
+    return res;
+  }catch(e){
+    if(isBinance)mdRestErr();
+    throw e;
+  }
+}
 
 const COIN_ALIASES={
   BTC:['bitcoin','btc','btcusdt','satoshi','digital gold','xapo'],
@@ -1702,16 +1938,36 @@ async function fetchTickers(){
 }
 async function fetchKlines(sym){
   try{
-    const inter=state.tf||'15m';
-    const data=await jget('https://api.binance.com/api/v3/klines?symbol='+sym+'&interval='+inter+'&limit=200');
-    state.candles=data.map(k=>({t:k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]}));
+    const inter=mdTf(state.tf||'15m');
+    const data=await jget('https://api.binance.com/api/v3/klines?symbol='+mdSym(sym)+'&interval='+inter+'&limit=200');
+    const candles=data.map(mdFromK).filter(Boolean);
+    if(!candles.length)throw new Error('empty');
+    state.candles=candles;
+    mdStoreCandles(state.symbol,inter,candles);
+    mdCachePut(state.symbol,inter,candles);
     updateChartData();runAnalytics();
-  }catch(e){console.warn('klines',e);showToast('Klines unavailable — check network/Binance access')}
+  }catch(e){
+    console.warn('klines',e);
+    // REST fallback: serve recent cached candles so the chart isn't left blank
+    const inter=mdTf(state.tf);
+    const cached=mdCacheGet(state.symbol,inter)||md.candles[mdSym(state.symbol)+'|'+inter]||null;
+    if(cached&&cached.length){
+      state.candles=cached;
+      updateChartData();runAnalytics();
+      $('wsKlineState').textContent='CACHE';$('wsKlineState').className='badge b-amber';
+      mdDebug.log('klines','serving cached '+state.symbol+' '+inter);
+      showToast('Klines live stream down — showing cached data');
+    }else{
+      showToast('Klines unavailable — check network/Binance access');
+    }
+  }
 }
 async function fetchOB(){
   try{
-    const d=await jget('https://api.binance.com/api/v3/depth?symbol='+state.symbol+'&limit=15');
-    state.ob={bids:d.bids.map(b=>[+b[0],+b[1]]),asks:d.asks.map(a=>[+a[0],+a[1]])};
+    const d=await jget('https://api.binance.com/api/v3/depth?symbol='+mdSym(state.symbol)+'&limit=15');
+    const ob={bids:d.bids.map(b=>[+b[0],+b[1]]),asks:d.asks.map(a=>[+a[0],+a[1]])};
+    if(!mdStoreOB(state.symbol,ob))return;
+    state.ob=ob;
     renderOB();
   }catch(e){console.warn('depth',e)}
 }
@@ -1812,34 +2068,66 @@ async function fetchBreaking(){
 }
 
 function setWsStatus(){
+  // primary status derived from live stream count (unchanged behavior)
   const ok=state.wsOpen>0;
   $('statusPill').classList.toggle('off',!ok);
   $('statusTxt').textContent=ok?('LIVE · '+state.wsOpen+' STREAMS'):'RECONNECTING…';
+  // secondary: refresh health monitor + pill (non-disruptive augmentation)
+  try{mdPill()}catch(e){}
 }
 let wsTk=null,wsKl=null,wsDp=null;
 function closeWS(ws){if(ws){ws._dead=true;try{ws.close()}catch(e){}}}
 function connectStreams(){
   closeWS(wsTk);closeWS(wsKl);closeWS(wsDp);
   wsTk=null;wsKl=null;wsDp=null;
-  const s=state.symbol.toLowerCase();
+  const s=mdSym(state.symbol).toLowerCase();
+  const tf=mdTf(state.tf);
+  md.series={symbol:state.symbol,tf:tf};
+  // exponential backoff per stream with jitter + attempt cap
+  const backoff={n:0}; // multiplier: (2^n) * 1200ms, capped 30s
   const make=function(key,url,onMsg){
     let ws;
-    try{ws=new WebSocket(url)}catch(e){return null}
+    try{ws=new WebSocket(url)}catch(e){mdDebug.log('ws','create fail '+key);return null}
     if(key==='tk')wsTk=ws;else if(key==='kl')wsKl=ws;else wsDp=ws;
-    ws.onopen=function(){state.wsOpen++;setWsStatus()};
-    ws.onmessage=function(ev){try{onMsg(JSON.parse(ev.data))}catch(e){}};
-    ws.onclose=function(){
-      state.wsOpen=Math.max(0,state.wsOpen-1);setWsStatus();
-      if(!ws._dead)setTimeout(function(){if(state[key+'_want']===url&&!ws._dead)make(key,url,onMsg)},3000);
+    const attempts=(state[key+'_retry']=((state[key+'_retry']||0)+1));
+    ws._attempts=attempts;
+    ws.onopen=function(){
+      state.wsOpen++;state[key+'_retry']=0;
+      mdHearbeat('ws');md.conn.ws.streams=state.wsOpen;md.conn.ws.up=true;
+      setWsStatus();
     };
-    ws.onerror=function(){};
+    ws.onmessage=function(ev){
+      var d=null;
+      try{d=JSON.parse(ev.data)}catch(e){mdDebug.log('ws','bad json '+key);return}
+      if(!mdVal.wsMsg(d)){mdDebug.log('ws','invalid '+key,ev.data&&ev.data.slice?ev.data.slice(0,60):'');return}
+      mdHearbeat('ws');
+      try{onMsg(d)}catch(e){mdDebug.log('ws','handler '+key,e)}
+    };
+    ws.onclose=function(){
+      state.wsOpen=Math.max(0,state.wsOpen-1);md.conn.ws.streams=Math.max(0,md.conn.ws.streams-1);
+      setWsStatus();
+      if(ws._dead)return;
+      md.conn.ws.reconnects++;mdHealth.wsReconnects++;
+      // subscription restoration: only revive if this stream is still wanted & symbol unchanged
+      if(state[key+'_want']!==url||state.symbol!==md.series.symbol)return;
+      const exp=(state[key+'_retry']||0);
+      const cap=30;
+      backoff.n=Math.min(backoff.n+1,cap);
+      const delay=Math.min(30000,1200*Math.pow(2,Math.min(exp,cap)))+Math.floor(Math.random()*400);
+      setTimeout(function(){
+        if(!ws._dead&&state[key+'_want']===url&&state.symbol===md.series.symbol)make(key,url,onMsg);
+      },delay);
+    };
+    ws.onerror=function(){/* recovery handled via onclose */};
     state[key+'_want']=url;
     return ws;
   };
   make('tk','wss://stream.binance.com:9443/ws/'+s+'@ticker',function(d){
+    if(!mdVal.price(+d.c))return;
     const t=state.tickers[state.symbol]||{last:0,pct:0,high:0,low:0,qvol:0,trades:0};
     t.last=+d.c;t.pct=+d.P;t.high=+d.h;t.low=+d.l;t.qvol=+d.q;t.trades=+d.n;
     state.tickers[state.symbol]=t;
+    mdStoreTicker(state.symbol,{last:t.last,pct:t.pct,high:t.high,low:t.low,qvol:t.qvol,trades:t.trades});
     renderHero();
     document.querySelectorAll('#tickerTrack [data-sym="'+state.symbol+'"]').forEach(el=>{
       el.querySelector('.tp').textContent='$'+pfmt(t.last);
@@ -1848,9 +2136,10 @@ function connectStreams(){
       cEl.textContent=(t.pct>0?'+':'')+t.pct.toFixed(2)+'%';
     });
   });
-  make('kl','wss://stream.binance.com:9443/ws/'+s+'@kline_15m',function(d){
+  make('kl','wss://stream.binance.com:9443/ws/'+s+'@kline_'+tf,function(d){
     const k=d.k;
     const c={t:k.t,o:+k.o,h:+k.h,l:+k.l,c:+k.c,v:+k.v};
+    if(!mdVal.candle(c))return;
     const arr=state.candles;
     const ks=$('wsKlineState');
     ks.textContent='WS LIVE';ks.className='badge b-green';
@@ -1860,13 +2149,16 @@ function connectStreams(){
       arr.push(c);
       if(arr.length>240)arr.shift();
     }else{return}
+    mdStoreCandles(state.symbol,tf,arr);
     updateChartLast(c);
     state.klineTick++;
     if(state.klineTick%8===0||k.x)runAnalytics();
   });
   make('dp','wss://stream.binance.com:9443/ws/'+s+'@depth15@100ms',function(d){
     if(!d.bids||!d.bids.length)return;
-    state.ob={bids:d.bids.map(b=>[+b[0],+b[1]]),asks:d.asks.map(a=>[+a[0],+a[1]])};
+    const ob={bids:d.bids.map(b=>[+b[0],+b[1]]),asks:d.asks.map(a=>[+a[0],+a[1]])};
+    if(!mdStoreOB(state.symbol,ob))return;
+    state.ob=ob;
     if(!renderOB._pend){renderOB._pend=true;requestAnimationFrame(function(){renderOB();renderOB._pend=false})}
   });
 }
@@ -2498,9 +2790,10 @@ document.querySelectorAll('#tfSwitch .tf-btn').forEach(btn=>{
     document.querySelectorAll('#tfSwitch .tf-btn').forEach(b=>b.classList.remove('active'));
     btn.classList.add('active');
     const tf=btn.dataset.tf;
-    state.tf=tf;
-    $('chartTitle').textContent='Price Action · '+TF_LABELS[tf]+' Candles';
+    state.tf=mdTf(tf);
+    $('chartTitle').textContent='Price Action · '+TF_LABELS[state.tf]+' Candles';
     fetchKlines(state.symbol);
+    connectStreams(); // restart live kline stream at the new, consistent interval
   });
 });
 
@@ -2692,7 +2985,7 @@ function init(){
   setInterval(fetchFG,300000);
   setInterval(fetchNews,180000);
   setInterval(fetchForexEvents,600000);
-  setInterval(function(){renderPaper();renderMemeUniverse()},20000);
+  setInterval(function(){renderMemeUniverse();mdPill()},20000);
 }
 
 function initTheme(){
@@ -2821,14 +3114,13 @@ function initMultiCharts(){
 function mcAdd(sym,interval){
   const id=mcIdCounter++;
   mcPanels.push({id:id,sym:sym,interval:interval,chart:null,candleSeries:null,volSeries:null,ws:null,candles:[]});
-  renderMCGrid();
-  mcLoadChart(id);
+  renderMCGrid(); // renderMCGrid -> mcInitChart(p) creates chart + loads data for each panel
 }
 
 function mcRemove(id){
   const idx=mcPanels.findIndex(p=>p.id===id);
   if(idx===-1)return;
-  if(mcPanels[idx].ws)try{mcPanels[idx].ws.close()}catch(e){}
+  if(mcPanels[idx].ws){mcPanels[idx].ws._dead=true;try{mcPanels[idx].ws.close()}catch(e){}}
   if(mcPanels[idx].chart)try{mcPanels[idx].chart.remove()}catch(e){}
   mcPanels.splice(idx,1);
   renderMCGrid();
@@ -2892,30 +3184,47 @@ function mcInitChart(p){
 }
 
 function mcLoadData(p){
-  jget('https://api.binance.com/api/v3/klines?symbol='+p.sym+'&interval='+p.interval+'&limit=120').then(function(data){
-    p.candles=data.map(function(k){return{t:k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]}});
+  const sym=mdSym(p.sym),iv=mdTf(p.interval);
+  jget('https://api.binance.com/api/v3/klines?symbol='+sym+'&interval='+iv+'&limit=120').then(function(data){
+    const candles=data.map(mdFromK).filter(Boolean);
+    p.candles=candles;
+    mdCachePut(sym,iv,candles);
     if(p.candleSeries){
       p.candleSeries.setData(p.candles.map(mapCandle));
       p.volSeries.setData(p.candles.map(function(c){return{time:Math.floor(c.t/1000),value:c.v,color:c.c>=c.o?'rgba(0,230,118,.3)':'rgba(255,23,68,.3)'}}));
       p.chart.timeScale().fitContent();
     }
     mcConnectWS(p);
-  }).catch(function(e){console.warn('mc load',e)});
+  }).catch(function(e){
+    console.warn('mc load',e);
+    const cached=mdCacheGet(sym,iv);
+    if(cached&&cached.length&&p.candleSeries){
+      p.candles=cached;
+      p.candleSeries.setData(cached.map(mapCandle));
+      p.volSeries.setData(cached.map(function(c){return{time:Math.floor(c.t/1000),value:c.v,color:c.c>=c.o?'rgba(0,230,118,.3)':'rgba(255,23,68,.3)'}}));
+    }
+    mcConnectWS(p);
+  });
 }
 
 function mcConnectWS(p){
-  if(p.ws)try{p.ws.close()}catch(e){}
-  const s=p.sym.toLowerCase();
-  const iv=p.interval;
+  if(p.ws&&p.ws._dead===false){p.ws._dead=true;try{p.ws.close()}catch(e){}}
+  const s=mdSym(p.sym).toLowerCase();
+  const iv=mdTf(p.interval);
   const url='wss://stream.binance.com:9443/ws/'+s+'@kline_'+iv;
   try{
     const ws=new WebSocket(url);
+    ws._dead=false;
     p.ws=ws;
+    ws._expectSym=p.sym;ws._expectIv=p.interval;
+    ws.onopen=function(){mdHearbeat('ws')};
     ws.onmessage=function(ev){
       try{
         const d=JSON.parse(ev.data);
         const k=d.k;
         const c={t:k.t,o:+k.o,h:+k.h,l:+k.l,c:+k.c,v:+k.v};
+        if(!mdVal.candle(c))return;
+        mdHearbeat('ws');
         const arr=p.candles;
         if(arr.length&&arr[arr.length-1].t===c.t)arr[arr.length-1]=c;
         else if(arr.length&&c.t>arr[arr.length-1].t){arr.push(c);if(arr.length>200)arr.shift()}
@@ -2924,17 +3233,26 @@ function mcConnectWS(p){
           p.candleSeries.update(mapCandle(c));
           p.volSeries.update({time:Math.floor(c.t/1000),value:c.v,color:c.c>=c.o?'rgba(0,230,118,.3)':'rgba(255,23,68,.3)'});
         }
-      }catch(e){}
+      }catch(e){mdDebug.log('ws','mc handler',e)}
     };
-    ws.onclose=function(){if(!ws._dead)setTimeout(function(){if(!ws._dead)mcConnectWS(p)},5000)};
-  }catch(e){}
+    ws.onclose=function(){
+      // only reconnect if the panel still exists and this socket is still current
+      if(ws._dead)return;
+      if(!mcPanels.some(function(x){return x===p&&x.ws===ws}))return;
+      if(p.sym!==ws._expectSym||p.interval!==ws._expectIv)return;
+      md.conn.ws.reconnects++;mdHealth.wsReconnects++;
+      const exp=(p._retry=(p._retry||0)+1);
+      const delay=Math.min(30000,1200*Math.pow(2,Math.min(exp,6)))+Math.floor(Math.random()*300);
+      setTimeout(function(){if(!ws._dead&&mcPanels.indexOf(p)!==-1&&p.ws===ws)mcConnectWS(p)},delay);
+    };
+  }catch(e){mdDebug.log('ws','mc create',e)}
 }
 
 function mcChangeInterval(id,iv){
   const p=mcPanels.find(function(x){return x.id===id});
   if(!p)return;
   p.interval=iv;
-  if(p.ws)try{p.ws.close()}catch(e){}
+  if(p.ws){p.ws._dead=true;try{p.ws.close()}catch(e){}}
   mcLoadData(p);
 }
 
@@ -2943,7 +3261,7 @@ function mcChangeSymbol(id,sym){
   if(!p)return;
   p.sym=sym;
   p.candles=[];
-  if(p.ws)try{p.ws.close()}catch(e){}
+  if(p.ws){p.ws._dead=true;try{p.ws.close()}catch(e){}}
   mcLoadData(p);
   renderMCGrid();
 }
@@ -2951,10 +3269,11 @@ function mcChangeSymbol(id,sym){
 function mcRefreshAll(){
   mcPanels.forEach(function(p){
     if(p.candles.length>0){
-      jget('https://api.binance.com/api/v3/klines?symbol='+p.sym+'&interval='+p.interval+'&limit=5').then(function(data){
+      const sym=mdSym(p.sym),iv=mdTf(p.interval);
+      jget('https://api.binance.com/api/v3/klines?symbol='+sym+'&interval='+iv+'&limit=5').then(function(data){
         if(data&&data.length){
-          const last=data[data.length-1];
-          const c={t:last[0],o:+last[1],h:+last[2],l:+last[3],c:+last[4],v:+last[5]};
+          const c=mdFromK(data[data.length-1]);
+          if(!c||!mdVal.candle(c))return;
           const arr=p.candles;
           if(arr.length&&arr[arr.length-1].t===c.t)arr[arr.length-1]=c;
           else if(arr.length&&c.t>arr[arr.length-1].t){arr.push(c);if(arr.length>200)arr.shift()}
