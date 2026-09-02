@@ -2009,7 +2009,7 @@ function initChart(){
     const cp=state.candles.find(c=>Math.floor(c.t/1000)===param.time);
     if(cp)renderLegend(cp.o,cp.h,cp.l,cp.c,null,true);
   });
-  chart.subscribeVisibleTimeRangeChange(function(){redrawDrawings()});
+  chart.timeScale().subscribeVisibleTimeRangeChange(function(){redrawDrawings()});
   new ResizeObserver(()=>{
     if(chart&&el.clientWidth)chart.applyOptions({width:el.clientWidth,height:el.clientHeight});
     redrawDrawings();
