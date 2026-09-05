@@ -136,6 +136,30 @@ server.listen(PORT, async () => {
     console.log('--- recent logs ---')
     allLogs.slice(-8).forEach((l) => console.log('  ' + l))
   }
+
+  const missing = (r) => r === undefined || r === null || r === '' || r === '—'
+  const gates = [
+    ['tab buttons rendered', results.tabButtons === 9],
+    ['tab sections rendered', results.sections === 9],
+    [
+      'streams live (LIVE·N STREAMS)',
+      !missing(results['t+15s']) && /^LIVE/.test(results['t+15s'].status),
+    ],
+    ['live hero price present', !missing(results['t+15s']) && !missing(results['t+15s'].heroPrice)],
+    ['ticker populated', !missing(results['t+15s']) && results['t+15s'].tickerCount >= 1],
+    ['symbol selector populated', !missing(results['t+15s']) && results['t+15s'].symSelOpts >= 1],
+    ['chart canvases mounted', !missing(results['t+15s']) && results['t+15s'].canvases >= 8],
+    ['window globals exposed', Object.values(results.globals || {}).every((t) => t === 'function')],
+    ['signal tab activates', results.signalsActive === 'tab-signals'],
+    ['analysis tab activates', results.analysis?.active === 'tab-analysis'],
+    ['no app-level js errors', jsErrors.length === 0],
+  ]
+  console.log('--- verdict ---')
+  const failed = []
+  for (const [name, ok] of gates) {
+    console.log((ok ? 'PASS' : 'FAIL').padEnd(6) + name)
+    if (!ok) failed.push(name)
+  }
   server.close()
-  process.exit(jsErrors.length ? 1 : 0)
+  process.exit(failed.length ? 1 : 0)
 })
