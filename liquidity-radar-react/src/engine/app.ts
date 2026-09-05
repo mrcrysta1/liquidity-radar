@@ -5,42 +5,26 @@
 // sections are progressively being converted to declarative React.
 // @ts-nocheck
 import * as LightweightCharts from 'lightweight-charts'
-
-
-const COINS={
-  BTC:{sym:'BTCUSDT',name:'Bitcoin',icon:'₿',color:'#F7931A'},
-  ETH:{sym:'ETHUSDT',name:'Ethereum',icon:'◆',color:'#627EEA'},
-  SOL:{sym:'SOLUSDT',name:'Solana',icon:'◎',color:'#9945FF'},
-  BNB:{sym:'BNBUSDT',name:'BNB',icon:'⬡',color:'#F3BA2F'},
-  DOGE:{sym:'DOGEUSDT',name:'Dogecoin',icon:'D',color:'#C2A633'},
-  XRP:{sym:'XRPUSDT',name:'XRP',icon:'✕',color:'#25A0E0'},
-  ADA:{sym:'ADAUSDT',name:'Cardano',icon:'🔹',color:'#0033AD'},
-  AVAX:{sym:'AVAXUSDT',name:'Avalanche',icon:'🔺',color:'#E84142'},
-  DOT:{sym:'DOTUSDT',name:'Polkadot',icon:'⚪',color:'#E6007A'},
-  LINK:{sym:'LINKUSDT',name:'Chainlink',icon:'🔗',color:'#2A5ADA'},
-  UNI:{sym:'UNIUSDT',name:'Uniswap',icon:'🦄',color:'#FF007A'},
-  TRUMP:{sym:'TRUMPUSDT',name:'OFFICIAL TRUMP',icon:'🎩',color:'#D4AF37'},
-  PEPE:{sym:'PEPEUSDT',name:'Pepe',icon:'P',color:'#4CAF50'},
-  WIF:{sym:'WIFUSDT',name:'dogwifhat',icon:'🧢',color:'#C08A53'},
-  FLOKI:{sym:'FLOKIUSDT',name:'Floki',icon:'F',color:'#E6B800'},
-  SHIB:{sym:'SHIBUSDT',name:'Shiba Inu',icon:'S',color:'#FFA409'},
-  BONK:{sym:'BONKUSDT',name:'Bonk',icon:'🔨',color:'#FF6600'},
-  POL:{sym:'POLUSDT',name:'Polygon',icon:'⬢',color:'#8247E5'},
-  ARB:{sym:'ARBUSDT',name:'Arbitrum',icon:'🔄',color:'#28A0F0'},
-  OP:{sym:'OPUSDT',name:'Optimism',icon:'🔴',color:'#FF0420'},
-  SUI:{sym:'SUIUSDT',name:'Sui',icon:'💧',color:'#4DA2FF'},
-  APT:{sym:'APTUSDT',name:'Aptos',icon:'🌀',color:'#6FDBC2'},
-  NEAR:{sym:'NEARUSDT',name:'NEAR Protocol',icon:'N',color:'#00C1DE'},
-  FIL:{sym:'FILUSDT',name:'Filecoin',icon:'📦',color:'#0090FF'},
-  AAVE:{sym:'AAVEUSDT',name:'Aave',icon:'👻',color:'#B6509E'},
-  MKR:{sym:'MKRUSDT',name:'Maker',icon:'🧱',color:'#1AAB9B'},
-  INJ:{sym:'INJUSDT',name:'Injective',icon:'💉',color:'#00BFFF'},
-  TIA:{sym:'TIAUSDT',name:'Celestia',icon:'T',color:'#7B2BF9'},
-  SEI:{sym:'SEIUSDT',name:'Sei',icon:'🌊',color:'#9E1F19'}
-};
-const TOP16=['BTC','ETH','SOL','BNB','DOGE','XRP','ADA','AVAX','DOT','LINK','UNI','TRUMP','PEPE','WIF','FLOKI','SHIB'];
-const CELEBS=['TRUMP','DOGE','PEPE','WIF','FLOKI','SHIB','BONK'];
-const TICKER_COINS=['BTC','ETH','SOL','BNB','DOGE','XRP','ADA','TRUMP','PEPE','WIF'];
+import { COINS, TOP16, CELEBS, TICKER_COINS } from '../constants/market'
+import { esc, fmt, pfmt, cfmt, nfmt, timeAgo, chgHtml, sigOf } from '../utils/format'
+import {
+  calcRSI,
+  calcMACD,
+  calcBB,
+  calcATR,
+  volTrend,
+  linReg,
+  emaArr,
+  aiComposite,
+  forecastFrom,
+  supportResistance,
+  smaArr,
+  vwapSeries,
+  macdSeries,
+  calcBBList,
+} from '../utils/indicators'
+import { findCoin, baseOf, coinMeta } from '../utils/coins'
+import { $, showToast, openModal, closeModal } from '../utils/dom'
 
 const state={
   symbol:'BTCUSDT',
@@ -284,19 +268,6 @@ window.mdDebug=mdDebug;
 window.mdSnapshot=function(){return mdDebug.snapshot()};
 window.mdToggleDebug=mdToggleDebug;
 
-const $=(id:any):any=>document.getElementById(id);
-const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-function fmt(n,d){d=d==null?2:d;if(!isFinite(n))return'—';return n.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d})}
-function pfmt(p){if(!isFinite(p))return'—';let d=p>=100?2:p>=1?4:p>=0.01?5:p>=0.0001?6:8;return fmt(p,d)}
-function cfmt(n){if(!isFinite(n))return'—';const a=Math.abs(n);if(a>=1e9)return'$'+fmt(n/1e9,2)+'B';if(a>=1e6)return'$'+fmt(n/1e6,2)+'M';if(a>=1e3)return'$'+fmt(n/1e3,1)+'K';return'$'+fmt(n,0)}
-function nfmt(n){if(!isFinite(n))return'—';const a=Math.abs(n);if(a>=1e9)return fmt(n/1e9,2)+'B';if(a>=1e6)return fmt(n/1e6,2)+'M';if(a>=1e3)return fmt(n/1e3,1)+'K';return fmt(n,2)}
-function timeAgo(ts){const s=Math.max(1,Math.floor((Date.now()-ts)/1000));if(s<60)return s+'s ago';const m=Math.floor(s/60);if(m<60)return m+'m ago';const h=Math.floor(m/60);if(h<24)return h+'h '+(m%60)+'m ago';return Math.floor(h/24)+'d ago'}
-function chgCls(p){return p>0.005?'up':p<-0.005?'down':'flat'}
-function chgHtml(p){return '<span class="chg '+chgCls(p)+'">'+(p>0?'+':'')+p.toFixed(2)+'%</span>'}
-function sigOf(p){return p>3?['STRONG BUY','b-green']:p>0.8?['BUY','b-green']:p>-0.8?['NEUTRAL','b-gray']:p>-3?['SELL','b-red']:['STRONG SELL','b-red']}
-function showToast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),3200)}
-function openModal(id){const m=$(id);if(m){m.classList.add('open')}}
-function closeModal(id){const m=$(id);if(m){m.classList.remove('open')}}
 async function jget(url,to){
   to=to||12000;
   const isBinance=/binance\.com/.test(url);
@@ -308,157 +279,6 @@ async function jget(url,to){
     if(isBinance)mdRestErr();
     throw e;
   }
-}
-
-const COIN_ALIASES={
-  BTC:['bitcoin','btc','btcusdt','satoshi','digital gold','xapo'],
-  ETH:['ethereum','eth','ether','ethusdt','vitalik','buterin'],
-  SOL:['solana','sol','solusdt'],
-  BNB:['bnb','binance coin','binance','bsc','binance smart chain'],
-  DOGE:['dogecoin','doge'],
-  XRP:['xrp','ripple'],
-  ADA:['cardano','ada'],
-  AVAX:['avalanche','avax'],
-  DOT:['polkadot','dot'],
-  LINK:['chainlink','link'],
-  UNI:['uniswap','uni'],
-  POL:['polygon','matic','pol'],
-  TRUMP:['trump','trumpcoin','donald','maga','officialtrump','official trump','trump coin','donald trump'],
-  PEPE:['pepe','peppe','peppy','pepecoin','pepe coin'],
-  WIF:['dogwifhat','wif','dogwithhat','wifhat','dog wif hat','dogwif'],
-  FLOKI:['floki','flokiinu','floki inu'],
-  SHIB:['shiba','shib','shibainu','shiba inu','shiba inu token'],
-  BONK:['bonk','bonkcoin','bonk coin'],
-  ARB:['arbitrum','arb'],
-  OP:['optimism','op'],
-  SUI:['sui'],
-  APT:['aptos','apt'],
-  NEAR:['near protocol','near'],
-  FIL:['filecoin','fil'],
-  AAVE:['aave'],
-  MKR:['maker','mkr'],
-  INJ:['injective','inj'],
-  TIA:['celestia','tia'],
-  SEI:['sei network','sei'],
-  NEIRO:['neiro','neirocoin','neiro eth'],
-  TREMP:['tremp','meme of trump','dark maga']
-};
-
-function findCoin(text){
-  const flat=[];
-  for(const k in COIN_ALIASES)COIN_ALIASES[k].forEach(a=>flat.push({k,a:a}));
-  flat.sort((x,y)=>y.a.length-x.a.length);
-  for(const it of flat){if(new RegExp('\\b'+it.a.replace(/ /g,'\\s+')+'\\b').test(text))return it.k}
-  return null;
-}
-
-function emaArr(v,p){const k=2/(p+1);const o=[v[0]];for(let i=1;i<v.length;i++)o.push(v[i]*k+o[i-1]*(1-k));return o}
-function calcRSI(closes,p){
-  p=p||14;
-  if(closes.length<p+1)return 50;
-  let g=0,l=0;
-  for(let i=1;i<=p;i++){const d=closes[i]-closes[i-1];if(d>0)g+=d;else l-=d}
-  let ag=g/p,al=l/p;
-  for(let i=p+1;i<closes.length;i++){
-    const d=closes[i]-closes[i-1];
-    ag=(ag*(p-1)+Math.max(d,0))/p;
-    al=(al*(p-1)+Math.max(-d,0))/p;
-  }
-  if(al===0)return 100;
-  return 100-100/(1+ag/al);
-}
-function calcMACD(closes){
-  const e12=emaArr(closes,12),e26=emaArr(closes,26);
-  const line=closes.map((_,i)=>e12[i]-e26[i]);
-  const sig=emaArr(line,9);
-  const hist=line[line.length-1]-sig[sig.length-1];
-  return{macd:line[line.length-1],signal:sig[sig.length-1],hist:hist};
-}
-function calcBB(closes,p,m){
-  p=p||20;m=m||2;
-  const w=closes.slice(-p);
-  const mid=w.reduce((a,b)=>a+b,0)/p;
-  const sd=Math.sqrt(w.reduce((a,b)=>a+(b-mid)*(b-mid),0)/p);
-  const up=mid+m*sd,lo=mid-m*sd,last=closes[closes.length-1];
-  return{mid:mid,up:up,lo:lo,pctB:up===lo?50:(last-lo)/(up-lo)*100};
-}
-function calcATR(candles,p){
-  p=p||14;
-  const w=candles.slice(-(p+1));
-  if(w.length<2)return 0;
-  let s=0;
-  for(let i=1;i<w.length;i++){const tr=Math.max(w[i].h-w[i].l,Math.abs(w[i].h-w[i-1].c),Math.abs(w[i].l-w[i-1].c));s+=tr}
-  return s/(w.length-1);
-}
-function volTrend(vols){
-  if(vols.length<20)return'FLAT';
-  const a=vols.slice(-10).reduce((x,y)=>x+y,0)/10;
-  const b=vols.slice(-20,-10).reduce((x,y)=>x+y,0)/10;
-  if(b===0)return'FLAT';
-  const r=a/b;
-  return r>1.08?'RISING':r<0.92?'FALLING':'FLAT';
-}
-function linReg(y){
-  const n=y.length;if(n<2)return{slope:0,intercept:y[n-1]||0};
-  let sx=0,sy=0,sxy=0,sxx=0;
-  for(let i=0;i<n;i++){sx+=i;sy+=y[i];sxy+=i*y[i];sxx+=i*i}
-  const den=n*sxx-sx*sx;
-  const slope=den?(n*sxy-sx*sy)/den:0;
-  return{slope:slope,intercept:(sy-slope*sx)/n};
-}
-function aiComposite(candles,closes,vols){
-  const last=closes[closes.length-1];
-  const rsi=calcRSI(closes);
-  const macd=calcMACD(closes);
-  const e20=emaArr(closes,20)[closes.length-1];
-  const bb=calcBB(closes);
-  const vt=volTrend(vols);
-  const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
-  let score=0;
-  score+=clamp((50-rsi)/50,-1,1)*22;
-  score+=clamp(macd.hist/(last*0.002),-1,1)*26;
-  score+=clamp((last-e20)/(last*0.012),-1,1)*18;
-  score+=clamp((bb.pctB-50)/50,-1,1)*14;
-  const momSign=closes[closes.length-1]>=closes[closes.length-2]?1:-1;
-  score+=(vt==='RISING'?10:vt==='FALLING'?-10:0)*momSign;
-  score+=clamp((last-bb.mid)/(bb.mid*0.01),-1,1)*10;
-  score=Math.max(-100,Math.min(100,Math.round(score)));
-  let label,color,badge;
-  if(score>45){label='STRONG BUY';color='#00E676';badge='b-green'}
-  else if(score>15){label='BUY';color='#00E676';badge='b-green'}
-  else if(score>-15){label='NEUTRAL';color='#8FA3BF';badge='b-gray'}
-  else if(score>-45){label='SELL';color='#FF1744';badge='b-red'}
-  else{label='STRONG SELL';color='#FF1744';badge='b-red'}
-  return{score:score,label:label,color:color,badge:badge,rsi:rsi,macd:macd,e20:e20,bb:bb,vt:vt,last:last};
-}
-function forecastFrom(closes){
-  const win=closes.slice(-20);
-  const last=closes[closes.length-1];
-  const lr=linReg(win);
-  const slope=lr.slope;
-  const rets=[];
-  for(let i=1;i<closes.length;i++){if(closes[i-1]>0)rets.push(closes[i]/closes[i-1]-1)}
-  const meanR=rets.reduce((a,b)=>a+b,0)/rets.length;
-  const sd=Math.sqrt(rets.reduce((a,b)=>a+(b-meanR)*(b-meanR),0)/rets.length)||0.001;
-  const damp=0.55;
-  const defs=[[1,'1H',4],[4,'4H',16],[8,'8H',32],[24,'24H',96]];
-  const baseConf=[74,62,50,38];
-  const rows=defs.map(function(def,idx){
-    const k=def[2];
-    const pred=last+slope*k*damp;
-    const band=last*sd*Math.sqrt(k)*1.28;
-    const dp=(pred/last-1)*100;
-    const sigOK=Math.abs(slope/last)>0.0002;
-    const conf=Math.max(20,baseConf[idx]+(sigOK?6:-14));
-    return{label:def[1],pred:pred,lo:pred-band,hi:pred+band,dp:dp,conf:conf};
-  });
-  const bias=rows[3].dp>=0?'UP ▲':'DOWN ▼';
-  return{rows:rows,bias:bias};
-}
-function supportResistance(candles){
-  const w=candles.slice(-96);
-  if(!w.length)return null;
-  return{res:Math.max.apply(null,w.map(c=>c.h)),sup:Math.min.apply(null,w.map(c=>c.l))};
 }
 
 let chart=null,candleSeries=null,volSeries=null;
@@ -490,30 +310,6 @@ function applyChartTheme(){
   refreshOverlayColors();
 }
 function mapCandle(c){return{time:Math.floor(c.t/1000),open:c.o,high:c.h,low:c.l,close:c.c}}
-
-// ---- Overlay indicator math helpers ----
-function smaArr(v,p){const o=[];for(let i=0;i<v.length;i++){if(i<p-1){o.push(null);continue}let s=0;for(let j=0;j<p;j++)s+=v[i-j];o.push(s/p)}return o}
-function vwapSeries(candles,period){
-  const p=period||0;
-  const n=candles.length;
-  const out=new Array(n).fill(null);
-  let pv=0,vol=0,start=0;
-  for(let i=0;i<n;i++){
-    const c=candles[i],t=+c.t;
-    const typical=(c.h+c.l+c.c)/3;
-    if(p>0&&i-start>=p){const rem=candles[start];const tpv=((rem.h+rem.l+rem.c)/3)*(rem.v||0);pv-=tpv;vol-=(rem.v||0);start++;}
-    pv+=typical*(c.v||0);vol+=(c.v||0);
-    if(vol>0)out[i]={time:Math.floor(t/1000),value:pv/vol};
-  }
-  return out;
-}
-function macdSeries(closes){
-  const e12=emaArr(closes,12),e26=emaArr(closes,26);
-  const line=closes.map((_,i)=>e12[i]-e26[i]);
-  const sig=emaArr(line,9);
-  const hist=line.map((v,i)=>v-(sig[i]!=null?sig[i]:v));
-  return{line:line,sig:sig,hist:hist};
-}
 
 // ---- Overlay / pane series management ----
 function rebuildOverlays(){
@@ -549,15 +345,6 @@ function rebuildOverlays(){
     }
     if(s)s.setData(data.filter(x=>x&&x.value!=null&&isFinite(x.value)));
   });
-}
-function calcBBList(closes,p){
-  const out=[];
-  for(let i=0;i<closes.length;i++){
-    if(i<p-1){out.push({mid:null,up:null,lo:null});continue}
-    const bb=calcBB(closes.slice(0,i+1),p);
-    out.push(bb);
-  }
-  return out;
 }
 function refreshOverlayColors(){
   if(!chartState.overlaySeries)return;
@@ -1017,9 +804,6 @@ function runAnalytics(){
   renderAnalysis();
   document.title=baseOf(state.symbol)+' '+pfmt(last)+' · Liquidity Radar';
 }
-function baseOf(sym){for(const k in COINS)if(COINS[k].sym===sym)return k;return sym.replace('USDT','')}
-function coinMeta(sym){const b=baseOf(sym);return COINS[b]||{sym:sym,name:b,icon:'🪙',color:'#2962FF'}}
-
 function renderOB(){
   const bids=state.ob.bids,asks=state.ob.asks;
   if(!bids.length||!asks.length)return;
