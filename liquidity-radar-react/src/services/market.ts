@@ -298,7 +298,7 @@ export function mdPill(): void {
 
 export const mdDebug: {
   on: boolean
-  log: (kind: string, msg: unknown) => void
+  log: (kind: string, msg: unknown, extra?: unknown) => void
   snapshot: () => unknown
 } = {
   on: (function () {

@@ -6,7 +6,7 @@
 // @ts-nocheck
 import * as LightweightCharts from 'lightweight-charts'
 import { COINS, TOP16, CELEBS, TICKER_COINS } from '../constants/market'
-import { esc, fmt, pfmt, cfmt, nfmt, timeAgo, chgHtml, sigOf } from '../utils/format'
+import { esc, fmt, pfmt, cfmt, nfmt, timeAgo, chgHtml, chgCls, sigOf } from '../utils/format'
 import {
   calcRSI,
   calcMACD,
@@ -53,6 +53,7 @@ import {
 } from '../services/market'
 import { jget, jget2 } from '../api/client'
 import { storageGet, storageSet, storageGetRaw, storageSetRaw } from '../services/storage'
+import { connectStreams } from '../services/streams'
 import {
   initChart,
   applyChartTheme,
@@ -427,93 +428,28 @@ function setWsStatus(){
   // secondary: refresh health monitor + pill (non-disruptive augmentation)
   try{mdPill()}catch(e){}
 }
-let wsTk=null,wsKl=null,wsDp=null;
-function closeWS(ws){if(ws){ws._dead=true;try{ws.close()}catch(e){}}}
-function connectStreams(){
-  closeWS(wsTk);closeWS(wsKl);closeWS(wsDp);
-  wsTk=null;wsKl=null;wsDp=null;
-  const s=mdSym(state.symbol).toLowerCase();
-  const tf=mdTf(state.tf);
-  md.series={symbol:state.symbol,tf:tf};
-  // exponential backoff per stream with jitter + attempt cap
-  const backoff={n:0}; // multiplier: (2^n) * 1200ms, capped 30s
-  const make=function(key,url,onMsg){
-    let ws;
-    try{ws=new WebSocket(url)}catch(e){mdDebug.log('ws','create fail '+key);return null}
-    if(key==='tk')wsTk=ws;else if(key==='kl')wsKl=ws;else wsDp=ws;
-    const attempts=(state[key+'_retry']=((state[key+'_retry']||0)+1));
-    ws._attempts=attempts;
-    ws.onopen=function(){
-      state.wsOpen++;state[key+'_retry']=0;
-      mdHearbeat('ws');md.conn.ws.streams=state.wsOpen;md.conn.ws.up=true;
-      setWsStatus();
-    };
-    ws.onmessage=function(ev){
-      var d=null;
-      try{d=JSON.parse(ev.data)}catch(e){mdDebug.log('ws','bad json '+key);return}
-      if(!mdVal.wsMsg(d)){mdDebug.log('ws','invalid '+key,ev.data&&ev.data.slice?ev.data.slice(0,60):'');return}
-      mdHearbeat('ws');
-      try{onMsg(d)}catch(e){mdDebug.log('ws','handler '+key,e)}
-    };
-    ws.onclose=function(){
-      state.wsOpen=Math.max(0,state.wsOpen-1);md.conn.ws.streams=Math.max(0,md.conn.ws.streams-1);
-      setWsStatus();
-      if(ws._dead)return;
-      md.conn.ws.reconnects++;mdHealth.wsReconnects++;
-      // subscription restoration: only revive if this stream is still wanted & symbol unchanged
-      if(state[key+'_want']!==url||state.symbol!==md.series.symbol)return;
-      const exp=(state[key+'_retry']||0);
-      const cap=30;
-      backoff.n=Math.min(backoff.n+1,cap);
-      const delay=Math.min(30000,1200*Math.pow(2,Math.min(exp,cap)))+Math.floor(Math.random()*400);
-      setTimeout(function(){
-        if(!ws._dead&&state[key+'_want']===url&&state.symbol===md.series.symbol)make(key,url,onMsg);
-      },delay);
-    };
-    ws.onerror=function(){/* recovery handled via onclose */};
-    state[key+'_want']=url;
-    return ws;
-  };
-  make('tk','wss://stream.binance.com:9443/ws/'+s+'@ticker',function(d){
-    if(!mdVal.price(+d.c))return;
-    const t=state.tickers[state.symbol]||{last:0,pct:0,high:0,low:0,qvol:0,trades:0};
-    t.last=+d.c;t.pct=+d.P;t.high=+d.h;t.low=+d.l;t.qvol=+d.q;t.trades=+d.n;
-    state.tickers[state.symbol]=t;
-    mdStoreTicker(state.symbol,{last:t.last,pct:t.pct,high:t.high,low:t.low,qvol:t.qvol,trades:t.trades});
-    renderHero();
-    document.querySelectorAll('#tickerTrack [data-sym="'+state.symbol+'"]').forEach(el=>{
-      el.querySelector('.tp').textContent='$'+pfmt(t.last);
-      const cEl=el.querySelector('.chg');
-      cEl.className='chg '+chgCls(t.pct);
-      cEl.textContent=(t.pct>0?'+':'')+t.pct.toFixed(2)+'%';
+const streamCb={
+  onStatus:setWsStatus,
+  onHero:renderHero,
+  onTickerLive:function(t){
+    document.querySelectorAll('#tickerTrack [data-sym="'+state.symbol+'"]').forEach(function(el){
+    el.querySelector('.tp').textContent='$'+pfmt(t.last);
+    const cEl=el.querySelector('.chg');
+    cEl.className='chg '+chgCls(t.pct);
+    cEl.textContent=(t.pct>0?'+':'')+t.pct.toFixed(2)+'%';
     });
-  });
-  make('kl','wss://stream.binance.com:9443/ws/'+s+'@kline_'+tf,function(d){
-    const k=d.k;
-    const c={t:k.t,o:+k.o,h:+k.h,l:+k.l,c:+k.c,v:+k.v};
-    if(!mdVal.candle(c))return;
-    const arr=state.candles;
+  },
+  onKlineLive:function(){
     const ks=$('wsKlineState');
     ks.textContent='WS LIVE';ks.className='badge b-green';
-    if(arr.length&&arr[arr.length-1].t===c.t){
-      arr[arr.length-1]=c;
-    }else if(arr.length&&c.t>arr[arr.length-1].t){
-      arr.push(c);
-      if(arr.length>240)arr.shift();
-    }else{return}
-    mdStoreCandles(state.symbol,tf,arr);
-    updateChartLast(c);
-    state.klineTick++;
-    if(state.klineTick%8===0||k.x)runAnalytics();
-  });
-  make('dp','wss://stream.binance.com:9443/ws/'+s+'@depth15@100ms',function(d){
-    if(!d.bids||!d.bids.length)return;
-    const ob={bids:d.bids.map(b=>[+b[0],+b[1]]),asks:d.asks.map(a=>[+a[0],+a[1]])};
-    if(!mdStoreOB(state.symbol,ob))return;
-    state.ob=ob;
+  },
+  onChartLast:updateChartLast,
+  onAnalytics:runAnalytics,
+  onOB:function(){
     if(!renderOB._pend){renderOB._pend=true;requestAnimationFrame(function(){renderOB();renderOB._pend=false})}
-  });
-}
+  }
+};
+
 
 
 async function loadCtx(base){
@@ -1093,7 +1029,7 @@ async function setSymbol(sym){
   renderTicker();
   switchTab('radar');
   await Promise.all([fetchKlines(sym),fetchOB(),fetchFR(),fetchOI(),fetchWhales()]);
-  connectStreams();
+  connectStreams(streamCb);
   renderHero();
 }
 function COIN_ALIASESHas(sym){return Object.values(COINS).some(c=>c.sym===sym)}
@@ -1149,7 +1085,7 @@ document.querySelectorAll('#tfSwitch .tf-btn').forEach(btn=>{
     state.tf=mdTf(tf);
     $('chartTitle').textContent='Price Action · '+TF_LABELS[state.tf]+' Candles';
     fetchKlines(state.symbol);
-    connectStreams(); // restart live kline stream at the new, consistent interval
+    connectStreams(streamCb); // restart live kline stream at the new, consistent interval
   });
 });
 
@@ -1336,7 +1272,7 @@ function init(){
   fetchFR();
   fetchOI();
   fetchWhales();
-  connectStreams();
+  connectStreams(streamCb);
   initSearch();
   initTheme();
   fetchForexEvents();
