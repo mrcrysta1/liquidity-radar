@@ -41,7 +41,14 @@ export function mdFlat(c: unknown): CandleFlat | null {
 export function mdFromK(k: unknown): CandleFlat | null {
   if (!k || !Array.isArray(k)) return null
   const a = k as unknown[]
-  return { t: Number(a[0]), o: Number(a[1]), h: Number(a[2]), l: Number(a[3]), c: Number(a[4]), v: Number(a[5]) }
+  return {
+    t: Number(a[0]),
+    o: Number(a[1]),
+    h: Number(a[2]),
+    l: Number(a[3]),
+    c: Number(a[4]),
+    v: Number(a[5]),
+  }
 }
 
 // --- Data validation ----------------------------------------

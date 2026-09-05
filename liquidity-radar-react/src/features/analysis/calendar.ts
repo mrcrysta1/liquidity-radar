@@ -32,7 +32,13 @@ interface FxState {
   filter: string
 }
 
-export const _fx: FxState = { sorted: [], now: Date.now(), showAll: true, source: '', filter: 'All' }
+export const _fx: FxState = {
+  sorted: [],
+  now: Date.now(),
+  showAll: true,
+  source: '',
+  filter: 'All',
+}
 
 export function countryFlag(code: string): string {
   if (!code || /all|world|global/i.test(code)) return '🌐'
@@ -56,7 +62,9 @@ export function fxCountdown(t: Date): string {
 
 export function fxDayLabel(t: Date): string {
   const d = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][t.getDay()]
-  const m = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][t.getMonth()]
+  const m = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][
+    t.getMonth()
+  ]
   return d + ' ' + m + ' ' + t.getDate()
 }
 
@@ -107,7 +115,8 @@ export async function fetchForexEvents(): Promise<void> {
     } catch (e2) {
       const list = $('forexList')
       const count = $('fxCount')
-      if (list) list.innerHTML = '<div class="fc-note">Economic calendar unavailable — will retry</div>'
+      if (list)
+        list.innerHTML = '<div class="fc-note">Economic calendar unavailable — will retry</div>'
       if (count) count.textContent = 'OFFLINE'
       return
     }
@@ -117,11 +126,12 @@ export async function fetchForexEvents(): Promise<void> {
     const parsed = events
       .map(function (e): { ev: FxEv; t: Date | null } {
         let t: Date | null = null
-        const iso = e.date && /^\d{4}-\d{2}-\d{2}T/.test(e.date)
-          ? e.date
-          : e.date
-            ? e.date + 'T' + (e.time || '00:00') + ':00'
-            : null
+        const iso =
+          e.date && /^\d{4}-\d{2}-\d{2}T/.test(e.date)
+            ? e.date
+            : e.date
+              ? e.date + 'T' + (e.time || '00:00') + ':00'
+              : null
         if (iso) {
           t = new Date(iso)
           if (isNaN(t.getTime())) t = null
@@ -145,7 +155,8 @@ export async function fetchForexEvents(): Promise<void> {
   } catch (e) {
     const list = $('forexList')
     const count = $('fxCount')
-    if (list) list.innerHTML = '<div class="fc-note">Economic calendar render error — will retry</div>'
+    if (list)
+      list.innerHTML = '<div class="fc-note">Economic calendar render error — will retry</div>'
     if (count) count.textContent = 'ERROR'
   }
 }
@@ -194,7 +205,14 @@ export function renderForex(): void {
         (hd ? ' · ' + hd : '') +
         '</span></div>'
     }
-    const imp = e.impact === 'High' ? 'b-hi' : e.impact === 'Medium' ? 'b-md' : e.impact === 'Low' ? 'b-lo' : 'b-lo nn'
+    const imp =
+      e.impact === 'High'
+        ? 'b-hi'
+        : e.impact === 'Medium'
+          ? 'b-md'
+          : e.impact === 'Low'
+            ? 'b-lo'
+            : 'b-lo nn'
     const isPast = t.getTime() < now
     html +=
       '<div class="fx-row' +
@@ -234,7 +252,7 @@ export function renderForex(): void {
   if (!shownAny)
     html =
       f === 'All'
-        ? "<div class=\"fc-note\">No events in this week's calendar</div>"
+        ? '<div class="fc-note">No events in this week\'s calendar</div>'
         : '<div class="fc-note">No events at this impact level</div>'
   if (listEl) listEl.innerHTML = html
   refreshFxFilters()
