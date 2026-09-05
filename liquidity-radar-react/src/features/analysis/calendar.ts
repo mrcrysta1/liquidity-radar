@@ -68,7 +68,7 @@ export function fxDayLabel(t: Date): string {
   return d + ' ' + m + ' ' + t.getDate()
 }
 
-async function fetchFromXoomar(): Promise<FxEv[]> {
+export async function fetchFromXoomar(): Promise<FxEv[]> {
   const r = await fetch('https://xoomar.com/api/markets/calendar')
   if (!r.ok) throw new Error('xoomar ' + r.status)
   const d = (await r.json()) as { data?: Array<Record<string, unknown>> }

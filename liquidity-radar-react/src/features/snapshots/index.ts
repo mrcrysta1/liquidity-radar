@@ -1,1 +1,1 @@
-export { renderFG, renderTopCoins, renderWhales } from './snapshots'
+export { fngColor, renderFG, renderTopCoins, renderWhales } from './snapshots'

@@ -10,7 +10,7 @@ import { state } from '../../services/store'
 
 interface FngData { value: string; classification: string }
 
-function fngColor(v: number | null | undefined): string {
+export function fngColor(v: number | null | undefined): string {
   if (v == null) return '#8FA3BF'
   if (v < 25) return '#FF1744'
   if (v < 45) return '#FFB300'
