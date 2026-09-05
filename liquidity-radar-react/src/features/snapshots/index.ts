@@ -1,0 +1,1 @@
+export { renderFG, renderTopCoins, renderWhales } from './snapshots'
