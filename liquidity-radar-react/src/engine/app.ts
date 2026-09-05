@@ -77,6 +77,7 @@ import {
 } from '../features/charts/multiCharts'
 import { switchTab, setSymbol, wireUserActions } from '../features/actions/userActions'
 import { applySigAnaTheme, analyzeSigCoin, onSigSearch, signalData, startAutoScan, switchSigMode } from '../features/signals'
+import { initBubbles, renderBubbles, renderMemeUniverse } from '../features/bubbles'
 
 
 function runAnalytics(){
@@ -1398,90 +1399,6 @@ async function initSearch(){
     if(item){setSymbol(item.dataset.sym);input.value='';results.classList.remove('show')}
   });
   document.addEventListener('click',function(e){if(!e.target.closest('.search-wrap'))results.classList.remove('show')});
-}
-
-// ===== MEME COIN UNIVERSE =====
-const MEME_UNIVERSE=['PEPEUSDT','WIFUSDT','FLOKIUSDT','SHIBUSDT','BONKUSDT','DOGEUSDT','TRUMPUSDT','NEIROUSDT','BOMEUSDT','MEMEUSDT','ORDIUSDT','DOGSUSDT','HMSTRUSDT','ACTUSDT','TURBOUSDT','GALAUSDT','SANDUSDT','NOTUSDT','TONUSDT','1000SATSUSDT'];
-
-function renderMemeUniverse(){
-  const rows=MEME_UNIVERSE.map(function(sym){
-    const t=state.tickers[sym];
-    const base=sym.replace('USDT','');
-    if(!t)return'';
-    const sg=sigOf(t.pct);
-    return'<tr data-sym="'+sym+'">'
-      +'<td><div class="coin-cell"><div class="coin-ci" style="color:var(--pink);border-color:rgba(255,64,129,.3)">'+base.charAt(0)+'</div><div class="coin-nm"><div class="cn">'+esc(base)+'</div><div class="cs">'+base+'/USDT</div></div></div></td>'
-      +'<td>$'+pfmt(t.last)+'</td>'
-      +'<td>'+chgHtml(t.pct)+'</td>'
-      +'<td class="vol-dim">'+cfmt(t.qvol)+'</td>'
-      +'<td><span class="badge '+sg[1]+'">'+sg[0]+'</span></td>'
-      +'<td><button class="sc-action-btn" onclick="setSymbol(\''+sym+'\');switchTab(\'radar\')" style="font-size:10px;padding:3px 8px">Chart</button></td>'
-      +'</tr>';
-  }).filter(Boolean).join('');
-  $('memeBody').innerHTML=rows;
-  $('memeCount').textContent=MEME_UNIVERSE.filter(function(s){return state.tickers[s]}).length+' MEME COINS';
-}
-
-// ===== CRYPTO BUBBLES =====
-const BUB_MAJORS=['BTC','ETH','SOL','BNB','XRP','ADA','DOGE','AVAX','DOT','LINK','UNI','SUI'];
-const BUB_MEMES=['DOGE','PEPE','WIF','FLOKI','SHIB','BONK','TRUMP'];
-function bubFilterSet(){
-  const f=state.bubFilter||'all';
-  if(f==='major')return BUB_MAJORS;
-  if(f==='meme')return BUB_MEMES;
-  return null;
-}
-function renderBubbles(){
-  const wrap=$('bubWrap');
-  if(!wrap)return;
-  const keys=bubFilterSet();
-  const items=[];
-  Object.keys(COINS).forEach(function(k){
-    if(keys&&keys.indexOf(k)===-1)return;
-    const t=state.tickers[COINS[k].sym];
-    if(!t||!isFinite(t.last)||!(t.qvol>0))return;
-    items.push({k:k,sym:COINS[k].sym,name:COINS[k].name,icon:COINS[k].icon,last:t.last,pct:t.pct,qvol:t.qvol});
-  });
-  items.sort(function(a,b){return b.qvol-a.qvol});
-  const cnt=$('bubCount');
-  if(!items.length){
-    wrap.innerHTML='<div class="bub-empty">Loading live prices…</div>';
-    if(cnt)cnt.textContent='—';
-    return;
-  }
-  const maxQ=items[0].qvol;
-  const minS=46,maxS=118;
-  const up=items.filter(function(i){return i.pct>=0}).length;
-  if(cnt)cnt.textContent=items.length+' COINS · '+up+' ▲';
-  wrap.innerHTML=items.map(function(it,i){
-    const size=Math.round(minS+(maxS-minS)*Math.sqrt(Math.max(0,it.qvol)/maxQ));
-    const gain=it.pct>=0;
-    const my=((i*37)%16)-8;
-    const fdur=(4.5+((i*13)%28)/10).toFixed(1);
-    const fdel=((i*97)%40)/10;
-    const pctTxt=(it.pct>0?'+':'')+it.pct.toFixed(2)+'%';
-    const fs=Math.max(9,Math.round(size*0.135));
-    return'<div class="bub '+(gain?'b-g':'b-r')+'" data-sym="'+it.sym+'" title="'+esc(it.name)+' · 24h '+pctTxt+' · vol '+cfmt(it.qvol)+'" style="width:'+size+'px;height:'+size+'px;--my:'+my+'px;--fdur:'+fdur+'s;--fdel:'+fdel+'s">'
-      +'<div class="bub-sym" style="font-size:'+fs+'px">'+it.icon+' '+esc(it.k)+'</div>'
-      +'<div class="bub-pct">'+pctTxt+'</div>'
-      +'</div>';
-  }).join('');
-}
-function initBubbles(){
-  renderBubbles();
-  document.querySelectorAll('.bub-f').forEach(function(btn){
-    btn.addEventListener('click',function(){
-      state.bubFilter=btn.dataset.f;
-      document.querySelectorAll('.bub-f').forEach(function(b){b.classList.toggle('on',b===btn)});
-      renderBubbles();
-    });
-  });
-  document.addEventListener('click',function(e){
-    const b=e.target.closest('.bub');
-    if(!b)return;
-    setSymbol(b.dataset.sym);
-    switchTab('radar');
-  });
 }
 
 // ===== LIVE LIQUIDATION HEAT MAP =====
