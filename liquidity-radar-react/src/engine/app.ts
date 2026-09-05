@@ -26,260 +26,30 @@ import {
 import { findCoin, baseOf, coinMeta } from '../utils/coins'
 import { $, showToast, openModal, closeModal } from '../utils/dom'
 
-const state={
-  symbol:'BTCUSDT',
-  tab:'radar',
-  tf:'15m',
-  tickers:{},
-  candles:[],
-  ob:{bids:[],asks:[]},
-  fr:null,
-  oi:null,
-  fg:null,
-  whales:[],
-  wsOpen:0,
-  klineTick:0,
-  ctxCache:{},
-  mem:{lastCoin:null,topics:[]}
-};
-
-// ============================================================
-// PHASE 1 — MARKET DATA FOUNDATION
-// Centralized store, validation, adapter, rate-limit, health,
-// candle cache, symbol/timeframe normalization, diagnostics.
-// Existing `state.*` and consumers are preserved unchanged.
-// ============================================================
-
-// --- Symbol / timeframe normalization -----------------------
-const mdTfs=['1m','5m','15m','1h','4h','1d'];
-function mdSym(s){
-  if(!s)return null;
-  s=String(s).trim().toUpperCase().replace(/-/g,'');
-  if(!/USDT$/.test(s))s=s+'USDT';
-  return s;
-}
-function mdTf(t){
-  if(!t)return '15m';
-  t=String(t).toLowerCase().trim();
-  if(t==='60m'||t==='60')return '1h';
-  if(t==='24h'||t==='1d'||t==='d')return '1d';
-  if(t==='240'||t==='4h')return '4h';
-  if(mdTfs.indexOf(t)!==-1)return t;
-  return '15m';
-}
-function mdFlat(c){if(!c)return null;return{t:c.t,o:+c.o,h:+c.h,l:+c.l,c:+c.c,v:+c.v}}
-function mdFromK(k){
-  if(!k||!Array.isArray(k))return null;
-  return{t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]};
-}
-
-// --- Data validation ----------------------------------------
-const mdVal={
-  num(v){return typeof v==='number'&&isFinite(v)&&Math.abs(v)<1e15},
-  pos(v){return mdVal.num(v)&&v>=0},
-  price(p){return mdVal.pos(p)&&p>0&&p<1e9},
-  obj(x){return x&&typeof x==='object'},
-  sym(s){return typeof s==='string'&&/^[A-Z0-9]{4,20}$/.test(s)&&/USDT$/.test(s)},
-  candle(c){
-    return mdVal.obj(c)&&mdVal.pos(c.t)
-      &&mdVal.price(c.o)&&mdVal.price(c.h)&&mdVal.price(c.l)&&mdVal.price(c.c)
-      &&mdVal.pos(c.v)
-      &&Math.min(c.o,c.c)>=c.l&&Math.max(c.o,c.c)<=c.h+0.000001
-      &&c.h>=c.l;
-  },
-  wsMsg(d){
-    if(!mdVal.obj(d))return false;
-    if(d.e==='kline'){return d.k&&mdVal.candle(mdFlat(d.k))}
-    if(d.e==='24hrTicker'){return mdVal.price(+d.c)}
-    if(d.e==='depthUpdate'||d.e==='depth'){
-      return Array.isArray(d.bids)&&Array.isArray(d.asks)
-        &&d.bids.length>0&&d.asks.length>0;
-    }
-    // unknown stream type -> reject (defensive; kinds we know pass through)
-    return d.e!==undefined||d.k!==undefined||d.c!==undefined||d.bids!==undefined;
-  }
-};
-
-// --- Centralized market data store --------------------------
-const md:any={
-  // normalized view (mirrors state.* but validated/normalized)
-  tickers:{},candles:{},ob:{},fr:{},oi:{},
-  lastUpdate:{tickers:0,candles:0,ob:0,fr:0,oi:0,whales:0,fg:0},
-  conn:{ws:{up:false,reconnects:0,streams:0,age:0},rest:{ok:true,errors:0,lastOk:0}},
-  series:{symbol:'',tf:''}
-};
-function mdStoreTicker(sym,t){
-  if(!mdVal.sym(sym)||!mdVal.obj(t)||!mdVal.price(t.last))return false;
-  md.tickers[sym]=t;
-  md.lastUpdate.tickers=Date.now();
-  return true;
-}
-function mdStoreCandles(sym,tf,arr){
-  if(!mdVal.sym(sym)||!mdTf(tf)||!Array.isArray(arr)||!arr.length)return false;
-  const ok=arr.filter(mdVal.candle);
-  if(ok.length<Math.min(2,arr.length))return false;
-  const key=sym+'|'+mdTf(tf);
-  md.candles[key]=ok;
-  md.lastUpdate.candles=Date.now();
-  return true;
-}
-function mdStoreOB(sym,ob){
-  if(!mdVal.sym(sym)||!mdVal.obj(ob)||!Array.isArray(ob.bids)||!Array.isArray(ob.asks)
-    ||!ob.bids.length||!ob.asks.length)return false;
-  const good=mdVal.price(+ob.bids[0][0])&&mdVal.price(+ob.asks[0][0])&&+ob.bids[0][0]<+ob.asks[0][0];
-  if(!good)return false;
-  md.ob[sym]={bids:ob.bids.map(b=>[+b[0],+b[1]]),asks:ob.asks.map(a=>[+a[0],+a[1]])};
-  md.lastUpdate.ob=Date.now();
-  return true;
-}
-function mdDataAge(kind){
-  const t=md.lastUpdate[kind]||0;
-  if(!t)return null;
-  return Date.now()-t;
-}
-// staleness thresholds (ms)
-const mdStale={tickers:6000,candles:90000,ob:6000,fr:45000,oi:45000,whales:30000,fg:360000};
-
-// --- REST adapter: dedup + throttling + retry/backoff -------
-const rl={map:{},queue:0,minGap:90,last:0};
-function rlThrottle(url){
-  const now=Date.now();
-  if(now-rl.last>=rl.minGap){rl.last=now;rl.queue=0;return true}
-  rl.queue++;
-  return false;
-}
-async function rawFetch(url,to){
-  const c=new AbortController();const h=setTimeout(()=>c.abort(),to||12000);
-  try{const r=await fetch(url,{signal:c.signal});if(!r.ok)throw new Error('HTTP '+r.status);return await r.json()}
-  finally{clearTimeout(h)}
-}
-const mdReqs:any={};
-async function jget2(url,opts){
-  opts=opts||{};
-  const retries=opts.retries!=null?opts.retries:1;
-  const to=opts.to||12000;
-  // dedup: coalesce concurrent identical in-flight requests
-  if(opts.dedup!==false&&mdReqs[url]){
-    return mdReqs[url];
-  }
-  const doFetch=function(){
-    try{return rawFetch(url,to)}catch(e){throw new Error('network')}
-  };
-  if(opts.dedup!==false){
-    mdReqs[url]=doFetch().catch(err=>{delete mdReqs[url];throw err});
-  }
-  let attempt=0,delay=600;
-  const run=opts.dedup!==false?mdReqs[url]:doFetch();
-  const p=run.then(res=>{
-    if(opts.dedup!==false)delete mdReqs[url];
-    return res;
-  }).catch(function(err){
-    if(attempt>=retries)throw err;
-    attempt++;
-    return new Promise(function(r2){setTimeout(r2,delay+(attempt*250))}).then(function(){
-      if(opts.dedup!==false)delete mdReqs[url];
-      return rawFetch(url,to);
-    });
-  });
-  return p;
-}
-// throttle wrapper (fire-and-forget; dropped calls simply wait for next poll)
-function rlSchedule(fn){
-  if(rlThrottle())fn();
-  else setTimeout(fn,Math.max(0,rl.minGap-(Date.now()-rl.last)));
-}
-// health integration for REST
-function mdRestOk(){md.conn.rest.ok=true;md.conn.rest.lastOk=Date.now();md.conn.rest.errors=0}
-function mdRestErr(){md.conn.rest.ok=false;md.conn.rest.errors++}
-
-// --- Lightweight historical candle cache --------------------
-const mdCache:any={data:{},ttl:45000};
-function mdCacheGet(sym,tf){
-  const k=sym+'|'+mdTf(tf);
-  const e=mdCache.data[k];
-  if(e&&Date.now()-e.ts<mdCache.ttl)return e.candles;
-  return null;
-}
-function mdCachePut(sym,tf,arr){
-  if(!Array.isArray(arr)||!arr.length)return;
-  mdCache.data[sym+'|'+mdTf(tf)]={ts:Date.now(),candles:arr};
-}
-
-// --- Health monitor -----------------------------------------
-const mdHealth:any={
-  wsUp:false,wsStreams:0,wsReconnects:0,restOk:true,restErrors:0,
-  lastWsMsg:0,lastRestOk:0,staleWarn:[]
-};
-function mdHearbeat(kind){
-  if(kind==='ws'){mdHealth.lastWsMsg=Date.now();mdHealth.wsUp=true}
-  else if(kind==='rest'){mdHealth.lastRestOk=Date.now();mdHealth.restOk=true}
-}
-function mdRefreshHealth(){
-  const now=Date.now();
-  mdHealth.staleWarn.length=0;
-  if(md.conn.ws.streams>0&&now-mdHealth.lastWsMsg>8000)mdHealth.staleWarn.push('WS stalled');
-  if(mdHealth.lastWsMsg===0)mdHealth.staleWarn.push('no live stream');
-  // report ages per data kind
-  Object.keys(mdStale).forEach(function(k){
-    const a=mdDataAge(k);
-    if(a!=null&&a>mdStale[k])mdHealth.staleWarn.push(k+' stale '+Math.round(a/1000)+'s');
-  });
-  return mdHealth;
-}
-// non-disruptive UI: augment the existing status pill (no new layout)
-function mdPill(){
-  const pill=$('statusPill'),txt=$('statusTxt');
-  if(!pill||!txt)return;
-  const h=mdRefreshHealth();
-  const live=md.conn.ws.streams>0;
-  const stale=h.staleWarn.length>0;
-  pill.classList.toggle('off',!live||stale);
-  if(!live){txt.textContent='CONNECTING…';return}
-  if(stale){txt.textContent='RECONNECTING…';return}
-  txt.textContent='LIVE · '+md.conn.ws.streams+' STREAMS';
-}
-
-// --- Diagnostics / debug mode --------------------------------
-const mdDebug={
-  on:(function(){try{return /[?&]debug=1/.test(location.search)||localStorage.getItem('lr-debug')==='1'}catch(e){return false}})(),
-  log:null,
-  snapshot:function(){
-    return{
-      ws:mdHealth,
-      conn:md.conn,
-      lastUpdate:md.lastUpdate,
-      age:{tickers:mdDataAge('tickers'),candles:mdDataAge('candles'),ob:mdDataAge('ob'),fr:mdDataAge('fr'),oi:mdDataAge('oi')},
-      series:md.series,
-      cacheKeys:Object.keys(mdCache.data).length,
-      stateSymbol:state.symbol,stateTf:state.tf
-    };
-  }
-};
-mdDebug.log=function(kind,msg){if(mdDebug.on){try{console.log('[md:'+kind+']',msg)}catch(e){}}};
-function mdToggleDebug(){
-  try{
-    mdDebug.on=!mdDebug.on;
-    localStorage.setItem('lr-debug',mdDebug.on?'1':'0');
-  }catch(e){}
-  if(mdDebug.on)console.log('[md] debug ON',mdDebug.snapshot());
-  return mdDebug.on;
-}
-window.mdDebug=mdDebug;
-window.mdSnapshot=function(){return mdDebug.snapshot()};
-window.mdToggleDebug=mdToggleDebug;
-
-async function jget(url,to){
-  to=to||12000;
-  const isBinance=/binance\.com/.test(url);
-  try{
-    const res=await jget2(url,{to:to,retries:isBinance?1:0,dedup:true});
-    if(isBinance)mdRestOk();
-    return res;
-  }catch(e){
-    if(isBinance)mdRestErr();
-    throw e;
-  }
-}
+import { state } from '../services/store'
+import {
+  md,
+  mdHealth,
+  mdSym,
+  mdTf,
+  mdFlat,
+  mdFromK,
+  mdVal,
+  mdStoreTicker,
+  mdStoreCandles,
+  mdStoreOB,
+  mdDataAge,
+  mdCacheGet,
+  mdCachePut,
+  mdHearbeat,
+  mdRefreshHealth,
+  mdRestOk,
+  mdRestErr,
+  mdPill,
+  mdDebug,
+  mdToggleDebug,
+} from '../services/market'
+import { jget, jget2 } from '../api/client'
 
 let chart=null,candleSeries=null,volSeries=null;
 const chartState={
