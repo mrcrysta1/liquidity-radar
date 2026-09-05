@@ -52,6 +52,7 @@ import {
   mdToggleDebug,
 } from '../services/market'
 import { jget, jget2 } from '../api/client'
+import { storageGet, storageSet, storageGetRaw, storageSetRaw } from '../services/storage'
 
 let chart=null,candleSeries=null,volSeries=null;
 const chartState={
@@ -1659,8 +1660,8 @@ document.querySelectorAll('#tfSwitch .tf-btn').forEach(btn=>{
 });
 
 const PF_KEY='lr_portfolio_v1';
-function loadPortfolio(){try{return JSON.parse(localStorage.getItem(PF_KEY)||'[]')}catch(e){return[]}}
-function savePortfolio(p){localStorage.setItem(PF_KEY,JSON.stringify(p))}
+function loadPortfolio(){return storageGet(PF_KEY, [])}
+function savePortfolio(p){storageSet(PF_KEY,p)}
 function renderPortfolio(){
   const p=loadPortfolio();
   const rows=$('pfRows');
@@ -1719,8 +1720,8 @@ $('pfAddBtn').addEventListener('click',()=>openModal('pfModal'));
 
 const AL_KEY='lr_alerts_v1';
 let notifOk=false;
-function loadAlerts(){try{return JSON.parse(localStorage.getItem(AL_KEY)||'[]')}catch(e){return[]}}
-function saveAlerts(a){localStorage.setItem(AL_KEY,JSON.stringify(a))}
+function loadAlerts(){return storageGet(AL_KEY, [])}
+function saveAlerts(a){storageSet(AL_KEY,a)}
 function notifState(){return $('alPermState')}
 function renderAlerts(){
   const list=$('alList');
@@ -1898,11 +1899,11 @@ const PALETTES=[
    light:{bg:'#F7F8FC',card:'#FFFFFF',card2:'#FAFAFD',border:'#D9DEEB',border2:'#ACB7CC',primary:'#D97706',green:'#059669',red:'#DC2626',amber:'#B45309',cyan:'#0E7490',purple:'#7C3AED',pink:'#DB2777',txt:'#171B27',muted:'#5C6576',dim:'#98A0B0'}}
 ];
 function activePalette(){
-  return PALETTES.find(p=>p.id===localStorage.getItem('lr-palette'))||PALETTES[0];
+  return PALETTES.find(p=>p.id===storageGetRaw('lr-palette'))||PALETTES[0];
 }
 function applyPalette(id){
   var p=PALETTES.find(x=>x.id===id)||PALETTES[0];
-  localStorage.setItem('lr-palette',p.id);
+  storageSetRaw('lr-palette',p.id);
   var s=isLightTheme()?p.light:p.dark;
   var root=document.documentElement;
   ['bg','card','card2','border','border2','primary','green','red','amber','cyan','purple','pink','txt','muted','dim'].forEach(function(k){
@@ -1934,20 +1935,20 @@ function selectPalette(id){
 }
 
 function initTheme(){
-  var savedPal=localStorage.getItem('lr-palette')||'classic';
+  var savedPal=storageGetRaw('lr-palette')||'classic';
   applyPalette(savedPal);
-  var saved=localStorage.getItem('lr-theme');
+  var saved=storageGetRaw('lr-theme');
   if(saved==='light'){document.documentElement.setAttribute('data-theme','light');$('themeBtn').textContent='L'}
   $('paletteBtn').addEventListener('click',function(){renderPalettePicker();openModal('thModal')});
   $('themeBtn').addEventListener('click',function(){
     var cur=document.documentElement.getAttribute('data-theme');
     if(cur==='light'){
       document.documentElement.removeAttribute('data-theme');
-      localStorage.setItem('lr-theme','dark');
+      storageSetRaw('lr-theme','dark');
       $('themeBtn').textContent='D';
     }else{
       document.documentElement.setAttribute('data-theme','light');
-      localStorage.setItem('lr-theme','light');
+      storageSetRaw('lr-theme','light');
       $('themeBtn').textContent='L';
     }
     applyPalette(activePalette().id);
@@ -2203,15 +2204,15 @@ let patternHistory={};
 let modelWeights={rsi:25,macdCross:30,macdTrend:10,ema:12,bb:18,vol:5,diverge:20,whale:15,forecast:10,master:30};
 
 function loadPatternHistory(){
-  try{var d=JSON.parse(localStorage.getItem('lr-patternHist'));if(d)patternHistory=d}catch(e){}
+try{var d=storageGet('lr-patternHist',undefined);if(d)patternHistory=d}catch(e){}
 }
 function savePatternHistory(){
-  try{localStorage.setItem('lr-patternHist',JSON.stringify(patternHistory))}catch(e){}
+  try{storageSet('lr-patternHist',patternHistory)}catch(e){}
 }
 function loadModelWeights(){
-  try{var d=JSON.parse(localStorage.getItem('lr-modelW'));if(d)Object.keys(d).forEach(function(k){if(modelWeights[k]!==undefined)modelWeights[k]=d[k]})}catch(e){}
+  try{var d=storageGet('lr-modelW',undefined);if(d)Object.keys(d).forEach(function(k){if(modelWeights[k]!==undefined)modelWeights[k]=d[k]})}catch(e){}
 }
-function saveModelWeights(){try{localStorage.setItem('lr-modelW',JSON.stringify(modelWeights))}catch(e){}}
+function saveModelWeights(){try{storageSet('lr-modelW',modelWeights)}catch(e){}}
 
 function recordPatternOutcome(key,wrong){
   if(!patternHistory[key])patternHistory[key]={correct:0,total:0};
@@ -2388,7 +2389,7 @@ function scanSignals(){
 
 function recordSignalOutcomes(){
   if(!signalData.length)return;
-  var prevSignals=JSON.parse(localStorage.getItem('lr-lastSignals')||'{}');
+  var prevSignals=storageGet('lr-lastSignals',{});
   var touched=0;
   signalData.forEach(function(s){
     var old=prevSignals[s.sym];
@@ -2411,7 +2412,7 @@ function recordSignalOutcomes(){
     var px=(s.t&&s.t.last)?s.t.last:0;
     current[s.sym]={type:s.master.type,score:s.score,ts:Date.now(),price:px};
   });
-  localStorage.setItem('lr-lastSignals',JSON.stringify(current));
+  storageSet('lr-lastSignals',current);
 }
 
 function renderSignals(){
