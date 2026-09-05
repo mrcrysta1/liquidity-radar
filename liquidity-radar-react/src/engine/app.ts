@@ -75,6 +75,7 @@ import {
   mcChangeInterval,
   mcChangeSymbol,
 } from '../features/charts/multiCharts'
+import { switchTab, setSymbol, wireUserActions } from '../features/actions/userActions'
 
 
 function runAnalytics(){
@@ -1012,34 +1013,6 @@ async function generateReply(raw){
   return 'I didn\'t catch that. I\'m sharpest on:<br>• <b>Coins</b> — btc, eth, sol, doge, pepe, trump, wif + 20 more (nicknames &amp; typos welcome)<br>• <b>Indicators</b> — rsi, macd, bollinger, ema, atr<br>• <b>Microstructure</b> — whales, funding, open interest, liquidations, support/resistance<br>• <b>Patterns</b> — rsi divergence, macd crossover, bb squeeze, volume spike<br>• <b>Signals</b> — "show signals", "best signal", "scan the market"<br>• <b>Economics</b> — inflation, fed rates, gdp, nfp, quantitative easing<br>• <b>Crypto basics</b> — bitcoin, ethereum, blockchain, defi, layer 2, nfts<br>• <b>Trading</b> — position sizing, stop loss, take profit, leverage, margin<br>• <b>News</b> — "show news", "forex events", "what is happening today"<br>• <b>Conversation</b> — greetings, jokes, opinions on any coin<br><br>Rephrase and fire again.';
 }
 
-function switchTab(tab){
-  state.tab=tab;
-  document.querySelectorAll('.tab-btn').forEach(b=>{const on=b.dataset.tab===tab;b.classList.toggle('active',on);b.setAttribute('aria-selected',on?'true':'false')});
-  document.querySelectorAll('.tab-section').forEach(s=>s.classList.toggle('active',s.id==='tab-'+tab));
-  window.scrollTo({top:0});
-}
-async function setSymbol(sym){
-  if(!sym)return;
-  if(state.symbol===sym){switchTab('radar');return}
-  state.symbol=sym;
-  Object.keys(state.ctxCache).forEach(k=>delete state.ctxCache[k]);
-  state._liq=null;state._sr=null;state._ai=null;state.whales=[];
-  $('heroPrice').textContent='—';$('heroPrice').dataset.p='0';
-  $('wsKlineState').textContent='SYNCING';$('wsKlineState').className='badge b-amber';
-  var sel=$('symSelect');
-  if(!sel.querySelector('option[value="'+sym+'"]')){
-    var base=sym.replace(/USDT$/,'');
-    var opt=document.createElement('option');
-    opt.value=sym;opt.textContent=base+'/USDT';
-    sel.appendChild(opt);
-  }
-  sel.value=sym;
-  renderTicker();
-  switchTab('radar');
-  await Promise.all([fetchKlines(sym),fetchOB(),fetchFR(),fetchOI(),fetchWhales()]);
-  connectStreams(streamCb);
-  renderHero();
-}
 function COIN_ALIASESHas(sym){return Object.values(COINS).some(c=>c.sym===sym)}
 
 const chatLog=$('chatLog'),chatForm=$('chatForm'),chatInput=$('chatInput'),sendBtn=$('sendBtn');
@@ -2179,6 +2152,17 @@ function exposeGlobals(){
 
 export function initApp(){
   exposeGlobals()
+  wireUserActions({
+    fetchKlines,
+    fetchOB,
+    fetchFR,
+    fetchOI,
+    fetchWhales,
+    connectStreams,
+    streamCb,
+    renderHero,
+    renderTicker,
+  })
   init()
 }
 
