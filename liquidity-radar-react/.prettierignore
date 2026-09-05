@@ -1,0 +1,9 @@
+dist
+node_modules
+public
+
+# generated / verbatim-preserved files
+src/engine
+src/components/Shell.tsx
+src/index.css
+coverage
