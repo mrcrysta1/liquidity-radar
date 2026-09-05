@@ -646,6 +646,33 @@ html.radar-fs #chart{height:100% !important}
 .ni-title{font-size:13.5px;font-weight:600;line-height:1.4;color:var(--txt)}
 .news-thumb{width:74px;height:52px;border-radius:8px;object-fit:cover;flex-shrink:0;background:var(--card2);border:1px solid var(--border);display:block}
 
+.news-sent-row{display:flex;align-items:center;gap:12px;margin-bottom:8px;padding:8px 10px;background:rgba(6,11,24,.35);border:1px solid var(--border);border-radius:9px;flex-wrap:wrap}
+.ns-gauge-wrap{display:flex;align-items:center;gap:8px;flex:1;min-width:200px}
+.ns-gauge{position:relative;flex:1;height:8px;border-radius:5px;background:linear-gradient(90deg,var(--red),#888,var(--green));overflow:hidden}
+.ns-gauge-fill{position:absolute;top:0;bottom:0;left:50%;width:2px;background:#fff;box-shadow:0 0 6px rgba(255,255,255,.9);transition:left .4s ease}
+.ns-gauge-lbl{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--txt);min-width:70px}
+.ns-count{font-family:var(--mono);font-size:10.5px;color:var(--dim)}
+.news-sent-tag{margin-left:auto;font-family:var(--mono);font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px;color:#fff;letter-spacing:.05em}
+.news-sent-tag.pos{background:var(--green)}
+.news-sent-tag.neg{background:var(--red)}
+.news-sent-tag.neu{background:#666}
+.news-item.sent-pos{border-left:3px solid var(--green)}
+.news-item.sent-neg{border-left:3px solid var(--red)}
+.news-item.sent-neu{border-left:3px solid #666}
+.ni-sent{font-size:9px;font-weight:700;padding:1px 6px;border-radius:4px;color:#fff;letter-spacing:.05em}
+.ni-sent.s-pos{background:var(--green)}
+.ni-sent.s-neg{background:var(--red)}
+.ni-sent.s-neu{background:#777}
+.ni-coins{display:flex;gap:5px;flex-wrap:wrap;margin-top:4px}
+.news-coin-chip{display:inline-flex;align-items:center;gap:4px;font-family:var(--mono);font-size:10px;font-weight:700;color:var(--txt);background:rgba(41,98,255,.1);border:1px solid var(--border);border-radius:5px;padding:1px 6px;cursor:pointer;user-select:none}
+.news-coin-chip:hover{border-color:var(--cyan);color:var(--cyan)}
+.news-coin-chip .nc-px{color:var(--dim);font-weight:500}
+.news-coin-chip .nc-px.up{color:var(--green)}
+.news-coin-chip .nc-px.dn{color:var(--red)}
+.news-coin-chip.coin-on{background:rgb(var(--pRGB)/.2);border-color:var(--cyan);color:var(--cyan)}
+.news-coin-filter-tag{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:10px;font-weight:700;color:var(--cyan);background:rgb(var(--aRGB)/.12);border:1px solid var(--cyan);border-radius:6px;padding:2px 8px;cursor:pointer;user-select:none}
+.news-coin-filter-tag:hover{border-color:var(--red);color:var(--red)}
+
 .trend-chip{
   display:flex;align-items:center;gap:10px;padding:9px 11px;border:1px solid var(--border);
   border-radius:10px;margin-bottom:8px;background:rgba(6,11,24,.4);transition:border-color .2s;
@@ -1358,7 +1385,12 @@ footer{border-top:1px solid var(--border);margin-top:26px;padding:18px 14px;text
         <input type="text" id="newsSearch" class="news-search" placeholder="🔍 Search news…" autocomplete="off">
         <button class="news-src-clear" id="newsSrcClear" style="display:none" title="Clear source filter">✕ <span id="newsSrcName"></span></button>
       </div>
+      <div class="news-sent-row" id="newsSentRow" style="display:none">
+        <div class="ns-gauge-wrap"><div class="ns-gauge" id="newsSentGauge"><div class="ns-gauge-fill" id="newsSentFill"></div></div><span class="ns-gauge-lbl" id="newsSentLbl">Neutral</span></div>
+        <span class="ns-count" id="newsSentCount"></span>
+      </div>
       <div class="news-src-strip" id="newsSrcStrip"></div>
+      <div class="news-src-strip" id="newsCoinStrip"></div>
       <div id="newsList"><div class="fc-note">Loading live feed…</div></div>
       <button class="news-more" id="newsMore" style="display:none">Load more stories</button>
     </div>
@@ -2834,10 +2866,69 @@ const NEWS_RSS=[
   ['The Block','https://www.theblock.co/rss.xml','#F59E0B'],
   ['CoinGape','https://coingape.com/feed/','#EC4899'],
   ['BeInCrypto','https://beincrypto.com/feed/','#10B981'],
-  ['Bitcoin Magazine','https://bitcoinmagazine.com/feed','#F97316']
+  ['Bitcoin Magazine','https://bitcoinmagazine.com/feed','#F97316'],
+  ['U.Today','https://u.today/rss','#3B82F6'],
+  ['AMBCrypto','https://ambcrypto.com/feed/','#22D3EE'],
+  ['The Crypto Times','https://www.cryptotimes.io/feed/','#A78BFA'],
+  ['Bitcoinist','https://bitcoinist.com/feed/','#FBBF24']
 ];
 let newsCache={};
-let newsState={query:'',src:'',shown:30};
+let newsState={query:'',src:'',coin:'',shown:30};
+const NEWS_STO_KEY='lr_news_cache';
+function newsCoinsFor(title){
+  const coins=[];
+  const t=(title||'').toUpperCase();
+  for(const k in COINS){
+    const c=COINS[k];
+    if(!c||!c.sym)continue;
+    const names=[k,c.name.toUpperCase()].filter(Boolean);
+    if(names.some(function(n){return n.length>=3&&t.indexOf(n)>-1}))coins.push(k);
+  }
+  const alt={'ETHEREUM':'ETH','BITCOIN':'BTC','SOLANA':'SOL','BINANCE':'BNB','BNB COIN':'BNB','XRP':'XRP','DOGECOIN':'DOGE','DOGE':'DOGE','SHIBA INU':'SHIB','PEPE':'PEPE','CARDANO':'ADA','AVALANCHE':'AVAX','POLKADOT':'DOT','CHAINLINK':'LINK','UNISWAP':'UNI','ARBITRUM':'ARB','OPTIMISM':'OP','POLYGON':'POL','SUI':'SUI','APTOS':'APT','NEAR':'NEAR','INJECTIVE':'INJ','CELESTIA':'TIA','SEI':'SEI','MAKER':'MKR','AAVE':'AAVE','FILECOIN':'FIL','BONK':'BONK','FLOKI':'FLOKI','ONDO':'','RENDER':''};
+  Object.keys(alt).forEach(function(name){
+    const cn=alt[name];
+    if(cn&&t.indexOf(name)>-1&&coins.indexOf(cn)<0)coins.push(cn);
+  });
+  return coins;
+}
+function newsSentiment(title){
+  const pos=['surge','rallies','soars','hits all-time','record high','gain','gains','bullish','breakout','breaks out','adopts','approval','approved','launch','partnership','institutional','inflow','accumulat','recovery','rebound','upgrade','milestone','outperform','beats','beats earnings','positive','boost','win','wins','green','new high','all-time high','etf approves','cleared','mainnet','integration','investment','demand surge','adoption'];
+  const neg=['crash','plunges','tanks','slumps','drops','sell-off','selloff','decline','bearish','hack','exploit','fraud','scam','lawsuit','sues','banned','ban','freeze','seized','arrest','insolvenc','bankrupt','delist','collapse','dip','warning','crackdown','regulatory risk','fine','penal','loss','outflow','withdrawal halt','pump and dump','ponzi','rug pull','vulnerability','security breach','data breach','deficit','downgrade','fail','fails','unemploy','recession','inflation fears','repeats','resign','step down','suspension'];
+  let s=0;
+  const text=(title||'').toLowerCase();
+  pos.forEach(function(w){if(text.indexOf(w)>-1)s+=1});
+  neg.forEach(function(w){if(text.indexOf(w)>-1)s-=1});
+  if(text.indexOf('not ')>-1&&(text.indexOf('not approve')>-1||text.indexOf('not fixing')>-1||text.indexOf('no gains')>-1))s-=1;
+  return s>0?'pos':(s<0?'neg':'neu');
+}
+function newsDedup(a,b){
+  const norm=function(t){return t.toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/\s+/g,' ').trim()};
+  const na=norm(a),nb=norm(b);
+  if(na===nb)return true;
+  const wa=new Set(na.split(' ').filter(w=>w.length>3));
+  const wb=new Set(nb.split(' ').filter(w=>w.length>3));
+  if(!wa.size||!wb.size)return false;
+  let inter=0;
+  wa.forEach(function(w){if(wb.has(w))inter++});
+  const union=wa.size+wb.size-inter;
+  return union>0&&(inter/union)>=0.6;
+}
+function newsNormKey(t){
+  return t.toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,60);
+}
+function newsCacheSave(){
+  try{localStorage.setItem(NEWS_STO_KEY,JSON.stringify({t:Date.now(),news:newsCache.news}))}catch(e){}
+}
+function newsCacheLoad(){
+  try{
+    const raw=localStorage.getItem(NEWS_STO_KEY);
+    if(!raw)return null;
+    const d=JSON.parse(raw);
+    if(!d||!d.news||!d.news.length)return null;
+    if(Date.now()-d.t>(6*60*60*1000))return null;
+    return d.news;
+  }catch(e){return null}
+}
 function newsFeedUrl(i){
   return'https://api.rss2json.com/v1/api.json?rss_url='+encodeURIComponent(NEWS_RSS[i][1]);
 }
@@ -2845,36 +2936,65 @@ function rawNewsFetch(i,to){
   const c=new AbortController();const h=setTimeout(()=>c.abort(),to||15000);
   return fetch(newsFeedUrl(i),{signal:c.signal}).then(r=>r.json()).finally(()=>clearTimeout(h));
 }
+async function rawNewsFetchFallback(i,to){
+  const c=new AbortController();const h=setTimeout(()=>c.abort(),to||15000);
+  const url=NEWS_RSS[i][1];
+  try{
+    const r=await fetch('https://api.allorigins.win/raw?url='+encodeURIComponent(url),{signal:c.signal});
+    if(!r.ok)throw new Error('http '+r.status);
+    const xml=await r.text();
+    const p=new DOMParser().parseFromString(xml,'text/xml');
+    const items=Array.from(p.querySelectorAll('item'));
+    const out={status:'ok',items:items.map(function(it){
+      const get=function(sel){const el=it.querySelector(sel);return el?el.textContent.trim():''};
+      return{title:get('title'),link:get('link'),pubDate:get('pubDate'),thumbnail:get('enclosure url, thumbnail')};
+    })};
+    return out;
+  }catch(e){
+    throw new Error('allorigins fail');
+  }finally{clearTimeout(h)}
+}
+function rawNewsFetchAny(i){
+  return rawNewsFetch(i,13000).catch(function(){return rawNewsFetchFallback(i,15000)});
+}
+function newsSimplify(src,color){
+  return function(it){
+    if(!it||!it.title||typeof it.title!=='string'||!it.title.trim())return null;
+    const title=it.title.trim();
+    const p=it.pubDate?new Date(it.pubDate.replace(' ','T')).getTime():Date.now();
+    return{title:title,url:it.link||'#',time:p,src:src,color:color,img:it.thumbnail||(it.enclosure&&it.enclosure.link)||null,coins:newsCoinsFor(title),sent:newsSentiment(title)};
+  };
+}
 async function fetchNews(){
+  const cached=newsCacheLoad();
+  if(!newsCache.news&&cached){newsCache.news=cached;renderNewsList();renderNewsMeta();}
   try{
     // stagger requests (120ms apart) so rss2json free-tier throttling doesn't drop feeds
-    const results=await Promise.all(NEWS_RSS.map((_,i)=>new Promise(res=>setTimeout(res,i*120)).then(()=>rawNewsFetch(i).catch(()=>null))));
+    const results=await Promise.all(NEWS_RSS.map((_,i)=>new Promise(res=>setTimeout(res,i*120)).then(()=>rawNewsFetchAny(i).catch(()=>null))));
     const merged=[];
     results.forEach((res,i)=>{
       if(!res||res.status!=='ok'||!res.items)return;
       const src=NEWS_RSS[i][0],color=NEWS_RSS[i][2];
-      const seenItem=new Set();
-      res.items.forEach(it=>{
-        if(!it.title||typeof it.title!=='string'||!it.title.trim())return;
-        const t=it.title.trim();
-        const k=t.toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,60);
-        if(seenItem.has(k))return;seenItem.add(k);
-        const p=it.pubDate?new Date(it.pubDate.replace(' ', 'T')).getTime():Date.now();
-        merged.push({title:t,url:it.link||'#',time:p,src:src,color:color,img:it.thumbnail||it.enclosure?.link||null});
+      res.items.map(newsSimplify(src,color)).forEach(function(n){
+        if(!n)return;
+        const k=newsNormKey(n.title);
+        if(!k)return;
+        if(!merged.some(function(m){return newsDedup(m.title,n.title)||newsNormKey(m.title)===k}))merged.push(n);
       });
     });
-    merged.sort((a,b)=>b.time-a.time);
-    const seen=new Set();const unique=[];
-    merged.forEach(n=>{
-      const k=n.title.toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,60);
-      if(seen.has(k))return;
-      seen.add(k);unique.push(n);
+    merged.sort(function(a,b){return b.time-a.time});
+    const unique=[];
+    merged.forEach(function(n){
+      if(unique.some(function(u){return newsDedup(u.title,n.title)}))return;
+      unique.push(n);
     });
     if(!unique.length)throw new Error('empty');
     newsCache.news=unique;
+    newsCacheSave();
     renderNewsList();
+    renderNewsMeta();
     const srcCounts={};
-    unique.forEach(n=>{srcCounts[n.src]=(srcCounts[n.src]||0)+1});
+    unique.forEach(function(n){srcCounts[n.src]=(srcCounts[n.src]||0)+1});
     $('newsSrcStrip').innerHTML=NEWS_RSS.filter(n=>srcCounts[n[0]]).map(n=>'<span class="news-src-tag'+(newsState.src===n[0]?' on':'')+'" data-src="'+esc(n[0])+'"><b>'+esc(n[0])+'</b> '+srcCounts[n[0]]+'</span>').join('')||'';
     const clear=$('newsSrcClear');
     clear.style.display=newsState.src?'inline-flex':'none';
@@ -2883,9 +3003,13 @@ async function fetchNews(){
     fetchBreaking();
     wireNewsUI();
   }catch(e){
-    $('newsList').innerHTML='<div class="fc-note">News feed unreachable from this network. Core radar features remain live via Binance.</div>';
-    $('newsCount').textContent='OFFLINE';
-    $('newsMore').style.display='none';
+    if(newsCache.news&&newsCache.news.length){
+      renderNewsList();
+    }else{
+      $('newsList').innerHTML='<div class="fc-note">News feed unreachable from this network. Core radar features remain live via Binance.</div>';
+      $('newsCount').textContent='OFFLINE';
+      $('newsMore').style.display='none';
+    }
   }
 }
 function filteredNews(){
@@ -2893,9 +3017,43 @@ function filteredNews(){
   const items=newsCache.news||[];
   return items.filter(n=>{
     if(newsState.src&&n.src!==newsState.src)return false;
+    if(newsState.coin&&(!n.coins||n.coins.indexOf(newsState.coin)<0))return false;
     if(q&&n.title.toLowerCase().indexOf(q)<0)return false;
     return true;
   });
+}
+function newsChipHtml(k,count){
+  if(!COINS[k])return'';
+  const c=COINS[k];
+  let px='';
+  const tk=state.tickers&&state.tickers[c.sym];
+  if(tk&&tk.last&&mdVal.price(tk.last)){
+    px=' <span class="nc-px '+(tk.pct>=0?'up':'dn')+'">'+pfmt(tk.last)
+      +(tk.pct!=null?(' '+((tk.pct>=0?'+':'')+tk.pct.toFixed(2))+'%'):'')+'</span>';
+  }
+  return'<span class="news-coin-chip'+(newsState.coin===k?' coin-on':'')+'" data-coin="'+k+'" role="button" tabindex="0" title="'+esc(c.name)+'">'+esc(c.icon)+' '+k+px+(count?' <b class="nc-cnt" style="color:var(--dim)">'+count+'</b>':'')+'</span>';
+}
+function renderNewsMeta(){
+  const items=newsCache.news||[];
+  const row=$('newsSentRow'),gauge=$('newsSentFill'),lbl=$('newsSentLbl'),cnt=$('newsSentCount'),strip=$('newsCoinStrip');
+  if(row&&items.length){
+    let pos=0,neu=0,neg=0;
+    items.forEach(n=>{if(n.sent==='pos')pos++;else if(n.sent==='neg')neg++;else neu++});
+    const total=pos+neu+neg||1;
+    const left=Math.max(6,Math.min(94,50+((pos-neg)/total)*50));
+    gauge.style.left=left+'%';
+    const cls=(pos-neg)/total>0.12?'pos':((pos-neg)/total<-0.12?'neg':'neu');
+    const label=cls==='pos'?('BULLISH '+Math.round((pos/total)*100)+'%'):(cls==='neg'?('BEARISH '+Math.round((neg/total)*100)+'%'):'NEUTRAL');
+    lbl.innerHTML='<span class="news-sent-tag '+cls+'">'+label+'</span>';
+    cnt.textContent=pos+' pos · '+neu+' neu · '+neg+' neg';
+    row.style.display='flex';
+  }else if(row){row.style.display='none';}
+  if(strip){
+    const map={};
+    items.forEach(n=>(n.coins||[]).forEach(k=>{if(COINS[k])map[k]=(map[k]||0)+1}));
+    const chips=Object.keys(map).map(k=>({k:k,n:map[k]})).sort(function(a,b){return b.n-a.n}).slice(0,12);
+    strip.innerHTML=chips.length?chips.map(c=>newsChipHtml(c.k,c.n)).join(''):'';
+  }
 }
 function renderNewsList(){
   if(!newsCache.news){return;}
@@ -2904,10 +3062,14 @@ function renderNewsList(){
   $('newsCount').textContent=(newsState.src||newsState.query?(list.length+' / '+newsCache.news.length):(list.length))+' STORIES';
   if(!list.length){$('newsList').innerHTML='<div class="fc-note">No stories match this filter.</div>';$('newsMore').style.display='none';return;}
   $('newsList').innerHTML=list.slice(0,shown).map(n=>{
-    return'<a class="news-item" href="'+esc(n.url)+'" target="_blank" rel="noopener">'
+    const sentCls=n.sent==='pos'?'sent-pos':(n.sent==='neg'?'sent-neg':'sent-neu');
+    const sentTag=n.sent?('<span class="ni-sent s-'+n.sent+'">'+(n.sent==='pos'?'POS':(n.sent==='neg'?'NEG':'NEU'))+'</span>'):'';
+    const coinTags=(n.coins&&n.coins.length)?('<div class="ni-coins">'+n.coins.map(k=>newsChipHtml(k)).join('')+'</div>'):'';
+    return'<a class="news-item '+sentCls+'" href="'+esc(n.url)+'" target="_blank" rel="noopener">'
       +'<div class="news-item-body">'
-      +'<div class="ni-meta"><span class="ni-src-badge" style="background:'+n.color+'">'+esc(n.src)+'</span><span class="ni-time">'+(n.time?timeAgo(n.time):'')+'</span></div>'
+      +'<div class="ni-meta">'+sentTag+'<span class="ni-src-badge" style="background:'+n.color+'">'+esc(n.src)+'</span><span class="ni-time">'+(n.time?timeAgo(n.time):'')+'</span></div>'
       +'<div class="ni-title">'+esc(n.title)+'</div>'
+      +coinTags
       +'</div>'
       +(n.img&&!/logo|placeholder|\.svg/i.test(n.img)?'<img class="news-thumb" src="'+esc(n.img)+'" alt="" loading="lazy" onerror="this.style.display=\'none\'">':'')
       +'</a>';
@@ -2935,9 +3097,10 @@ function renderTrending(items){
     return'<div class="trend-chip" data-word="'+esc(k)+'" role="button" tabindex="0"><span class="tr-rank">#'+(i+1)+'</span><span style="font-weight:700;font-size:12.5px">'+esc(k)+'</span><span class="tr-score">'+t.c+' stories</span>'+head+'</div>';
   }).join('');
 }
-function applyNewsFilter({word,src,query}={}){
+function applyNewsFilter({word,src,query,coin}={}){
   if(word){newsState.query=word;$('newsSearch').value=word;}
   if(src!==undefined)newsState.src=src;
+  if(coin!==undefined)newsState.coin=coin;
   if(query!==undefined){newsState.query=query;}
   newsState.shown=30;
   renderNewsList();
@@ -2946,7 +3109,9 @@ function applyNewsFilter({word,src,query}={}){
   const clear=$('newsSrcClear');
   clear.style.display=newsState.src?'inline-flex':'none';
   if(newsState.src)$('newsSrcName').textContent=newsState.src;
+  document.querySelectorAll('.news-coin-chip[data-coin]').forEach(ch=>ch.classList.toggle('coin-on',ch.dataset.coin===newsState.coin));
 }
+let newsCoinClicksBound=false;
 function wireNewsUI(){
   const tagEls=document.querySelectorAll('.news-src-tag');
   tagEls.forEach(t=>{t.onclick=(ev)=>{ev.stopPropagation();applyNewsFilter({src:(t.dataset.src===newsState.src?'':t.dataset.src)})}});
@@ -2955,6 +3120,15 @@ function wireNewsUI(){
   $('newsSearch').oninput=()=>applyNewsFilter({query:$('newsSearch').value});
   const chips=document.querySelectorAll('.trend-chip');
   chips.forEach(c=>{c.onclick=(ev)=>{ev.stopPropagation();applyNewsFilter({word:c.dataset.word})}});
+  if(!newsCoinClicksBound){
+    newsCoinClicksBound=true;
+    document.addEventListener('click',function(ev){
+      const chip=ev.target.closest('.news-coin-chip');
+      if(!chip)return;
+      ev.preventDefault();ev.stopPropagation();
+      applyNewsFilter({coin:(chip.dataset.coin===newsState.coin?'':chip.dataset.coin)});
+    });
+  }
 }
 async function fetchTrending(){
   if(newsCache.news){renderTrending(newsCache.news);}
