@@ -65,7 +65,6 @@ import { renderFG, renderTopCoins, renderWhales } from '../features/snapshots'
 import { addPosition, removePosition, renderPortfolio } from '../features/portfolio'
 import { addAlert, checkAlerts, enableAlerts, removeAlert, renderAlerts } from '../features/alerts'
 import { initTheme, selectPalette } from '../features/theme'
-import { initSearch } from '../features/search'
 import { initKeyboard } from '../features/keyboard'
 
 
@@ -155,7 +154,6 @@ function init(){
   fetchOI();
   fetchWhales();
   connectStreams(streamCb);
-  initSearch();
   initTheme();
   fetchForexEvents();
   initMultiCharts();
