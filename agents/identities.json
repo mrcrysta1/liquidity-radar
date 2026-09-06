@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "branchPolicy": "All implementation work happens on dedicated task branches (chore/, feature/, fix/, test/, refactor/). Never work directly on master.",
+  "identities": [
+    {
+      "id": "OC-LEAD",
+      "name": "OpenCode",
+      "role": "Lead Architect + System Implementation"
+    },
+    {
+      "id": "CL-UI",
+      "name": "Cline",
+      "role": "UI/UX + Feature Developer"
+    },
+    {
+      "id": "AI-REF",
+      "name": "Aider",
+      "role": "Refactoring + Maintenance + Testing"
+    }
+  ]
+}
