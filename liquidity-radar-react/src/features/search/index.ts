@@ -1,0 +1,1 @@
+export { initSearch } from './search'

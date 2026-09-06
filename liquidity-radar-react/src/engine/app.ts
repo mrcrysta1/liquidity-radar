@@ -5,8 +5,8 @@
 // sections are progressively being converted to declarative React.
 // @ts-nocheck
 import * as LightweightCharts from 'lightweight-charts'
-import { COINS, TOP16, CELEBS, TICKER_COINS } from '../constants/market'
-import { esc, fmt, pfmt, timeAgo, chgHtml, chgCls, sigOf } from '../utils/format'
+import { COINS, CELEBS, TICKER_COINS } from '../constants/market'
+import { esc, fmt, pfmt, timeAgo, chgCls, sigOf } from '../utils/format'
 import {
   calcRSI,
   calcMACD,
@@ -48,7 +48,6 @@ import {
   renderHero,
   renderTicker,
   mapCandle,
-  resizeChart,
 } from '../features/charts/chartRender'
 import {
   initMultiCharts,
@@ -66,6 +65,8 @@ import { renderFG, renderTopCoins, renderWhales } from '../features/snapshots'
 import { addPosition, removePosition, renderPortfolio } from '../features/portfolio'
 import { addAlert, checkAlerts, enableAlerts, removeAlert, renderAlerts } from '../features/alerts'
 import { initTheme, selectPalette } from '../features/theme'
+import { initSearch } from '../features/search'
+import { initKeyboard } from '../features/keyboard'
 
 
 function runAnalytics(){
@@ -130,42 +131,8 @@ document.querySelectorAll('#tfSwitch .tf-btn').forEach(btn=>{
   });
 });
 
-const SHORTCUT_TABS={'r':'radar','c':'multichart','s':'signals','m':'market','b':'bubbles','a':'analysis','n':'news','p':'portfolio','t':'chat'};
-document.addEventListener('keydown',function(e){
-  if(e.key==='Escape'){
-    if(document.documentElement.classList.contains('radar-fs')){
-      document.documentElement.classList.remove('radar-fs');
-      const b=$('fsBtn');if(b){b.textContent='⛶';b.title='Full screen [F]';}
-      resizeChart();
-    }
-    const modals=document.querySelectorAll('.modal-overlay.open');
-    modals.forEach(m=>m.classList.remove('open'));
-    return;
-  }
-  if(e.ctrlKey||e.metaKey||e.altKey)return;
-  const t=e.target;
-  if(t&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.tagName==='SELECT'||t.isContentEditable))return;
-  if(e.key==='/'){
-    e.preventDefault();
-    const cs=$('coinSearch');
-    if(cs){cs.focus();cs.select()}
-    return;
-  }
-  if(e.key==='?'){
-    e.preventDefault();
-    const hints=['R Radar','C Charts','S Signals','M Market','B Bubbles','A Analysis','N News','P Portfolio','T Chat','F Fullscreen','/ Search','Esc Close'];
-    showToast('Shortcuts: '+hints.join('   '));
-    return;
-  }
-  if(e.key==='f'||e.key==='F'){
-    $('fsBtn').click();
-    return;
-  }
-  const k=e.key.toLowerCase();
-  if(SHORTCUT_TABS[k]){switchTab(SHORTCUT_TABS[k])}
-});
-
 function init(){
+  initKeyboard();
   const sel=$('symSelect');
   sel.innerHTML=Object.keys(COINS).map(k=>'<option value="'+COINS[k].sym+'">'+k+'/USDT — '+esc(COINS[k].name)+'</option>').join('');
   sel.value=state.symbol;
@@ -206,39 +173,6 @@ function init(){
   setInterval(fetchForexEvents,600000);
   setInterval(function(){renderMemeUniverse();mdPill()},20000);
   setInterval(renderBubbles,30000);
-}
-
-let allBinanceSymbols=[];
-async function initSearch(){
-  try{
-    const r=await fetch('https://api.binance.com/api/v3/exchangeInfo');
-    const d=await r.json();
-    allBinanceSymbols=d.symbols.filter(s=>s.status==='TRADING'&&s.symbol.endsWith('USDT')).map(s=>({sym:s.symbol,base:s.baseAsset,quote:s.quoteAsset,prec:s.filters.find(f=>f.filterType==='PRICE_FILTER')?s.filters.find(f=>f.filterType==='PRICE_FILTER').tickSize:'0.01'}));
-    allBinanceSymbols.sort((a,b)=>a.base.localeCompare(b.base));
-  }catch(e){}
-  const input=$('coinSearch');
-  const results=$('searchResults');
-  input.addEventListener('input',function(){
-    const q=this.value.trim().toLowerCase();
-    if(q.length<1){results.classList.remove('show');return}
-    const matches=allBinanceSymbols.filter(s=>s.base.toLowerCase().indexOf(q)!==-1||s.sym.toLowerCase().indexOf(q)!==-1).slice(0,30);
-    if(!matches.length){results.innerHTML='<div class="search-count">No matches for "'+esc(q)+'"</div>';results.classList.add('show');return}
-    results.innerHTML=matches.map(s=>{
-      const t=state.tickers[s.sym];
-      const price=t?'$'+pfmt(t.last):'—';
-      const chg=t?chgHtml(t.pct):'<span class="chg flat">—</span>';
-      const known=COIN_ALIASES[s.base.toUpperCase()];
-      const isPopular=known||TOP16.indexOf(s.base.toUpperCase())!==-1;
-      return'<div class="search-item" data-sym="'+s.sym+'"><span class="si-sym" style="color:'+(isPopular?'var(--cyan)':'var(--muted)')+'">'+s.base+'</span><span class="si-name">'+s.base+'/USDT</span><span class="si-price">'+price+'</span><span class="si-chg">'+chg+'</span></div>';
-    }).join('')+'<div class="search-count">'+matches.length+' pairs found</div>';
-    results.classList.add('show');
-  });
-  input.addEventListener('focus',function(){if(this.value.trim().length>=1)results.classList.add('show')});
-  results.addEventListener('click',function(e){
-    const item=e.target.closest('.search-item');
-    if(item){setSymbol(item.dataset.sym);input.value='';results.classList.remove('show')}
-  });
-  document.addEventListener('click',function(e){if(!e.target.closest('.search-wrap'))results.classList.remove('show')});
 }
 
 // --- expose module-scope functions to window (classic-script globals no

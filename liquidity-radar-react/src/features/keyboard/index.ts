@@ -1,0 +1,1 @@
+export { SHORTCUT_TABS, initKeyboard } from './keyboard'
