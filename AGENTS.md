@@ -726,3 +726,90 @@ Do not automatically continue into the next project phase.
 
 When uncertain about a potentially architectural or destructive change, stop and ask for confirmation.
 
+
+
+\---
+
+
+
+
+\# Phase 0 — Agent Operating System
+
+Crypto Radar runs its own multi-agent operating system. ChatGPT is PROJECT LEAD. The three agent identities below are authoritative; the single source of truth is agents/identities.json. Phase 0 only defines identity, task, report, startup and handoff protocols. It does not change application behavior.
+
+
+
+\## 1. AGENT IDENTITY
+
+Stable identities (authoritative store: agents/identities.json):
+
+\- OC-LEAD = OpenCode = Lead Architect + System Implementation
+
+\- CL-UI = Cline = UI/UX + Feature Developer
+
+\- AI-REF = Aider = Refactoring + Maintenance + Testing
+
+Every task MUST contain: TASK ID, AGENT ID, AGENT NAME, AUTHORIZED ROLE, PROJECT, EXPECTED OUTPUT.
+
+Before working, every agent MUST validate these values with:
+
+node scripts/agent-os.mjs task <file> [--agent-id <AGENT_ID>]
+
+If the task is assigned to another agent, the agent MUST NOT execute it. Return exactly:
+
+WRONG AGENT
+
+Expected Agent: OC-LEAD
+
+Current Agent: CL-UI
+
+Task ID: CR-P0-001
+
+Action: STOP
+
+Reason: This task is not authorized for this agent.
+
+Do not attempt to "help anyway."
+
+
+
+\## 2. TASK / PROMPT PROTOCOL
+
+ChatGPT authors every task using the template tasks/TEMPLATE.md and records it in tasks/index.json. Required header fields: TASK ID, PHASE, PRIORITY, AGENT ID, AGENT NAME, AUTHORIZED ROLE, PROJECT, EXPECTED OUTPUT, OBJECTIVE, SCOPE, DO NOT, DEPENDENCIES, REQUIRED VERIFICATION.
+
+Task IDs are unique and traceable: CR-<PHASE>-NNN.
+
+Each task specifies a dedicated branch: <chore|feature|fix|test|refactor>/<short-slug>.
+
+Agents never self-assign tasks and never start unrelated work.
+
+
+
+\## 3. OUTPUT / REPORT PROTOCOL
+
+Every agent report MUST include: TASK ID, AGENT NAME, AGENT ID, STATUS, BRANCH, COMMIT, FILES CHANGED, TEST RESULTS, BLOCKERS, NEXT RECOMMENDED ACTION.
+
+A report that does NOT contain valid task + agent identification MUST be treated as UNVERIFIED and re-submitted.
+
+Validate reports with:
+
+node scripts/agent-os.mjs report <file> [--agent-id <AGENT_ID>]
+
+
+
+\## 4. DAILY PLUG-AND-PLAY STARTUP
+
+Windows one-click launcher:
+
+startup\START-AGENTS.bat
+
+It verifies repository state, current branch, agent identities, git/node availability, and project dependencies; prints the agent identities and validates current task headers; warns when on master. No application work is performed by the launcher.
+
+
+
+\## 5. HANDOFF + VERIFICATION LIFECYCLE
+
+CHATGPT → TASK CREATED (tasks/) → AGENT ASSIGNED → AGENT VALIDATES IDENTITY → AGENT WORKS ON TASK BRANCH → AGENT RUNS VERIFICATION → AGENT REPORT → CHATGPT VERIFIES REPORT → NEXT TASK / NEXT AGENT → PR → MASTER → VERCEL
+
+ChatGPT decides priority, architecture, task breakdown, dependencies, assignment, prompts, verification, the next agent and the next task. Agents complete only their assigned task, push only their task branch, and open a PR to master; merging is authorized by the lead.
+
