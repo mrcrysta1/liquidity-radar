@@ -1,0 +1,4 @@
+# Aider configuration — minimal autonomous workflow
+# Reduces unnecessary "Add file to chat?" prompts for assigned tasks
+# Sensitive files (.env, keys, tokens) remain protected by .gitignore
+auto-commits: false
