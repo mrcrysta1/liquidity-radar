@@ -49,6 +49,8 @@ const EXTERNAL_NOISE = [
   'Access to fetch at',
   'ERR_CERT',
   'net::ERR_CONNECTION',
+  'ERR_ABORTED',
+  'rss2json',
 ]
 const isNoise = (m) => EXTERNAL_NOISE.some((p) => m.includes(p))
 

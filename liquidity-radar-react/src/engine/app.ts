@@ -26,31 +26,19 @@ import { computeAnalytics, renderAnalysis } from '../features/analysis'
 import { fetchNews, fetchTrending, fetchBreaking, wireNewsUI } from '../features/news/newsFeed'
 
 import { state } from '../services/store'
-import {
-  md,
-  mdHealth,
-  mdSym,
-  mdTf,
-  mdFlat,
-  mdFromK,
-  mdVal,
-  mdStoreTicker,
-  mdStoreCandles,
-  mdStoreOB,
-  mdDataAge,
-  mdCacheGet,
-  mdCachePut,
-  mdHearbeat,
-  mdRefreshHealth,
-  mdRestOk,
-  mdRestErr,
-  mdPill,
-  mdDebug,
-  mdToggleDebug,
-} from '../services/market'
-import { jget } from '../api/client'
+import { mdTf, mdPill, mdToggleDebug } from '../services/market'
 import { storageGet, storageSet, storageGetRaw, storageSetRaw } from '../services/storage'
 import { connectStreams } from '../services/streams'
+import {
+  fetchTickers,
+  fetchKlines,
+  fetchOB,
+  fetchFR,
+  fetchOI,
+  fetchFG,
+  fetchWhales,
+  wireMarketHooks,
+} from '../services/marketData'
 import {
   initChart,
   applyChartTheme,
@@ -89,84 +77,6 @@ function runAnalytics(){
   document.title = baseOf(state.symbol)+' '+pfmt(s.last)+' · Liquidity Radar'
 }
 
-
-async function fetchTickers(){
-  try{
-    const syms=Object.values(COINS).map(c=>c.sym);
-    const url='https://api.binance.com/api/v3/ticker/24hr?symbols='+encodeURIComponent(JSON.stringify(syms));
-    const data=await jget(url);
-    data.forEach(d=>{
-      state.tickers[d.symbol]={last:+d.lastPrice,pct:+d.priceChangePercent,high:+d.highPrice,low:+d.lowPrice,qvol:+d.quoteVolume,trades:+d.count};
-    });
-    renderTicker();renderHero();renderTopCoins();renderPortfolio();checkAlerts();renderBubbles();
-    $('topCoinsUpd').textContent='LIVE · '+new Date().toLocaleTimeString();
-  }catch(e){console.warn('tickers',e)}
-}
-async function fetchKlines(sym){
-  try{
-    const inter=mdTf(state.tf||'15m');
-    const data=await jget('https://api.binance.com/api/v3/klines?symbol='+mdSym(sym)+'&interval='+inter+'&limit=200');
-    const candles=data.map(mdFromK).filter(Boolean);
-    if(!candles.length)throw new Error('empty');
-    state.candles=candles;
-    mdStoreCandles(state.symbol,inter,candles);
-    mdCachePut(state.symbol,inter,candles);
-    updateChartData();runAnalytics();
-  }catch(e){
-    console.warn('klines',e);
-    // REST fallback: serve recent cached candles so the chart isn't left blank
-    const inter=mdTf(state.tf);
-    const cached=mdCacheGet(state.symbol,inter)||md.candles[mdSym(state.symbol)+'|'+inter]||null;
-    if(cached&&cached.length){
-      state.candles=cached;
-      updateChartData();runAnalytics();
-      $('wsKlineState').textContent='CACHE';$('wsKlineState').className='badge b-amber';
-      mdDebug.log('klines','serving cached '+state.symbol+' '+inter);
-      showToast('Klines live stream down — showing cached data');
-    }else{
-      showToast('Klines unavailable — check network/Binance access');
-    }
-  }
-}
-async function fetchOB(){
-  try{
-    const d=await jget('https://api.binance.com/api/v3/depth?symbol='+mdSym(state.symbol)+'&limit=15');
-    const ob={bids:d.bids.map(b=>[+b[0],+b[1]]),asks:d.asks.map(a=>[+a[0],+a[1]])};
-    if(!mdStoreOB(state.symbol,ob))return;
-    state.ob=ob;
-    renderOB();
-  }catch(e){console.warn('depth',e)}
-}
-async function fetchFR(){
-  try{
-    state.fr=await jget('https://fapi.binance.com/fapi/v1/premiumIndex?symbol='+state.symbol);
-    runAnalytics();renderHero();
-  }catch(e){console.warn('premiumIndex',e);$('mFR').textContent='N/A'}
-}
-async function fetchOI(){
-  try{
-    state.oi=await jget('https://fapi.binance.com/fapi/v1/openInterest?symbol='+state.symbol);
-    runAnalytics();
-  }catch(e){console.warn('openInterest',e);$('mOI').textContent='N/A'}
-}
-async function fetchFG(){
-  try{
-    const d=await jget('https://api.alternative.me/fng/');
-    if(d.data&&d.data[0]){state.fg=d.data[0];renderFG()}
-  }catch(e){console.warn('fng',e);$('fngClass').textContent='feed unreachable'}
-}
-async function fetchWhales(){
-  try{
-    const trades=await jget('https://api.binance.com/api/v3/trades?symbol='+state.symbol+'&limit=1000');
-    const big=trades
-      .map(t=>({id:t.id,time:t.time,price:+t.price,qty:+t.qty,usd:+t.price*+t.qty,maker:t.isBuyerMaker}))
-      .filter(t=>t.usd>=50000)
-      .sort((a,b)=>b.time-a.time)
-      .slice(0,40);
-    state.whales=big;
-    renderWhales();
-  }catch(e){console.warn('trades',e)}
-}
 
 function setWsStatus(){
   // primary status derived from live stream count (unchanged behavior)
@@ -454,6 +364,27 @@ export function initApp(){
     streamCb,
     renderHero,
     renderTicker,
+  })
+  wireMarketHooks({
+    onTickers() {
+      renderTicker();renderHero();renderTopCoins();renderPortfolio();checkAlerts();renderBubbles();
+      $('topCoinsUpd').textContent='LIVE · '+new Date().toLocaleTimeString();
+    },
+    onKlines(){ updateChartData();runAnalytics(); },
+    onKlineCache(){
+      updateChartData();runAnalytics();
+      $('wsKlineState').textContent='CACHE';$('wsKlineState').className='badge b-amber';
+      showToast('Klines live stream down — showing cached data');
+    },
+    onKlineFail(){ showToast('Klines unavailable — check network/Binance access'); },
+    onOB(){ renderOB(); },
+    onFR(){ runAnalytics();renderHero(); },
+    onFRfail(){ $('mFR').textContent='N/A'; },
+    onOI(){ runAnalytics(); },
+    onOIfail(){ $('mOI').textContent='N/A'; },
+    onFG(){ renderFG(); },
+    onFGfail(){ $('fngClass').textContent='feed unreachable'; },
+    onWhales(){ renderWhales(); },
   })
   init()
 }
