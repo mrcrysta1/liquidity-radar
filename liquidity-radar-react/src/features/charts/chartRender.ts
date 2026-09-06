@@ -8,6 +8,8 @@ import { state } from '../../services/store'
 
 type Any = any
 
+;(window as Any).LightweightCharts = LightweightCharts
+
 let chart: Any = null
 let candleSeries: Any = null
 let volSeries: Any = null
