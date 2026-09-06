@@ -6,18 +6,14 @@
 // @ts-nocheck
 import * as LightweightCharts from 'lightweight-charts'
 import { COINS, TOP16, CELEBS, TICKER_COINS } from '../constants/market'
-import { esc, fmt, pfmt, cfmt, nfmt, timeAgo, chgHtml, chgCls, sigOf } from '../utils/format'
+import { esc, fmt, pfmt, timeAgo, chgHtml, chgCls, sigOf } from '../utils/format'
 import {
   calcRSI,
   calcMACD,
   calcBB,
-  calcATR,
   volTrend,
   linReg,
   emaArr,
-  aiComposite,
-  forecastFrom,
-  supportResistance,
   smaArr,
   vwapSeries,
   macdSeries,
@@ -26,6 +22,7 @@ import {
 import { baseOf, coinMeta } from '../utils/coins'
 import { $, showToast, openModal, closeModal } from '../utils/dom'
 import { fetchForexEvents } from '../features/analysis/calendar'
+import { computeAnalytics, renderAnalysis } from '../features/analysis'
 import { fetchNews, fetchTrending, fetchBreaking, wireNewsUI } from '../features/news/newsFeed'
 
 import { state } from '../services/store'
@@ -86,150 +83,12 @@ import { addAlert, checkAlerts, enableAlerts, removeAlert, renderAlerts } from '
 
 
 function runAnalytics(){
-  if(state.candles.length<30)return;
-  const closes=state.candles.map(c=>c.c);
-  const vols=state.candles.map(c=>c.v);
-  const a=aiComposite(state.candles,closes,vols);
-  const last=a.last;
-
-  const rsiZone=a.rsi>70?['OVERBOUGHT','b-red']:a.rsi<30?['OVERSOLD','b-green']:a.rsi>55?['BULLISH','b-green']:a.rsi<45?['BEARISH','b-red']:['NEUTRAL','b-gray'];
-  $('mRSI').textContent=a.rsi.toFixed(1);
-  $('mRSI').style.color=rsiZone[0]==='OVERBOUGHT'?'var(--red)':rsiZone[0]==='OVERSOLD'?'var(--green)':'var(--txt)';
-  $('mRSIZone').textContent=rsiZone[0];$('mRSIZone').className='badge '+rsiZone[1];
-  $('indRSI').textContent=a.rsi.toFixed(1);
-  $('indRSIb').textContent=rsiZone[0];$('indRSIb').className='badge '+rsiZone[1];
-
-  const mBull=a.macd.hist>0;
-  const histPct=((a.macd.hist/(last*0.002))*100).toFixed(0);
-  $('mMACD').textContent=(mBull?'+':'')+histPct+'%';
-  $('mMACD').style.color=mBull?'var(--green)':'var(--red)';
-  $('mMACDZone').textContent=mBull?'BULLISH':'BEARISH';$('mMACDZone').className='badge '+(mBull?'b-green':'b-red');
-  $('indMACD').textContent=a.macd.hist.toFixed(last>100?2:6);
-  $('indMACDb').textContent=mBull?'HIST > 0':'HIST < 0';$('indMACDb').className='badge '+(mBull?'b-green':'b-red');
-
-  const above=last>a.e20;
-  $('mEMA').textContent=pfmt(a.e20);
-  $('mEMAZone').textContent=above?'PRICE ABOVE':'PRICE BELOW';$('mEMAZone').className='badge '+(above?'b-green':'b-red');
-  $('mEMASub').textContent=(above?'uptrend bias':'downtrend bias')+' · Δ '+(((last/a.e20)-1)*100).toFixed(2)+'%';
-  $('indEMA').textContent=pfmt(a.e20);
-  $('indEMAb').textContent=above?'ABOVE ✓':'BELOW ✕';$('indEMAb').className='badge '+(above?'b-green':'b-red');
-
-  const pb=a.bb.pctB;
-  const bbZone=pb>95?['UPPER BREAK','b-amber']:pb>70?['HIGH','b-green']:pb<5?['LOWER BREAK','b-amber']:pb<30?['LOW','b-red']:['MID RANGE','b-gray'];
-  $('mBB').textContent=pb.toFixed(1)+'%';
-  $('mBBZone').textContent=bbZone[0];$('mBBZone').className='badge '+bbZone[1];
-  $('indBB').textContent=pb.toFixed(1)+'%';
-  $('indBBb').textContent=bbZone[0];$('indBBb').className='badge '+bbZone[1];
-  $('indBBs').textContent='bands '+pfmt(a.bb.lo)+' – '+pfmt(a.bb.up);
-
-  $('indVT').textContent=a.vt;
-  const vtc=a.vt==='RISING'?['RISING ↑','b-green']:a.vt==='FALLING'?['FALLING ↓','b-red']:['FLAT →','b-gray'];
-  $('indVTb').textContent=vtc[0];$('indVTb').className='badge '+vtc[1];
-
-  $('mAIScore').textContent=(a.score>0?'+':'')+a.score;
-  $('mAIScore').style.color=a.color;
-  $('mAIZone').textContent=a.label;$('mAIZone').className='badge '+a.badge;
-  const mkPos=50+a.score/2;
-  $('mAIMarker').style.left='calc('+mkPos+'% - 2px)';
-  $('indScoreMarker').style.left='calc('+mkPos+'% - 2px)';
-  $('indScoreLbl').textContent=(a.score>0?'+':'')+a.score+' · '+a.label;
-  $('indScoreLbl').style.color=a.color;
-
-  const rets=[];
-  for(let i=1;i<closes.length;i++)rets.push(closes[i]/closes[i-1]-1);
-  const mr=rets.reduce((x,y)=>x+y,0)/rets.length;
-  const sd=Math.sqrt(rets.reduce((x,y)=>x+(y-mr)*(y-mr),0)/rets.length);
-  const dv=sd*Math.sqrt(96)*100;
-  $('mVol').textContent=dv.toFixed(2)+'%';
-  $('mVol').style.color=dv>4?'var(--red)':dv>1.5?'var(--amber)':'var(--green)';
-
-  const fc=forecastFrom(closes);
-  $('fcBias').textContent=fc.bias;
-  $('fcBias').style.color=fc.bias.indexOf('UP')===0?'var(--green)':'var(--red)';
-  $('fcConf').textContent=fc.rows[3].conf+'%';
-  $('fcRows').innerHTML=fc.rows.map(r=>{
-    const cls=r.dp>=0?'hl-g':'hl-r';
-    const col=r.dp>=0?'var(--green)':'var(--red)';
-    return'<tr><td>'+r.label+'</td><td><b>'+pfmt(r.pred)+'</b></td><td style="color:'+col+'">'+(r.dp>0?'+':'')+r.dp.toFixed(2)+'%</td><td>'+pfmt(r.lo)+' – '+pfmt(r.hi)+'</td><td>'+r.conf+'%<span class="conf-bar"><i style="width:'+r.conf+'%"></i></span></td></tr>';
-  }).join('');
-
-  const sr=supportResistance(state.candles);
-  if(sr)state._sr=sr;
-  state._atr=calcATR(state.candles);
-  state._ai=a;
-  renderAnalysis();
-  document.title=baseOf(state.symbol)+' '+pfmt(last)+' · Liquidity Radar';
+  const s = computeAnalytics()
+  if (!s) return
+  renderAnalysis(s)
+  document.title = baseOf(state.symbol)+' '+pfmt(s.last)+' · Liquidity Radar'
 }
 
-function renderAnalysis(){
-  const base=baseOf(state.symbol);
-  const mark=state.fr?parseFloat(state.fr.markPrice):(state._ai?state._ai.last:null);
-  $('liqSym').textContent=state.symbol;
-  $('vpSym').textContent=state.symbol+' · 96 BARS';
-  if(mark!=null)$('liqMark').textContent='$'+pfmt(mark);
-  if(state.fr){
-    const rate=parseFloat(state.fr.lastFundingRate);
-    $('mFR').textContent=(rate*100).toFixed(4)+'%';
-    $('mFR').style.color=rate>0?'var(--green)':rate<0?'var(--red)':'var(--txt)';
-    $('mFRNext').textContent=rate>0?'longs pay shorts':rate<0?'shorts pay longs':'flat';
-    if(state.fr.nextFundingTime){
-      const upd=()=>{
-        const ms=state.fr.nextFundingTime-Date.now();
-        if(ms<0)return;
-        const hh=Math.floor(ms/3600000),mm=Math.floor((ms%3600000)/60000),ss=Math.floor((ms%60000)/1000);
-        $('mFRNext').textContent=(rate>0?'longs pay · ':'shorts pay · ')+String(hh).padStart(2,'0')+':'+String(mm).padStart(2,'0')+':'+String(ss).padStart(2,'0')+' to funding';
-      };
-      upd();clearInterval(state._frTimer);state._frTimer=setInterval(upd,1000);
-    }
-  }
-  if(state.oi&&mark!=null){
-    const oiN=parseFloat(state.oi.openInterest)*mark;
-    $('mOI').textContent=cfmt(oiN);
-    $('mOISub').textContent=nfmt(parseFloat(state.oi.openInterest))+' '+base+' contracts';
-    $('liqOI').textContent=cfmt(oiN);
-    const atr=state._atr||mark*0.004;
-    $('liqATR').textContent='$'+pfmt(atr);
-    const sr=state._sr||{sup:mark*0.97,res:mark*1.03};
-    const lz={lo:sr.sup-1.1*atr,hi:sr.sup-0.3*atr};
-    const sz={lo:sr.res+0.3*atr,hi:sr.res+1.1*atr};
-    $('liqLongRange').textContent='$'+pfmt(lz.lo)+' — $'+pfmt(lz.hi);
-    $('liqShortRange').textContent='$'+pfmt(sz.lo)+' — $'+pfmt(sz.hi);
-    const leLong=oiN*0.22,leShort=oiN*0.16;
-    $('liqLongEst').textContent='estimated trapped-notional magnet: '+cfmt(leLong)+' ('+(((lz.hi/mark)-1)*100).toFixed(2)+'% below mark)';
-    $('liqShortEst').textContent='estimated trapped-notional magnet: '+cfmt(leShort)+' ('+(((sz.lo/mark)-1)*100).toFixed(2)+'% above mark)';
-    const liqSpan=Math.max(atr*2.8*3,mark*0.003);
-    const liqLBars=Math.max(8,Math.min(100,Math.round(((lz.hi/mark-1)*100)/(liqSpan/mark*100)*100)));
-    const liqSBars=Math.max(8,Math.min(100,Math.round(((sz.lo/mark-1)*100)/(liqSpan/mark*100)*100)));
-    const lB=$('liqLongBar'),sB=$('liqShortBar');
-    if(lB)lB.style.width=liqLBars+'%';
-    if(sB)sB.style.width=liqSBars+'%';
-    const srDist=((sr.sup-mark)/mark*100).toFixed(2);
-    $('liqLev').textContent=Math.abs(srDist)+'% below support at $'+pfmt(sr.sup);
-    state._liq={lz:lz,sz:sz,oiN:oiN};
-  }
-  if(!state.candles.length)return;
-  const w=state.candles.slice(-96);
-  const lo=Math.min.apply(null,w.map(c=>c.l)),hi=Math.max.apply(null,w.map(c=>c.h));
-  const bins=22;
-  const buckets=new Array(bins).fill(0);
-  w.forEach(c=>{
-    let bi=Math.floor((c.c-lo)/((hi-lo)||1)*bins);
-    bi=Math.min(bins-1,bi);
-    buckets[bi]+=c.v;
-  });
-  const maxB=Math.max.apply(null,buckets)||1;
-  const pocIdx=buckets.indexOf(maxB);
-  const lastP=w[w.length-1].c;
-  let html='';
-  for(let i=bins-1;i>=0;i--){
-    const pl=lo+i*((hi-lo)/bins);
-    const midP=pl+((hi-lo)/bins)/2;
-    const wpct=buckets[i]/maxB*100;
-    const isPoc=i===pocIdx,isCur=lastP>=pl&&lastP<=pl+((hi-lo)/bins);
-    html+='<div class="vp-row'+(isPoc?' poc':'')+(isCur?' cur':'')+'"><span class="vp-lbl">'+pfmt(midP)+'</span><span class="vp-zone"><span class="vp-bar" style="width:'+Math.max(2,wpct).toFixed(1)+'%"></span></span><span class="vp-val">'+nfmt(buckets[i])+'</span><span class="vp-flag">'+(isPoc?'★POC':isCur?'◀ LIVE':'')+'</span></div>';
-  }
-  $('vpList').innerHTML=html;
-}
 
 async function fetchTickers(){
   try{
