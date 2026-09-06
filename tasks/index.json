@@ -9,6 +9,16 @@
       "status": "COMPLETED",
       "branch": "chore/phase-0-agent-operating-system",
       "file": "tasks/CR-P0-001.md"
+    },
+    {
+      "id": "CR-P3-001",
+      "title": "Phase 3 React Componentization Plan",
+      "phase": "3",
+      "agentId": "OC-LEAD",
+      "agentName": "OpenCode",
+      "status": "PLANNED",
+      "branch": "task/CR-P3-001-react-componentization-plan",
+      "file": "docs/PHASE3-COMPONENTIZATION-PLAN.md"
     }
   ]
 }
