@@ -236,7 +236,7 @@ nav.tabs::-webkit-scrollbar{display:none}
   transition:all .2s;display:flex;align-items:center;justify-content:center;gap:7px;
 }
 .tab-btn:hover{color:var(--txt)}
-.tab-btn.active{color:#fff;border-bottom-color:var(--primary);text-shadow:0 0 14px rgb(var(--pRGB)/.8)}
+.tab-btn.active{color:#fff;border-bottom-color:var(--primary);text-shadow:0 0 14px rgb(var(--pRGB)/.8);background:rgb(var(--pRGB)/.16)}
 
 main{padding-top:14px}
 .tab-section{display:none;animation:fadeUp .3s ease}
