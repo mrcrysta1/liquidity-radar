@@ -2,6 +2,9 @@ import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
+
 import {
   resolveRoot,
   loadIdentities,
@@ -15,6 +18,8 @@ import {
   preflight,
   acquireLock,
   releaseLock,
+  resolveAgentKey,
+  resolveLaunch,
 } from '../startup/agent-env.mjs'
 
 let passed = 0
@@ -120,6 +125,72 @@ t('acquire/release lock round-trips', () => {
   releaseLock(name)
   assert.equal(acquireLock(name).ok, true, 'acquire succeeds after release')
   releaseLock(name)
+})
+
+console.log('')
+console.log('regression: exact launcher arguments resolve to registered identities')
+
+const expectedMapping = { opencode: 'OC-LEAD', aider: 'AI-REF', cline: 'CL-UI' }
+const ids = loadIdentities(root)
+const registeredIds = ids.identities.map((i) => i.id)
+
+for (const [key, expectedId] of Object.entries(expectedMapping)) {
+  t(`resolveAgentKey('${key}') maps to registered identity ${expectedId}`, () => {
+    const resolved = resolveAgentKey(key)
+    assert.ok(resolved, `'${key}' must resolve`)
+    assert.equal(resolved.id, expectedId)
+    assert.equal(resolved.agent, key)
+    assert.ok(registeredIds.includes(resolved.id), `${resolved.id} must exist in agents/identities.json`)
+  })
+
+  t(`resolveLaunch('${key}') builds a runnable command from the git root`, () => {
+    const launch = resolveLaunch(key, root)
+    assert.ok(launch, `'${key}' must resolve`)
+    assert.equal(launch.id, expectedId)
+    assert.ok(launch.bin && launch.bin.path, `${key} binary resolves`)
+    assert.ok(Array.isArray(launch.cmd) && launch.cmd.length > 0, 'command array built')
+    assert.equal(launch.cwd, root, 'agents spawn from the git root')
+    const expectedCmds = {
+      opencode: [launch.bin.path, root],
+      cline: [launch.bin.path, '-c', root, '-i'],
+      aider: [launch.bin.path, '--model', 'openrouter/openrouter/free', '--yes-always'],
+    }
+    assert.equal(
+      launch.cmd.map((p) => p.replaceAll('\\', '/')).join(' '),
+      expectedCmds[key].map((p) => p.replaceAll('\\', '/')).join(' '),
+      `exact command expected for '${key}'`,
+    )
+  })
+}
+
+t('resolveAgentKey is case-insensitive for registered IDs (OC-LEAD/oc-lead)', () => {
+  for (const key of ['OC-LEAD', 'oc-lead', 'OC-lead']) {
+    const resolved = resolveAgentKey(key)
+    assert.ok(resolved, `'${key}' must resolve`)
+    assert.equal(resolved.id, 'OC-LEAD')
+    assert.equal(resolved.agent, 'opencode')
+  }
+})
+
+t('resolution agrees with agents/identities.json (every agent maps to a registered id)', () => {
+  for (const [agent, id] of Object.entries(expectedMapping)) {
+    assert.ok(registeredIds.includes(id), `${agent} -> ${id} is registered`)
+  }
+})
+
+t('unknown-agent rejection still works for genuinely invalid names', () => {
+  for (const bad of ['notreal', 'vscode', 'chatgpt', '']) {
+    assert.equal(resolveAgentKey(bad), null, `'${bad}' must not resolve`)
+  }
+  assert.equal(resolveLaunch('notreal', root), null, "resolveLaunch('notreal') must be null")
+})
+
+t('CLI dispatch: invalid agent exits 1 with unknown agent (real dispatch path)', () => {
+  const entry = fileURLToPath(new URL('../startup/agent-env.mjs', import.meta.url))
+  const res = spawnSync(process.execPath, [entry, 'start', 'notreal'], { encoding: 'utf8' })
+  assert.notEqual(res.status, 0, 'exit must be non-zero')
+  const output = `${res.stdout || ''}${res.stderr || ''}`
+  assert.ok(output.includes('unknown agent'), `output must say "unknown agent" (got: ${output.trim()})`)
 })
 
 console.log('')

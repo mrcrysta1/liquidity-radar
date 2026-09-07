@@ -56,6 +56,10 @@ respect to Git state.
   `--restore-chat-history` to the Aider command in `startup\agent-env.mjs` (`buildAiderCmd`)
   to resume it. Cline supports `--id <session-id>` resume via its CLI.
 
+Agent keys accept either the tool name (`opencode` | `aider` | `cline`) or the registered
+identity ID (`OC-LEAD` | `CL-UI` | `AI-REF`), case-insensitive. Both map to the same
+launch target: OpenCode → OC-LEAD, Cline → CL-UI, Aider → AI-REF.
+
 ---
 
 ## Single-instance guard

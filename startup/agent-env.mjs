@@ -79,6 +79,24 @@ export const IDENTITY_AGENT_MAP = {
   'AI-REF': 'aider',
 }
 
+export const AGENT_IDENTITY_MAP = Object.fromEntries(
+  Object.entries(IDENTITY_AGENT_MAP).map(([id, agent]) => [agent, id]),
+)
+
+export function resolveAgentKey(key = '') {
+  const normalized = String(key).trim()
+  if (!normalized) return null
+  const upper = normalized.toUpperCase()
+  if (Object.prototype.hasOwnProperty.call(IDENTITY_AGENT_MAP, upper)) {
+    return { id: upper, agent: IDENTITY_AGENT_MAP[upper] }
+  }
+  const lower = normalized.toLowerCase()
+  if (Object.prototype.hasOwnProperty.call(AGENT_IDENTITY_MAP, lower)) {
+    return { id: AGENT_IDENTITY_MAP[lower], agent: lower }
+  }
+  return null
+}
+
 export function resolveAgentBins() {
   const result = {}
   for (const [id, agent] of Object.entries(IDENTITY_AGENT_MAP)) {
@@ -208,57 +226,74 @@ export function releaseLock(agentId) {
   rmSync(lockPath(agentId), { force: true })
 }
 
-function runAgent(agentId, root) {
-  if (!IDENTITY_AGENT_MAP[agentId]) {
-    console.error(`[AGENT-OS] unknown agent '${agentId}'`)
-    process.exitCode = 1
-    return
-  }
-  const agent = IDENTITY_AGENT_MAP[agentId]
+const AGENT_CMD_BUILDERS = {
+  opencode: buildOpenCodeCmd,
+  aider: buildAiderCmd,
+  cline: buildClineCmd,
+}
+
+export function resolveLaunch(key, root) {
+  const resolved = resolveAgentKey(key)
+  if (!resolved) return null
+  const { id, agent } = resolved
   const bin = findBin(BIN_CANDIDATES[agent])
   if (!bin) {
-    console.error(`[AGENT-OS] ${agentId} binary not found`)
+    return { id, agent, bin: null, error: 'binary not found' }
+  }
+  const cmd = AGENT_CMD_BUILDERS[agent](bin.path, root)
+  const needsShell = cmd[0].toLowerCase().endsWith('.cmd') || cmd[0].toLowerCase().endsWith('.bat')
+  return { id, agent, bin, cmd, needsShell, cwd: root }
+}
+
+function runAgent(key, root) {
+  const launch = resolveLaunch(key, root)
+  if (!launch) {
+    console.error(`[AGENT-OS] unknown agent '${key}' (expected opencode|aider|cline or OC-LEAD|CL-UI|AI-REF)`)
     process.exitCode = 1
     return
   }
+  if (!launch.bin) {
+    console.error(`[AGENT-OS] ${launch.id} binary not found`)
+    process.exitCode = 1
+    return
+  }
+  const { id, agent } = launch
 
-  const lock = acquireLock(agentId)
+  const lock = acquireLock(id)
   if (lock.ok === false) {
-    console.error(`[AGENT-OS] ${agentId} already running (pid ${lock.existing ? lock.existing.pid : '?'} since ${lock.existing ? lock.existing.started : '?'}) — launcher already started it`)
+    console.error(`[AGENT-OS] ${id} already running (pid ${lock.existing ? lock.existing.pid : '?'} since ${lock.existing ? lock.existing.started : '?'}) — launcher already started it`)
     process.exitCode = 2
     return
   }
 
-  const builders = {
-    opencode: buildOpenCodeCmd,
-    aider: buildAiderCmd,
-    cline: buildClineCmd,
-  }
-  const cmd = builders[agent](bin.path, root)
-  const needsShell = cmd[0].toLowerCase().endsWith('.cmd') || cmd[0].toLowerCase().endsWith('.bat')
-
-  console.log(`[AGENT-OS] launching ${agentId} (${agent}) in ${root}`)
-  console.log(`[AGENT-OS] command: ${cmd.join(' ')}`)
+  console.log(`[AGENT-OS] launching ${id} (${agent}) in ${root}`)
+  console.log(`[AGENT-OS] command: ${launch.cmd.join(' ')}`)
   console.log(`[AGENT-OS] close this window to stop the agent.`)
 
   let child
   try {
-    child = spawn(cmd[0], cmd.slice(1), {
+    child = spawn(launch.cmd[0], launch.cmd.slice(1), {
       cwd: root,
       stdio: 'inherit',
-      shell: needsShell,
+      shell: launch.needsShell,
       windowsHide: false,
     })
   } catch (err) {
-    console.error(`[AGENT-OS] failed to spawn ${agentId}: ${err.message}`)
-    releaseLock(agentId)
+    console.error(`[AGENT-OS] failed to spawn ${id}: ${err.message}`)
+    releaseLock(id)
     process.exitCode = 1
     return
   }
 
+  child.on('error', (err) => {
+    console.error(`[AGENT-OS] failed to start ${id}: ${err.message}`)
+    releaseLock(id)
+    process.exitCode = 1
+  })
+
   child.on('exit', (code, signal) => {
-    releaseLock(agentId)
-    console.log(`[AGENT-OS] ${agentId} exited (code=${code}, signal=${signal || 'none'})`)
+    releaseLock(id)
+    console.log(`[AGENT-OS] ${id} exited (code=${code}, signal=${signal || 'none'})`)
     process.exitCode = code && typeof code === 'number' ? code : 0
   })
 }
@@ -267,7 +302,7 @@ function printHelp() {
   console.log('usage:')
   console.log('  node startup/agent-env.mjs preflight      validate repo + toolchain')
   console.log('  node startup/agent-env.mjs info           print repo/toolchain summary')
-  console.log('  node startup/agent-env.mjs start <agent>  launch one agent (opencode|aider|cline)')
+  console.log('  node startup/agent-env.mjs start <agent>  launch one agent (opencode|aider|cline or OC-LEAD|CL-UI|AI-REF)')
   console.log('  node startup/agent-env.mjs help           show this help')
 }
 
