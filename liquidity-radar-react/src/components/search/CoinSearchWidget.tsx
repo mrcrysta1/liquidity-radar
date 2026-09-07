@@ -50,7 +50,7 @@ function loadExchangeInfo(): Promise<void> {
           })
         allBinanceSymbols.sort((a, b) => a.base.localeCompare(b.base))
       } catch {
-        /* silent — empty list → "No matches" path, as before */
+        /* silent — empty list → "No coins found" empty state */
       }
     })()
   }
@@ -200,7 +200,7 @@ export function CoinSearchWidget() {
               <div className="search-count">{matches.length} pairs found</div>
             </>
           ) : (
-            <div className="search-count">No matches for &quot;{q}&quot;</div>
+            <div className="search-count">No coins found</div>
           ))}
       </div>
     </div>
