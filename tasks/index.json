@@ -16,7 +16,7 @@
       "phase": "0",
       "agentId": "OC-LEAD",
       "agentName": "OpenCode",
-      "status": "IN_PROGRESS",
+      "status": "COMPLETED",
       "branch": "task/CR-P0-006-multi-agent-startup",
       "file": "tasks/CR-P0-006.md"
     }
