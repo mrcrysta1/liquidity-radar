@@ -803,7 +803,7 @@ Windows one-click launcher:
 
 startup\START-AGENTS.bat
 
-It verifies repository state, current branch, agent identities, git/node availability, and project dependencies; prints the agent identities and validates current task headers; warns when on master. No application work is performed by the launcher.
+It verifies repository state, current branch, agent identities, git/node availability, and project dependencies; prints the agent identities and warns when on master. It launches each agent (OpenCode, Cline, Aider) in its own window via startup\agent-env.mjs. No application work is performed by the launcher, and it never checks out, pushes, or merges branches. See docs\MULTI-AGENT-STARTUP.md for details.
 
 
 
