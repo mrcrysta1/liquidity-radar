@@ -1,4 +1,7 @@
 {
+  "taskBoard": "tasks/PROJECT-TASK-BOARD.md",
+  "taskQueue": "tasks/AUTONOMOUS-TASK-QUEUE.md",
+  "template": "tasks/TEMPLATE.md",
   "tasks": [
     {
       "id": "CR-P0-001",
@@ -19,6 +22,18 @@
       "status": "COMPLETED",
       "branch": "task/CR-P0-006-multi-agent-startup",
       "file": "tasks/CR-P0-006.md"
+    },
+    {
+      "id": "CR-P0-007",
+      "title": "Task Board + Autonomous Task Queue + task template",
+      "phase": "0",
+      "agentId": "OC-LEAD",
+      "agentName": "OpenCode",
+      "status": "PENDING",
+      "branch": "task/CR-P0-007-task-board",
+      "file": "tasks/CR-P0-007.md",
+      "pr": null,
+      "commit": null
     }
   ]
 }
