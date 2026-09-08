@@ -29,11 +29,11 @@
       "phase": "0",
       "agentId": "OC-LEAD",
       "agentName": "OpenCode",
-      "status": "PENDING",
+      "status": "PR",
       "branch": "task/CR-P0-007-task-board",
       "file": "tasks/CR-P0-007.md",
-      "pr": null,
-      "commit": null
+      "pr": 11,
+      "commit": "8ccef9c"
     }
   ]
 }

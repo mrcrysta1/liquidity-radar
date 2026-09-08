@@ -102,7 +102,7 @@ Source: `tasks/index.json` (kept in sync with this table).
 |---------|------|-------|----------|--------|--------|----|--------|-----------|
 | CR-P0-001 | Establish Phase 0 Agent Operating System | OpenCode | OC-LEAD | COMPLETED | chore/phase-0-agent-operating-system | — | — | N/A (governance) |
 | CR-P0-006 | One-click multi-agent Windows launcher | OpenCode | OC-LEAD | COMPLETED | task/CR-P0-006-multi-agent-startup | — | — | N/A (governance) |
-| CR-P0-007 | Task Board + Autonomous Task Queue + task template | OpenCode | OC-LEAD | PENDING | task/CR-P0-007-task-board | — | — | N/A (governance) |
+| CR-P0-007 | Task Board + Autonomous Task Queue + task template | OpenCode | OC-LEAD | PR | task/CR-P0-007-task-board | #11 | 8ccef9c | N/A (governance) |
 
 Legacy Phase 1-5 application tasks predate this board and are not re-created here;
 new tasks register in `tasks/index.json` and are appended to this table.
