@@ -29,7 +29,7 @@
       "phase": "0",
       "agentId": "OC-LEAD",
       "agentName": "OpenCode",
-      "status": "PR",
+      "status": "COMPLETED",
       "branch": "task/CR-P0-007-task-board",
       "file": "tasks/CR-P0-007.md",
       "pr": 11,
