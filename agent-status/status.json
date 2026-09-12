@@ -1,22 +1,24 @@
 {
   "version": 1,
   "schema": "liquidity-radar/agent-status@1",
-  "updatedAt": "2026-09-08T08:26:09.640Z",
+  "updatedAt": "2026-09-08T10:05:00.000Z",
   "note": "Structured, manually/automation-maintained status source for the Agent Status Monitor (CR-P0-008). The live BUSY/REST/BLOCKED state is not auto-detectable here; keep this file in sync via the launch/task systems or with: node agent-status/agent-status.mjs set <ID> <STATUS> [--task-id X] [--task-name Y] [--note Z]. See agent-status/README.md.",
   "agents": {
     "OC-LEAD": {
       "name": "OpenCode",
-      "status": "REST",
-      "note": "CR-P0-007 COMPLETED (PR #11 merged); no active task currently recorded in tasks/index.json"
+      "status": "BUSY",
+      "taskId": "CR-P0-009",
+      "taskName": "Agent OS Control Center",
+      "startedAt": "2026-09-08T09:35:00Z",
+      "lastActivity": "2026-09-08T10:05:00Z",
+      "note": "takeover: final review, startup reliability + duplicate protection, PR/completion"
     },
     "CL-UI": {
       "name": "Cline",
-      "status": "BUSY",
-      "taskId": "CR-P0-008",
-      "taskName": "Agent Status Monitor",
-      "startedAt": "2026-09-08T08:26:09.640Z",
-      "lastActivity": "2026-09-08T08:26:09.640Z",
-      "note": "implementing the Agent Status Monitor task"
+      "status": "REST",
+      "taskId": "CR-P0-009",
+      "taskName": "Agent OS Control Center",
+      "note": "implementation handed off to OC-LEAD for integration/PR/production"
     },
     "AI-REF": {
       "name": "Aider",

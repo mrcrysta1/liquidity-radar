@@ -34,6 +34,16 @@
       "file": "tasks/CR-P0-007.md",
       "pr": 11,
       "commit": "8ccef9c"
+    },
+    {
+      "id": "CR-P0-009",
+      "title": "Agent OS Control Center",
+      "phase": "0",
+      "agentId": "CL-UI",
+      "agentName": "Cline",
+      "status": "IN_PROGRESS",
+      "branch": "task/CR-P0-009-agent-os-control-center",
+      "file": "tasks/CR-P0-009.md"
     }
   ]
 }
