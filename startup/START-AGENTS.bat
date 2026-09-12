@@ -36,10 +36,12 @@ if defined LR_DRY_RUN (
 
 REM Agent OS Control Center (CR-P0-009): optional one-click dashboard window.
 REM Set LR_NO_DASHBOARD=1 to skip it and keep the original 3-agent launch only.
+REM cmd /c (not cmd /k) so a duplicate-launch window closes itself right after
+REM the control center reports that an instance is already running.
 if not defined LR_NO_DASHBOARD (
   echo.
   echo [AGENT-OS] LAUNCHING Control Center dashboard (set LR_NO_DASHBOARD=1 to skip)
-  start "Agent OS Control Center" /D "%CD%" cmd /k "node agent-os\control-center.mjs start --port 8787 --open"
+  start "Agent OS Control Center" /D "%CD%" cmd /c "node agent-os\control-center.mjs start --port 8787 --open"
 )
 
 echo.

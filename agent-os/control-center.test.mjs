@@ -1,6 +1,7 @@
 // Agent OS Control Center tests — CR-P0-009 (CL-UI).
 // Run with: node agent-os/control-center.test.mjs
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
+import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -11,6 +12,7 @@ import {
   projectPhases,
   projectOverview,
   createControlCenterServer,
+  probeService,
 } from './control-center.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -162,6 +164,41 @@ check('resolveRoot finds the real repo root', () => {
   check('unknown static path returns 404', miss.status === 404)
 
   server.close()
+}
+
+// --- probeService duplicate-instance detection ---
+{
+  // 1. A running control center must probe as 'running'.
+  const root = makeRoot()
+  const server = createControlCenterServer({ root })
+  server.listen(0, '127.0.0.1')
+  await new Promise((r) => setTimeout(r, 150))
+  const p1 = server.address().port
+  const probe1 = await probeService(p1, '127.0.0.1')
+  check('probeService detects a running control center as "running"', probe1 === 'running', 'got ' + probe1)
+  server.close()
+
+  // 2. A different service on the port must probe as 'conflict'.
+  const other = createServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'text/plain' })
+    res.end('some other service')
+  })
+  other.listen(0, '127.0.0.1')
+  await new Promise((r) => setTimeout(r, 150))
+  const p2 = other.address().port
+  const probe2 = await probeService(p2, '127.0.0.1')
+  check('probeService flags an unrelated service as "conflict"', probe2 === 'conflict', 'got ' + probe2)
+  other.close()
+
+  // 3. A free port must probe as 'free'.
+  const free = createServer(() => {})
+  free.listen(0, '127.0.0.1')
+  await new Promise((r) => setTimeout(r, 150))
+  const p3 = free.address().port
+  free.close()
+  await new Promise((r) => setTimeout(r, 150))
+  const probe3 = await probeService(p3, '127.0.0.1')
+  check('probeService reports an unoccupied port as "free"', probe3 === 'free', 'got ' + probe3)
 }
 
 // --- Real repo smoke (uses the actual status.json + tasks) ---

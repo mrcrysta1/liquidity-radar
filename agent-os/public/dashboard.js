@@ -68,7 +68,7 @@ function renderAgents(agents) {
     nameWrap.appendChild(el('div', 'os-agent-id', a.id + ' · ' + (a.role || '')));
     top.appendChild(nameWrap);
 
-    const badge = el('span', 'os-status-badge ' + STATUS_CLASS[a.status] || 'unknown', a.status);
+    const badge = el('span', 'os-status-badge ' + (STATUS_CLASS[a.status] || 'unknown'), a.status);
     top.appendChild(badge);
 
     const dot = el('span', 'os-session-dot' + (a.sessionOpen ? '' : ' closed'));

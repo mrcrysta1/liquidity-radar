@@ -239,6 +239,37 @@ export function openBrowser(port, host) {
   return r.status === 0
 }
 
+// Detect whether the Agent OS Control Center is already serving on host:port.
+// Returns:
+//   'running'  — /api/health answers with the agent-os control-center marker
+//   'conflict' — the port is occupied, but by a DIFFERENT service
+//   'free'     — nothing is listening (or the endpoint is unreachable)
+export async function probeService(port, host = '127.0.0.1') {
+  const target = `http://${host}:${port}/api/health`
+  try {
+    const res = await fetch(target, { signal: AbortSignal.timeout(1200) })
+    if (res.ok) {
+      let body = ''
+      try {
+        body = await res.text()
+      } catch {
+        body = ''
+      }
+      if (body.includes('agent-os-control-center')) return 'running'
+    }
+    return 'conflict'
+  } catch {
+    return 'free'
+  }
+}
+
+function maybeOpen(port, host) {
+  if (process.env.LR_NO_OPEN === '1') return
+  if (!openBrowser(port, host)) {
+    process.stdout.write(`[AGENT-OS] could not auto-open the browser — open http://${host}:${port}/ manually\n`)
+  }
+}
+
 function printHelp() {
   process.stdout.write(
     'Agent OS Control Center (CR-P0-009)\n' +
@@ -276,11 +307,35 @@ function main(argv) {
   const host = opt('host') || '127.0.0.1'
   const shouldOpen = rest.includes('--open')
 
-  const server = createControlCenterServer({ root })
-  server.listen(port, host, () => {
-    process.stdout.write(`[AGENT-OS] Control Center listening on http://${host}:${port}/\n`)
-    process.stdout.write('[AGENT-OS] Open /api/state for the JSON source or / for the dashboard. Ctrl+C to stop.\n')
-    if (shouldOpen) openBrowser(port, host)
+  probeService(port, host).then((state) => {
+    if (state === 'running') {
+      // Never start a second dashboard/control-center instance — just surface it.
+      process.stdout.write(`[AGENT-OS] Control Center is ALREADY running on http://${host}:${port}/\n`)
+      process.stdout.write('[AGENT-OS] reusing the existing instance — no duplicate server started.\n')
+      if (shouldOpen) maybeOpen(port, host)
+      return
+    }
+    if (state === 'conflict') {
+      process.stderr.write(`[AGENT-OS] ERROR: port ${port} is already in use by a DIFFERENT service (not the Agent OS Control Center).\n`)
+      process.stderr.write('[AGENT-OS] free the port or pick another one with --port <N>\n')
+      process.exitCode = 1
+      return
+    }
+
+    const server = createControlCenterServer({ root })
+    server.on('error', (err) => {
+      if (err && err.code === 'EADDRINUSE') {
+        process.stderr.write(`[AGENT-OS] ERROR: port ${port} is already in use (EADDRINUSE)\n`)
+      } else {
+        process.stderr.write('[AGENT-OS] ERROR: ' + ((err && err.message) || err) + '\n')
+      }
+      process.exitCode = 1
+    })
+    server.listen(port, host, () => {
+      process.stdout.write(`[AGENT-OS] Control Center listening on http://${host}:${port}/\n`)
+      process.stdout.write('[AGENT-OS] Open /api/state for the JSON source or / for the dashboard. Ctrl+C to stop.\n')
+      if (shouldOpen) maybeOpen(port, host)
+    })
   })
 }
 
