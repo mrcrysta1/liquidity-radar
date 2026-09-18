@@ -29,6 +29,7 @@ import { state } from '../services/store'
 import { mdTf, mdPill, mdToggleDebug } from '../services/market'
 import { storageGet, storageSet } from '../services/storage'
 import { connectStreams } from '../services/streams'
+import { initAdvanced } from '../features/advanced'
 import {
   fetchTickers,
   fetchKlines,
@@ -161,6 +162,7 @@ function init(){
   initBubbles();
   initHeatMap();
   startAutoScan();
+  initAdvanced();
 
   setInterval(fetchTickers,20000);
   setInterval(fetchWhales,10000);

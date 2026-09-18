@@ -984,3 +984,24 @@ footer{border-top:1px solid var(--border);margin-top:26px;padding:18px 14px;text
 .alert-item{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px dashed var(--border);font-size:12px}
 .alert-item:last-child{border-bottom:none}
 .alert-del{background:none;border:1px solid var(--red);color:var(--red);border-radius:6px;padding:2px 8px;cursor:pointer;font-size:11px}
+
+/* Advanced Radar panels (Pro-terminal features adopted into the main app) */
+.adv-liq{display:flex;gap:18px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.adv-dial{position:relative;width:118px;height:118px;flex:0 0 auto;border-radius:50%;display:grid;place-items:center;
+  background:conic-gradient(var(--green) calc(var(--v,0)*1%),rgba(255,255,255,.07) 0)}
+.adv-dial::after{content:'';position:absolute;inset:11px;border-radius:50%;background:var(--card);border:1px solid var(--border)}
+.adv-dial span{position:relative;z-index:1;font-family:var(--mono);font-size:30px;font-weight:800;color:var(--txt);line-height:1}
+.adv-dial small{position:absolute;bottom:34px;z-index:1;font-size:10px;color:var(--dim);font-family:var(--mono)}
+.adv-liq-comps{flex:1 1 320px;min-width:260px;display:grid;gap:8px}
+.adv-comp{border:1px solid var(--border);border-radius:9px;padding:7px 10px;background:rgba(6,11,24,.35)}
+.adv-comp-top{display:flex;justify-content:space-between;font-size:11.5px;color:var(--txt);font-family:var(--mono)}
+.adv-comp small{display:block;margin-top:3px;font-size:10px;color:var(--dim)}
+.adv-bar{margin-top:5px;height:5px;border-radius:4px;background:rgba(255,255,255,.07);overflow:hidden}
+.adv-bar i{display:block;height:100%;border-radius:4px;background:linear-gradient(90deg,var(--cyan),var(--green))}
+.adv-regime{margin:2px 0 10px;padding:10px 12px;border-radius:10px;border:1px solid var(--border2);
+  background:rgb(var(--pRGB)/.12);font-size:12px;color:var(--muted);line-height:1.5}
+.adv-regime b{display:block;color:var(--txt);font-family:var(--mono);margin-bottom:2px}
+.adv-ev{padding:3px 0;border-bottom:1px dashed var(--border);font-size:11px;font-family:var(--mono)}
+.adv-ev:last-child{border-bottom:none}
+.adv-ev .muted{margin-left:6px}
+@media(max-width:640px){.adv-dial{width:96px;height:96px}.adv-dial span{font-size:24px}.adv-dial small{bottom:26px}}
