@@ -1,0 +1,4841 @@
+{
+  "schema_version": "1.0",
+  "generated": "2026-09-12",
+  "project": "Liquidity Radar",
+  "notes": "FREE-ONLY catalogue. Paid-only providers excluded entirely. Fields may be null when unknown. verification.status: verified (official docs/pricing or >=2 recent independent sources on 2026-09-12), known_stable (training knowledge, re-check before prod), needs_verification. Extended catalogue (RSS lists, minor backups, dead APIs) lives in LIQUIDITY-RADAR-FREE-API-MASTER-MAP.md.",
+  "labels": [
+    "FREE",
+    "FREE TIER",
+    "OPEN SOURCE",
+    "PUBLIC DATA",
+    "PAID ONLY",
+    "UNCERTAIN"
+  ],
+  "tiers": [
+    "MUST HAVE",
+    "HIGH VALUE",
+    "USEFUL",
+    "FUTURE",
+    "BACKUP",
+    "NOT RECOMMENDED"
+  ],
+  "apis": [
+    {
+      "id": "binance",
+      "name": "Binance",
+      "category": "Exchange",
+      "subcategory": "Spot/Futures/Options",
+      "label": "FREE",
+      "website": "https://www.binance.com",
+      "documentation": "https://developers.binance.com/docs",
+      "data_provided": "Spot & USD-M/COIN-M futures: ticker, klines, depth, trades, funding, OI, L/S ratio, basis, liquidation stream; options (eapi)",
+      "capabilities": {
+        "rest": true,
+        "websocket": true,
+        "streaming": true,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "Public: spot 6000 weight/min/IP, futures 2400 weight/min/IP",
+        "rate_limits": "Public: spot 6000 weight/min/IP, futures 2400 weight/min/IP",
+        "commercial_use": "Display OK; redistribution restricted",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "Official connectors JS/Python; CCXT"
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": "US IPs blocked on binance.com (use data-api.binance.vision); liquidation stream throttled 1/s/symbol; OI hist 30 days",
+      "best_use_in_liquidity_radar": "Primary market-data + derivatives source",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 9,
+        "reliability": 9,
+        "rate_limits": 9,
+        "real_time": 10,
+        "historical": 9,
+        "coverage": 9,
+        "documentation": 8,
+        "ease_of_integration": 9,
+        "liquidity_radar_usefulness": 10
+      },
+      "overall_score": 9.2,
+      "tier": "MUST HAVE"
+    },
+    {
+      "id": "bybit",
+      "name": "Bybit V5",
+      "category": "Exchange",
+      "subcategory": "Spot/Linear/Inverse/Options",
+      "label": "FREE",
+      "website": "https://www.bybit.com",
+      "documentation": "https://bybit-exchange.github.io/docs/v5/intro",
+      "data_provided": "Unified market data, funding, OI, account ratio, liquidation WS, options, historical volatility",
+      "capabilities": {
+        "rest": true,
+        "websocket": true,
+        "streaming": true,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "~120 req/5s/IP per endpoint group (varies)",
+        "rate_limits": "~120 req/5s/IP per endpoint group (varies)",
+        "commercial_use": "Display OK",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "pybit; bybit-api (npm); CCXT"
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": "Funding history ~200/req; region restrictions for trading",
+      "best_use_in_liquidity_radar": "Primary backup to Binance",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 8,
+        "reliability": 8,
+        "rate_limits": 8,
+        "real_time": 9,
+        "historical": 7,
+        "coverage": 8,
+        "documentation": 8,
+        "ease_of_integration": 8,
+        "liquidity_radar_usefulness": 9
+      },
+      "overall_score": 8.3,
+      "tier": "MUST HAVE"
+    },
+    {
+      "id": "okx",
+      "name": "OKX V5",
+      "category": "Exchange",
+      "subcategory": "Spot/Swap/Futures/Options",
+      "label": "FREE",
+      "website": "https://www.okx.com",
+      "documentation": "https://www.okx.com/docs-v5/en/",
+      "data_provided": "Market data, funding, OI, rubik stats (L/S, taker volume, OI history), options",
+      "capabilities": {
+        "rest": true,
+        "websocket": true,
+        "streaming": true,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "~20 req/2s/endpoint/IP",
+        "rate_limits": "~20 req/2s/endpoint/IP",
+        "commercial_use": "Display OK",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "okx SDKs; CCXT"
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": "Candles 1440 recent; use history-candles",
+      "best_use_in_liquidity_radar": "Second backup; rich stats",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 8,
+        "reliability": 8,
+        "rate_limits": 8,
+        "real_time": 9,
+        "historical": 7,
+        "coverage": 8,
+        "documentation": 8,
+        "ease_of_integration": 8,
+        "liquidity_radar_usefulness": 9
+      },
+      "overall_score": 8.3,
+      "tier": "MUST HAVE"
+    },
+    {
+      "id": "coinbase",
+      "name": "Coinbase Exchange / Advanced Trade",
+      "category": "Exchange",
+      "subcategory": "Spot",
+      "label": "FREE",
+      "website": "https://www.coinbase.com",
+      "documentation": "https://docs.cdp.coinbase.com/exchange/docs",
+      "data_provided": "Ticker, L2 book (full), trades, candles",
+      "capabilities": {
+        "rest": true,
+        "websocket": true,
+        "streaming": true,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "10 req/s public",
+        "rate_limits": "10 req/s public",
+        "commercial_use": "Display OK",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "coinbase SDKs; CCXT"
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": "Candles 300/req",
+      "best_use_in_liquidity_radar": "US-regulated spot reference",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 9,
+        "reliability": 9,
+        "rate_limits": 7,
+        "real_time": 9,
+        "historical": 7,
+        "coverage": 6,
+        "documentation": 8,
+        "ease_of_integration": 8,
+        "liquidity_radar_usefulness": 7
+      },
+      "overall_score": 8,
+      "tier": "HIGH VALUE"
+    },
+    {
+      "id": "kraken",
+      "name": "Kraken",
+      "category": "Exchange",
+      "subcategory": "Spot/Futures",
+      "label": "FREE",
+      "website": "https://www.kraken.com",
+      "documentation": "https://docs.kraken.com/api/",
+      "data_provided": "Ticker, OHLC, depth, trades, USDT/USD pair",
+      "capabilities": {
+        "rest": true,
+        "websocket": true,
+        "streaming": true,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "~1 req/s public counter",
+        "rate_limits": "~1 req/s public counter",
+        "commercial_use": "Display OK",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "CCXT"
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": "OHLC 720/req",
+      "best_use_in_liquidity_radar": "USDT/USD peg monitor; backup",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 8,
+        "reliability": 9,
+        "rate_limits": 5,
+        "real_time": 8,
+        "historical": 7,
+        "coverage": 6,
+        "documentation": 7,
+        "ease_of_integration": 7,
+        "liquidity_radar_usefulness": 7
+      },
+      "overall_score": 7.4,
+      "tier": "HIGH VALUE"
+    },
+    {
+      "id": "kucoin",
+      "name": "KuCoin",
+      "category": "Exchange",
+      "subcategory": "Spot/Futures",
+      "label": "FREE",
+      "website": "https://www.kucoin.com",
+      "documentation": "https://www.kucoin.com/docs-new",
+      "data_provided": "Market data, klines",
+      "capabilities": {
+        "rest": true,
+        "websocket": true,
+        "streaming": true,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "2000 req/30s/IP",
+        "rate_limits": "2000 req/30s/IP",
+        "commercial_use": "Display OK",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "CCXT"
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": "WS needs connect token",
+      "best_use_in_liquidity_radar": "Listings/altcoins backup",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 7,
+        "reliability": 7,
+        "rate_limits": 8,
+        "real_time": 8,
+        "historical": 7,
+        "coverage": 7,
+        "documentation": 7,
+        "ease_of_integration": 7,
+        "liquidity_radar_usefulness": 6
+      },
+      "overall_score": 7.4,
+      "tier": "HIGH VALUE"
+    },
+    {
+      "id": "bitget",
+      "name": "Bitget",
+      "category": "Exchange",
+      "subcategory": "Spot/Futures",
+      "label": "FREE",
+      "website": "https://www.bitget.com",
+      "documentation": "https://www.bitget.com/api-doc",
+      "data_provided": "Market data, copy-trading data",
+      "capabilities": {
+        "rest": true,
+        "websocket": true,
+        "streaming": true,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "20 req/s/IP",
+        "rate_limits": "20 req/s/IP",
+        "commercial_use": "Display OK",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "CCXT"
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": null,
+      "best_use_in_liquidity_radar": "Altcoin listings backup",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 7,
+        "reliability": 7,
+        "rate_limits": 8,
+        "real_time": 8,
+        "historical": 6,
+        "coverage": 7,
+        "documentation": 6,
+        "ease_of_integration": 7,
+        "liquidity_radar_usefulness": 6
+      },
+      "overall_score": 7.2,
+      "tier": "USEFUL"
+    },
+    {
+      "id": "gateio",
+      "name": "Gate.io V4",
+      "category": "Exchange",
+      "subcategory": "Spot/Futures",
+      "label": "FREE",
+      "website": "https://www.gate.io",
+      "documentation": "https://www.gate.io/docs/developers/apiv4",
+      "data_provided": "Market data; widest altcoin coverage",
+      "capabilities": {
+        "rest": true,
+        "websocket": true,
+        "streaming": true,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "200 req/10s/IP",
+        "rate_limits": "200 req/10s/IP",
+        "commercial_use": "Display OK",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "CCXT"
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": null,
+      "best_use_in_liquidity_radar": "New/obscure tokens",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 7,
+        "reliability": 7,
+        "rate_limits": 7,
+        "real_time": 8,
+        "historical": 6,
+        "coverage": 9,
+        "documentation": 6,
+        "ease_of_integration": 7,
+        "liquidity_radar_usefulness": 6
+      },
+      "overall_score": 7.3,
+      "tier": "USEFUL"
+    },
+    {
+      "id": "mexc",
+      "name": "MEXC V3",
+      "category": "Exchange",
+      "subcategory": "Spot/Futures",
+      "label": "FREE",
+      "website": "https://www.mexc.com",
+      "documentation": "https://mexcdevelop.github.io/apidocs/",
+      "data_provided": "Market data; early listings",
+      "capabilities": {
+        "rest": true,
+        "websocket": true,
+        "streaming": true,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "500 req/10s/IP",
+        "rate_limits": "500 req/10s/IP",
+        "commercial_use": "Display OK",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "CCXT"
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": null,
+      "best_use_in_liquidity_radar": "Earliest CEX listings",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 6,
+        "reliability": 6,
+        "rate_limits": 8,
+        "real_time": 8,
+        "historical": 6,
+        "coverage": 8,
+        "documentation": 6,
+        "ease_of_integration": 7,
+        "liquidity_radar_usefulness": 6
+      },
+      "overall_score": 7.1,
+      "tier": "USEFUL"
+    },
+    {
+      "id": "deribit",
+      "name": "Deribit",
+      "category": "Exchange",
+      "subcategory": "Options/Futures",
+      "label": "FREE",
+      "website": "https://www.deribit.com",
+      "documentation": "https://docs.deribit.com/",
+      "data_provided": "Options chains, IV, greeks, DVOL, futures, trades",
+      "capabilities": {
+        "rest": true,
+        "websocket": true,
+        "streaming": true,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "20 req/s non-matching",
+        "rate_limits": "20 req/s non-matching",
+        "commercial_use": "Display OK",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "JSON-RPC; CCXT"
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": "BTC/ETH-centric",
+      "best_use_in_liquidity_radar": "IV, skew, market-implied distributions",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 9,
+        "reliability": 9,
+        "rate_limits": 8,
+        "real_time": 9,
+        "historical": 9,
+        "coverage": 6,
+        "documentation": 8,
+        "ease_of_integration": 7,
+        "liquidity_radar_usefulness": 9
+      },
+      "overall_score": 8.4,
+      "tier": "MUST HAVE"
+    },
+    {
+      "id": "hyperliquid",
+      "name": "Hyperliquid",
+      "category": "Exchange (DEX)",
+      "subcategory": "Perpetuals",
+      "label": "FREE",
+      "website": "https://hyperliquid.xyz",
+      "documentation": "https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api",
+      "data_provided": "L2 book, candles, funding, OI, all wallet positions & fills, leaderboard",
+      "capabilities": {
+        "rest": true,
+        "websocket": true,
+        "streaming": true,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "1200 weight/min/IP",
+        "rate_limits": "1200 weight/min/IP",
+        "commercial_use": "Open",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "hyperliquid-python-sdk; @nktkas/hyperliquid"
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": "Single venue",
+      "best_use_in_liquidity_radar": "Transparent smart-money perp tracking",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 8,
+        "reliability": 8,
+        "rate_limits": 8,
+        "real_time": 9,
+        "historical": 7,
+        "coverage": 6,
+        "documentation": 7,
+        "ease_of_integration": 8,
+        "liquidity_radar_usefulness": 9
+      },
+      "overall_score": 8,
+      "tier": "HIGH VALUE"
+    },
+    {
+      "id": "ccxt",
+      "name": "CCXT",
+      "category": "Library",
+      "subcategory": "Exchange abstraction",
+      "label": "OPEN SOURCE",
+      "website": "https://ccxt.com",
+      "documentation": "https://docs.ccxt.com/",
+      "data_provided": "Unified REST+WS for 100+ exchanges",
+      "capabilities": {
+        "rest": true,
+        "websocket": true,
+        "streaming": true,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "Per exchange",
+        "rate_limits": "Per exchange",
+        "commercial_use": "MIT",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "JS/TS, Python, PHP, C#, Go"
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": "Normalization quirks per exchange",
+      "best_use_in_liquidity_radar": "Default abstraction layer",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 8,
+        "reliability": 9,
+        "rate_limits": 8,
+        "real_time": 9,
+        "historical": 8,
+        "coverage": 10,
+        "documentation": 9,
+        "ease_of_integration": 9,
+        "liquidity_radar_usefulness": 9
+      },
+      "overall_score": 8.9,
+      "tier": "MUST HAVE"
+    },
+    {
+      "id": "coingecko",
+      "name": "CoinGecko API",
+      "category": "Aggregator",
+      "subcategory": "Coins/Exchanges/Onchain",
+      "label": "FREE TIER",
+      "website": "https://www.coingecko.com",
+      "documentation": "https://docs.coingecko.com",
+      "data_provided": "Prices, market caps, coin metadata, categories, trending, exchanges, NFTs, GeckoTerminal onchain DEX endpoints",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "Demo: 10,000 calls/mo, 100 req/min (docs), 1-yr history; keyless 5-15/min IP-shared",
+        "rate_limits": "Demo: 10,000 calls/mo, 100 req/min (docs), 1-yr history; keyless 5-15/min IP-shared",
+        "commercial_use": "Demo non-commercial; commercial from Analyst",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "Official SDKs; MCP server"
+      },
+      "verification": {
+        "status": "verified",
+        "last_verified": "2026-09-12"
+      },
+      "known_limitations": "WS/webhooks paid only; hourly/daily granularity on Demo",
+      "best_use_in_liquidity_radar": "Metadata, trending, categories, onchain DEX",
+      "scores": {
+        "free_availability": 8,
+        "data_quality": 9,
+        "reliability": 9,
+        "rate_limits": 7,
+        "real_time": 6,
+        "historical": 7,
+        "coverage": 10,
+        "documentation": 9,
+        "ease_of_integration": 9,
+        "liquidity_radar_usefulness": 9
+      },
+      "overall_score": 8.3,
+      "tier": "MUST HAVE"
+    },
+    {
+      "id": "coinmarketcap",
+      "name": "CoinMarketCap API",
+      "category": "Aggregator",
+      "subcategory": "Coins/Exchanges/DEX",
+      "label": "FREE TIER",
+      "website": "https://coinmarketcap.com",
+      "documentation": "https://coinmarketcap.com/api/documentation/v1/",
+      "data_provided": "Listings, quotes, metadata, global metrics, F&G, DEX data",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": false,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "Basic: 15,000 credits/mo, 50 req/min, no historical; x402 $0.01/call",
+        "rate_limits": "Basic: 15,000 credits/mo, 50 req/min, no historical; x402 $0.01/call",
+        "commercial_use": "Basic personal use (pricing page ambiguous)",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": null
+      },
+      "verification": {
+        "status": "verified",
+        "last_verified": "2026-09-12"
+      },
+      "known_limitations": "No historical on Basic; WS under development",
+      "best_use_in_liquidity_radar": "Backup to CoinGecko; F&G backup",
+      "scores": {
+        "free_availability": 7,
+        "data_quality": 8,
+        "reliability": 9,
+        "rate_limits": 6,
+        "real_time": 6,
+        "historical": 3,
+        "coverage": 10,
+        "documentation": 8,
+        "ease_of_integration": 8,
+        "liquidity_radar_usefulness": 7
+      },
+      "overall_score": 7.2,
+      "tier": "BACKUP"
+    },
+    {
+      "id": "coindeskdata",
+      "name": "CoinDesk Data (ex-CryptoCompare)",
+      "category": "Aggregator",
+      "subcategory": "Prices/Indices/News",
+      "label": "FREE TIER",
+      "website": "https://developers.coindesk.com",
+      "documentation": "https://developers.coindesk.com/documentation",
+      "data_provided": "CCCAGG index, minute/hour/day history, exchange data, news",
+      "capabilities": {
+        "rest": true,
+        "websocket": true,
+        "streaming": true,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "UNKNOWN / NEEDS VERIFICATION",
+        "rate_limits": "UNKNOWN / NEEDS VERIFICATION",
+        "commercial_use": "UNKNOWN / NEEDS VERIFICATION",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": null
+      },
+      "verification": {
+        "status": "needs_verification",
+        "last_verified": null
+      },
+      "known_limitations": "Legacy min-api host; migration in progress",
+      "best_use_in_liquidity_radar": "Deep historical backup",
+      "scores": {
+        "free_availability": 6,
+        "data_quality": 8,
+        "reliability": 8,
+        "rate_limits": 6,
+        "real_time": 6,
+        "historical": 9,
+        "coverage": 8,
+        "documentation": 7,
+        "ease_of_integration": 7,
+        "liquidity_radar_usefulness": 6
+      },
+      "overall_score": 7.1,
+      "tier": "USEFUL"
+    },
+    {
+      "id": "coinpaprika",
+      "name": "CoinPaprika",
+      "category": "Aggregator",
+      "subcategory": "Coins",
+      "label": "FREE TIER",
+      "website": "https://coinpaprika.com",
+      "documentation": "https://api.coinpaprika.com/",
+      "data_provided": "Tickers, coins, exchanges, 1-yr history",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "20,000 calls/mo free (secondary source)",
+        "rate_limits": "20,000 calls/mo free (secondary source)",
+        "commercial_use": "UNKNOWN / NEEDS VERIFICATION",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "Official SDKs"
+      },
+      "verification": {
+        "status": "needs_verification",
+        "last_verified": null
+      },
+      "known_limitations": null,
+      "best_use_in_liquidity_radar": "CG backup",
+      "scores": {
+        "free_availability": 8,
+        "data_quality": 7,
+        "reliability": 7,
+        "rate_limits": 6,
+        "real_time": 6,
+        "historical": 6,
+        "coverage": 8,
+        "documentation": 7,
+        "ease_of_integration": 8,
+        "liquidity_radar_usefulness": 6
+      },
+      "overall_score": 6.9,
+      "tier": "BACKUP"
+    },
+    {
+      "id": "messari",
+      "name": "Messari",
+      "category": "Aggregator",
+      "subcategory": "Fundamentals",
+      "label": "FREE TIER",
+      "website": "https://messari.io",
+      "documentation": "https://docs.messari.io/",
+      "data_provided": "Asset profiles, metrics, tokenomics",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": true,
+        "real_time": false,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "UNKNOWN / NEEDS VERIFICATION",
+        "rate_limits": "UNKNOWN / NEEDS VERIFICATION",
+        "commercial_use": "UNKNOWN / NEEDS VERIFICATION",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": null
+      },
+      "verification": {
+        "status": "needs_verification",
+        "last_verified": null
+      },
+      "known_limitations": null,
+      "best_use_in_liquidity_radar": "Tokenomics research",
+      "scores": {
+        "free_availability": 6,
+        "data_quality": 8,
+        "reliability": 8,
+        "rate_limits": 5,
+        "real_time": 4,
+        "historical": 6,
+        "coverage": 7,
+        "documentation": 7,
+        "ease_of_integration": 7,
+        "liquidity_radar_usefulness": 6
+      },
+      "overall_score": 6.4,
+      "tier": "USEFUL"
+    },
+    {
+      "id": "etherscan",
+      "name": "Etherscan API V2",
+      "category": "On-chain",
+      "subcategory": "EVM explorer",
+      "label": "FREE TIER",
+      "website": "https://etherscan.io",
+      "documentation": "https://docs.etherscan.io",
+      "data_provided": "Txs, token transfers, logs, balances, contract source/ABI, gas oracle, name tags; 60+ EVM chains one key",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "Free: 3 calls/s, 100k calls/day, selected chains (Avalanche/Base/BNB/Optimism moved to paid Dec 2025); name tags 2 calls/s; Lite $49 all chains",
+        "rate_limits": "Free: 3 calls/s, 100k calls/day, selected chains (Avalanche/Base/BNB/Optimism moved to paid Dec 2025); name tags 2 calls/s; Lite $49 all chains",
+        "commercial_use": "Allowed with attribution (check ToS)",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "etherscan-api (npm), etherscan-python"
+      },
+      "verification": {
+        "status": "verified",
+        "last_verified": "2026-09-12"
+      },
+      "known_limitations": "Holder lists PRO only",
+      "best_use_in_liquidity_radar": "EVM tx/label data; contract verification",
+      "scores": {
+        "free_availability": 7,
+        "data_quality": 9,
+        "reliability": 9,
+        "rate_limits": 6,
+        "real_time": 7,
+        "historical": 9,
+        "coverage": 9,
+        "documentation": 9,
+        "ease_of_integration": 9,
+        "liquidity_radar_usefulness": 8
+      },
+      "overall_score": 8.2,
+      "tier": "HIGH VALUE"
+    },
+    {
+      "id": "blockscout",
+      "name": "Blockscout",
+      "category": "On-chain",
+      "subcategory": "EVM explorer",
+      "label": "OPEN SOURCE",
+      "website": "https://www.blockscout.com",
+      "documentation": "https://docs.blockscout.com/devs/apis",
+      "data_provided": "Etherscan-compatible + REST v2; public instances per chain",
+      "capabilities": {
+        "rest": true,
+        "websocket": true,
+        "streaming": true,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "Per instance; generous",
+        "rate_limits": "Per instance; generous",
+        "commercial_use": "GPL-3.0",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": null
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": "Instance reliability varies",
+      "best_use_in_liquidity_radar": "Free backup for chains Etherscan paywalled",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 7,
+        "reliability": 7,
+        "rate_limits": 7,
+        "real_time": 7,
+        "historical": 8,
+        "coverage": 8,
+        "documentation": 7,
+        "ease_of_integration": 7,
+        "liquidity_radar_usefulness": 7
+      },
+      "overall_score": 7.5,
+      "tier": "HIGH VALUE"
+    },
+    {
+      "id": "mempoolspace",
+      "name": "mempool.space",
+      "category": "On-chain",
+      "subcategory": "Bitcoin",
+      "label": "FREE",
+      "website": "https://mempool.space",
+      "documentation": "https://mempool.space/docs/api",
+      "data_provided": "Mempool, fees, blocks, addresses, lightning",
+      "capabilities": {
+        "rest": true,
+        "websocket": true,
+        "streaming": true,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "Fair use; self-host available",
+        "rate_limits": "Fair use; self-host available",
+        "commercial_use": "AGPL",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": null
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": null,
+      "best_use_in_liquidity_radar": "BTC fees/mempool",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 9,
+        "reliability": 9,
+        "rate_limits": 8,
+        "real_time": 10,
+        "historical": 8,
+        "coverage": 5,
+        "documentation": 9,
+        "ease_of_integration": 9,
+        "liquidity_radar_usefulness": 7
+      },
+      "overall_score": 8.4,
+      "tier": "HIGH VALUE"
+    },
+    {
+      "id": "trongrid",
+      "name": "TronGrid / Tronscan",
+      "category": "On-chain",
+      "subcategory": "TRON",
+      "label": "FREE TIER",
+      "website": "https://www.trongrid.io",
+      "documentation": "https://developers.tron.network/",
+      "data_provided": "TRON RPC, TRC-20 transfers",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "~100k req/day free key (K)",
+        "rate_limits": "~100k req/day free key (K)",
+        "commercial_use": "UNKNOWN / NEEDS VERIFICATION",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "tronweb"
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": null,
+      "best_use_in_liquidity_radar": "USDT-TRC20 flows",
+      "scores": {
+        "free_availability": 8,
+        "data_quality": 7,
+        "reliability": 7,
+        "rate_limits": 7,
+        "real_time": 8,
+        "historical": 7,
+        "coverage": 4,
+        "documentation": 6,
+        "ease_of_integration": 6,
+        "liquidity_radar_usefulness": 6
+      },
+      "overall_score": 6.6,
+      "tier": "USEFUL"
+    },
+    {
+      "id": "alchemy",
+      "name": "Alchemy",
+      "category": "On-chain",
+      "subcategory": "RPC + data APIs",
+      "label": "FREE TIER",
+      "website": "https://www.alchemy.com",
+      "documentation": "https://docs.alchemy.com",
+      "data_provided": "JSON-RPC 100+ chains, Transfers API, Token API, NFT API, Notify webhooks, Prices API",
+      "capabilities": {
+        "rest": true,
+        "websocket": true,
+        "streaming": true,
+        "historical": true,
+        "real_time": true,
+        "webhooks": true
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "30M CU/mo, 300 CU/s, no card",
+        "rate_limits": "30M CU/mo, 300 CU/s, no card",
+        "commercial_use": "Allowed",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "alchemy-sdk (JS), Python via web3"
+      },
+      "verification": {
+        "status": "verified",
+        "last_verified": "2026-09-12"
+      },
+      "known_limitations": "CU accounting per method",
+      "best_use_in_liquidity_radar": "EVM RPC + whale webhooks",
+      "scores": {
+        "free_availability": 9,
+        "data_quality": 9,
+        "reliability": 9,
+        "rate_limits": 8,
+        "real_time": 9,
+        "historical": 8,
+        "coverage": 9,
+        "documentation": 9,
+        "ease_of_integration": 9,
+        "liquidity_radar_usefulness": 9
+      },
+      "overall_score": 8.8,
+      "tier": "MUST HAVE"
+    },
+    {
+      "id": "helius",
+      "name": "Helius",
+      "category": "On-chain",
+      "subcategory": "Solana RPC + APIs",
+      "label": "FREE TIER",
+      "website": "https://www.helius.dev",
+      "documentation": "https://docs.helius.dev",
+      "data_provided": "Solana RPC, DAS, webhooks, enhanced WS, parsed events",
+      "capabilities": {
+        "rest": true,
+        "websocket": true,
+        "streaming": true,
+        "historical": true,
+        "real_time": true,
+        "webhooks": true
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "1M credits/mo, 10 RPS; RPC 1 credit, DAS 10, webhook push 1",
+        "rate_limits": "1M credits/mo, 10 RPS; RPC 1 credit, DAS 10, webhook push 1",
+        "commercial_use": "Allowed",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "helius-sdk"
+      },
+      "verification": {
+        "status": "verified",
+        "last_verified": "2026-09-12"
+      },
+      "known_limitations": "Solana only",
+      "best_use_in_liquidity_radar": "Solana whale/token monitoring",
+      "scores": {
+        "free_availability": 8,
+        "data_quality": 9,
+        "reliability": 9,
+        "rate_limits": 7,
+        "real_time": 9,
+        "historical": 7,
+        "coverage": 5,
+        "documentation": 9,
+        "ease_of_integration": 9,
+        "liquidity_radar_usefulness": 8
+      },
+      "overall_score": 8,
+      "tier": "MUST HAVE"
+    },
+    {
+      "id": "quicknode",
+      "name": "QuickNode",
+      "category": "On-chain",
+      "subcategory": "RPC",
+      "label": "FREE TIER",
+      "website": "https://www.quicknode.com",
+      "documentation": "https://www.quicknode.com/docs",
+      "data_provided": "Multi-chain RPC, Streams",
+      "capabilities": {
+        "rest": true,
+        "websocket": true,
+        "streaming": true,
+        "historical": true,
+        "real_time": true,
+        "webhooks": true
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "10M credits/mo",
+        "rate_limits": "10M credits/mo",
+        "commercial_use": "Allowed",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": null
+      },
+      "verification": {
+        "status": "verified",
+        "last_verified": "2026-09-12"
+      },
+      "known_limitations": "Credit weights high per request",
+      "best_use_in_liquidity_radar": "RPC backup",
+      "scores": {
+        "free_availability": 7,
+        "data_quality": 8,
+        "reliability": 9,
+        "rate_limits": 6,
+        "real_time": 8,
+        "historical": 7,
+        "coverage": 9,
+        "documentation": 8,
+        "ease_of_integration": 8,
+        "liquidity_radar_usefulness": 6
+      },
+      "overall_score": 7.6,
+      "tier": "BACKUP"
+    },
+    {
+      "id": "infura",
+      "name": "Infura (MetaMask Developer)",
+      "category": "On-chain",
+      "subcategory": "RPC",
+      "label": "FREE TIER",
+      "website": "https://www.infura.io",
+      "documentation": "https://docs.metamask.io/services/",
+      "data_provided": "EVM RPC",
+      "capabilities": {
+        "rest": true,
+        "websocket": true,
+        "streaming": true,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "~3M credits/day (K)",
+        "rate_limits": "~3M credits/day (K)",
+        "commercial_use": "Allowed",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": null
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": null,
+      "best_use_in_liquidity_radar": "RPC backup",
+      "scores": {
+        "free_availability": 7,
+        "data_quality": 8,
+        "reliability": 9,
+        "rate_limits": 7,
+        "real_time": 8,
+        "historical": 7,
+        "coverage": 7,
+        "documentation": 8,
+        "ease_of_integration": 8,
+        "liquidity_radar_usefulness": 6
+      },
+      "overall_score": 7.5,
+      "tier": "BACKUP"
+    },
+    {
+      "id": "drpc",
+      "name": "dRPC",
+      "category": "On-chain",
+      "subcategory": "RPC",
+      "label": "FREE TIER",
+      "website": "https://drpc.org",
+      "documentation": "https://drpc.org/docs",
+      "data_provided": "Multi-chain RPC",
+      "capabilities": {
+        "rest": true,
+        "websocket": true,
+        "streaming": true,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "210M CU/mo on public nodes",
+        "rate_limits": "210M CU/mo on public nodes",
+        "commercial_use": "Allowed",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": null
+      },
+      "verification": {
+        "status": "verified",
+        "last_verified": "2026-09-12"
+      },
+      "known_limitations": "Public-node quality",
+      "best_use_in_liquidity_radar": "RPC fallback",
+      "scores": {
+        "free_availability": 8,
+        "data_quality": 6,
+        "reliability": 6,
+        "rate_limits": 8,
+        "real_time": 7,
+        "historical": 6,
+        "coverage": 9,
+        "documentation": 6,
+        "ease_of_integration": 7,
+        "liquidity_radar_usefulness": 5
+      },
+      "overall_score": 6.8,
+      "tier": "BACKUP"
+    },
+    {
+      "id": "dune",
+      "name": "Dune",
+      "category": "On-chain",
+      "subcategory": "SQL analytics",
+      "label": "FREE TIER",
+      "website": "https://dune.com",
+      "documentation": "https://docs.dune.com",
+      "data_provided": "SQL over major chains; Sim APIs",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": true,
+        "real_time": false,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "New accounts: 2,500 credits/mo; legacy free view-only from 2026-09-10; Analyst $65/mo",
+        "rate_limits": "New accounts: 2,500 credits/mo; legacy free view-only from 2026-09-10; Analyst $65/mo",
+        "commercial_use": "Check plan",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": null
+      },
+      "verification": {
+        "status": "verified",
+        "last_verified": "2026-09-12"
+      },
+      "known_limitations": "Free tier shrinking; latency",
+      "best_use_in_liquidity_radar": "Ad-hoc research, not production",
+      "scores": {
+        "free_availability": 5,
+        "data_quality": 9,
+        "reliability": 8,
+        "rate_limits": 4,
+        "real_time": 3,
+        "historical": 9,
+        "coverage": 9,
+        "documentation": 8,
+        "ease_of_integration": 6,
+        "liquidity_radar_usefulness": 7
+      },
+      "overall_score": 6.8,
+      "tier": "USEFUL"
+    },
+    {
+      "id": "thegraph",
+      "name": "The Graph",
+      "category": "On-chain",
+      "subcategory": "Subgraphs",
+      "label": "FREE TIER",
+      "website": "https://thegraph.com",
+      "documentation": "https://thegraph.com/docs",
+      "data_provided": "GraphQL subgraphs (Uniswap, Aave, Curve...)",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": true,
+        "real_time": false,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "~100k queries/mo free (K); GRT billing beyond",
+        "rate_limits": "~100k queries/mo free (K); GRT billing beyond",
+        "commercial_use": "UNKNOWN / NEEDS VERIFICATION",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "graph-client"
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": "Indexing lag",
+      "best_use_in_liquidity_radar": "Protocol-level DEX data",
+      "scores": {
+        "free_availability": 7,
+        "data_quality": 8,
+        "reliability": 7,
+        "rate_limits": 6,
+        "real_time": 6,
+        "historical": 8,
+        "coverage": 8,
+        "documentation": 7,
+        "ease_of_integration": 6,
+        "liquidity_radar_usefulness": 7
+      },
+      "overall_score": 7,
+      "tier": "USEFUL"
+    },
+    {
+      "id": "bitquery",
+      "name": "Bitquery",
+      "category": "On-chain",
+      "subcategory": "GraphQL + streams",
+      "label": "FREE TIER",
+      "website": "https://bitquery.io",
+      "documentation": "https://docs.bitquery.io",
+      "data_provided": "DEX trades multi-chain incl. Solana memecoins, Kafka streams",
+      "capabilities": {
+        "rest": true,
+        "websocket": true,
+        "streaming": true,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "UNKNOWN / NEEDS VERIFICATION",
+        "rate_limits": "UNKNOWN / NEEDS VERIFICATION",
+        "commercial_use": "UNKNOWN / NEEDS VERIFICATION",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": null
+      },
+      "verification": {
+        "status": "needs_verification",
+        "last_verified": null
+      },
+      "known_limitations": null,
+      "best_use_in_liquidity_radar": "Solana launch tracking",
+      "scores": {
+        "free_availability": 5,
+        "data_quality": 8,
+        "reliability": 7,
+        "rate_limits": 5,
+        "real_time": 8,
+        "historical": 8,
+        "coverage": 9,
+        "documentation": 7,
+        "ease_of_integration": 6,
+        "liquidity_radar_usefulness": 7
+      },
+      "overall_score": 7,
+      "tier": "FUTURE"
+    },
+    {
+      "id": "moralis",
+      "name": "Moralis",
+      "category": "On-chain",
+      "subcategory": "Wallet/Token APIs",
+      "label": "FREE TIER",
+      "website": "https://moralis.com",
+      "documentation": "https://docs.moralis.com",
+      "data_provided": "Wallet balances, token prices, DEX data, streams",
+      "capabilities": {
+        "rest": true,
+        "websocket": true,
+        "streaming": true,
+        "historical": true,
+        "real_time": true,
+        "webhooks": true
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "Free: 150 CU/s throughput; monthly CUs ~40k (secondary source)",
+        "rate_limits": "Free: 150 CU/s throughput; monthly CUs ~40k (secondary source)",
+        "commercial_use": "Allowed",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "moralis (JS), moralis (Python)"
+      },
+      "verification": {
+        "status": "needs_verification",
+        "last_verified": null
+      },
+      "known_limitations": "Premium endpoints locked",
+      "best_use_in_liquidity_radar": "Wallet intelligence",
+      "scores": {
+        "free_availability": 6,
+        "data_quality": 8,
+        "reliability": 8,
+        "rate_limits": 6,
+        "real_time": 7,
+        "historical": 7,
+        "coverage": 8,
+        "documentation": 8,
+        "ease_of_integration": 8,
+        "liquidity_radar_usefulness": 6
+      },
+      "overall_score": 7.2,
+      "tier": "USEFUL"
+    },
+    {
+      "id": "glassnode",
+      "name": "Glassnode",
+      "category": "On-chain",
+      "subcategory": "Metrics",
+      "label": "FREE TIER",
+      "website": "https://glassnode.com",
+      "documentation": "https://docs.glassnode.com",
+      "data_provided": "On-chain metrics; T1 free at 24h",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": true,
+        "real_time": false,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "Free key: Tier-1 metrics, 24h resolution (K)",
+        "rate_limits": "Free key: Tier-1 metrics, 24h resolution (K)",
+        "commercial_use": "Personal",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": null
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": "Most metrics paid",
+      "best_use_in_liquidity_radar": "Reference metrics",
+      "scores": {
+        "free_availability": 4,
+        "data_quality": 10,
+        "reliability": 9,
+        "rate_limits": 4,
+        "real_time": 3,
+        "historical": 9,
+        "coverage": 7,
+        "documentation": 9,
+        "ease_of_integration": 7,
+        "liquidity_radar_usefulness": 6
+      },
+      "overall_score": 6.8,
+      "tier": "FUTURE"
+    },
+    {
+      "id": "bigquery_crypto",
+      "name": "Google BigQuery public blockchain datasets",
+      "category": "On-chain",
+      "subcategory": "Batch datasets",
+      "label": "PUBLIC DATA",
+      "website": "https://cloud.google.com",
+      "documentation": "https://cloud.google.com/blockchain-analytics/docs",
+      "data_provided": "Full-chain tables BTC/ETH/Solana/Polygon...",
+      "capabilities": {
+        "rest": false,
+        "websocket": false,
+        "streaming": false,
+        "historical": true,
+        "real_time": false,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "1 TB queries/mo free",
+        "rate_limits": "1 TB queries/mo free",
+        "commercial_use": "Allowed",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "BigQuery clients"
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": "Not real-time; GCP account",
+      "best_use_in_liquidity_radar": "Backfills/research",
+      "scores": {
+        "free_availability": 8,
+        "data_quality": 9,
+        "reliability": 9,
+        "rate_limits": 8,
+        "real_time": 2,
+        "historical": 10,
+        "coverage": 8,
+        "documentation": 8,
+        "ease_of_integration": 6,
+        "liquidity_radar_usefulness": 6
+      },
+      "overall_score": 7.4,
+      "tier": "USEFUL"
+    },
+    {
+      "id": "whalealert",
+      "name": "Whale Alert",
+      "category": "Whale",
+      "subcategory": "Large transfers",
+      "label": "FREE TIER",
+      "website": "https://whale-alert.io",
+      "documentation": "https://docs.whale-alert.io",
+      "data_provided": "Large transfers cross-chain",
+      "capabilities": {
+        "rest": true,
+        "websocket": true,
+        "streaming": true,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "UNKNOWN / NEEDS VERIFICATION",
+        "rate_limits": "UNKNOWN / NEEDS VERIFICATION",
+        "commercial_use": "UNKNOWN / NEEDS VERIFICATION",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": null
+      },
+      "verification": {
+        "status": "needs_verification",
+        "last_verified": null
+      },
+      "known_limitations": "Free plan limits unverified",
+      "best_use_in_liquidity_radar": "Transfer alerts backup",
+      "scores": {
+        "free_availability": 5,
+        "data_quality": 8,
+        "reliability": 8,
+        "rate_limits": 4,
+        "real_time": 8,
+        "historical": 3,
+        "coverage": 8,
+        "documentation": 7,
+        "ease_of_integration": 8,
+        "liquidity_radar_usefulness": 7
+      },
+      "overall_score": 6.6,
+      "tier": "USEFUL"
+    },
+    {
+      "id": "dexscreener",
+      "name": "DexScreener API",
+      "category": "DeFi/DEX",
+      "subcategory": "Pairs",
+      "label": "FREE",
+      "website": "https://dexscreener.com",
+      "documentation": "https://docs.dexscreener.com/api/reference",
+      "data_provided": "Pairs, liquidity, volume, txns, makers, token profiles, boosts; 300+ DEXs, 80+ chains",
+      "capabilities": {
+        "rest": true,
+        "websocket": true,
+        "streaming": true,
+        "historical": false,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "300 req/min pairs/tokens/search; 60 req/min profiles/boosts; no key",
+        "rate_limits": "300 req/min pairs/tokens/search; 60 req/min profiles/boosts; no key",
+        "commercial_use": "Fair use",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": null
+      },
+      "verification": {
+        "status": "verified",
+        "last_verified": "2026-09-12"
+      },
+      "known_limitations": "No OHLC/history endpoint; WS only for profiles/boosts/ads",
+      "best_use_in_liquidity_radar": "DEX liquidity + new tokens",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 8,
+        "reliability": 8,
+        "rate_limits": 8,
+        "real_time": 9,
+        "historical": 2,
+        "coverage": 10,
+        "documentation": 8,
+        "ease_of_integration": 9,
+        "liquidity_radar_usefulness": 9
+      },
+      "overall_score": 8.1,
+      "tier": "MUST HAVE"
+    },
+    {
+      "id": "geckoterminal",
+      "name": "GeckoTerminal API",
+      "category": "DeFi/DEX",
+      "subcategory": "Pools/OHLCV",
+      "label": "FREE",
+      "website": "https://www.geckoterminal.com",
+      "documentation": "https://apiguide.geckoterminal.com",
+      "data_provided": "Pools, OHLCV, trades, new/trending pools",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "30 req/min public; higher via CoinGecko Demo key",
+        "rate_limits": "30 req/min public; higher via CoinGecko Demo key",
+        "commercial_use": "Attribution",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": null
+      },
+      "verification": {
+        "status": "verified",
+        "last_verified": "2026-09-12"
+      },
+      "known_limitations": null,
+      "best_use_in_liquidity_radar": "DEX candles + new pools",
+      "scores": {
+        "free_availability": 9,
+        "data_quality": 8,
+        "reliability": 8,
+        "rate_limits": 6,
+        "real_time": 8,
+        "historical": 8,
+        "coverage": 9,
+        "documentation": 8,
+        "ease_of_integration": 9,
+        "liquidity_radar_usefulness": 9
+      },
+      "overall_score": 8.2,
+      "tier": "MUST HAVE"
+    },
+    {
+      "id": "defillama",
+      "name": "DefiLlama",
+      "category": "DeFi",
+      "subcategory": "TVL/Stablecoins/Fees/Prices",
+      "label": "FREE",
+      "website": "https://defillama.com",
+      "documentation": "https://defillama.com/docs/api",
+      "data_provided": "TVL, protocols, fees/revenue, stablecoins, yields, bridges, DEX volumes, price oracle, CEX reserves, hacks",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "No key; fair use",
+        "rate_limits": "No key; fair use",
+        "commercial_use": "Open (data), MIT code",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": null
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": "Hourly granularity",
+      "best_use_in_liquidity_radar": "DeFi + stablecoin + CEX reserves",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 9,
+        "reliability": 9,
+        "rate_limits": 9,
+        "real_time": 7,
+        "historical": 9,
+        "coverage": 10,
+        "documentation": 8,
+        "ease_of_integration": 9,
+        "liquidity_radar_usefulness": 9
+      },
+      "overall_score": 8.9,
+      "tier": "MUST HAVE"
+    },
+    {
+      "id": "jupiter",
+      "name": "Jupiter API",
+      "category": "DeFi/DEX",
+      "subcategory": "Solana aggregator",
+      "label": "FREE",
+      "website": "https://jup.ag",
+      "documentation": "https://dev.jup.ag/docs",
+      "data_provided": "Quotes, prices, token list",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": false,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "UNKNOWN / NEEDS VERIFICATION",
+        "rate_limits": "UNKNOWN / NEEDS VERIFICATION",
+        "commercial_use": "UNKNOWN / NEEDS VERIFICATION",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "@jup-ag/api"
+      },
+      "verification": {
+        "status": "needs_verification",
+        "last_verified": null
+      },
+      "known_limitations": "Free key via portal; limits unverified",
+      "best_use_in_liquidity_radar": "Solana slippage quotes",
+      "scores": {
+        "free_availability": 8,
+        "data_quality": 8,
+        "reliability": 8,
+        "rate_limits": 6,
+        "real_time": 9,
+        "historical": 3,
+        "coverage": 5,
+        "documentation": 8,
+        "ease_of_integration": 8,
+        "liquidity_radar_usefulness": 7
+      },
+      "overall_score": 7,
+      "tier": "HIGH VALUE"
+    },
+    {
+      "id": "birdeye",
+      "name": "Birdeye",
+      "category": "DeFi/DEX",
+      "subcategory": "Solana/multichain tokens",
+      "label": "FREE TIER",
+      "website": "https://birdeye.so",
+      "documentation": "https://docs.birdeye.so",
+      "data_provided": "Token OHLCV, trades, holders, new listings",
+      "capabilities": {
+        "rest": true,
+        "websocket": true,
+        "streaming": true,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "UNKNOWN / NEEDS VERIFICATION",
+        "rate_limits": "UNKNOWN / NEEDS VERIFICATION",
+        "commercial_use": "UNKNOWN / NEEDS VERIFICATION",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": null
+      },
+      "verification": {
+        "status": "needs_verification",
+        "last_verified": null
+      },
+      "known_limitations": null,
+      "best_use_in_liquidity_radar": "Solana token analytics",
+      "scores": {
+        "free_availability": 5,
+        "data_quality": 8,
+        "reliability": 7,
+        "rate_limits": 4,
+        "real_time": 8,
+        "historical": 8,
+        "coverage": 7,
+        "documentation": 8,
+        "ease_of_integration": 8,
+        "liquidity_radar_usefulness": 7
+      },
+      "overall_score": 7,
+      "tier": "USEFUL"
+    },
+    {
+      "id": "oneinch",
+      "name": "1inch Developer Portal",
+      "category": "DeFi/DEX",
+      "subcategory": "Aggregator quotes",
+      "label": "FREE TIER",
+      "website": "https://1inch.dev",
+      "documentation": "https://portal.1inch.dev",
+      "data_provided": "Swap quotes, spot prices",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": false,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "Free dev key ~1 RPS (K)",
+        "rate_limits": "Free dev key ~1 RPS (K)",
+        "commercial_use": "Allowed",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": null
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": null,
+      "best_use_in_liquidity_radar": "EVM slippage estimation",
+      "scores": {
+        "free_availability": 7,
+        "data_quality": 8,
+        "reliability": 8,
+        "rate_limits": 4,
+        "real_time": 9,
+        "historical": 2,
+        "coverage": 8,
+        "documentation": 8,
+        "ease_of_integration": 8,
+        "liquidity_radar_usefulness": 6
+      },
+      "overall_score": 6.8,
+      "tier": "USEFUL"
+    },
+    {
+      "id": "rss_direct",
+      "name": "Direct publisher RSS feeds",
+      "category": "News",
+      "subcategory": "Crypto/financial",
+      "label": "FREE",
+      "website": "https://www.coindesk.com/arc/outboundfeeds/rss/",
+      "documentation": "https://www.cointelegraph.com/rss",
+      "data_provided": "Headlines/summaries from CoinDesk, Cointelegraph, The Block, Decrypt, Blockworks, DL News, Fed, SEC, CFTC",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": false,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "Poll 1-5 min",
+        "rate_limits": "Poll 1-5 min",
+        "commercial_use": "Headlines OK; full text per publisher ToS",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "rss-parser, feedparser"
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": "No sentiment; dedup needed",
+      "best_use_in_liquidity_radar": "News backbone",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 8,
+        "reliability": 9,
+        "rate_limits": 9,
+        "real_time": 8,
+        "historical": 3,
+        "coverage": 9,
+        "documentation": 7,
+        "ease_of_integration": 9,
+        "liquidity_radar_usefulness": 9
+      },
+      "overall_score": 8.1,
+      "tier": "MUST HAVE"
+    },
+    {
+      "id": "googlenews_rss",
+      "name": "Google News RSS",
+      "category": "News",
+      "subcategory": "Aggregation",
+      "label": "FREE",
+      "website": "https://news.google.com",
+      "documentation": "https://news.google.com/rss/search?q=bitcoin",
+      "data_provided": "Keyword news search feed",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": false,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "Fair use, unofficial",
+        "rate_limits": "Fair use, unofficial",
+        "commercial_use": "UNKNOWN / NEEDS VERIFICATION",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": null
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": "Unofficial",
+      "best_use_in_liquidity_radar": "Broad keyword coverage",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 7,
+        "reliability": 8,
+        "rate_limits": 7,
+        "real_time": 8,
+        "historical": 2,
+        "coverage": 9,
+        "documentation": 4,
+        "ease_of_integration": 9,
+        "liquidity_radar_usefulness": 7
+      },
+      "overall_score": 7.1,
+      "tier": "HIGH VALUE"
+    },
+    {
+      "id": "cryptopanic",
+      "name": "CryptoPanic API",
+      "category": "News",
+      "subcategory": "Crypto news + votes",
+      "label": "UNCERTAIN",
+      "website": "https://cryptopanic.com",
+      "documentation": "https://cryptopanic.com/developers/api/",
+      "data_provided": "Aggregated crypto news with bullish/bearish votes",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "UNKNOWN / NEEDS VERIFICATION",
+        "rate_limits": "UNKNOWN / NEEDS VERIFICATION",
+        "commercial_use": "UNKNOWN / NEEDS VERIFICATION",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": null
+      },
+      "verification": {
+        "status": "needs_verification",
+        "last_verified": null
+      },
+      "known_limitations": "Secondary source says free Developer plan discontinued early 2026",
+      "best_use_in_liquidity_radar": "Sentiment-tagged news if free path exists",
+      "scores": {
+        "free_availability": 4,
+        "data_quality": 8,
+        "reliability": 8,
+        "rate_limits": 5,
+        "real_time": 8,
+        "historical": 7,
+        "coverage": 8,
+        "documentation": 7,
+        "ease_of_integration": 8,
+        "liquidity_radar_usefulness": 7
+      },
+      "overall_score": 7,
+      "tier": "USEFUL"
+    },
+    {
+      "id": "finnhub",
+      "name": "Finnhub",
+      "category": "Fundamentals",
+      "subcategory": "Stocks/FX/Crypto/News",
+      "label": "FREE TIER",
+      "website": "https://finnhub.io",
+      "documentation": "https://finnhub.io/docs/api",
+      "data_provided": "Real-time US quotes (WS), candles, fundamentals, earnings, insider transactions, news, FX, crypto",
+      "capabilities": {
+        "rest": true,
+        "websocket": true,
+        "streaming": true,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "60 calls/min free; personal use",
+        "rate_limits": "60 calls/min free; personal use",
+        "commercial_use": "Personal on free",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "finnhub (npm), finnhub-python"
+      },
+      "verification": {
+        "status": "verified",
+        "last_verified": "2026-09-12"
+      },
+      "known_limitations": "Some endpoints premium",
+      "best_use_in_liquidity_radar": "Equity/FX/news backbone",
+      "scores": {
+        "free_availability": 8,
+        "data_quality": 8,
+        "reliability": 8,
+        "rate_limits": 8,
+        "real_time": 9,
+        "historical": 8,
+        "coverage": 9,
+        "documentation": 8,
+        "ease_of_integration": 9,
+        "liquidity_radar_usefulness": 8
+      },
+      "overall_score": 8.3,
+      "tier": "MUST HAVE"
+    },
+    {
+      "id": "alphavantage",
+      "name": "Alpha Vantage",
+      "category": "Fundamentals",
+      "subcategory": "Stocks/FX/Crypto/Indicators/Econ",
+      "label": "FREE TIER",
+      "website": "https://www.alphavantage.co",
+      "documentation": "https://www.alphavantage.co/documentation/",
+      "data_provided": "OHLC, 50+ indicators, fundamentals, economic indicators",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": true,
+        "real_time": false,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "25 req/day, 5/min; no card",
+        "rate_limits": "25 req/day, 5/min; no card",
+        "commercial_use": "Check ToS",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": null
+      },
+      "verification": {
+        "status": "verified",
+        "last_verified": "2026-09-12"
+      },
+      "known_limitations": "Tiny quota",
+      "best_use_in_liquidity_radar": "Cached indicators/backfill",
+      "scores": {
+        "free_availability": 7,
+        "data_quality": 8,
+        "reliability": 8,
+        "rate_limits": 2,
+        "real_time": 5,
+        "historical": 8,
+        "coverage": 9,
+        "documentation": 8,
+        "ease_of_integration": 8,
+        "liquidity_radar_usefulness": 5
+      },
+      "overall_score": 6.8,
+      "tier": "USEFUL"
+    },
+    {
+      "id": "twelvedata",
+      "name": "Twelve Data",
+      "category": "Fundamentals",
+      "subcategory": "Stocks/FX/Crypto/ETF",
+      "label": "FREE TIER",
+      "website": "https://twelvedata.com",
+      "documentation": "https://twelvedata.com/docs",
+      "data_provided": "Time series, indicators, fundamentals",
+      "capabilities": {
+        "rest": true,
+        "websocket": true,
+        "streaming": true,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "800 req/day, 8/min; WS paid",
+        "rate_limits": "800 req/day, 8/min; WS paid",
+        "commercial_use": "Check ToS",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "twelvedata (Python)"
+      },
+      "verification": {
+        "status": "verified",
+        "last_verified": "2026-09-12"
+      },
+      "known_limitations": "Delayed on free",
+      "best_use_in_liquidity_radar": "Equity/FX backup",
+      "scores": {
+        "free_availability": 7,
+        "data_quality": 8,
+        "reliability": 8,
+        "rate_limits": 6,
+        "real_time": 5,
+        "historical": 8,
+        "coverage": 9,
+        "documentation": 8,
+        "ease_of_integration": 8,
+        "liquidity_radar_usefulness": 6
+      },
+      "overall_score": 7.3,
+      "tier": "USEFUL"
+    },
+    {
+      "id": "massive",
+      "name": "Massive (ex-Polygon.io)",
+      "category": "Fundamentals",
+      "subcategory": "Stocks/Options",
+      "label": "FREE TIER",
+      "website": "https://massive.com",
+      "documentation": "https://massive.com/docs",
+      "data_provided": "Aggregates, tickers, options (paid)",
+      "capabilities": {
+        "rest": true,
+        "websocket": true,
+        "streaming": true,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "5 req/min, EOD, 2-yr history",
+        "rate_limits": "5 req/min, EOD, 2-yr history",
+        "commercial_use": "Check ToS",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "polygon client libs"
+      },
+      "verification": {
+        "status": "verified",
+        "last_verified": "2026-09-12"
+      },
+      "known_limitations": "Rebranded Oct 2025; api.polygon.io still works",
+      "best_use_in_liquidity_radar": "EOD stock backfill",
+      "scores": {
+        "free_availability": 6,
+        "data_quality": 9,
+        "reliability": 9,
+        "rate_limits": 3,
+        "real_time": 4,
+        "historical": 7,
+        "coverage": 8,
+        "documentation": 10,
+        "ease_of_integration": 9,
+        "liquidity_radar_usefulness": 5
+      },
+      "overall_score": 7,
+      "tier": "USEFUL"
+    },
+    {
+      "id": "alpaca",
+      "name": "Alpaca Market Data",
+      "category": "Fundamentals",
+      "subcategory": "Stocks/Crypto",
+      "label": "FREE TIER",
+      "website": "https://alpaca.markets",
+      "documentation": "https://docs.alpaca.markets/docs/about-market-data-api",
+      "data_provided": "IEX real-time quotes, bars, WS, crypto",
+      "capabilities": {
+        "rest": true,
+        "websocket": true,
+        "streaming": true,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "Free: 200 req/min, IEX feed",
+        "rate_limits": "Free: 200 req/min, IEX feed",
+        "commercial_use": "Check ToS",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "alpaca-py, @alpacahq/alpaca-trade-api"
+      },
+      "verification": {
+        "status": "verified",
+        "last_verified": "2026-09-12"
+      },
+      "known_limitations": "Requires brokerage/paper account",
+      "best_use_in_liquidity_radar": "Real-time equity backup",
+      "scores": {
+        "free_availability": 8,
+        "data_quality": 8,
+        "reliability": 8,
+        "rate_limits": 8,
+        "real_time": 9,
+        "historical": 7,
+        "coverage": 6,
+        "documentation": 8,
+        "ease_of_integration": 8,
+        "liquidity_radar_usefulness": 6
+      },
+      "overall_score": 7.6,
+      "tier": "HIGH VALUE"
+    },
+    {
+      "id": "secedgar",
+      "name": "SEC EDGAR APIs",
+      "category": "Fundamentals",
+      "subcategory": "Filings",
+      "label": "PUBLIC DATA",
+      "website": "https://www.sec.gov",
+      "documentation": "https://www.sec.gov/search-filings/edgar-application-programming-interfaces",
+      "data_provided": "Submissions, XBRL company facts/frames, full-text search, Form 4, 13F, 8-K; RSS",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "10 req/s; User-Agent header required",
+        "rate_limits": "10 req/s; User-Agent header required",
+        "commercial_use": "Public domain",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "edgartools, sec-api (3rd party)"
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": "No sentiment/parsing",
+      "best_use_in_liquidity_radar": "Insider, institutional, filings alerts",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 10,
+        "reliability": 9,
+        "rate_limits": 9,
+        "real_time": 8,
+        "historical": 10,
+        "coverage": 8,
+        "documentation": 7,
+        "ease_of_integration": 7,
+        "liquidity_radar_usefulness": 8
+      },
+      "overall_score": 8.6,
+      "tier": "MUST HAVE"
+    },
+    {
+      "id": "fmp",
+      "name": "Financial Modeling Prep",
+      "category": "Fundamentals",
+      "subcategory": "Statements/ETF",
+      "label": "FREE TIER",
+      "website": "https://financialmodelingprep.com",
+      "documentation": "https://site.financialmodelingprep.com/developer/docs",
+      "data_provided": "Statements, ratios, ETF holdings, calendars",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": true,
+        "real_time": false,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "250 req/day free; many endpoints paid",
+        "rate_limits": "250 req/day free; many endpoints paid",
+        "commercial_use": "Check ToS",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": null
+      },
+      "verification": {
+        "status": "verified",
+        "last_verified": "2026-09-12"
+      },
+      "known_limitations": "Endpoint access shrinking",
+      "best_use_in_liquidity_radar": "Filings backup",
+      "scores": {
+        "free_availability": 5,
+        "data_quality": 8,
+        "reliability": 8,
+        "rate_limits": 5,
+        "real_time": 5,
+        "historical": 8,
+        "coverage": 8,
+        "documentation": 7,
+        "ease_of_integration": 8,
+        "liquidity_radar_usefulness": 5
+      },
+      "overall_score": 6.7,
+      "tier": "USEFUL"
+    },
+    {
+      "id": "yfinance",
+      "name": "yfinance (Yahoo, unofficial)",
+      "category": "Fundamentals",
+      "subcategory": "Research",
+      "label": "OPEN SOURCE",
+      "website": "https://github.com/ranaroussi/yfinance",
+      "documentation": "https://ranaroussi.github.io/yfinance/",
+      "data_provided": "Quotes, history, fundamentals, options chains",
+      "capabilities": {
+        "rest": false,
+        "websocket": false,
+        "streaming": false,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "Unofficial; breaks periodically",
+        "rate_limits": "Unofficial; breaks periodically",
+        "commercial_use": "Yahoo ToS grey",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "yfinance (Python)"
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": "Never production-critical",
+      "best_use_in_liquidity_radar": "Research notebooks",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 7,
+        "reliability": 4,
+        "rate_limits": 8,
+        "real_time": 5,
+        "historical": 9,
+        "coverage": 9,
+        "documentation": 7,
+        "ease_of_integration": 9,
+        "liquidity_radar_usefulness": 5
+      },
+      "overall_score": 7.3,
+      "tier": "USEFUL"
+    },
+    {
+      "id": "fred",
+      "name": "FRED API",
+      "category": "Macro",
+      "subcategory": "US + global series",
+      "label": "PUBLIC DATA",
+      "website": "https://fred.stlouisfed.org",
+      "documentation": "https://fred.stlouisfed.org/docs/api/fred/",
+      "data_provided": "800k+ series: CPI, GDP, rates, yields, DXY, M2, Fed balance sheet, commodities",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": true,
+        "real_time": false,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "Free key; 120 req/min",
+        "rate_limits": "Free key; 120 req/min",
+        "commercial_use": "Public with attribution",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "fredapi (Python)"
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": "T+1 for most",
+      "best_use_in_liquidity_radar": "Macro backbone",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 10,
+        "reliability": 10,
+        "rate_limits": 9,
+        "real_time": 6,
+        "historical": 10,
+        "coverage": 10,
+        "documentation": 9,
+        "ease_of_integration": 9,
+        "liquidity_radar_usefulness": 9
+      },
+      "overall_score": 9.2,
+      "tier": "MUST HAVE"
+    },
+    {
+      "id": "bls",
+      "name": "BLS API v2",
+      "category": "Macro",
+      "subcategory": "CPI/NFP/Unemployment",
+      "label": "PUBLIC DATA",
+      "website": "https://www.bls.gov",
+      "documentation": "https://www.bls.gov/developers/",
+      "data_provided": "Labor & price statistics",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": true,
+        "real_time": false,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "500 req/day with key",
+        "rate_limits": "500 req/day with key",
+        "commercial_use": "Public",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": null
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": null,
+      "best_use_in_liquidity_radar": "Release-time CPI/NFP",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 10,
+        "reliability": 9,
+        "rate_limits": 7,
+        "real_time": 7,
+        "historical": 10,
+        "coverage": 5,
+        "documentation": 7,
+        "ease_of_integration": 7,
+        "liquidity_radar_usefulness": 8
+      },
+      "overall_score": 8,
+      "tier": "HIGH VALUE"
+    },
+    {
+      "id": "treasury_fiscal",
+      "name": "US Treasury Fiscal Data API",
+      "category": "Macro",
+      "subcategory": "Yields/Debt/TGA",
+      "label": "PUBLIC DATA",
+      "website": "https://fiscaldata.treasury.gov",
+      "documentation": "https://fiscaldata.treasury.gov/api-documentation/",
+      "data_provided": "Daily yields, auctions, debt, TGA",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": true,
+        "real_time": false,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "No key",
+        "rate_limits": "No key",
+        "commercial_use": "Public",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": null
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": null,
+      "best_use_in_liquidity_radar": "Liquidity (TGA) tracking",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 10,
+        "reliability": 9,
+        "rate_limits": 8,
+        "real_time": 7,
+        "historical": 10,
+        "coverage": 5,
+        "documentation": 8,
+        "ease_of_integration": 8,
+        "liquidity_radar_usefulness": 8
+      },
+      "overall_score": 8.3,
+      "tier": "HIGH VALUE"
+    },
+    {
+      "id": "dbnomics",
+      "name": "DBnomics",
+      "category": "Macro",
+      "subcategory": "Aggregator of 80+ providers",
+      "label": "PUBLIC DATA",
+      "website": "https://db.nomics.world",
+      "documentation": "https://api.db.nomics.world/v22/apidocs",
+      "data_provided": "ECB, IMF, OECD, Eurostat, BIS... series",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": true,
+        "real_time": false,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "No key",
+        "rate_limits": "No key",
+        "commercial_use": "Open (AGPL code)",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "dbnomics (Python/R)"
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": null,
+      "best_use_in_liquidity_radar": "FRED complement",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 9,
+        "reliability": 8,
+        "rate_limits": 8,
+        "real_time": 5,
+        "historical": 9,
+        "coverage": 10,
+        "documentation": 7,
+        "ease_of_integration": 8,
+        "liquidity_radar_usefulness": 7
+      },
+      "overall_score": 8.1,
+      "tier": "HIGH VALUE"
+    },
+    {
+      "id": "ecb",
+      "name": "ECB Data Portal API",
+      "category": "Macro",
+      "subcategory": "Eurozone",
+      "label": "PUBLIC DATA",
+      "website": "https://data.ecb.europa.eu",
+      "documentation": "https://data.ecb.europa.eu/help/api/overview",
+      "data_provided": "ECB rates, FX ref rates, monetary data",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": true,
+        "real_time": false,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "No key (SDMX)",
+        "rate_limits": "No key (SDMX)",
+        "commercial_use": "Public",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": null
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": null,
+      "best_use_in_liquidity_radar": "EUR macro",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 10,
+        "reliability": 9,
+        "rate_limits": 8,
+        "real_time": 5,
+        "historical": 10,
+        "coverage": 4,
+        "documentation": 6,
+        "ease_of_integration": 6,
+        "liquidity_radar_usefulness": 6
+      },
+      "overall_score": 7.4,
+      "tier": "USEFUL"
+    },
+    {
+      "id": "frankfurter",
+      "name": "Frankfurter",
+      "category": "Forex",
+      "subcategory": "Daily FX",
+      "label": "FREE",
+      "website": "https://frankfurter.dev",
+      "documentation": "https://frankfurter.dev/",
+      "data_provided": "ECB reference rates, conversion, history",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": true,
+        "real_time": false,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "No key; no stated limit; self-host",
+        "rate_limits": "No key; no stated limit; self-host",
+        "commercial_use": "MIT",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": null
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": "Daily only",
+      "best_use_in_liquidity_radar": "FX conversion",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 9,
+        "reliability": 9,
+        "rate_limits": 9,
+        "real_time": 4,
+        "historical": 9,
+        "coverage": 6,
+        "documentation": 9,
+        "ease_of_integration": 10,
+        "liquidity_radar_usefulness": 7
+      },
+      "overall_score": 8.2,
+      "tier": "HIGH VALUE"
+    },
+    {
+      "id": "openerapi",
+      "name": "ExchangeRate-API (open endpoint)",
+      "category": "Forex",
+      "subcategory": "Daily FX",
+      "label": "FREE",
+      "website": "https://www.exchangerate-api.com",
+      "documentation": "https://www.exchangerate-api.com/docs/free",
+      "data_provided": "Daily rates, USD base",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": false,
+        "real_time": false,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "Daily update; attribution required",
+        "rate_limits": "Daily update; attribution required",
+        "commercial_use": "Attribution",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": null
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": null,
+      "best_use_in_liquidity_radar": "FX fallback",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 7,
+        "reliability": 8,
+        "rate_limits": 8,
+        "real_time": 3,
+        "historical": 2,
+        "coverage": 7,
+        "documentation": 7,
+        "ease_of_integration": 10,
+        "liquidity_radar_usefulness": 5
+      },
+      "overall_score": 6.7,
+      "tier": "BACKUP"
+    },
+    {
+      "id": "oanda_demo",
+      "name": "OANDA v20 (practice)",
+      "category": "Forex",
+      "subcategory": "Real-time FX",
+      "label": "FREE",
+      "website": "https://developer.oanda.com",
+      "documentation": "https://developer.oanda.com/rest-live-v20/introduction/",
+      "data_provided": "Streaming FX prices, candles",
+      "capabilities": {
+        "rest": true,
+        "websocket": true,
+        "streaming": true,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "Demo account; 120 req/s",
+        "rate_limits": "Demo account; 120 req/s",
+        "commercial_use": "Personal demo",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "oandapyV20"
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": "Needs demo signup",
+      "best_use_in_liquidity_radar": "Real-time FX",
+      "scores": {
+        "free_availability": 8,
+        "data_quality": 9,
+        "reliability": 9,
+        "rate_limits": 9,
+        "real_time": 9,
+        "historical": 8,
+        "coverage": 7,
+        "documentation": 8,
+        "ease_of_integration": 7,
+        "liquidity_radar_usefulness": 7
+      },
+      "overall_score": 8.1,
+      "tier": "HIGH VALUE"
+    },
+    {
+      "id": "eia",
+      "name": "EIA API v2",
+      "category": "Commodities",
+      "subcategory": "Oil/Gas",
+      "label": "PUBLIC DATA",
+      "website": "https://www.eia.gov",
+      "documentation": "https://www.eia.gov/opendata/",
+      "data_provided": "Petroleum/gas prices, inventories",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": true,
+        "real_time": false,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "Free key",
+        "rate_limits": "Free key",
+        "commercial_use": "Public",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": null
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": null,
+      "best_use_in_liquidity_radar": "Energy macro",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 10,
+        "reliability": 9,
+        "rate_limits": 8,
+        "real_time": 5,
+        "historical": 10,
+        "coverage": 4,
+        "documentation": 7,
+        "ease_of_integration": 7,
+        "liquidity_radar_usefulness": 7
+      },
+      "overall_score": 7.7,
+      "tier": "HIGH VALUE"
+    },
+    {
+      "id": "polymarket",
+      "name": "Polymarket",
+      "category": "Prediction",
+      "subcategory": "Prediction markets",
+      "label": "FREE",
+      "website": "https://polymarket.com",
+      "documentation": "https://docs.polymarket.com",
+      "data_provided": "Gamma (markets), CLOB (books/prices), Data API, WS",
+      "capabilities": {
+        "rest": true,
+        "websocket": true,
+        "streaming": true,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "Gamma 4,000/10s, CLOB 9,000/10s, Data 1,000/10s; reads no key",
+        "rate_limits": "Gamma 4,000/10s, CLOB 9,000/10s, Data 1,000/10s; reads no key",
+        "commercial_use": "Open reads",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "py-clob-client, @polymarket/clob-client"
+      },
+      "verification": {
+        "status": "verified",
+        "last_verified": "2026-09-12"
+      },
+      "known_limitations": "Trading geo-gated",
+      "best_use_in_liquidity_radar": "Event probabilities",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 8,
+        "reliability": 8,
+        "rate_limits": 9,
+        "real_time": 9,
+        "historical": 8,
+        "coverage": 8,
+        "documentation": 7,
+        "ease_of_integration": 8,
+        "liquidity_radar_usefulness": 8
+      },
+      "overall_score": 8.3,
+      "tier": "MUST HAVE"
+    },
+    {
+      "id": "kalshi",
+      "name": "Kalshi",
+      "category": "Prediction",
+      "subcategory": "Regulated prediction markets",
+      "label": "FREE",
+      "website": "https://kalshi.com",
+      "documentation": "https://trading-api.readme.io",
+      "data_provided": "Markets, orderbooks (public); trading auth",
+      "capabilities": {
+        "rest": true,
+        "websocket": true,
+        "streaming": true,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "Public reads; limits per docs",
+        "rate_limits": "Public reads; limits per docs",
+        "commercial_use": "Open reads",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "kalshi-python"
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": null,
+      "best_use_in_liquidity_radar": "Macro (CPI/Fed/jobs) odds",
+      "scores": {
+        "free_availability": 9,
+        "data_quality": 8,
+        "reliability": 8,
+        "rate_limits": 7,
+        "real_time": 9,
+        "historical": 7,
+        "coverage": 6,
+        "documentation": 7,
+        "ease_of_integration": 7,
+        "liquidity_radar_usefulness": 7
+      },
+      "overall_score": 7.5,
+      "tier": "HIGH VALUE"
+    },
+    {
+      "id": "binance_vision",
+      "name": "data.binance.vision",
+      "category": "Historical",
+      "subcategory": "Bulk datasets",
+      "label": "FREE",
+      "website": "https://data.binance.vision",
+      "documentation": "https://github.com/binance/binance-public-data",
+      "data_provided": "Daily/monthly zips: klines, trades, aggTrades, bookDepth, metrics (OI, L/S)",
+      "capabilities": {
+        "rest": false,
+        "websocket": false,
+        "streaming": false,
+        "historical": true,
+        "real_time": false,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "Unlimited download",
+        "rate_limits": "Unlimited download",
+        "commercial_use": "Display OK",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "binance-public-data scripts"
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": "Futures bookDepth limited levels",
+      "best_use_in_liquidity_radar": "Backtesting lake",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 9,
+        "reliability": 9,
+        "rate_limits": 10,
+        "real_time": 1,
+        "historical": 10,
+        "coverage": 7,
+        "documentation": 7,
+        "ease_of_integration": 7,
+        "liquidity_radar_usefulness": 9
+      },
+      "overall_score": 7.9,
+      "tier": "MUST HAVE"
+    },
+    {
+      "id": "alternative_fng",
+      "name": "Alternative.me Fear & Greed",
+      "category": "Sentiment",
+      "subcategory": "Crypto F&G",
+      "label": "FREE",
+      "website": "https://alternative.me",
+      "documentation": "https://alternative.me/crypto/fear-and-greed-index/",
+      "data_provided": "Daily index + full history",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": true,
+        "real_time": false,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "No key; fair use",
+        "rate_limits": "No key; fair use",
+        "commercial_use": "Attribution",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": null
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": "Daily only",
+      "best_use_in_liquidity_radar": "Canonical F&G",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 7,
+        "reliability": 9,
+        "rate_limits": 9,
+        "real_time": 5,
+        "historical": 9,
+        "coverage": 3,
+        "documentation": 6,
+        "ease_of_integration": 10,
+        "liquidity_radar_usefulness": 9
+      },
+      "overall_score": 7.7,
+      "tier": "MUST HAVE"
+    },
+    {
+      "id": "cftc_cot",
+      "name": "CFTC Commitments of Traders",
+      "category": "Sentiment",
+      "subcategory": "Positioning",
+      "label": "PUBLIC DATA",
+      "website": "https://www.cftc.gov",
+      "documentation": "https://publicreporting.cftc.gov",
+      "data_provided": "Weekly futures positioning incl. BTC/ETH, DXY, gold",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": true,
+        "real_time": false,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "Socrata API; no key",
+        "rate_limits": "Socrata API; no key",
+        "commercial_use": "Public",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": null
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": "Weekly",
+      "best_use_in_liquidity_radar": "Institutional positioning",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 9,
+        "reliability": 9,
+        "rate_limits": 8,
+        "real_time": 3,
+        "historical": 10,
+        "coverage": 5,
+        "documentation": 6,
+        "ease_of_integration": 6,
+        "liquidity_radar_usefulness": 7
+      },
+      "overall_score": 7.3,
+      "tier": "HIGH VALUE"
+    },
+    {
+      "id": "finbert",
+      "name": "FinBERT / CryptoBERT (Hugging Face)",
+      "category": "Sentiment",
+      "subcategory": "Models",
+      "label": "OPEN SOURCE",
+      "website": "https://huggingface.co/ProsusAI/finbert",
+      "documentation": "https://huggingface.co/ElKulako/cryptobert",
+      "data_provided": "Financial/crypto sentiment classification",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": false,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "Self-host or HF free credits",
+        "rate_limits": "Self-host or HF free credits",
+        "commercial_use": "Model licences vary",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "transformers"
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": "Needs GPU/CPU inference",
+      "best_use_in_liquidity_radar": "News/social sentiment",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 8,
+        "reliability": 9,
+        "rate_limits": 9,
+        "real_time": 8,
+        "historical": 8,
+        "coverage": 7,
+        "documentation": 7,
+        "ease_of_integration": 7,
+        "liquidity_radar_usefulness": 8
+      },
+      "overall_score": 8.1,
+      "tier": "MUST HAVE"
+    },
+    {
+      "id": "reddit",
+      "name": "Reddit API",
+      "category": "Social",
+      "subcategory": "Reddit",
+      "label": "FREE TIER",
+      "website": "https://www.reddit.com",
+      "documentation": "https://www.reddit.com/dev/api/",
+      "data_provided": "Posts, comments, subreddit streams",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "OAuth: 100 req/min; non-commercial free; commercial agreement required",
+        "rate_limits": "OAuth: 100 req/min; non-commercial free; commercial agreement required",
+        "commercial_use": "Non-commercial free",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "praw, snoowrap"
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": null,
+      "best_use_in_liquidity_radar": "Retail sentiment/mentions",
+      "scores": {
+        "free_availability": 8,
+        "data_quality": 7,
+        "reliability": 8,
+        "rate_limits": 8,
+        "real_time": 8,
+        "historical": 5,
+        "coverage": 7,
+        "documentation": 7,
+        "ease_of_integration": 8,
+        "liquidity_radar_usefulness": 7
+      },
+      "overall_score": 7.3,
+      "tier": "HIGH VALUE"
+    },
+    {
+      "id": "telegram_bot",
+      "name": "Telegram Bot API",
+      "category": "Social/Alerts",
+      "subcategory": "Telegram",
+      "label": "FREE",
+      "website": "https://telegram.org",
+      "documentation": "https://core.telegram.org/bots/api",
+      "data_provided": "Send messages, read updates in admin channels",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": false,
+        "real_time": true,
+        "webhooks": true
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "30 msg/s; unlimited",
+        "rate_limits": "30 msg/s; unlimited",
+        "commercial_use": "Allowed",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "telegraf, grammY, python-telegram-bot"
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": "Cannot read arbitrary channels (use MTProto)",
+      "best_use_in_liquidity_radar": "Primary alert transport",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 9,
+        "reliability": 10,
+        "rate_limits": 9,
+        "real_time": 10,
+        "historical": 3,
+        "coverage": 8,
+        "documentation": 9,
+        "ease_of_integration": 10,
+        "liquidity_radar_usefulness": 10
+      },
+      "overall_score": 8.8,
+      "tier": "MUST HAVE"
+    },
+    {
+      "id": "telegram_mtproto",
+      "name": "Telegram MTProto (Telethon/GramJS)",
+      "category": "Social",
+      "subcategory": "Telegram channels",
+      "label": "OPEN SOURCE",
+      "website": "https://docs.telethon.dev",
+      "documentation": "https://gram.js.org",
+      "data_provided": "Read public channels via user account",
+      "capabilities": {
+        "rest": false,
+        "websocket": true,
+        "streaming": true,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "Flood limits",
+        "rate_limits": "Flood limits",
+        "commercial_use": "ToS-sensitive",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "telethon, gramjs"
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": "Account risk",
+      "best_use_in_liquidity_radar": "Alpha-channel monitoring",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 7,
+        "reliability": 7,
+        "rate_limits": 6,
+        "real_time": 9,
+        "historical": 7,
+        "coverage": 7,
+        "documentation": 7,
+        "ease_of_integration": 6,
+        "liquidity_radar_usefulness": 7
+      },
+      "overall_score": 7.3,
+      "tier": "USEFUL"
+    },
+    {
+      "id": "youtube",
+      "name": "YouTube Data API v3",
+      "category": "Social",
+      "subcategory": "YouTube",
+      "label": "FREE TIER",
+      "website": "https://developers.google.com/youtube",
+      "documentation": "https://developers.google.com/youtube/v3",
+      "data_provided": "Channel uploads, video stats",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": true,
+        "real_time": false,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "10,000 units/day (search=100)",
+        "rate_limits": "10,000 units/day (search=100)",
+        "commercial_use": "Allowed",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "googleapis"
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": "Quota burns fast",
+      "best_use_in_liquidity_radar": "Influencer velocity",
+      "scores": {
+        "free_availability": 8,
+        "data_quality": 8,
+        "reliability": 9,
+        "rate_limits": 5,
+        "real_time": 6,
+        "historical": 7,
+        "coverage": 6,
+        "documentation": 9,
+        "ease_of_integration": 8,
+        "liquidity_radar_usefulness": 5
+      },
+      "overall_score": 7.1,
+      "tier": "USEFUL"
+    },
+    {
+      "id": "wikipedia_pageviews",
+      "name": "Wikimedia Pageviews API",
+      "category": "Knowledge",
+      "subcategory": "Attention proxy",
+      "label": "FREE",
+      "website": "https://wikimedia.org",
+      "documentation": "https://wikimedia.org/api/rest_v1/",
+      "data_provided": "Daily article pageviews",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": true,
+        "real_time": false,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "Fair use; User-Agent",
+        "rate_limits": "Fair use; User-Agent",
+        "commercial_use": "CC0",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": null
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": "Daily",
+      "best_use_in_liquidity_radar": "Retail attention (Google Trends alt)",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 8,
+        "reliability": 9,
+        "rate_limits": 9,
+        "real_time": 3,
+        "historical": 9,
+        "coverage": 6,
+        "documentation": 8,
+        "ease_of_integration": 9,
+        "liquidity_radar_usefulness": 6
+      },
+      "overall_score": 7.7,
+      "tier": "HIGH VALUE"
+    },
+    {
+      "id": "brave_search",
+      "name": "Brave Search API",
+      "category": "Search",
+      "subcategory": "Web search",
+      "label": "FREE TIER",
+      "website": "https://brave.com/search/api/",
+      "documentation": "https://api.search.brave.com/app/documentation",
+      "data_provided": "Web/news search",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": false,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "2,000 queries/mo, 1 QPS (K)",
+        "rate_limits": "2,000 queries/mo, 1 QPS (K)",
+        "commercial_use": "Allowed",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": null
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": "Card may be required",
+      "best_use_in_liquidity_radar": "LLM grounding",
+      "scores": {
+        "free_availability": 7,
+        "data_quality": 8,
+        "reliability": 8,
+        "rate_limits": 6,
+        "real_time": 8,
+        "historical": 2,
+        "coverage": 8,
+        "documentation": 8,
+        "ease_of_integration": 9,
+        "liquidity_radar_usefulness": 6
+      },
+      "overall_score": 7,
+      "tier": "HIGH VALUE"
+    },
+    {
+      "id": "tavily",
+      "name": "Tavily",
+      "category": "Search",
+      "subcategory": "LLM search",
+      "label": "FREE TIER",
+      "website": "https://tavily.com",
+      "documentation": "https://docs.tavily.com",
+      "data_provided": "Search + extract for LLMs",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": false,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "1,000 credits/mo",
+        "rate_limits": "1,000 credits/mo",
+        "commercial_use": "Allowed",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "tavily-python, @tavily/core"
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": null,
+      "best_use_in_liquidity_radar": "Research agent",
+      "scores": {
+        "free_availability": 7,
+        "data_quality": 8,
+        "reliability": 8,
+        "rate_limits": 6,
+        "real_time": 8,
+        "historical": 2,
+        "coverage": 7,
+        "documentation": 8,
+        "ease_of_integration": 9,
+        "liquidity_radar_usefulness": 6
+      },
+      "overall_score": 6.9,
+      "tier": "USEFUL"
+    },
+    {
+      "id": "jina_reader",
+      "name": "Jina Reader",
+      "category": "Search",
+      "subcategory": "URL to markdown",
+      "label": "FREE TIER",
+      "website": "https://jina.ai",
+      "documentation": "https://jina.ai/reader",
+      "data_provided": "Clean page extraction",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": false,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "20 RPM no key",
+        "rate_limits": "20 RPM no key",
+        "commercial_use": "Allowed",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": null
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": null,
+      "best_use_in_liquidity_radar": "LLM ingestion of pages",
+      "scores": {
+        "free_availability": 9,
+        "data_quality": 8,
+        "reliability": 8,
+        "rate_limits": 7,
+        "real_time": 8,
+        "historical": 1,
+        "coverage": 9,
+        "documentation": 7,
+        "ease_of_integration": 10,
+        "liquidity_radar_usefulness": 6
+      },
+      "overall_score": 7.3,
+      "tier": "HIGH VALUE"
+    },
+    {
+      "id": "goplus",
+      "name": "GoPlus Security API",
+      "category": "Security",
+      "subcategory": "Token/address risk",
+      "label": "FREE TIER",
+      "website": "https://gopluslabs.io",
+      "documentation": "https://docs.gopluslabs.io",
+      "data_provided": "Token security, malicious address, approval security, dApp/phishing; 20+ chains",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": false,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "Free without key (low rate); free app key raises limits (exact UNK)",
+        "rate_limits": "Free without key (low rate); free app key raises limits (exact UNK)",
+        "commercial_use": "Allowed",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "goplus-sdk-node, goplus-sdk-python"
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": null,
+      "best_use_in_liquidity_radar": "Rug-pull gate",
+      "scores": {
+        "free_availability": 9,
+        "data_quality": 8,
+        "reliability": 8,
+        "rate_limits": 7,
+        "real_time": 9,
+        "historical": 2,
+        "coverage": 9,
+        "documentation": 8,
+        "ease_of_integration": 9,
+        "liquidity_radar_usefulness": 9
+      },
+      "overall_score": 7.8,
+      "tier": "MUST HAVE"
+    },
+    {
+      "id": "honeypot_is",
+      "name": "Honeypot.is",
+      "category": "Security",
+      "subcategory": "Honeypot sim",
+      "label": "FREE",
+      "website": "https://honeypot.is",
+      "documentation": "https://api.honeypot.is/",
+      "data_provided": "Honeypot simulation ETH/BSC/Base",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": false,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "No key; fair use",
+        "rate_limits": "No key; fair use",
+        "commercial_use": "Fair use",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": null
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": "Few chains",
+      "best_use_in_liquidity_radar": "Backup honeypot check",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 8,
+        "reliability": 7,
+        "rate_limits": 7,
+        "real_time": 9,
+        "historical": 1,
+        "coverage": 4,
+        "documentation": 6,
+        "ease_of_integration": 10,
+        "liquidity_radar_usefulness": 7
+      },
+      "overall_score": 6.9,
+      "tier": "HIGH VALUE"
+    },
+    {
+      "id": "rugcheck",
+      "name": "RugCheck.xyz",
+      "category": "Security",
+      "subcategory": "Solana token risk",
+      "label": "FREE",
+      "website": "https://rugcheck.xyz",
+      "documentation": "https://api.rugcheck.xyz/swagger/index.html",
+      "data_provided": "Risk score, LP lock, authorities",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": false,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "No key; fair use",
+        "rate_limits": "No key; fair use",
+        "commercial_use": "Fair use",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": null
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": "Solana only",
+      "best_use_in_liquidity_radar": "Solana risk gate",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 8,
+        "reliability": 7,
+        "rate_limits": 7,
+        "real_time": 9,
+        "historical": 1,
+        "coverage": 3,
+        "documentation": 7,
+        "ease_of_integration": 9,
+        "liquidity_radar_usefulness": 8
+      },
+      "overall_score": 6.9,
+      "tier": "HIGH VALUE"
+    },
+    {
+      "id": "federal_register",
+      "name": "Federal Register API",
+      "category": "Regulatory",
+      "subcategory": "US rules",
+      "label": "PUBLIC DATA",
+      "website": "https://www.federalregister.gov",
+      "documentation": "https://www.federalregister.gov/developers/documentation/api/v1",
+      "data_provided": "Rules, notices, agency documents",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": true,
+        "real_time": false,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "No key",
+        "rate_limits": "No key",
+        "commercial_use": "Public",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": null
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": null,
+      "best_use_in_liquidity_radar": "Regulatory tracker",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 9,
+        "reliability": 9,
+        "rate_limits": 8,
+        "real_time": 5,
+        "historical": 10,
+        "coverage": 4,
+        "documentation": 8,
+        "ease_of_integration": 8,
+        "liquidity_radar_usefulness": 5
+      },
+      "overall_score": 7.6,
+      "tier": "USEFUL"
+    },
+    {
+      "id": "groq",
+      "name": "Groq",
+      "category": "AI/LLM",
+      "subcategory": "Inference",
+      "label": "FREE TIER",
+      "website": "https://groq.com",
+      "documentation": "https://console.groq.com/docs",
+      "data_provided": "OpenAI-compatible fast inference (Llama, gpt-oss...)",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": false,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "~30 RPM, ~1,000 RPD flagship (14.4k RPD smaller models), ~200k TPD; no card",
+        "rate_limits": "~30 RPM, ~1,000 RPD flagship (14.4k RPD smaller models), ~200k TPD; no card",
+        "commercial_use": "No-training policy",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "groq-sdk, groq (Python), OpenAI-compatible"
+      },
+      "verification": {
+        "status": "verified",
+        "last_verified": "2026-09-12"
+      },
+      "known_limitations": "Limits change without notice",
+      "best_use_in_liquidity_radar": "Real-time headline classification",
+      "scores": {
+        "free_availability": 9,
+        "data_quality": 8,
+        "reliability": 8,
+        "rate_limits": 7,
+        "real_time": 10,
+        "historical": 1,
+        "coverage": 7,
+        "documentation": 9,
+        "ease_of_integration": 10,
+        "liquidity_radar_usefulness": 9
+      },
+      "overall_score": 7.8,
+      "tier": "MUST HAVE"
+    },
+    {
+      "id": "gemini",
+      "name": "Google AI Studio (Gemini API)",
+      "category": "AI/LLM",
+      "subcategory": "Inference/Embeddings",
+      "label": "FREE TIER",
+      "website": "https://ai.google.dev",
+      "documentation": "https://ai.google.dev/gemini-api/docs/rate-limits",
+      "data_provided": "Flash/Flash-Lite LLM, embeddings, multimodal, 1M context",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": false,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "Flash free: ~10-30 RPM, 500-1,500 RPD (model-specific); Search grounding paid",
+        "rate_limits": "Flash free: ~10-30 RPM, 500-1,500 RPD (model-specific); Search grounding paid",
+        "commercial_use": "Free-tier inputs used to improve Google products",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "@google/genai, google-genai"
+      },
+      "verification": {
+        "status": "verified",
+        "last_verified": "2026-09-12"
+      },
+      "known_limitations": "Data-use terms",
+      "best_use_in_liquidity_radar": "Long-doc summarization, embeddings",
+      "scores": {
+        "free_availability": 9,
+        "data_quality": 9,
+        "reliability": 8,
+        "rate_limits": 7,
+        "real_time": 8,
+        "historical": 1,
+        "coverage": 8,
+        "documentation": 9,
+        "ease_of_integration": 9,
+        "liquidity_radar_usefulness": 9
+      },
+      "overall_score": 7.7,
+      "tier": "MUST HAVE"
+    },
+    {
+      "id": "openrouter",
+      "name": "OpenRouter",
+      "category": "AI/LLM",
+      "subcategory": "Router",
+      "label": "FREE TIER",
+      "website": "https://openrouter.ai",
+      "documentation": "https://openrouter.ai/docs",
+      "data_provided": ":free models across providers",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": false,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "20 RPM; 50 RPD (<$10 lifetime credits) → 1,000 RPD (≥$10)",
+        "rate_limits": "20 RPM; 50 RPD (<$10 lifetime credits) → 1,000 RPD (≥$10)",
+        "commercial_use": "Per model",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "OpenAI-compatible"
+      },
+      "verification": {
+        "status": "verified",
+        "last_verified": "2026-09-12"
+      },
+      "known_limitations": "Free models rotate",
+      "best_use_in_liquidity_radar": "Failover router",
+      "scores": {
+        "free_availability": 8,
+        "data_quality": 7,
+        "reliability": 7,
+        "rate_limits": 6,
+        "real_time": 8,
+        "historical": 1,
+        "coverage": 9,
+        "documentation": 8,
+        "ease_of_integration": 10,
+        "liquidity_radar_usefulness": 7
+      },
+      "overall_score": 7.1,
+      "tier": "HIGH VALUE"
+    },
+    {
+      "id": "cerebras",
+      "name": "Cerebras Inference",
+      "category": "AI/LLM",
+      "subcategory": "Inference",
+      "label": "FREE TIER",
+      "website": "https://cerebras.ai",
+      "documentation": "https://inference-docs.cerebras.ai",
+      "data_provided": "Ultra-fast Llama/Qwen inference",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": false,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "~30 RPM, 1M tokens/day, 8k context; no card",
+        "rate_limits": "~30 RPM, 1M tokens/day, 8k context; no card",
+        "commercial_use": "No-training",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "cerebras_cloud_sdk"
+      },
+      "verification": {
+        "status": "verified",
+        "last_verified": "2026-09-12"
+      },
+      "known_limitations": "Context cap",
+      "best_use_in_liquidity_radar": "Classification backup",
+      "scores": {
+        "free_availability": 9,
+        "data_quality": 7,
+        "reliability": 8,
+        "rate_limits": 7,
+        "real_time": 10,
+        "historical": 1,
+        "coverage": 4,
+        "documentation": 8,
+        "ease_of_integration": 9,
+        "liquidity_radar_usefulness": 7
+      },
+      "overall_score": 7,
+      "tier": "HIGH VALUE"
+    },
+    {
+      "id": "mistral",
+      "name": "Mistral (Experiment tier)",
+      "category": "AI/LLM",
+      "subcategory": "Inference/Embeddings",
+      "label": "FREE TIER",
+      "website": "https://mistral.ai",
+      "documentation": "https://docs.mistral.ai",
+      "data_provided": "LLM + mistral-embed",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": false,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "2 RPM, 500k TPM, 1B tokens/mo",
+        "rate_limits": "2 RPM, 500k TPM, 1B tokens/mo",
+        "commercial_use": "Data-use terms",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "mistralai"
+      },
+      "verification": {
+        "status": "verified",
+        "last_verified": "2026-09-12"
+      },
+      "known_limitations": "Low RPM",
+      "best_use_in_liquidity_radar": "Batch summarization/embeddings",
+      "scores": {
+        "free_availability": 8,
+        "data_quality": 8,
+        "reliability": 8,
+        "rate_limits": 3,
+        "real_time": 6,
+        "historical": 1,
+        "coverage": 6,
+        "documentation": 8,
+        "ease_of_integration": 9,
+        "liquidity_radar_usefulness": 6
+      },
+      "overall_score": 6.3,
+      "tier": "USEFUL"
+    },
+    {
+      "id": "cloudflare_ai",
+      "name": "Cloudflare Workers AI",
+      "category": "AI/LLM",
+      "subcategory": "Edge inference/embeddings",
+      "label": "FREE TIER",
+      "website": "https://www.cloudflare.com",
+      "documentation": "https://developers.cloudflare.com/workers-ai/",
+      "data_provided": "bge embeddings, small LLMs, classification",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": false,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "10,000 Neurons/day",
+        "rate_limits": "10,000 Neurons/day",
+        "commercial_use": "Allowed",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "wrangler / REST"
+      },
+      "verification": {
+        "status": "verified",
+        "last_verified": "2026-09-12"
+      },
+      "known_limitations": "Compute-budget unit",
+      "best_use_in_liquidity_radar": "Embeddings at edge",
+      "scores": {
+        "free_availability": 9,
+        "data_quality": 7,
+        "reliability": 9,
+        "rate_limits": 7,
+        "real_time": 9,
+        "historical": 1,
+        "coverage": 6,
+        "documentation": 9,
+        "ease_of_integration": 8,
+        "liquidity_radar_usefulness": 7
+      },
+      "overall_score": 7.2,
+      "tier": "HIGH VALUE"
+    },
+    {
+      "id": "ollama",
+      "name": "Ollama / vLLM (self-host)",
+      "category": "AI/LLM",
+      "subcategory": "Local inference",
+      "label": "OPEN SOURCE",
+      "website": "https://ollama.com",
+      "documentation": "https://github.com/ollama/ollama",
+      "data_provided": "Any open model; embeddings",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": false,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "Hardware only",
+        "rate_limits": "Hardware only",
+        "commercial_use": "MIT/Apache",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "ollama (JS/Python)"
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": "Infra cost",
+      "best_use_in_liquidity_radar": "Unlimited private inference",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 7,
+        "reliability": 8,
+        "rate_limits": 10,
+        "real_time": 8,
+        "historical": 1,
+        "coverage": 8,
+        "documentation": 8,
+        "ease_of_integration": 8,
+        "liquidity_radar_usefulness": 7
+      },
+      "overall_score": 7.5,
+      "tier": "HIGH VALUE"
+    },
+    {
+      "id": "pgvector",
+      "name": "pgvector",
+      "category": "AI/LLM",
+      "subcategory": "Vector DB",
+      "label": "OPEN SOURCE",
+      "website": "https://github.com/pgvector/pgvector",
+      "documentation": "https://github.com/pgvector/pgvector",
+      "data_provided": "Vector similarity in Postgres",
+      "capabilities": {
+        "rest": false,
+        "websocket": false,
+        "streaming": false,
+        "historical": true,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "n/a",
+        "rate_limits": "n/a",
+        "commercial_use": "PostgreSQL licence",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "all Postgres clients"
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": null,
+      "best_use_in_liquidity_radar": "Semantic dedup/RAG",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 8,
+        "reliability": 9,
+        "rate_limits": 10,
+        "real_time": 9,
+        "historical": 9,
+        "coverage": 8,
+        "documentation": 8,
+        "ease_of_integration": 8,
+        "liquidity_radar_usefulness": 7
+      },
+      "overall_score": 8.6,
+      "tier": "HIGH VALUE"
+    },
+    {
+      "id": "discord",
+      "name": "Discord Webhooks / Bot API",
+      "category": "Alerts",
+      "subcategory": "Discord",
+      "label": "FREE",
+      "website": "https://discord.com",
+      "documentation": "https://discord.com/developers/docs/resources/webhook",
+      "data_provided": "Post embeds; bot reads/writes",
+      "capabilities": {
+        "rest": true,
+        "websocket": true,
+        "streaming": true,
+        "historical": false,
+        "real_time": true,
+        "webhooks": true
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "30 req/min per webhook; 50 req/s bot",
+        "rate_limits": "30 req/min per webhook; 50 req/s bot",
+        "commercial_use": "Allowed",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "discord.js, discord.py"
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": null,
+      "best_use_in_liquidity_radar": "Community alerts",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 8,
+        "reliability": 10,
+        "rate_limits": 8,
+        "real_time": 10,
+        "historical": 2,
+        "coverage": 7,
+        "documentation": 9,
+        "ease_of_integration": 10,
+        "liquidity_radar_usefulness": 9
+      },
+      "overall_score": 8.3,
+      "tier": "MUST HAVE"
+    },
+    {
+      "id": "webpush",
+      "name": "Web Push (VAPID)",
+      "category": "Alerts",
+      "subcategory": "Browser push",
+      "label": "OPEN SOURCE",
+      "website": "https://developer.mozilla.org/docs/Web/API/Push_API",
+      "documentation": "https://github.com/web-push-libs/web-push",
+      "data_provided": "Push to PWA subscribers via browser push services",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": false,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "Free (browser vendors)",
+        "rate_limits": "Free (browser vendors)",
+        "commercial_use": "Open standard",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "web-push (npm), pywebpush"
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": "iOS requires installed PWA",
+      "best_use_in_liquidity_radar": "In-app alerts without vendor",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 8,
+        "reliability": 9,
+        "rate_limits": 9,
+        "real_time": 10,
+        "historical": 1,
+        "coverage": 8,
+        "documentation": 8,
+        "ease_of_integration": 8,
+        "liquidity_radar_usefulness": 9
+      },
+      "overall_score": 8,
+      "tier": "MUST HAVE"
+    },
+    {
+      "id": "fcm",
+      "name": "Firebase Cloud Messaging",
+      "category": "Alerts",
+      "subcategory": "Mobile push",
+      "label": "FREE",
+      "website": "https://firebase.google.com",
+      "documentation": "https://firebase.google.com/docs/cloud-messaging",
+      "data_provided": "Push to Android/iOS/web",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": false,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "Unlimited free",
+        "rate_limits": "Unlimited free",
+        "commercial_use": "Allowed",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "firebase-admin"
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": "Google dependency",
+      "best_use_in_liquidity_radar": "Mobile push",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 9,
+        "reliability": 10,
+        "rate_limits": 10,
+        "real_time": 10,
+        "historical": 1,
+        "coverage": 9,
+        "documentation": 9,
+        "ease_of_integration": 8,
+        "liquidity_radar_usefulness": 8
+      },
+      "overall_score": 8.4,
+      "tier": "HIGH VALUE"
+    },
+    {
+      "id": "resend",
+      "name": "Resend",
+      "category": "Alerts",
+      "subcategory": "Email",
+      "label": "FREE TIER",
+      "website": "https://resend.com",
+      "documentation": "https://resend.com/docs",
+      "data_provided": "Transactional email",
+      "capabilities": {
+        "rest": true,
+        "websocket": false,
+        "streaming": false,
+        "historical": false,
+        "real_time": true,
+        "webhooks": true
+      },
+      "access": {
+        "api_key_required": true,
+        "free_without_account": false,
+        "free_tier_limits": "3,000 emails/mo, 100/day",
+        "rate_limits": "3,000 emails/mo, 100/day",
+        "commercial_use": "Allowed",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": "resend (npm/Python)"
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": null,
+      "best_use_in_liquidity_radar": "Email digests",
+      "scores": {
+        "free_availability": 8,
+        "data_quality": 9,
+        "reliability": 9,
+        "rate_limits": 7,
+        "real_time": 9,
+        "historical": 1,
+        "coverage": 8,
+        "documentation": 10,
+        "ease_of_integration": 10,
+        "liquidity_radar_usefulness": 7
+      },
+      "overall_score": 7.8,
+      "tier": "HIGH VALUE"
+    },
+    {
+      "id": "ntfy",
+      "name": "ntfy.sh",
+      "category": "Alerts",
+      "subcategory": "Pub/sub push",
+      "label": "OPEN SOURCE",
+      "website": "https://ntfy.sh",
+      "documentation": "https://docs.ntfy.sh",
+      "data_provided": "Simple HTTP push to phones/desktop",
+      "capabilities": {
+        "rest": true,
+        "websocket": true,
+        "streaming": true,
+        "historical": false,
+        "real_time": true,
+        "webhooks": false
+      },
+      "access": {
+        "api_key_required": false,
+        "free_without_account": true,
+        "free_tier_limits": "Public server free; self-host",
+        "rate_limits": "Public server free; self-host",
+        "commercial_use": "Apache-2.0",
+        "license": null,
+        "geographic_limitations": null
+      },
+      "integration": {
+        "javascript_typescript": true,
+        "python": true,
+        "sdk": null
+      },
+      "verification": {
+        "status": "known_stable",
+        "last_verified": null
+      },
+      "known_limitations": null,
+      "best_use_in_liquidity_radar": "Ops alerts",
+      "scores": {
+        "free_availability": 10,
+        "data_quality": 7,
+        "reliability": 8,
+        "rate_limits": 8,
+        "real_time": 10,
+        "historical": 1,
+        "coverage": 5,
+        "documentation": 9,
+        "ease_of_integration": 10,
+        "liquidity_radar_usefulness": 6
+      },
+      "overall_score": 7.4,
+      "tier": "USEFUL"
+    }
+  ],
+  "backups": {
+    "market_data": [
+      "binance",
+      "bybit",
+      "okx"
+    ],
+    "order_book": [
+      "binance",
+      "bybit",
+      "coinbase",
+      "hyperliquid"
+    ],
+    "funding_oi": [
+      "binance",
+      "bybit",
+      "okx"
+    ],
+    "options": [
+      "deribit",
+      "binance"
+    ],
+    "coin_metadata": [
+      "coingecko",
+      "coinmarketcap",
+      "coinpaprika",
+      "defillama"
+    ],
+    "dex_pairs": [
+      "dexscreener",
+      "geckoterminal",
+      "birdeye"
+    ],
+    "evm_explorer": [
+      "etherscan",
+      "blockscout"
+    ],
+    "evm_rpc": [
+      "alchemy",
+      "infura",
+      "drpc"
+    ],
+    "solana": [
+      "helius",
+      "quicknode"
+    ],
+    "bitcoin": [
+      "mempoolspace"
+    ],
+    "token_security": [
+      "goplus",
+      "honeypot_is",
+      "rugcheck"
+    ],
+    "news": [
+      "rss_direct",
+      "finnhub",
+      "googlenews_rss",
+      "cryptopanic"
+    ],
+    "fear_greed": [
+      "alternative_fng",
+      "coinmarketcap"
+    ],
+    "macro": [
+      "fred",
+      "dbnomics",
+      "bls",
+      "treasury_fiscal"
+    ],
+    "fx": [
+      "frankfurter",
+      "finnhub",
+      "openerapi",
+      "oanda_demo"
+    ],
+    "stocks": [
+      "finnhub",
+      "twelvedata",
+      "alpaca",
+      "massive"
+    ],
+    "filings": [
+      "secedgar",
+      "fmp"
+    ],
+    "prediction": [
+      "polymarket",
+      "kalshi"
+    ],
+    "llm": [
+      "groq",
+      "gemini",
+      "openrouter",
+      "cerebras",
+      "ollama"
+    ],
+    "embeddings": [
+      "cloudflare_ai",
+      "gemini",
+      "ollama"
+    ],
+    "search": [
+      "brave_search",
+      "tavily",
+      "jina_reader"
+    ],
+    "alerts": [
+      "telegram_bot",
+      "discord",
+      "webpush",
+      "fcm",
+      "resend"
+    ]
+  },
+  "dead_or_deprecated": [
+    "IEX Cloud",
+    "Twitter API free tier",
+    "Pushshift",
+    "Reservoir NFT API",
+    "SimpleHash",
+    "Etherscan API V1",
+    "Coinbase Pro API",
+    "Bybit V2/V3",
+    "Nitter",
+    "CoinGecko /news"
+  ],
+  "research_gaps": [
+    "free economic calendar API",
+    "free historical liquidations",
+    "free historical L2",
+    "crypto ETF flows API",
+    "token unlock schedules",
+    "exchange inflow/outflow service",
+    "X data at zero cost",
+    "wallet label dataset",
+    "CryptoPanic free plan status"
+  ]
+}
