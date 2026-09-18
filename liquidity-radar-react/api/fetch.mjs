@@ -4,7 +4,9 @@
 // and in production (this function). Keep the allow-list in sync with that file.
 const ALLOW = new Set([
   'nfs.faireconomy.media', // Forex Factory calendar JSON
+  'xoomar.com', // economic calendar fallback API
   'www.coindesk.com', 'cointelegraph.com', 'www.theblock.co', 'decrypt.co', 'blockworks.co', 'bitcoinmagazine.com', 'www.dlnews.com',
+  'cryptoslate.com', 'coingape.com', 'beincrypto.com', 'u.today', 'ambcrypto.com', 'www.cryptotimes.io', 'bitcoinist.com',
   'cryptocurrency.cv', 'news.google.com', 'www.federalreserve.gov', 'www.sec.gov', 'www.cftc.gov', 'feeds.reuters.com', 'www.cnbc.com', 'feeds.content.dowjones.io', 'www.marketwatch.com',
   'www.binance.com', 'announcements.bybit.com', 'www.okx.com',
 ]);

@@ -276,6 +276,40 @@ function rawNewsFetch(i: number, to?: number): Promise<RssResponse> {
     .finally(() => clearTimeout(h))
 }
 
+function parseRssXml(xml: string): RssResponse {
+  const p = new DOMParser().parseFromString(xml, 'text/xml')
+  const items = Array.from(p.querySelectorAll('item'))
+  return {
+    status: 'ok',
+    items: items.map((it) => {
+      const get = (sel: string) => {
+        const el = it.querySelector(sel)
+        return el ? (el.textContent || '').trim() : ''
+      }
+      return {
+        title: get('title'),
+        link: get('link'),
+        pubDate: get('pubDate'),
+        thumbnail: get('enclosure url, thumbnail'),
+      }
+    }),
+  }
+}
+
+async function rawNewsFetchProxy(i: number, to?: number): Promise<RssResponse> {
+  const c = new AbortController()
+  const h = setTimeout(() => c.abort(), to || 15000)
+  try {
+    const r = await fetch('/api/fetch?url=' + encodeURIComponent(NEWS_RSS[i][1]), {
+      signal: c.signal,
+    })
+    if (!r.ok) throw new Error('proxy http ' + r.status)
+    return parseRssXml(await r.text())
+  } finally {
+    clearTimeout(h)
+  }
+}
+
 async function rawNewsFetchFallback(i: number, to?: number): Promise<RssResponse> {
   const c = new AbortController()
   const h = setTimeout(() => c.abort(), to || 15000)
@@ -285,25 +319,7 @@ async function rawNewsFetchFallback(i: number, to?: number): Promise<RssResponse
       signal: c.signal,
     })
     if (!r.ok) throw new Error('http ' + r.status)
-    const xml = await r.text()
-    const p = new DOMParser().parseFromString(xml, 'text/xml')
-    const items = Array.from(p.querySelectorAll('item'))
-    const out: RssResponse = {
-      status: 'ok',
-      items: items.map((it) => {
-        const get = (sel: string) => {
-          const el = it.querySelector(sel)
-          return el ? (el.textContent || '').trim() : ''
-        }
-        return {
-          title: get('title'),
-          link: get('link'),
-          pubDate: get('pubDate'),
-          thumbnail: get('enclosure url, thumbnail'),
-        }
-      }),
-    }
-    return out
+    return parseRssXml(await r.text())
   } catch (e) {
     throw new Error('allorigins fail', { cause: e })
   } finally {
@@ -312,8 +328,11 @@ async function rawNewsFetchFallback(i: number, to?: number): Promise<RssResponse
 }
 
 function rawNewsFetchAny(i: number): Promise<RssResponse> {
+  // rss2json (CORS-enabled) -> same-origin /api/fetch proxy -> allorigins
   return rawNewsFetch(i, 13000).catch(function () {
-    return rawNewsFetchFallback(i, 15000)
+    return rawNewsFetchProxy(i, 15000).catch(function () {
+      return rawNewsFetchFallback(i, 15000)
+    })
   })
 }
 
