@@ -1,0 +1,10 @@
+const P = { width: 20, height: 20, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
+export const IcChart = () => <svg {...P}><path d="M4 19V5M4 19h16" /><path d="M8 15l3-4 3 2 4-6" /></svg>;
+export const IcNews = () => <svg {...P}><rect x="4" y="5" width="16" height="14" rx="2" /><path d="M8 9h8M8 12h8M8 15h5" /></svg>;
+export const IcBell = () => <svg {...P}><path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15z" /><path d="M10 20a2 2 0 0 0 4 0" /></svg>;
+export const IcList = () => <svg {...P}><path d="M5 7h1M5 12h1M5 17h1M9 7h10M9 12h10M9 17h10" /></svg>;
+export const IcPanelL = () => <svg {...P}><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M9 5v14" /></svg>;
+export const IcPanelR = () => <svg {...P}><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M15 5v14" /></svg>;
+export const IcPanelB = () => <svg {...P}><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 14h18" /></svg>;
+export const IcRadar = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.5" opacity=".5" /><circle cx="12" cy="12" r="5" stroke="currentColor" strokeWidth="1.5" opacity=".5" /><path d="M12 12V3a9 9 0 0 1 7.8 4.5z" fill="currentColor" /><circle cx="12" cy="12" r="1.6" fill="currentColor" /></svg>;
+export const IcHeat = () => <svg {...P}><rect x="4" y="5" width="16" height="14" rx="2" /><path d="M4 10h16M4 14h10M9 5v14" opacity=".6" /><path d="M14 14h6" strokeWidth="3" /></svg>;

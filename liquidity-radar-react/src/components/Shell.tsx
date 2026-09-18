@@ -5,9 +5,27 @@
 // the original index.html — do not hand-edit; App.tsx consumes <Shell/>.
 import { CoinSearchWidget } from './search/CoinSearchWidget'
 import { Footer } from './footer/Footer'
+import { useEffect, useRef } from 'react'
 const w = window as any
 
 export function Shell() {
+  // Pro Terminal embed — the iframe src is only set once the Pro tab becomes
+  // visible (IntersectionObserver) so the embedded app's streams don't run in
+  // the background while the user is on another tab. Dev serves pro-terminal on
+  // :5174; production serves the pre-built /pro/ assets from the same deploy.
+  const proRef = useRef<HTMLIFrameElement>(null)
+  useEffect(() => {
+    const PRO_SRC = (import.meta as any).env?.DEV ? 'http://localhost:5174' : '/pro/'
+    const el = proRef.current
+    const tab = document.getElementById('tab-pro')
+    if (!el || !tab) return
+    const obs = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) { el.src = PRO_SRC; obs.disconnect() }
+    }, { threshold: 0 })
+    obs.observe(tab)
+    return () => obs.disconnect()
+  }, [])
+
   return (
     <>
       <header className="top">
@@ -31,6 +49,7 @@ export function Shell() {
           <button className="tab-btn" data-tab="news" aria-label="News tab" aria-selected="false">[N] News</button>
           <button className="tab-btn" data-tab="portfolio" aria-label="Portfolio tab" aria-selected="false">[$] Portfolio</button>
           <button className="tab-btn" data-tab="chat" aria-label="AI Chat tab" aria-selected="false">[T] AI Chat</button>
+          <button className="tab-btn" data-tab="pro" aria-label="Pro Terminal tab" aria-selected="false">Pro</button>
         </nav>
       </header>
       
@@ -440,13 +459,19 @@ export function Shell() {
             <button className="chip" data-q="What patterns do you see?">🔍 Patterns</button>
             <button className="chip" data-q="What can you do">Help</button>
           </div>
-          <form className="chat-input-row" id="chatForm">
+<form className="chat-input-row" id="chatForm">
             <input type="text" id="chatInput" placeholder="Ask about any coin, indicator, whale moves…" autoComplete="off" maxLength={300} />
             <button className="send-btn" type="submit" id="sendBtn">Send ➤</button>
           </form>
         </div>
       </section>
-      
+
+      <section className="tab-section" id="tab-pro">
+        <div className="pro-frame">
+          <iframe ref={proRef} id="proFrame" title="Pro Terminal" aria-label="Embedded Pro Terminal (order book, tape, liquidations, cross-exchange, structure, futures, alerts, news)"></iframe>
+        </div>
+      </section>
+
       </main>
       <Footer />
       </div>
