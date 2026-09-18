@@ -1,4 +1,6 @@
 import type { CandleLike } from '../types/market'
+import type { CrossExRow, DeepOb, LongShortRow, OiPoint } from '../features/advanced/advancedData'
+import type { Liq } from '../features/advanced/liquidations'
 
 export interface AppState {
   symbol: string
@@ -15,6 +17,12 @@ export interface AppState {
   klineTick: number
   ctxCache: Record<string, unknown>
   mem: { lastCoin: string | null; topics: unknown[] }
+  deepOb: DeepOb | null
+  oiHist: OiPoint[] | null
+  ls: LongShortRow[] | null
+  crossEx: CrossExRow[]
+  liqs: Liq[]
+  liqWs: string
   [key: string]: unknown
 }
 
@@ -35,4 +43,10 @@ export const state: AppState = {
   klineTick: 0,
   ctxCache: {},
   mem: { lastCoin: null, topics: [] },
+  deepOb: null,
+  oiHist: null,
+  ls: null,
+  crossEx: [],
+  liqs: [],
+  liqWs: 'closed',
 }

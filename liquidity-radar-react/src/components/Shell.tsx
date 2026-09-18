@@ -5,6 +5,7 @@
 // the original index.html — do not hand-edit; App.tsx consumes <Shell/>.
 import { CoinSearchWidget } from './search/CoinSearchWidget'
 import { Footer } from './footer/Footer'
+import { NewsView } from '../features/news'
 import { useEffect, useRef } from 'react'
 const w = window as any
 
@@ -212,6 +213,68 @@ export function Shell() {
             <div className="whale-list" id="whaleList"><div className="fc-note">Scanning tape for block trades…</div></div>
           </div>
         </div>
+
+        <div className="desktop-grid">
+          <div className="card full">
+            <div className="sec-head"><div className="sec-title">Liquidity Score</div><span className="badge b-green">ADVANCED</span></div>
+            <div className="adv-liq">
+              <div className="adv-dial" id="advLiqDial"><span id="advLiqVal">—</span><small>/100</small></div>
+              <div className="adv-liq-comps" id="advLiqComps"><div className="fc-note">Waiting for deep order book…</div></div>
+            </div>
+            <div className="fc-note">Weighted 0–100 blend of live spread, depth within ±1%, slippage on a $100k market buy, bid/ask balance and 24h quote volume. Every component is shown — transparent, not a black box.</div>
+          </div>
+
+          <div className="card full">
+            <div className="sec-head"><div className="sec-title">Futures Positioning</div><span className="badge b-purple">PERP · LIVE</span></div>
+            <div className="metric-grid">
+              <div className="metric"><div className="ml"><span>Funding Rate</span><span className="badge b-purple">PERP</span></div><div className="mv" id="advFunding">—</div><div className="ms" id="advFundingSub"></div></div>
+              <div className="metric"><div className="ml"><span>Open Interest</span><span className="badge b-cyan">LIVE</span></div><div className="mv" id="advOI">—</div><div className="ms" id="advOISub"></div></div>
+              <div className="metric"><div className="ml"><span>Long / Short Ratio</span><span className="badge b-gray">ACCOUNTS</span></div><div className="mv" id="advLS">—</div><div className="ms" id="advLSSub"></div></div>
+              <div className="metric"><div className="ml"><span>Mark Price</span></div><div className="mv" id="advMark">—</div><div className="ms" id="advBasis"></div></div>
+              <div className="metric"><div className="ml"><span>Index Price</span></div><div className="mv" id="advIndex">—</div><div className="ms">spot index</div></div>
+              <div className="metric"><div className="ml"><span>OI Δ (5h)</span></div><div className="mv" id="advOIchg">—</div><div className="ms">open interest change</div></div>
+              <div className="metric"><div className="ml"><span>Price Δ (5h)</span></div><div className="mv" id="advPriceChg">—</div><div className="ms">mark change</div></div>
+            </div>
+            <div className="adv-regime" id="advRegime" style={{ 'display': 'none' }}></div>
+            <div className="fc-note">Price × open-interest matrix over the last ~5h plus funding and the account long/short ratio. Heuristic regime read — not a prediction.</div>
+          </div>
+
+          <div className="card full">
+            <div className="sec-head"><div className="sec-title">Market Structure</div><span className="badge b-amber">BOS · CHOCH</span></div>
+            <div className="metric-grid">
+              <div className="metric"><div className="ml"><span>Swing Sequence</span></div><div className="mv" style={{ 'fontSize': '14px' }} id="advStSeq">—</div><div className="ms">last 6 swings</div></div>
+              <div className="metric"><div className="ml"><span>Nearest Resistance</span></div><div className="mv" style={{ 'fontSize': '15px' }} id="advStRes">—</div><div className="ms">last swing high</div></div>
+              <div className="metric"><div className="ml"><span>Nearest Support</span></div><div className="mv" style={{ 'fontSize': '15px' }} id="advStSup">—</div><div className="ms">last swing low</div></div>
+              <div className="metric"><div className="ml"><span>RSI (14)</span></div><div className="mv" id="advStRsi">—</div><div className="ms">momentum</div></div>
+              <div className="metric"><div className="ml"><span>ATR (14)</span></div><div className="mv" id="advStAtr">—</div><div className="ms">average true range</div></div>
+              <div className="metric"><div className="ml"><span>Structure Events</span></div><div className="ms" id="advStEvents" style={{ 'marginTop': '2px' }}><span className="muted">—</span></div></div>
+            </div>
+            <div className="fc-note">Fractal swings (3-bar confirmation) → HH/HL/LH/LL, then Break of Structure and Change of Character events with the broken level.</div>
+          </div>
+
+          <div className="card full">
+            <div className="sec-head"><div className="sec-title">Cross-Exchange Radar</div><span className="badge b-cyan" id="advXexBadge">—</span></div>
+            <div className="table-scroll">
+              <table className="fc-table">
+                <thead><tr><th>Venue</th><th>Last</th><th>24h Volume</th><th>Spread</th><th>Funding</th></tr></thead>
+                <tbody id="advXexBody"><tr><td colSpan={5} className="muted">Loading venues…</td></tr></tbody>
+              </table>
+            </div>
+            <div className="fc-note" id="advXexFoot"></div>
+          </div>
+
+          <div className="card full">
+            <div className="sec-head"><div className="sec-title">Live Liquidations</div><span className="badge b-gray" id="advLiqBadge">ws closed</span></div>
+            <div className="fc-note" id="advLiqTotals" style={{ 'margin': '0 0 8px' }}></div>
+            <div className="table-scroll">
+              <table className="fc-table">
+                <thead><tr><th>Symbol</th><th>Type</th><th>Price</th><th>Notional</th><th>Time</th></tr></thead>
+                <tbody id="advLiqBody"><tr><td colSpan={5} className="muted">Listening for forced orders…</td></tr></tbody>
+              </table>
+            </div>
+            <div className="fc-note">All-market Binance USD-M forceOrder stream. Long liquidation = a long was forced out (sell side); notional is price × quantity.</div>
+          </div>
+        </div>
       </section>
       
       <section className="tab-section" id="tab-portfolio">
@@ -374,66 +437,7 @@ export function Shell() {
       </section>
       
       <section className="tab-section" id="tab-news">
-        <div className="breaking-box" id="breakingBox" style={{ 'display': 'none' }}>
-          <div className="sec-head" style={{ 'marginBottom': '6px' }}><div className="sec-title" style={{ 'color': 'var(--red)' }}>Breaking</div><span className="bb-live">LIVE WIRE</span></div>
-          <div id="breakingList"></div>
-        </div>
-      
-        <div className="card fx-macro-card">
-          <div className="fx-head">
-            <div className="fx-title-wrap">
-              <div className="fx-title-icon">🗓️</div>
-              <div>
-                <div className="fx-title">Forex Factory Economic Calendar</div>
-                <div className="fx-sub">Weekly schedule · same layout &amp; fields as forexfactory.com · auto-refreshes</div>
-              </div>
-            </div>
-            <div className="fx-impact-legend">
-              <span className="fx-legend-lbl">FILTER</span>
-              <span className="fx-im fx-im-hi" data-fx-filter="High" title="Filter: High impact only"><i></i>High</span>
-              <span className="fx-im fx-im-md" data-fx-filter="Medium" title="Filter: Medium impact only"><i></i>Medium</span>
-              <span className="fx-im fx-im-lo" data-fx-filter="Low" title="Filter: Low impact only"><i></i>Low</span>
-              <span className="fx-im fx-im-all" data-fx-filter="All" title="Show all"><i></i>All</span>
-              <span className="badge b-amber" id="fxCount">—</span>
-            </div>
-          </div>
-          <div className="fx-scroll" id="forexScroll">
-            <div className="fx-colhead">
-              <span className="fx-c-time">Time</span>
-              <span className="fx-c-cur">Cur.</span>
-              <span className="fx-c-imp">Imp.</span>
-              <span className="fx-c-ev">Event</span>
-              <span className="fx-c-num">Actual</span>
-              <span className="fx-c-num">Forecast</span>
-              <span className="fx-c-num">Previous</span>
-            </div>
-            <div id="forexList"><div className="fc-note">Loading economic calendar…</div></div>
-          </div>
-        </div>
-      
-        <div className="news-grid">
-          <div className="card">
-            <div className="sec-head"><div className="sec-title">Latest Crypto News</div><span className="badge b-cyan" id="newsCount">—</span></div>
-            <div className="news-toolbar">
-              <input type="text" id="newsSearch" className="news-search" placeholder="🔍 Search news…" autoComplete="off" />
-              <button className="news-src-clear" id="newsSrcClear" style={{ 'display': 'none' }} title="Clear source filter">✕ <span id="newsSrcName"></span></button>
-            </div>
-            <div className="news-sent-row" id="newsSentRow" style={{ 'display': 'none' }}>
-              <div className="ns-gauge-wrap"><div className="ns-gauge" id="newsSentGauge"><div className="ns-gauge-fill" id="newsSentFill"></div></div><span className="ns-gauge-lbl" id="newsSentLbl">Neutral</span></div>
-              <span className="ns-count" id="newsSentCount"></span>
-            </div>
-            <div className="news-src-strip" id="newsSrcStrip"></div>
-            <div className="news-src-strip" id="newsCoinStrip"></div>
-            <div id="newsList"><div className="fc-note">Loading live feed…</div></div>
-            <button className="news-more" id="newsMore" style={{ 'display': 'none' }}>Load more stories</button>
-          </div>
-          <div>
-            <div className="card">
-              <div className="sec-head"><div className="sec-title">Trending Now</div><span className="badge b-purple">HEAT</span></div>
-              <div id="trendingList"><div className="fc-note">Loading trends…</div></div>
-            </div>
-          </div>
-        </div>
+        <NewsView />
       </section>
       
       <section className="tab-section" id="tab-chat">
