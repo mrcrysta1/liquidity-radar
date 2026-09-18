@@ -1,4 +1,4 @@
-import { jget2 } from '../../api/client'
+import { jgetProxied } from '../../api/client'
 import { $ } from '../../utils/dom'
 import { esc } from '../../utils/format'
 
@@ -69,9 +69,9 @@ export function fxDayLabel(t: Date): string {
 }
 
 export async function fetchFromXoomar(): Promise<FxEv[]> {
-  const r = await fetch('https://xoomar.com/api/markets/calendar')
-  if (!r.ok) throw new Error('xoomar ' + r.status)
-  const d = (await r.json()) as { data?: Array<Record<string, unknown>> }
+  const d = (await jgetProxied('https://xoomar.com/api/markets/calendar', { to: 12000 })) as {
+    data?: Array<Record<string, unknown>>
+  }
   if (!d || !d.data || !d.data.length) throw new Error('xoomar empty')
   return d.data.map(function (e): FxEv {
     const country = 'US'
@@ -99,7 +99,7 @@ export async function fetchForexEvents(): Promise<void> {
   let events: FxEv[] | null
   let source: string
   try {
-    events = (await jget2('https://nfs.faireconomy.media/ff_calendar_thisweek.json', {
+    events = (await jgetProxied('https://nfs.faireconomy.media/ff_calendar_thisweek.json', {
       to: 15000,
       retries: 2,
       dedup: true,

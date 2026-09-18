@@ -88,3 +88,24 @@ export async function jget(url: string, to?: number): Promise<unknown> {
     throw e
   }
 }
+
+// Feed getter for CORS-less hosts (Forex Factory, RSS feeds): prefers the
+// same-origin /api/fetch proxy (Vercel function in prod) and falls back to a
+// direct jget2 when the proxy is unavailable (e.g. plain `vite dev`).
+export async function jgetProxied(
+  url: string,
+  opts?: { retries?: number; to?: number; dedup?: boolean },
+): Promise<unknown> {
+  const to = opts?.to || 12000
+  const c = new AbortController()
+  const h = setTimeout(() => c.abort(), to)
+  try {
+    const r = await fetch('/api/fetch?url=' + encodeURIComponent(url), { signal: c.signal })
+    if (!r.ok) throw new Error('proxy HTTP ' + r.status)
+    return JSON.parse(await r.text())
+  } catch {
+    return jget2(url, opts)
+  } finally {
+    clearTimeout(h)
+  }
+}
