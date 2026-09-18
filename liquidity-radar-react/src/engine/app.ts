@@ -21,9 +21,7 @@ import {
 } from '../utils/indicators'
 import { baseOf, coinMeta } from '../utils/coins'
 import { $, showToast, closeModal } from '../utils/dom'
-import { fetchForexEvents } from '../features/analysis/calendar'
 import { computeAnalytics, renderAnalysis } from '../features/analysis'
-import { fetchNews, fetchTrending, fetchBreaking, wireNewsUI } from '../features/news/newsFeed'
 
 import { state } from '../services/store'
 import { mdTf, mdPill, mdToggleDebug } from '../services/market'
@@ -145,10 +143,6 @@ function init(){
 
   fetchTickers();
   fetchFG();
-  fetchNews();
-  fetchTrending();
-  fetchBreaking();
-  wireNewsUI();
   fetchKlines(state.symbol);
   fetchOB();
   fetchFR();
@@ -156,7 +150,6 @@ function init(){
   fetchWhales();
   connectStreams(streamCb);
   initTheme();
-  fetchForexEvents();
   initMultiCharts();
   renderMemeUniverse();
   initBubbles();
@@ -169,8 +162,6 @@ function init(){
   setInterval(fetchFR,30000);
   setInterval(fetchOI,30000);
   setInterval(fetchFG,300000);
-  setInterval(fetchNews,300000);
-  setInterval(fetchForexEvents,600000);
   setInterval(function(){renderMemeUniverse();mdPill()},20000);
   setInterval(renderBubbles,30000);
 }
