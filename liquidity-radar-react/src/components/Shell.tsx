@@ -437,6 +437,68 @@ export function Shell() {
       </section>
       
       <section className="tab-section" id="tab-news">
+        <div className="breaking-box" id="breakingBox" style={{ 'display': 'none' }}>
+          <div className="sec-head" style={{ 'marginBottom': '6px' }}><div className="sec-title" style={{ 'color': 'var(--red)' }}>Breaking</div><span className="bb-live">LIVE WIRE</span></div>
+          <div id="breakingList"></div>
+        </div>
+      
+        <div className="card fx-macro-card">
+          <div className="fx-head">
+            <div className="fx-title-wrap">
+              <div className="fx-title-icon">🗓️</div>
+              <div>
+                <div className="fx-title">Forex Factory Economic Calendar</div>
+                <div className="fx-sub">Weekly schedule · same layout &amp; fields as forexfactory.com · auto-refreshes</div>
+              </div>
+            </div>
+            <div className="fx-impact-legend">
+              <span className="fx-legend-lbl">FILTER</span>
+              <span className="fx-im fx-im-hi" data-fx-filter="High" title="Filter: High impact only"><i></i>High</span>
+              <span className="fx-im fx-im-md" data-fx-filter="Medium" title="Filter: Medium impact only"><i></i>Medium</span>
+              <span className="fx-im fx-im-lo" data-fx-filter="Low" title="Filter: Low impact only"><i></i>Low</span>
+              <span className="fx-im fx-im-all" data-fx-filter="All" title="Show all"><i></i>All</span>
+              <span className="badge b-amber" id="fxCount">—</span>
+            </div>
+          </div>
+          <div className="fx-scroll" id="forexScroll">
+            <div className="fx-colhead">
+              <span className="fx-c-time">Time</span>
+              <span className="fx-c-cur">Cur.</span>
+              <span className="fx-c-imp">Imp.</span>
+              <span className="fx-c-ev">Event</span>
+              <span className="fx-c-num">Actual</span>
+              <span className="fx-c-num">Forecast</span>
+              <span className="fx-c-num">Previous</span>
+            </div>
+            <div id="forexList"><div className="fc-note">Loading economic calendar…</div></div>
+          </div>
+        </div>
+      
+        <div className="news-grid">
+          <div className="card">
+            <div className="sec-head"><div className="sec-title">Latest Crypto News</div><span className="badge b-cyan" id="newsCount">—</span></div>
+            <div className="news-toolbar">
+              <input type="text" id="newsSearch" className="news-search" placeholder="🔍 Search news…" autoComplete="off" />
+              <button className="news-src-clear" id="newsSrcClear" style={{ 'display': 'none' }} title="Clear source filter">✕ <span id="newsSrcName"></span></button>
+            </div>
+            <div className="news-sent-row" id="newsSentRow" style={{ 'display': 'none' }}>
+              <div className="ns-gauge-wrap"><div className="ns-gauge" id="newsSentGauge"><div className="ns-gauge-fill" id="newsSentFill"></div></div><span className="ns-gauge-lbl" id="newsSentLbl">Neutral</span></div>
+              <span className="ns-count" id="newsSentCount"></span>
+            </div>
+            <div className="news-src-strip" id="newsSrcStrip"></div>
+            <div className="news-src-strip" id="newsCoinStrip"></div>
+            <div id="newsList"><div className="fc-note">Loading live feed…</div></div>
+            <button className="news-more" id="newsMore" style={{ 'display': 'none' }}>Load more stories</button>
+          </div>
+          <div>
+            <div className="card">
+              <div className="sec-head"><div className="sec-title">Trending Now</div><span className="badge b-purple">HEAT</span></div>
+              <div id="trendingList"><div className="fc-note">Loading trends…</div></div>
+            </div>
+          </div>
+        </div>
+      
+        <div className="sec-head" style={{ 'marginTop': '18px' }}><div className="sec-title">Pro Terminal · Live News &amp; Economic Calendar</div><span className="badge b-cyan">PRO</span></div>
         <NewsView />
       </section>
       
