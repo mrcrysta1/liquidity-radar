@@ -21,7 +21,9 @@ import {
 } from '../utils/indicators'
 import { baseOf, coinMeta } from '../utils/coins'
 import { $, showToast, closeModal } from '../utils/dom'
+import { fetchForexEvents } from '../features/analysis/calendar'
 import { computeAnalytics, renderAnalysis } from '../features/analysis'
+import { fetchNews, fetchTrending, fetchBreaking, wireNewsUI } from '../features/news/newsFeed'
 
 import { state } from '../services/store'
 import { mdTf, mdPill, mdToggleDebug } from '../services/market'
@@ -156,6 +158,11 @@ function init(){
   initHeatMap();
   startAutoScan();
   initAdvanced();
+  fetchNews();
+  fetchTrending();
+  fetchBreaking();
+  wireNewsUI();
+  fetchForexEvents();
 
   setInterval(fetchTickers,20000);
   setInterval(fetchWhales,10000);
@@ -164,6 +171,8 @@ function init(){
   setInterval(fetchFG,300000);
   setInterval(function(){renderMemeUniverse();mdPill()},20000);
   setInterval(renderBubbles,30000);
+  setInterval(fetchNews,300000);
+  setInterval(fetchForexEvents,600000);
 }
 
 // --- expose module-scope functions to window (classic-script globals no
