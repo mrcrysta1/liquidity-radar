@@ -7,7 +7,6 @@ export {
   initChart,
   updateChartData,
   updateChartLast,
-  renderOB,
   renderHero,
   renderTicker,
   resizeChart,

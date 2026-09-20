@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { Shell } from './components/Shell'
+import { ErrorBoundary } from './components/ErrorBoundary'
 
 // Root component. The app shell is a 1:1 port of the original index.html body
 // (see src/components/Shell.tsx). The engine (src/engine) expects the full DOM
@@ -11,5 +12,9 @@ export default function App() {
     import('./engine/app').then(({ initApp }) => initApp())
   }, [])
 
-  return <Shell />
+  return (
+    <ErrorBoundary name="Liquidity Radar">
+      <Shell />
+    </ErrorBoundary>
+  )
 }

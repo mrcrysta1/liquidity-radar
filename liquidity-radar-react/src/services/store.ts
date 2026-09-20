@@ -1,4 +1,4 @@
-import type { CandleLike } from '../types/market'
+import type { CandleFlat } from './market'
 import type { CrossExRow, DeepOb, LongShortRow, OiPoint } from '../features/advanced/advancedData'
 import type { Liq } from '../features/advanced/liquidations'
 
@@ -7,7 +7,7 @@ export interface AppState {
   tab: string
   tf: string
   tickers: Record<string, { last: number; pct: number; qvol: number }>
-  candles: CandleLike[]
+  candles: CandleFlat[]
   ob: { bids: Array<Array<number | string>>; asks: Array<Array<number | string>> }
   fr: unknown
   oi: unknown

@@ -2,7 +2,7 @@
 // plain React hook so no zustand dependency is introduced in the main app.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { NEWS_SOURCES, parseFeed, dedupe, type NewsItem } from './rss'
-import { parseFF, FF_URLS, type CalendarEvent } from './forexFactory'
+import { parseFF, FF_URLS, XOOMAR_URL, MONTH_MS, mergeCalendar, calendarSpanDays, parseXoomar, type CalendarEvent } from './forexFactory'
 import { fetchText } from './fetchText'
 
 export type SourceStatus = Record<string, 'ok' | 'error' | 'loading'>
@@ -16,9 +16,8 @@ export interface ProNewsState {
   calendarStatus: CalendarStatus
   calendarError?: string
   lastCalendar?: number
-  calendarWeek: 'this' | 'next'
   refreshNews: () => Promise<void>
-  refreshCalendar: (week?: 'this' | 'next') => Promise<void>
+  refreshCalendar: () => Promise<void>
 }
 
 export function useProNews(): ProNewsState {
@@ -29,16 +28,11 @@ export function useProNews(): ProNewsState {
   const [calendarStatus, setCalendarStatus] = useState<CalendarStatus>('idle')
   const [calendarError, setCalendarError] = useState<string>()
   const [lastCalendar, setLastCalendar] = useState<number>()
-  const [calendarWeek, setCalendarWeek] = useState<'this' | 'next'>('this')
   const itemsRef = useRef(items)
-  const weekRef = useRef(calendarWeek)
 
   useEffect(() => {
     itemsRef.current = items
   }, [items])
-  useEffect(() => {
-    weekRef.current = calendarWeek
-  }, [calendarWeek])
 
   const refreshNews = useCallback(async () => {
     const status: SourceStatus = {}
@@ -65,12 +59,26 @@ export function useProNews(): ProNewsState {
     setLastNews(Date.now())
   }, [])
 
-  const refreshCalendar = useCallback(async (week: 'this' | 'next' = weekRef.current) => {
+  const refreshCalendar = useCallback(async () => {
     setCalendarStatus('loading')
-    setCalendarWeek(week)
     try {
-      const ev = parseFF(await fetchText(week === 'next' ? FF_URLS.nextWeek : FF_URLS.thisWeek))
-      setCalendar(ev)
+      // Forex Factory publishes one JSON file per week; last/next are only
+      // guaranteed around week boundaries, so tolerate missing files and merge.
+      const weeks = await Promise.allSettled(
+        [FF_URLS.lastWeek, FF_URLS.thisWeek, FF_URLS.nextWeek].map((u) => fetchText(u)),
+      )
+      const parsed = weeks.flatMap((r) => (r.status === 'fulfilled' ? parseFF(r.value) : []))
+      let merged = mergeCalendar(parsed)
+      // Guarantee ≥ one month of data: top up with a month-depth feed if the
+      // FF files alone don't span 28 days.
+      if (calendarSpanDays(merged) < MONTH_MS / 86400e3) {
+        try {
+          merged = mergeCalendar(parsed, parseXoomar(await fetchText(XOOMAR_URL)))
+        } catch {
+          /* keep the week(s) we already have */
+        }
+      }
+      setCalendar(merged)
       setCalendarStatus('ok')
       setLastCalendar(Date.now())
       setCalendarError(undefined)
@@ -88,7 +96,6 @@ export function useProNews(): ProNewsState {
     calendarStatus,
     calendarError,
     lastCalendar,
-    calendarWeek,
     refreshNews,
     refreshCalendar,
   }

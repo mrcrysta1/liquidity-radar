@@ -6,4 +6,5 @@ export {
   signalData,
   startAutoScan,
   switchSigMode,
+  setSigFilter,
 } from './signals'

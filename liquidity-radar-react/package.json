@@ -10,7 +10,9 @@
     "lint:prettier": "prettier --check .",
     "format": "prettier --write .",
     "smoke": "node scripts/smoke.mjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node scripts/test-engines.mjs",
+    "verify": "npm run lint && tsc --noEmit && npm test && npm run build && npm run smoke"
   },
   "dependencies": {
     "lightweight-charts": "^4.1.3",

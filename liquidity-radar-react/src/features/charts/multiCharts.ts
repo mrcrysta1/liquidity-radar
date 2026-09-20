@@ -3,6 +3,7 @@
 // re-exposed on window by the engine. Chart creation/rendering lives here,
 // matching the chartRender module conventions.
 import * as LightweightCharts from 'lightweight-charts'
+import { poll } from '../../services/pollScheduler'
 import { pfmt } from '../../utils/format'
 import { baseOf, coinMeta } from '../../utils/coins'
 import { $ } from '../../utils/dom'
@@ -36,7 +37,18 @@ interface McPanel {
 }
 
 const MC_INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d']
-const MC_COINS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'DOGEUSDT', 'PEPEUSDT', 'WIFUSDT', 'TRUMPUSDT', 'XRPUSDT', 'SUIUSDT', 'BNBUSDT']
+const MC_COINS = [
+  'BTCUSDT',
+  'ETHUSDT',
+  'SOLUSDT',
+  'DOGEUSDT',
+  'PEPEUSDT',
+  'WIFUSDT',
+  'TRUMPUSDT',
+  'XRPUSDT',
+  'SUIUSDT',
+  'BNBUSDT',
+]
 let mcPanels: McPanel[] = []
 let mcIdCounter = 0
 
@@ -47,12 +59,21 @@ export function initMultiCharts(): void {
   mcAdd('BTCUSDT', '15m')
   mcAdd('ETHUSDT', '1h')
   renderMCGrid()
-  setInterval(mcRefreshAll, 15000)
+  poll(mcRefreshAll, 15000)
 }
 
 export function mcAdd(sym: string, interval: string): void {
   const id = mcIdCounter++
-  mcPanels.push({ id: id, sym: sym, interval: interval, chart: null, candleSeries: null, volSeries: null, ws: null, candles: [] })
+  mcPanels.push({
+    id: id,
+    sym: sym,
+    interval: interval,
+    chart: null,
+    candleSeries: null,
+    volSeries: null,
+    ws: null,
+    candles: [],
+  })
   renderMCGrid() // renderMCGrid -> mcInitChart(p) creates chart + loads data for each panel
 }
 
@@ -98,14 +119,30 @@ function renderMCGrid(): void {
       p.id +
       ',this.value)">' +
       MC_INTERVALS.map(function (iv) {
-        return '<option value="' + iv + '"' + (iv === p.interval ? ' selected' : '') + '>' + iv + '</option>'
+        return (
+          '<option value="' +
+          iv +
+          '"' +
+          (iv === p.interval ? ' selected' : '') +
+          '>' +
+          iv +
+          '</option>'
+        )
       }).join('') +
       '</select>' +
       '<select onchange="mcChangeSymbol(' +
       p.id +
       ',this.value)">' +
       MC_COINS.map(function (s) {
-        return '<option value="' + s + '"' + (s === p.sym ? ' selected' : '') + '>' + baseOf(s) + '</option>'
+        return (
+          '<option value="' +
+          s +
+          '"' +
+          (s === p.sym ? ' selected' : '') +
+          '>' +
+          baseOf(s) +
+          '</option>'
+        )
       }).join('') +
       '</select>' +
       '<button class="theme-btn" onclick="mcRemove(' +
@@ -120,7 +157,8 @@ function renderMCGrid(): void {
       '</div>'
   })
   if (mcPanels.length < 6) {
-    html += '<div class="mc-add" onclick="mcAdd(\'BTCUSDT\',\'15m\')" title="Add chart">+ Add Chart</div>'
+    html +=
+      '<div class="mc-add" onclick="mcAdd(\'BTCUSDT\',\'15m\')" title="Add chart">+ Add Chart</div>'
   }
   grid.innerHTML = html
   mcPanels.forEach(function (p) {
@@ -138,13 +176,28 @@ function mcInitChart(p: McPanel): void {
   const c: Any = LightweightCharts.createChart(el, {
     width: w,
     height: h,
-    layout: { background: { type: 'solid', color: th.bg }, textColor: th.txt, fontSize: 10, fontFamily: "'JetBrains Mono', monospace" },
+    layout: {
+      background: { type: 'solid', color: th.bg },
+      textColor: th.txt,
+      fontSize: 10,
+      fontFamily: "'JetBrains Mono', monospace",
+    },
     grid: { vertLines: { color: th.grid }, horzLines: { color: th.grid } },
     rightPriceScale: { borderColor: th.border },
     timeScale: { borderColor: th.border, timeVisible: true, secondsVisible: false, rightOffset: 4 },
-    crosshair: { mode: 0, vertLine: { color: th.pline, labelBackgroundColor: th.pline }, horzLine: { color: th.pline, labelBackgroundColor: th.pline } },
+    crosshair: {
+      mode: 0,
+      vertLine: { color: th.pline, labelBackgroundColor: th.pline },
+      horzLine: { color: th.pline, labelBackgroundColor: th.pline },
+    },
   } as Any)
-  const cs = c.addCandlestickSeries({ upColor: th.up, downColor: th.dn, borderVisible: false, wickUpColor: th.up, wickDownColor: th.dn })
+  const cs = c.addCandlestickSeries({
+    upColor: th.up,
+    downColor: th.dn,
+    borderVisible: false,
+    wickUpColor: th.up,
+    wickDownColor: th.dn,
+  })
   const vs = c.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: '' })
   vs.priceScale().applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } })
   c.subscribeCrosshairMove(function (param: Any) {
@@ -152,11 +205,23 @@ function mcInitChart(p: McPanel): void {
     const d = param.seriesData.get(cs)
     if (d) {
       const up = d.close >= d.open
-      legEl.innerHTML = '<span style="color:' + (up ? 'var(--green)' : 'var(--red)') + '">O:' + pfmt(d.open) + ' H:' + pfmt(d.high) + ' L:' + pfmt(d.low) + ' C:' + pfmt(d.close) + '</span>'
+      legEl.innerHTML =
+        '<span style="color:' +
+        (up ? 'var(--green)' : 'var(--red)') +
+        '">O:' +
+        pfmt(d.open) +
+        ' H:' +
+        pfmt(d.high) +
+        ' L:' +
+        pfmt(d.low) +
+        ' C:' +
+        pfmt(d.close) +
+        '</span>'
     }
   })
   new ResizeObserver(function () {
-    if (c && el.clientWidth) c.applyOptions({ width: el.clientWidth, height: el.clientHeight || 260 })
+    if (c && el.clientWidth)
+      c.applyOptions({ width: el.clientWidth, height: el.clientHeight || 260 })
   }).observe(el)
   p.chart = c
   p.candleSeries = cs
@@ -176,7 +241,11 @@ function mcLoadData(p: McPanel): void {
         p.candleSeries.setData(p.candles.map(mapCandle))
         p.volSeries.setData(
           p.candles.map(function (c) {
-            return { time: Math.floor(c.t / 1000), value: c.v, color: c.c >= c.o ? 'rgba(0,230,118,.3)' : 'rgba(255,23,68,.3)' }
+            return {
+              time: Math.floor(c.t / 1000),
+              value: c.v,
+              color: c.c >= c.o ? 'rgba(0,230,118,.3)' : 'rgba(255,23,68,.3)',
+            }
           }),
         )
         p.chart.timeScale().fitContent()
@@ -191,7 +260,11 @@ function mcLoadData(p: McPanel): void {
         p.candleSeries.setData(cached.map(mapCandle))
         p.volSeries.setData(
           cached.map(function (c) {
-            return { time: Math.floor(c.t / 1000), value: c.v, color: c.c >= c.o ? 'rgba(0,230,118,.3)' : 'rgba(255,23,68,.3)' }
+            return {
+              time: Math.floor(c.t / 1000),
+              value: c.v,
+              color: c.c >= c.o ? 'rgba(0,230,118,.3)' : 'rgba(255,23,68,.3)',
+            }
           }),
         )
       }
@@ -235,7 +308,11 @@ function mcConnectWS(p: McPanel): void {
         } else return
         if (p.candleSeries) {
           p.candleSeries.update(mapCandle(c))
-          p.volSeries.update({ time: Math.floor(c.t / 1000), value: c.v, color: c.c >= c.o ? 'rgba(0,230,118,.3)' : 'rgba(255,23,68,.3)' })
+          p.volSeries.update({
+            time: Math.floor(c.t / 1000),
+            value: c.v,
+            color: c.c >= c.o ? 'rgba(0,230,118,.3)' : 'rgba(255,23,68,.3)',
+          })
         }
       } catch (e) {
         mdDebug.log('ws', 'mc handler', e)
@@ -244,12 +321,18 @@ function mcConnectWS(p: McPanel): void {
     ws.onclose = function () {
       // only reconnect if the panel still exists and this socket is still current
       if (ws._dead) return
-      if (!mcPanels.some(function (x) { return x === p && x.ws === ws })) return
+      if (
+        !mcPanels.some(function (x) {
+          return x === p && x.ws === ws
+        })
+      )
+        return
       if (p.sym !== ws._expectSym || p.interval !== ws._expectIv) return
       md.conn.ws.reconnects++
       mdHealth.wsReconnects++
       const exp = (p._retry = (p._retry || 0) + 1)
-      const delay = Math.min(30000, 1200 * Math.pow(2, Math.min(exp, 6))) + Math.floor(Math.random() * 300)
+      const delay =
+        Math.min(30000, 1200 * Math.pow(2, Math.min(exp, 6))) + Math.floor(Math.random() * 300)
       setTimeout(function () {
         if (!ws._dead && mcPanels.indexOf(p) !== -1 && p.ws === ws) mcConnectWS(p)
       }, delay)
@@ -260,7 +343,9 @@ function mcConnectWS(p: McPanel): void {
 }
 
 export function mcChangeInterval(id: number, iv: string): void {
-  const p = mcPanels.find(function (x) { return x.id === id })
+  const p = mcPanels.find(function (x) {
+    return x.id === id
+  })
   if (!p) return
   p.interval = iv
   if (p.ws) {
@@ -275,7 +360,9 @@ export function mcChangeInterval(id: number, iv: string): void {
 }
 
 export function mcChangeSymbol(id: number, sym: string): void {
-  const p = mcPanels.find(function (x) { return x.id === id })
+  const p = mcPanels.find(function (x) {
+    return x.id === id
+  })
   if (!p) return
   p.sym = sym
   p.candles = []
@@ -309,7 +396,11 @@ function mcRefreshAll(): void {
             }
             if (p.candleSeries) {
               p.candleSeries.update(mapCandle(c))
-              p.volSeries.update({ time: Math.floor(c.t / 1000), value: c.v, color: c.c >= c.o ? 'rgba(0,230,118,.3)' : 'rgba(255,23,68,.3)' })
+              p.volSeries.update({
+                time: Math.floor(c.t / 1000),
+                value: c.v,
+                color: c.c >= c.o ? 'rgba(0,230,118,.3)' : 'rgba(255,23,68,.3)',
+              })
             }
           }
         })
@@ -330,7 +421,13 @@ export function mcApplyTheme(): void {
         rightPriceScale: { borderColor: th.border },
         timeScale: { borderColor: th.border },
       })
-      if (p.candleSeries) p.candleSeries.applyOptions({ upColor: th.up, downColor: th.dn, wickUpColor: th.up, wickDownColor: th.dn })
+      if (p.candleSeries)
+        p.candleSeries.applyOptions({
+          upColor: th.up,
+          downColor: th.dn,
+          wickUpColor: th.up,
+          wickDownColor: th.dn,
+        })
       if (p.volSeries) p.volSeries.applyOptions({})
     }
   })

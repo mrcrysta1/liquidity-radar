@@ -21,14 +21,17 @@ import {
 } from '../utils/indicators'
 import { baseOf, coinMeta } from '../utils/coins'
 import { $, showToast, closeModal } from '../utils/dom'
-import { fetchForexEvents } from '../features/analysis/calendar'
 import { computeAnalytics, renderAnalysis } from '../features/analysis'
 import { fetchNews, fetchTrending, fetchBreaking, wireNewsUI } from '../features/news/newsFeed'
 
 import { state } from '../services/store'
-import { mdTf, mdPill, mdToggleDebug } from '../services/market'
+import { mdPill, mdToggleDebug } from '../services/market'
 import { storageGet, storageSet } from '../services/storage'
+import { onTimeframeChange, syncChartTitle } from '../features/charts/timeframes'
+import { applyLayout, watchStageHeight } from '../features/charts/companionCharts'
 import { connectStreams } from '../services/streams'
+import { poll } from '../services/pollScheduler'
+import { cooldownLeft } from '../api/rateLimit'
 import { initAdvanced } from '../features/advanced'
 import {
   fetchTickers,
@@ -45,7 +48,6 @@ import {
   chartTheme,
   updateChartData,
   updateChartLast,
-  renderOB,
   renderHero,
   renderTicker,
   mapCandle,
@@ -58,12 +60,10 @@ import {
   mcChangeSymbol,
 } from '../features/charts/multiCharts'
 import { switchTab, setSymbol, wireUserActions } from '../features/actions/userActions'
-import { analyzeSigCoin, onSigSearch, startAutoScan, switchSigMode } from '../features/signals'
+import { analyzeSigCoin, onSigSearch, startAutoScan, switchSigMode, setSigFilter } from '../features/signals'
 import { initBubbles, renderBubbles, renderMemeUniverse } from '../features/bubbles'
-import { initHeatMap } from '../features/heatmap'
 import { pushMsg } from '../features/chat'
 import { renderFG, renderTopCoins, renderWhales } from '../features/snapshots'
-import { addPosition, removePosition, renderPortfolio } from '../features/portfolio'
 import { addAlert, checkAlerts, enableAlerts, removeAlert, renderAlerts } from '../features/alerts'
 import { initTheme, selectPalette } from '../features/theme'
 import { initKeyboard } from '../features/keyboard'
@@ -102,9 +102,6 @@ const streamCb={
   },
   onChartLast:updateChartLast,
   onAnalytics:runAnalytics,
-  onOB:function(){
-    if(!renderOB._pend){renderOB._pend=true;requestAnimationFrame(function(){renderOB();renderOB._pend=false})}
-  }
 };
 
 document.querySelectorAll('.tab-btn').forEach(b=>b.addEventListener('click',()=>switchTab(b.dataset.tab)));
@@ -118,27 +115,23 @@ document.addEventListener('click',e=>{
 });
 $('symSelect').addEventListener('change',e=>setSymbol(e.target.value));
 
-const TF_LABELS={'1m':'1 Min','5m':'5 Min','15m':'15 Min','1h':'1 Hour','4h':'4 Hour','1d':'1 Day'};
-document.querySelectorAll('#tfSwitch .tf-btn').forEach(btn=>{
-  btn.addEventListener('click',()=>{
-    document.querySelectorAll('#tfSwitch .tf-btn').forEach(b=>b.classList.remove('active'));
-    btn.classList.add('active');
-    const tf=btn.dataset.tf;
-    state.tf=mdTf(tf);
-    $('chartTitle').textContent='Price Action · '+TF_LABELS[state.tf]+' Candles';
-    fetchKlines(state.symbol);
-    connectStreams(streamCb); // restart live kline stream at the new, consistent interval
-  });
+// The <TimeframePicker/> component owns the toolbar UI and state.tf; the
+// engine only supplies the reload when the interval changes.
+onTimeframeChange(()=>{
+  fetchKlines(state.symbol);
+  connectStreams(streamCb); // restart live kline stream at the new, consistent interval
 });
 
 function init(){
   initKeyboard();
+  syncChartTitle(); // state.tf was restored from storage when the picker loaded
   const sel=$('symSelect');
   sel.innerHTML=Object.keys(COINS).map(k=>'<option value="'+COINS[k].sym+'">'+k+'/USDT — '+esc(COINS[k].name)+'</option>').join('');
   sel.value=state.symbol;
 
   initChart();
-  renderPortfolio();
+  applyLayout(); // restores the saved multi-chart layout around the main chart
+  watchStageHeight();
   renderAlerts();
 
   pushMsg('Welcome to <b>Liquidity Radar v5.0</b>. Multi-chart workspace, live signal scanner, and AI analysis. Try: <i>"analyze eth"</i>, <i>"show meme coins"</i>, <i>"should i buy pepe?"</i>, <i>"what is inflation?"</i>, <i>"show news"</i>, <i>"forex events"</i>, <i>"tell me a joke"</i>.','ai');
@@ -155,34 +148,31 @@ function init(){
   initMultiCharts();
   renderMemeUniverse();
   initBubbles();
-  initHeatMap();
   startAutoScan();
   initAdvanced();
   fetchNews();
   fetchTrending();
   fetchBreaking();
   wireNewsUI();
-  fetchForexEvents();
 
-  setInterval(fetchTickers,20000);
-  setInterval(fetchWhales,10000);
-  setInterval(fetchFR,30000);
-  setInterval(fetchOI,30000);
-  setInterval(fetchFG,300000);
-  setInterval(function(){renderMemeUniverse();mdPill()},20000);
-  setInterval(renderBubbles,30000);
-  setInterval(fetchNews,300000);
-  setInterval(fetchForexEvents,600000);
+  poll(fetchTickers,20000);
+  poll(fetchWhales,10000);
+  poll(fetchFR,30000);
+  poll(fetchOI,30000);
+  poll(fetchFG,300000);
+  poll(function(){renderMemeUniverse();mdPill()},20000);
+  poll(renderBubbles,30000);
+  poll(fetchNews,300000);
 }
 
 // --- expose module-scope functions to window (classic-script globals no
 // longer exist in ES modules; inline/generated onclick handlers rely on them)
 const __LR_EXPOSE:[string,any][]=[
-  ['$',$,],['switchTab',switchTab,],['switchSigMode',switchSigMode,],
+  ['$',$,],['switchTab',switchTab,],['switchSigMode',switchSigMode,],['setSigFilter',setSigFilter,],
   ['onSigSearch',onSigSearch,],['analyzeSigCoin',analyzeSigCoin,],
-  ['closeModal',closeModal,],['addPosition',addPosition,],
+  ['closeModal',closeModal,],
   ['addAlert',addAlert,],['enableAlerts',enableAlerts,],
-  ['removePosition',removePosition,],['removeAlert',removeAlert,],
+  ['removeAlert',removeAlert,],
   ['selectPalette',selectPalette,],['mcChangeInterval',mcChangeInterval,],
   ['mcChangeSymbol',mcChangeSymbol,],['mcRemove',mcRemove,],['mcAdd',mcAdd,],
   ['setSymbol',setSymbol,],['mdToggleDebug',mdToggleDebug,],
@@ -207,17 +197,33 @@ export function initApp(){
   })
   wireMarketHooks({
     onTickers() {
-      renderTicker();renderHero();renderTopCoins();renderPortfolio();checkAlerts();renderBubbles();
+      renderTicker();renderHero();renderTopCoins();checkAlerts();renderBubbles();
       $('topCoinsUpd').textContent='LIVE · '+new Date().toLocaleTimeString();
     },
-    onKlines(){ updateChartData();runAnalytics(); },
+    onKlines(){ updateChartData(true);runAnalytics(); },
     onKlineCache(){
-      updateChartData();runAnalytics();
+      updateChartData(true);runAnalytics();
       $('wsKlineState').textContent='CACHE';$('wsKlineState').className='badge b-amber';
       showToast('Klines live stream down — showing cached data');
     },
-    onKlineFail(){ showToast('Klines unavailable — check network/Binance access'); },
-    onOB(){ renderOB(); },
+    onKlineFail(){
+      // Say so on the chart itself — a toast disappears and the legend would
+      // otherwise sit on "Loading chart…" forever. fetchKlines retries.
+      // The WS badge is left alone: it reports the socket, which can be live
+      // while the REST history is missing.
+      // A rate-limit cooldown is named explicitly: "retrying…" reads like a
+      // bug when the honest answer is that Binance is making us wait.
+      const cool=cooldownLeft();
+      if(cool>0){
+        const secs=Math.ceil(cool/1000);
+        const left=secs>90?Math.ceil(secs/60)+' min':secs+'s';
+        $('legendOHLC').textContent='Binance rate limit — chart resumes in '+left;
+        showToast('Binance rate limit reached — resuming in '+left);
+        return;
+      }
+      $('legendOHLC').textContent='Chart data unavailable — retrying…';
+      showToast('Klines unavailable — check network/Binance access');
+    },
     onFR(){ runAnalytics();renderHero(); },
     onFRfail(){ $('mFR').textContent='N/A'; },
     onOI(){ runAnalytics(); },
