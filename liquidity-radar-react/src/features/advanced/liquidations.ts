@@ -1,5 +1,6 @@
 // Live liquidation feed (all Binance USD-M perps) — Pro Terminal's
 // `!forceOrder@arr` stream adopted into the main app's native services.
+import { noteStream } from '../../services/dataSources'
 import { state } from '../../services/store'
 
 export interface Liq {
@@ -29,9 +30,11 @@ export function stopLiquidations(): void {
   ws = null
 }
 
+const LIQ_URL = 'wss://fstream.binance.com/ws/!forceOrder@arr'
+
 function connect(): void {
   try {
-    ws = new WebSocket('wss://fstream.binance.com/ws/!forceOrder@arr')
+    ws = new WebSocket(LIQ_URL)
   } catch {
     schedule()
     return
@@ -40,6 +43,7 @@ function connect(): void {
   self.onopen = () => {
     retry = 0
     state.liqWs = 'open'
+    noteStream(LIQ_URL, true)
   }
   self.onmessage = (ev: MessageEvent) => {
     let d: { e?: string; o?: Record<string, unknown> } | null
@@ -62,6 +66,7 @@ function connect(): void {
   }
   self.onclose = () => {
     state.liqWs = 'closed'
+    noteStream(LIQ_URL, false)
     if (!alive) return
     schedule()
   }

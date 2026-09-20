@@ -1,3 +1,4 @@
+import { noteCall } from '../../services/dataSources'
 import { COINS } from '../../constants/market'
 import { esc, pfmt, timeAgo } from '../../utils/format'
 import { $ } from '../../utils/dom'
@@ -44,6 +45,11 @@ const NEWS_RSS: Array<[string, string, string]> = [
 ]
 
 const newsCache: { news: NewsItem[] } = { news: [] }
+
+/** The latest wire, for anything that wants headlines without refetching. */
+export function latestNews(): NewsItem[] {
+  return newsCache.news
+}
 const newsState: NewsState = { query: '', src: '', coin: '', shown: 30 }
 const NEWS_STO_KEY = 'lr_news_cache'
 
@@ -271,8 +277,17 @@ function newsFeedUrl(i: number): string {
 function rawNewsFetch(i: number, to?: number): Promise<RssResponse> {
   const c = new AbortController()
   const h = setTimeout(() => c.abort(), to || 15000)
-  return fetch(newsFeedUrl(i), { signal: c.signal })
-    .then((r) => r.json())
+  const url = newsFeedUrl(i)
+  const t0 = Date.now()
+  return fetch(url, { signal: c.signal })
+    .then((r) => {
+      noteCall(url, r.ok, r.status, Date.now() - t0)
+      return r.json()
+    })
+    .catch((e) => {
+      noteCall(url, false, 0, Date.now() - t0)
+      throw e
+    })
     .finally(() => clearTimeout(h))
 }
 
@@ -300,9 +315,12 @@ async function rawNewsFetchProxy(i: number, to?: number): Promise<RssResponse> {
   const c = new AbortController()
   const h = setTimeout(() => c.abort(), to || 15000)
   try {
+    const t0 = Date.now()
     const r = await fetch('/api/fetch?url=' + encodeURIComponent(NEWS_RSS[i][1]), {
       signal: c.signal,
     })
+    // Recorded against the same-origin proxy, which is its own source.
+    noteCall('/api/fetch', r.ok, r.status, Date.now() - t0)
     if (!r.ok) throw new Error('proxy http ' + r.status)
     return parseRssXml(await r.text())
   } finally {
@@ -315,9 +333,11 @@ async function rawNewsFetchFallback(i: number, to?: number): Promise<RssResponse
   const h = setTimeout(() => c.abort(), to || 15000)
   const url = NEWS_RSS[i][1]
   try {
+    const t0 = Date.now()
     const r = await fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(url), {
       signal: c.signal,
     })
+    noteCall('https://api.allorigins.win/raw', r.ok, r.status, Date.now() - t0)
     if (!r.ok) throw new Error('http ' + r.status)
     return parseRssXml(await r.text())
   } catch (e) {
@@ -583,58 +603,95 @@ function renderNewsList(): void {
   $('newsMore')!.style.display = list.length > shown ? 'block' : 'none'
 }
 
+/**
+ * Trending Now — which coins the current feed is actually talking about.
+ *
+ * Each article is already tagged with the coins it mentions, so this counts
+ * those tags rather than guessing at capitalised words: a coin only appears
+ * here because articles named it. Clicking a row filters the feed to that coin.
+ */
 function renderTrending(items: NewsItem[]): void {
-  const words = items.map((n) => n.title)
-  const map: Record<string, any> = {}
-  const CO = (n: string) =>
-    n
-      .replace(/#/g, '')
-      .split(/\s+/)
-      .filter(
-        (w) =>
-          /^[$A-Z]{3,5}$/i.test(w) ||
-          /^(Bitcoin|Ethereum|Solana|Dogecoin|XRP|Dogwifhat|Cardano|Sui|Polkadot|Avalanche|Tron|Chainlink|Uniswap|PEPE|TRUMP|Binance Coin|BNB)$/i.test(
-            w,
-          ),
-      )
-  words.forEach((t) => {
-    CO(t).forEach((w) => {
-      const k = w.toUpperCase()
-      map[k] = (map[k] || 0) + 1
+  const box = $('trendingList')
+  if (!box) return
+  interface Row {
+    k: string
+    n: number
+    pos: number
+    neg: number
+    latest: NewsItem | null
+  }
+  const map: Record<string, Row> = {}
+  items.forEach((n) => {
+    ;(n.coins || []).forEach((k) => {
+      if (!COINS[k]) return
+      const r = map[k] || (map[k] = { k: k, n: 0, pos: 0, neg: 0, latest: null })
+      r.n++
+      if (n.sent === 'pos') r.pos++
+      else if (n.sent === 'neg') r.neg++
+      if (!r.latest || n.time > r.latest.time) r.latest = n
     })
   })
-  Object.keys(map).forEach((k) => {
-    const lines = words.filter((t) => t.toUpperCase().includes(k))
-    map[k] = { c: map[k], first: lines[0] }
-  })
   const list = Object.keys(map)
-    .sort((a, b) => map[b].c - map[a].c)
-    .slice(0, 12)
-    .filter((k) => map[k].c > 1)
+    .map((k) => map[k])
+    .sort((a, b) => b.n - a.n || (b.latest?.time ?? 0) - (a.latest?.time ?? 0))
+    .slice(0, 10)
   if (!list.length) {
-    $('trendingList')!.innerHTML =
-      '<div class="fc-note">No strong trends in the current feed yet.</div>'
+    box.innerHTML = '<div class="fc-note">No coins mentioned in the current feed yet.</div>'
     return
   }
-  $('trendingList')!.innerHTML = list
-    .map((k, i) => {
-      const t = map[k]
-      const head = t.first
-        ? '<div class="tr-chips-wrap" style="flex-basis:100%;margin-top:4px;padding-top:6px;border-top:1px dashed var(--border);font-size:10px;color:var(--dim);line-height:1.4;text-overflow:ellipsis;overflow:hidden;white-space:nowrap">' +
-          esc(t.first) +
-          '</div>'
-        : ''
+  const top = list[0].n || 1
+  box.innerHTML = list
+    .map((r, i) => {
+      const c = COINS[r.k]
+      const tk = state.tickers && state.tickers[c.sym]
+      const px =
+        tk && tk.last && mdVal.price(tk.last)
+          ? '<span class="tc-px ' +
+            (tk.pct >= 0 ? 'up' : 'dn') +
+            '">$' +
+            pfmt(tk.last) +
+            (tk.pct != null
+              ? ' <i>' + (tk.pct >= 0 ? '+' : '') + tk.pct.toFixed(2) + '%</i>'
+              : '') +
+            '</span>'
+          : ''
+      // Tone from the articles themselves, not from price.
+      const tone = r.pos > r.neg ? 'pos' : r.neg > r.pos ? 'neg' : 'neu'
+      const toneLbl = tone === 'pos' ? 'bullish' : tone === 'neg' ? 'bearish' : 'neutral'
       return (
-        '<div class="trend-chip" data-word="' +
-        esc(k) +
-        '" role="button" tabindex="0"><span class="tr-rank">#' +
+        '<div class="trend-coin' +
+        (newsState.coin === r.k ? ' on' : '') +
+        '" data-coin="' +
+        esc(r.k) +
+        '" role="button" tabindex="0" title="Show only ' +
+        esc(c.name) +
+        ' stories">' +
+        '<span class="tc-rank">#' +
         (i + 1) +
-        '</span><span style="font-weight:700;font-size:12.5px">' +
-        esc(k) +
-        '</span><span class="tr-score">' +
-        t.c +
-        ' stories</span>' +
-        head +
+        '</span>' +
+        '<span class="tc-icon">' +
+        esc(c.icon) +
+        '</span>' +
+        '<span class="tc-id"><b>' +
+        esc(r.k) +
+        '</b><small>' +
+        esc(c.name) +
+        '</small></span>' +
+        px +
+        '<span class="tc-meter" aria-hidden="true"><i style="width:' +
+        Math.round((r.n / top) * 100) +
+        '%"></i></span>' +
+        '<span class="tc-count"><b>' +
+        r.n +
+        '</b> ' +
+        (r.n === 1 ? 'story' : 'stories') +
+        '</span>' +
+        '<span class="tc-tone ' +
+        tone +
+        '">' +
+        toneLbl +
+        '</span>' +
+        (r.latest ? '<span class="tc-head">' + esc(r.latest.title) + '</span>' : '') +
         '</div>'
       )
     })
@@ -658,6 +715,11 @@ function applyNewsFilter({
   }
   newsState.shown = 30
   renderNewsList()
+  // Keep the coin chips and trending rows showing which coin is filtered.
+  if (coin !== undefined) {
+    renderNewsMeta()
+    if (newsCache.news) renderTrending(newsCache.news)
+  }
   const tags = document.querySelectorAll('.news-src-tag')
   tags.forEach((t) => t.classList.toggle('on', (t as HTMLElement).dataset.src === newsState.src))
   const clear = $('newsSrcClear')!
@@ -688,17 +750,12 @@ function wireNewsUI(): void {
   }
   ;($('newsSearch') as HTMLInputElement).oninput = () =>
     applyNewsFilter({ query: ($('newsSearch') as HTMLInputElement).value })
-  const chips = document.querySelectorAll('.trend-chip')
-  chips.forEach((c) => {
-    ;(c as HTMLElement).onclick = (ev) => {
-      ev.stopPropagation()
-      applyNewsFilter({ word: (c as HTMLElement).dataset.word })
-    }
-  })
   if (!newsCoinClicksBound) {
     newsCoinClicksBound = true
     document.addEventListener('click', (ev) => {
-      const chip = (ev.target as HTMLElement).closest('.news-coin-chip') as HTMLElement | null
+      const chip = (ev.target as HTMLElement).closest(
+        '.news-coin-chip,.trend-coin',
+      ) as HTMLElement | null
       if (!chip) return
       ev.preventDefault()
       ev.stopPropagation()

@@ -5,6 +5,7 @@
 // re-exposed on window by the engine's exposeGlobals().
 import { $ } from '../../utils/dom'
 import { state } from '../../services/store'
+import { placeChartForTab } from '../charts/chartHost'
 import type { StreamsCallbacks } from '../../services/streams'
 
 type Any = any
@@ -34,9 +35,12 @@ export function switchTab(tab: string): void {
     b.classList.toggle('active', on)
     b.setAttribute('aria-selected', on ? 'true' : 'false')
   })
-  document.querySelectorAll<HTMLElement>('.tab-section').forEach((s) =>
-    s.classList.toggle('active', s.id === 'tab-' + tab),
-  )
+  document
+    .querySelectorAll<HTMLElement>('.tab-section')
+    .forEach((s) => s.classList.toggle('active', s.id === 'tab-' + tab))
+  // The price-action chart is shown on both Radar and Charts — move the one
+  // card into whichever of them is now visible.
+  placeChartForTab(tab)
   window.scrollTo({ top: 0 })
 }
 

@@ -1,1 +1,0 @@
-export { NewsView } from './pro/NewsView'

@@ -1,4 +1,5 @@
 // CoinSearchWidget — Phase 3 first componentization slice (CR-P3-004).
+import { noteCall } from '../../services/dataSources'
 // React extraction of the former imperative search feature
 // (src/features/search/search.ts). P0 isolated widget: the engine never writes
 // into #searchResults, so it can be fully owned by React. Behavior is preserved
@@ -35,7 +36,10 @@ function loadExchangeInfo(): Promise<void> {
   if (!exchangeInfoFetch) {
     exchangeInfoFetch = (async () => {
       try {
-        const r = await fetch('https://api.binance.com/api/v3/exchangeInfo')
+        const url = 'https://api.binance.com/api/v3/exchangeInfo'
+        const t0 = Date.now()
+        const r = await fetch(url)
+        noteCall(url, r.ok, r.status, Date.now() - t0)
         const d = (await r.json()) as { symbols: RawSymbol[] }
         allBinanceSymbols = d.symbols
           .filter((s) => s.status === 'TRADING' && s.symbol.endsWith('USDT'))

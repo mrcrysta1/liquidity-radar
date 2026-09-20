@@ -1,10 +1,13 @@
 import type { CandleLike } from '../types/market'
 import { state } from './store'
 import { $ } from '../utils/dom'
+import { DEFAULT_TF, TF_IDS, isTf, normalizeTf } from './timeframe'
 
 // --- Symbol / timeframe normalization -----------------------
 
-export const mdTfs = ['1m', '5m', '15m', '1h', '4h', '1d']
+// Every interval the chart can display, native or resampled. The catalogue
+// and the resampling rules live in ./timeframe.
+export const mdTfs = TF_IDS
 
 export function mdSym(s: unknown): string | null {
   if (!s) return null
@@ -14,13 +17,16 @@ export function mdSym(s: unknown): string | null {
 }
 
 export function mdTf(t: unknown): string {
-  if (!t) return '15m'
-  const str = String(t).toLowerCase().trim()
+  if (!t) return DEFAULT_TF
+  const raw = String(t).trim()
+  // Month is the one interval whose case is load-bearing ('1M' month vs '1m'
+  // minute), so exact ids are matched before anything is folded to lower case.
+  if (isTf(raw)) return raw
+  const str = raw.toLowerCase()
   if (str === '60m' || str === '60') return '1h'
-  if (str === '24h' || str === '1d' || str === 'd') return '1d'
-  if (str === '240' || str === '4h') return '4h'
-  if (mdTfs.indexOf(str) !== -1) return str
-  return '15m'
+  if (str === '24h' || str === 'd') return '1d'
+  if (str === '240') return '4h'
+  return normalizeTf(str)
 }
 
 export interface CandleFlat {
@@ -154,6 +160,24 @@ export function mdStoreCandles(sym: unknown, tf: unknown, arr: unknown): boolean
   if (ok.length < Math.min(2, arr.length)) return false
   const key = String(sym) + '|' + mdTf(tf)
   md.candles[key] = ok
+  md.lastUpdate.candles = Date.now()
+  return true
+}
+
+/**
+ * Replace the newest candle in the store, in place.
+ *
+ * mdStoreCandles revalidates the whole series, which is right for a REST load
+ * but far too much work to repeat for every trade print; this touches only the
+ * bar that changed, and refuses anything that is not that bar.
+ */
+export function mdPatchLastCandle(sym: unknown, tf: unknown, c: unknown): boolean {
+  if (!mdVal.sym(sym) || !mdTf(tf) || !mdVal.candle(c)) return false
+  const arr = md.candles[String(sym) + '|' + mdTf(tf)]
+  if (!arr || !arr.length) return false
+  const bar = c as CandleFlat
+  if (arr[arr.length - 1].t !== bar.t) return false
+  arr[arr.length - 1] = bar
   md.lastUpdate.candles = Date.now()
   return true
 }

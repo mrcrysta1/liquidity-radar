@@ -4,6 +4,7 @@
 // writes into the single app state object, matching services/marketData.ts.
 import { jget } from '../../api/client'
 import { state } from '../../services/store'
+import { VENUES, isUsdQuoted } from './venues'
 
 export interface DeepOb {
   bids: { price: number; size: number }[]
@@ -21,6 +22,10 @@ export interface LongShortRow {
 }
 export interface CrossExRow {
   id: string
+  name: string
+  kind: 'spot' | 'perp'
+  /** Quoted in USD rather than USDT — comparable, but worth flagging. */
+  usd: boolean
   last?: number
   vol?: number
   spread?: number
@@ -87,72 +92,25 @@ async function safe<T>(p: Promise<T>): Promise<{ ok: true; v: T } | { ok: false 
 }
 
 export async function fetchCrossExchange(): Promise<void> {
-  const sym = state.symbol
-  const base = baseOf(sym)
-  const okx = base + '-USDT'
-  const [bT, bB, bF, yS, yF, oS, oF] = await Promise.all([
-    safe(jget('https://api.binance.com/api/v3/ticker/24hr?symbol=' + sym)),
-    safe(jget('https://api.binance.com/api/v3/ticker/bookTicker?symbol=' + sym)),
-    safe(jget('https://fapi.binance.com/fapi/v1/premiumIndex?symbol=' + sym)),
-    safe(jget('https://api.bybit.com/v5/market/tickers?category=spot&symbol=' + sym)),
-    safe(jget('https://api.bybit.com/v5/market/tickers?category=linear&symbol=' + sym)),
-    safe(jget('https://www.okx.com/api/v5/market/ticker?instId=' + okx)),
-    safe(jget('https://www.okx.com/api/v5/public/funding-rate?instId=' + okx + '-SWAP')),
-  ])
-  const rows: CrossExRow[] = []
-  const spreadBps = (bid?: number, ask?: number): number | undefined =>
-    bid && ask && bid > 0 ? ((ask - bid) / ((ask + bid) / 2)) * 1e4 : undefined
-
-  // Binance
-  {
-    const t = bT.ok ? (bT.v as { lastPrice?: string; quoteVolume?: string }) : undefined
-    const bk = bB.ok ? (bB.v as { bidPrice?: string; askPrice?: string }) : undefined
-    const f = bF.ok ? (bF.v as { lastFundingRate?: string }) : undefined
-    const row: CrossExRow = {
-      id: 'binance',
-      last: t?.lastPrice ? +t.lastPrice : undefined,
-      vol: t?.quoteVolume ? +t.quoteVolume : undefined,
-      spread: spreadBps(bk?.bidPrice ? +bk.bidPrice : undefined, bk?.askPrice ? +bk.askPrice : undefined),
-      funding: f?.lastFundingRate ? +f.lastFundingRate : undefined,
-    }
-    if (row.last == null) row.err = 'unreachable'
-    rows.push(row)
-  }
-  // Bybit
-  {
-    const t = yS.ok
-      ? ((yS.v as { result?: { list?: Array<Record<string, string>> } }).result?.list?.[0] ?? undefined)
-      : undefined
-    const f = yF.ok
-      ? ((yF.v as { result?: { list?: Array<Record<string, string>> } }).result?.list?.[0] ?? undefined)
-      : undefined
-    const row: CrossExRow = {
-      id: 'bybit',
-      last: t?.lastPrice ? +t.lastPrice : undefined,
-      vol: t?.turnover24h ? +t.turnover24h : undefined,
-      spread: spreadBps(t?.bid1Price ? +t.bid1Price : undefined, t?.ask1Price ? +t.ask1Price : undefined),
-      funding: f?.fundingRate ? +f.fundingRate : undefined,
-    }
-    if (row.last == null) row.err = 'unreachable'
-    rows.push(row)
-  }
-  // OKX
-  {
-    const t = oS.ok
-      ? ((oS.v as { data?: Array<Record<string, string>> }).data?.[0] ?? undefined)
-      : undefined
-    const f = oF.ok
-      ? ((oF.v as { data?: Array<Record<string, string>> }).data?.[0] ?? undefined)
-      : undefined
-    const row: CrossExRow = {
-      id: 'okx',
-      last: t?.last ? +t.last : undefined,
-      vol: t?.volCcy24h ? +t.volCcy24h : undefined,
-      spread: spreadBps(t?.bidPx ? +t.bidPx : undefined, t?.askPx ? +t.askPx : undefined),
-      funding: f?.fundingRate ? +f.fundingRate : undefined,
-    }
-    if (row.last == null) row.err = 'unreachable'
-    rows.push(row)
-  }
+  const base = baseOf(state.symbol)
+  const rows = await Promise.all(
+    VENUES.map(async (v): Promise<CrossExRow> => {
+      const sym = v.symbol(base)
+      const row: CrossExRow = { id: v.id, name: v.name, kind: v.kind, usd: isUsdQuoted(v.id) }
+      // No market here is an answer, not a failure — say which it is.
+      if (!sym) return { ...row, err: 'no market' }
+      const res = await Promise.all(v.urls(sym).map((u) => safe(jget(u))))
+      let q
+      try {
+        q = v.parse(res.map((r) => (r.ok ? r.v : undefined)))
+      } catch {
+        return { ...row, err: 'bad response' }
+      }
+      if (q.last == null) return { ...row, err: 'unreachable' }
+      const spread =
+        q.bid && q.ask && q.bid > 0 ? ((q.ask - q.bid) / ((q.ask + q.bid) / 2)) * 1e4 : undefined
+      return { ...row, last: q.last, vol: q.vol, spread, funding: q.funding }
+    }),
+  )
   state.crossEx = rows
 }

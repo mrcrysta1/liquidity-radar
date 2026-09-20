@@ -177,37 +177,32 @@ export function renderAnalysis(s: AnalyticsSnapshot): void {
   $('mRSI')!.textContent = s.rsi.toFixed(1)
   $('mRSI')!.style.color = s.rsiZone[0] === 'OVERBOUGHT' ? 'var(--red)' : s.rsiZone[0] === 'OVERSOLD' ? 'var(--green)' : 'var(--txt)'
   $('mRSIZone')!.textContent = s.rsiZone[0]; $('mRSIZone')!.className = 'badge ' + s.rsiZone[1]
-  $('indRSI')!.textContent = s.rsi.toFixed(1)
-  $('indRSIb')!.textContent = s.rsiZone[0]; $('indRSIb')!.className = 'badge ' + s.rsiZone[1]
 
   $('mMACD')!.textContent = (s.mBull ? '+' : '') + s.histPct + '%'
   $('mMACD')!.style.color = s.mBull ? 'var(--green)' : 'var(--red)'
   $('mMACDZone')!.textContent = s.mBull ? 'BULLISH' : 'BEARISH'; $('mMACDZone')!.className = 'badge ' + (s.mBull ? 'b-green' : 'b-red')
-  $('indMACD')!.textContent = s.macdHist.toFixed(s.last > 100 ? 2 : 6)
-  $('indMACDb')!.textContent = s.mBull ? 'HIST > 0' : 'HIST < 0'; $('indMACDb')!.className = 'badge ' + (s.mBull ? 'b-green' : 'b-red')
+  // The raw histogram the Technical Indicators card used to carry: the tile's
+  // headline is the percentage, which compares across coins, but the absolute
+  // value is what a MACD reader actually wants beneath it.
+  $('mMACDSub')!.textContent = 'hist ' + s.macdHist.toFixed(s.last > 100 ? 2 : 6) + ' · 12/26/9'
 
   $('mEMA')!.textContent = pfmt(s.e20)
   $('mEMAZone')!.textContent = s.above ? 'PRICE ABOVE' : 'PRICE BELOW'; $('mEMAZone')!.className = 'badge ' + (s.above ? 'b-green' : 'b-red')
   $('mEMASub')!.textContent = (s.above ? 'uptrend bias' : 'downtrend bias') + ' · Δ ' + s.e20Pct + '%'
-  $('indEMA')!.textContent = pfmt(s.e20)
-  $('indEMAb')!.textContent = s.above ? 'ABOVE ✓' : 'BELOW ✕'; $('indEMAb')!.className = 'badge ' + (s.above ? 'b-green' : 'b-red')
 
   $('mBB')!.textContent = s.pb.toFixed(1) + '%'
   $('mBBZone')!.textContent = s.bbZone[0]; $('mBBZone')!.className = 'badge ' + s.bbZone[1]
-  $('indBB')!.textContent = s.pb.toFixed(1) + '%'
-  $('indBBb')!.textContent = s.bbZone[0]; $('indBBb')!.className = 'badge ' + s.bbZone[1]
-  $('indBBs')!.textContent = 'bands ' + pfmt(s.bbLo) + ' – ' + pfmt(s.bbUp)
+  // Live band prices rather than a static "20, 2σ" caption — the one thing the
+  // card said that the tile did not.
+  $('mBBSub')!.textContent = 'bands ' + pfmt(s.bbLo) + ' – ' + pfmt(s.bbUp)
 
-  $('indVT')!.textContent = s.vt
-  $('indVTb')!.textContent = s.vtc[0]; $('indVTb')!.className = 'badge ' + s.vtc[1]
+  $('mVT')!.textContent = s.vt
+  $('mVTZone')!.textContent = s.vtc[0]; $('mVTZone')!.className = 'badge ' + s.vtc[1]
 
   $('mAIScore')!.textContent = (s.score > 0 ? '+' : '') + s.score
   $('mAIScore')!.style.color = s.color
   $('mAIZone')!.textContent = s.label; $('mAIZone')!.className = 'badge ' + s.badge
   $('mAIMarker')!.style.left = 'calc(' + s.mkPos + '% - 2px)'
-  $('indScoreMarker')!.style.left = 'calc(' + s.mkPos + '% - 2px)'
-  $('indScoreLbl')!.textContent = (s.score > 0 ? '+' : '') + s.score + ' · ' + s.label
-  $('indScoreLbl')!.style.color = s.color
 
   $('mVol')!.textContent = s.dv.toFixed(2) + '%'
   $('mVol')!.style.color = s.dv > 4 ? 'var(--red)' : s.dv > 1.5 ? 'var(--amber)' : 'var(--green)'

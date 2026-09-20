@@ -7,10 +7,11 @@
 import * as LightweightCharts from 'lightweight-charts'
 import { COINS } from '../../constants/market'
 import { esc, pfmt, cfmt, chgHtml } from '../../utils/format'
-import { aiComposite, calcRSI, forecastFrom } from '../../utils/indicators'
+import { aiComposite, calcATR, calcRSI, forecastFrom } from '../../utils/indicators'
 import { baseOf } from '../../utils/coins'
 import { $ } from '../../utils/dom'
 import { jget } from '../../api/client'
+import { poll } from '../../services/pollScheduler'
 import { state } from '../../services/store'
 import { md, mdTf, mdVal } from '../../services/market'
 import { storageGet, storageSet } from '../../services/storage'
@@ -20,9 +21,70 @@ type Any = any
 
 const SIGNAL_COINS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'SUIUSDT', 'LINKUSDT']
 const TF_LIST = [
-  { key: '1h', label: '1H', limit: 100, weight: 0.5 },
-  { key: '1d', label: '1D', limit: 60, weight: 0.5 },
+  { key: '1h', label: '1H', limit: 100, weight: 0.25 },
+  { key: '4h', label: '4H', limit: 100, weight: 0.4 },
+  { key: '1d', label: '1D', limit: 60, weight: 0.35 },
 ]
+
+/** Levels a reader can actually act on, derived from volatility rather than guessed. */
+export interface TradePlan {
+  entry: number
+  stop: number
+  t1: number
+  t2: number
+  /** Distance to stop, as a percentage of entry. */
+  riskPct: number
+  /** Reward-to-risk at the second target. */
+  rr: number
+  atr: number
+}
+
+/**
+ * Turn a direction into levels using ATR, so the stop sits outside the noise
+ * this market actually makes rather than at a round percentage.
+ *
+ * 1.5 ATR for the stop and 1.5/3.0 ATR for the targets is the conventional
+ * swing framing; it is stated plainly in the UI so it can be judged, not
+ * taken on trust. A WAIT signal gets no plan — inventing one would be the
+ * dishonest part.
+ */
+function tradePlan(dir: 'BUY' | 'SELL', entry: number, atr: number): TradePlan | null {
+  if (!(entry > 0) || !(atr > 0)) return null
+  const sign = dir === 'BUY' ? 1 : -1
+  const stop = entry - sign * 1.5 * atr
+  const risk = Math.abs(entry - stop)
+  if (!(risk > 0)) return null
+  return {
+    entry,
+    stop,
+    t1: entry + sign * 1.5 * atr,
+    t2: entry + sign * 3 * atr,
+    riskPct: (risk / entry) * 100,
+    rr: (3 * atr) / risk,
+    atr,
+  }
+}
+
+export type Conviction = 'STRONG' | 'MODERATE' | 'WEAK'
+
+/**
+ * How much the scan actually agrees with itself.
+ *
+ * Strength alone overstates a signal that only one timeframe believes in, so
+ * conviction needs both: a score that clears the bar, and timeframes pointing
+ * the same way. Three aligned beats one loud one.
+ */
+function conviction(score: number, breakdown: Any[]): { tier: Conviction; agree: number; of: number } {
+  const dir = score > 0 ? 'BUY' : 'SELL'
+  const rated = breakdown.filter((b: Any) => b.type !== 'WAIT')
+  const agree = rated.filter((b: Any) => b.type === dir).length
+  const mag = Math.abs(score)
+  let tier: Conviction = 'WEAK'
+  if (mag >= 45 && agree >= 2) tier = 'STRONG'
+  else if (mag >= 22 && agree >= 2) tier = 'MODERATE'
+  else if (mag >= 45) tier = 'MODERATE'
+  return { tier, agree, of: breakdown.length }
+}
 export let signalData: Any[] = []
 const whaleFlowCache: Record<string, Any> = {}
 let patternHistory: Record<string, { correct: number; total: number }> = {}
@@ -177,7 +239,7 @@ function scoreTimeframe(candles: Any[]): Any {
     score += 5
   }
   score = Math.max(-100, Math.min(100, score))
-  return { score: score, reasons: reasons.slice(0, 4), ai: a, fc: fc, last: last }
+  return { score: score, reasons: reasons.slice(0, 4), ai: a, fc: fc, last: last, candles: candles }
 }
 
 function getWhaleFlow(sym: string): Promise<Any> {
@@ -264,8 +326,13 @@ export function scanSignals(): void {
   const promises = SIGNAL_COINS.map(function (sym) {
     const tfPromises = TF_LIST.map(function (tf) {
       return scanKlineFetch(sym, tf.key).then(function (candles) {
-        return scoreTimeframe(candles)
-      }).catch(function () {
+        const sc = scoreTimeframe(candles)
+        // masterSignal weights each score by its timeframe, so the score has to
+        // carry which timeframe it came from. Without this every coin threw and
+        // was swallowed by the catch below — the scanner returned nothing at all.
+        return sc ? { ...sc, tf: tf.key } : null
+      }).catch(function (e) {
+        console.warn('signal tf', sym, tf.key, e)
         return null
       })
     })
@@ -287,13 +354,33 @@ export function scanSignals(): void {
       const allReasons: string[] = []
       tfScores.forEach((ts: Any) => { if (ts && ts.reasons.length) allReasons.push(ts.reasons[0]) })
       const t = state.tickers[sym]
+      // Levels come off the 4H series where it scored, since that is the
+      // timeframe the plan is framed on; failing that, any series with enough
+      // bars to measure ATR. Preferring a fixed slot meant one quiet timeframe
+      // left an otherwise good signal with no levels at all.
+      const swing =
+        [1, 2, 0]
+          .map((i) => tfScores[i])
+          .find((x: Any) => x && x.candles && x.candles.length >= 20) || null
+      const atr = swing && swing.candles ? calcATR(swing.candles, 14) : 0
+      const px = (t && t.last) || (swing && swing.last) || 0
+      const conv = conviction(blend, master.breakdown)
+      const dir = blend > 15 ? 'BUY' : blend < -15 ? 'SELL' : null
+      // The badge classified the pre-whale score while the card printed the
+      // blended one, so a coin could read "WAIT (-28)" and carry a sell plan.
+      // One score, one label.
+      master.type = dir || 'WAIT'
+      const plan = dir ? tradePlan(dir, px, atr) : null
       let fcObj: Any = null
       const s1 = tfScores[0] ? tfScores[0].fc : null
       if (s1 && s1.rows) {
         fcObj = { rows: s1.rows, pUp: 1 / (1 + Math.exp(-blend / 45)) }
       }
-      return { sym: sym, score: blend, master: master, tfScores: tfScores, whale: whale, whaleText: whaleText, t: t, fc: fcObj, reasons: allReasons.slice(0, 4) }
-    }).catch(function () {
+      return { sym: sym, score: blend, master: master, tfScores: tfScores, whale: whale, whaleText: whaleText, t: t, fc: fcObj, reasons: allReasons.slice(0, 4), plan: plan, conv: conv }
+    }).catch(function (e) {
+      // A coin dropping out used to be silent, which made a scanner returning
+      // nothing at all indistinguishable from a quiet market.
+      console.warn('signal scan', sym, e)
       return null
     })
   })
@@ -341,13 +428,48 @@ function recordSignalOutcomes(): void {
   storageSet('lr-lastSignals', current)
 }
 
+type SigFilter = 'all' | 'BUY' | 'SELL' | 'WAIT'
+let sigFilter: SigFilter = 'all'
+
+/** Filter chips live above the grid; the scan itself is unchanged by them. */
+export function setSigFilter(f: string): void {
+  sigFilter = (['all', 'BUY', 'SELL', 'WAIT'].indexOf(f) !== -1 ? f : 'all') as SigFilter
+  renderSignals()
+}
+
 function renderSignals(): void {
   $('sigCount')!.textContent = signalData.length + ' COINS · ' + TF_LIST.length + ' TIMEFRAMES'
+  const counts = { all: signalData.length, BUY: 0, SELL: 0, WAIT: 0 } as Record<string, number>
+  signalData.forEach((s: Any) => { counts[s.master.type] = (counts[s.master.type] || 0) + 1 })
+  const bar = $('sigFilters')
+  if (bar) {
+    bar.innerHTML = ([
+      ['all', 'All'], ['BUY', 'Buy'], ['SELL', 'Sell'], ['WAIT', 'Watch'],
+    ] as Array<[string, string]>).map(function (f) {
+      return '<button class="sig-chip ' + f[0].toLowerCase() + (sigFilter === f[0] ? ' on' : '') +
+        '" onclick="setSigFilter(&quot;' + f[0] + '&quot;)">' + f[1] +
+        '<i>' + (counts[f[0]] || 0) + '</i></button>'
+    }).join('')
+  }
+  // Rank by conviction first, then by strength — a strong reading that only one
+  // timeframe shares should not outrank a moderate one they all agree on.
+  const TIER: Record<string, number> = { STRONG: 2, MODERATE: 1, WEAK: 0 }
+  const shown = signalData
+    .filter((s: Any) => sigFilter === 'all' || s.master.type === sigFilter)
+    .slice()
+    .sort((a: Any, b: Any) => {
+      const t = (TIER[b.conv?.tier] || 0) - (TIER[a.conv?.tier] || 0)
+      return t !== 0 ? t : Math.abs(b.score) - Math.abs(a.score)
+    })
   let totalHits = 0
   let totalPreds = 0
   Object.keys(patternHistory).forEach((k) => { totalHits += patternHistory[k].correct; totalPreds += patternHistory[k].total })
   const hitRate = totalPreds > 10 ? Math.round((totalHits / totalPreds) * 100) : null
-  $('signalGrid')!.innerHTML = signalData.map(function (s) {
+  if (!shown.length) {
+    $('signalGrid')!.innerHTML = '<div class="sig-empty">No ' + (sigFilter === 'all' ? '' : sigFilter.toLowerCase() + ' ') + 'signals in this scan. The scanner refreshes every two minutes.</div>'
+    return
+  }
+  $('signalGrid')!.innerHTML = shown.map(function (s) {
     const ms = s.master
     const type = ms.type
     const typeCls = type === 'BUY' ? 'sig-buy' : type === 'SELL' ? 'sig-sell' : 'sig-wait'
@@ -375,11 +497,30 @@ function renderSignals(): void {
         + '</div>'
     }
     const learnHtml = hitRate ? '<div class="sc-learning">Model accuracy: ' + hitRate + '% across ' + totalPreds + ' predictions</div>' : ''
+    const cv = s.conv
+    const convHtml = cv
+      ? '<span class="sc-conv ' + cv.tier.toLowerCase() + '" title="' + cv.agree + ' of ' + cv.of +
+        ' timeframes agree">' + cv.tier + ' <i>' + cv.agree + '/' + cv.of + ' TF</i></span>'
+      : ''
+    const p = s.plan
+    const planHtml = p
+      ? '<div class="sc-plan">'
+        + '<div class="sc-plan-head"><span>Plan</span><span class="sc-rr">R:R ' + p.rr.toFixed(1) + ':1</span></div>'
+        + '<div class="sc-plan-grid">'
+        + '<div><small>Entry</small><b>' + pfmt(p.entry) + '</b></div>'
+        + '<div><small>Stop</small><b class="dn">' + pfmt(p.stop) + '</b><i>' + p.riskPct.toFixed(2) + '%</i></div>'
+        + '<div><small>Target 1</small><b class="up">' + pfmt(p.t1) + '</b></div>'
+        + '<div><small>Target 2</small><b class="up">' + pfmt(p.t2) + '</b></div>'
+        + '</div>'
+        + '<small class="sc-plan-note">1.5×ATR stop, 1.5× and 3×ATR targets · ATR(14) 4H = ' + pfmt(p.atr) + '</small>'
+        + '</div>'
+      : ''
     return '<div class="signal-card ' + typeCls + '">'
       + '<div class="sc-head"><span class="sc-coin">' + baseOf(s.sym) + '/USDT ' + price + ' ' + chg + '</span><span class="sc-type ' + badgeCls + '">' + type + '</span></div>'
-      + '<div class="sc-tf-row">' + tfBadges + '</div>'
+      + '<div class="sc-tf-row">' + tfBadges + convHtml + '</div>'
       + '<div class="sc-conf"><div class="sc-conf-bar"><div class="sc-conf-fill" style="width:' + Math.min(100, conf) + '%;background:' + confColor + '"></div></div></div>'
       + '<div class="sc-reasons">' + s.reasons.map((r: string) => '&bull; ' + esc(r)).join('<br>') + '</div>'
+      + planHtml
       + (s.whaleText ? '<div class="sc-whale ' + whaleClass + '">' + esc(s.whaleText) + '</div>' : '')
       + forecastHtml
       + learnHtml
@@ -553,10 +694,9 @@ export function applySigAnaTheme(): void {
 }
 
 // ===== AUTO-SCAN TIMER =====
-let autoScanInterval: Any = null
 export function startAutoScan(): void {
   loadPatternHistory()
   loadModelWeights()
   scanSignals()
-  autoScanInterval = setInterval(scanSignals, 120000)
+  poll(scanSignals, 120000)
 }

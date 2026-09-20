@@ -80,8 +80,21 @@ server.listen(PORT, async () => {
 
     const count = (sel) => page.evaluate((s) => document.querySelectorAll(s).length, sel)
 
-    results.tabButtons = await count('.tab-btn')
-    results.sections = await count('.tab-section')
+    // Assert the invariant, not a headcount: every section must be reachable
+    // and every nav button must point at a section that exists. A raw count
+    // breaks whenever navigation is rearranged, which tells you nothing.
+    results.nav = await page.evaluate(() => {
+      const targets = [...new Set([...document.querySelectorAll('.tab-btn')].map((b) => b.dataset.tab))].sort()
+      const sections = [...document.querySelectorAll('.tab-section')].map((s) => s.id.replace(/^tab-/, '')).sort()
+      return {
+        buttons: document.querySelectorAll('.tab-btn').length,
+        targets,
+        sections,
+        unreachable: sections.filter((s) => !targets.includes(s)),
+        dangling: targets.filter((t) => !sections.includes(t)),
+      }
+    })
+    results.sections = results.nav.sections.length
 
     const sample = async (label) =>
       page
@@ -141,8 +154,9 @@ server.listen(PORT, async () => {
 
   const missing = (r) => r === undefined || r === null || r === '' || r === '—'
   const gates = [
-    ['tab buttons rendered', results.tabButtons === 9],
-    ['tab sections rendered', results.sections === 9],
+    ['every section is reachable from nav', results.nav.unreachable.length === 0],
+    ['no nav button points at a missing section', results.nav.dangling.length === 0],
+    ['tab sections rendered', results.sections >= 9],
     [
       'streams live (LIVE·N STREAMS)',
       !missing(results['t+15s']) && /^LIVE/.test(results['t+15s'].status),

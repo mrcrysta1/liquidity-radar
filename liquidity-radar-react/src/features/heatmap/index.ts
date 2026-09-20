@@ -1,1 +1,0 @@
-export { initHeatMap } from './heatmap'

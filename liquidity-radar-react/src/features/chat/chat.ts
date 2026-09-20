@@ -12,6 +12,13 @@ import { jget, jget2 } from '../../api/client'
 import { $ } from '../../utils/dom'
 import { state } from '../../services/store'
 import { signalData } from '../signals'
+import {
+  bookMetrics,
+  fmtUsd,
+  liquidityScore,
+  structureEvents,
+  swings,
+} from '../charts/sidePanels/metrics'
 import { detectPatterns, generateSignalSummary } from '../aiScanner'
 import { fetchFromXoomar } from '../analysis/calendar'
 import { fngColor } from '../snapshots'
@@ -96,7 +103,13 @@ IND_EXPLAIN.bb = IND_EXPLAIN.bollinger
 
 export async function generateReply(raw: string): Promise<string> {
   const text = ' ' + raw.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim() + ' '
-  const has = function (w: string): boolean { return new RegExp('\\b' + w.replace(/ /g, '\\s+') + '\\b').test(text) }
+  // Tolerate a plural on the last word. The help text advertises "show
+  // signals" and "patterns", but a bare \b made every plural fall through to
+  // the "I didn't catch that" reply — the assistant could not answer the
+  // questions it was telling people to ask.
+  const has = function (w: string): boolean {
+    return new RegExp('\\b' + w.replace(/ /g, '\\s+') + 's?\\b').test(text)
+  }
   let coin: string | null = null
 
   if (/^(hi|hello|hey|yo|sup|gm|good morning)\s/.test(text) || has('help') || has('what can you do') || has('commands')) {
@@ -122,8 +135,84 @@ export async function generateReply(raw: string): Promise<string> {
       s += '&nbsp;&nbsp;' + tfStr + '<br>'
       if (sig.whaleText) s += '&nbsp;&nbsp;<span style="color:var(--muted)">' + esc(sig.whaleText) + '</span><br>'
     })
-    s += '<br>Each signal covers 15m, 1H, 4H, 1D timeframes weighted into a Master signal. Whale flow and auto-learning included.'
+    s += '<br>Each signal weights 1H, 4H and 1D into a Master score, then grades conviction by how many of the three agree. Ask <i>&quot;plan for btc&quot;</i> for entry, stop and targets.'
     return s
+  }
+
+  // Trade plan for a scanned coin — the levels the scanner already derived.
+  if (has('plan') || has('entry') || has('stop loss') || has('stop') || has('target') || has('risk reward') || has('where do i enter')) {
+    const want = coin || baseOf(state.symbol)
+    const sig = signalData.find(function (x) { return baseOf(x.sym) === want })
+    if (!sig) return 'No scan for <b>' + esc(want) + '</b> yet. The scanner covers the ten majors every two minutes — try <i>"show signals"</i> for what it has.'
+    if (!sig.plan) {
+      return '<b>' + esc(want) + '</b> reads <span class="hl-a">' + sig.master.type + '</span> right now (' + (sig.score > 0 ? '+' : '') + sig.score + '), so there are no levels to give. A plan is only drawn once the master score clears ±15 in one direction — inventing an entry for a flat read would be the dishonest part.'
+    }
+    const p = sig.plan
+    return '<b>' + esc(want) + ' — ' + sig.master.type + ' plan</b> <span style="color:var(--muted)">(' + sig.conv.tier.toLowerCase() + ', ' + sig.conv.agree + '/' + sig.conv.of + ' timeframes agree)</span><br><br>'
+      + '<span class="kv">Entry ' + pfmt(p.entry) + '</span> <span class="kv">Stop ' + pfmt(p.stop) + '</span><br>'
+      + '<span class="kv">T1 ' + pfmt(p.t1) + '</span> <span class="kv">T2 ' + pfmt(p.t2) + '</span><br><br>'
+      + 'Risk to stop is <b>' + p.riskPct.toFixed(2) + '%</b> of entry; reward-to-risk at T2 is <b>' + p.rr.toFixed(1) + ':1</b>.<br>'
+      + '<span style="color:var(--muted)">Levels come from ATR(14) on the 4H series (' + pfmt(p.atr) + '): stop at 1.5×, targets at 1.5× and 3×. A volatility frame, not a forecast — size it yourself.</span>'
+  }
+
+  // Liquidity, from the same engine that scores the chart side panel.
+  if (has('liquidity') || has('slippage') || has('spread') || has('order book') || has('depth') || has('how deep')) {
+    const deep = state.deepOb as { bids: Array<{ price: number; size: number }>; asks: Array<{ price: number; size: number }> } | null
+    const m = deep && deep.bids.length ? bookMetrics(deep.bids, deep.asks) : null
+    if (!m) return 'The deep order book has not arrived yet — give it a few seconds and ask again. It refreshes every three seconds.'
+    const tk = state.tickers[state.symbol] as { qvol?: number } | undefined
+    const sc = liquidityScore(m, tk?.qvol)
+    const s100 = m.slippage.find(function (x) { return x.notional === 100000 && x.side === 'buy' })
+    let out = '<b>' + baseOf(state.symbol) + ' liquidity: <span class="hl-c">' + sc.value + '/100</span></b><br><br>'
+    out += '<span class="kv">Spread ' + m.spreadBps.toFixed(2) + ' bps</span> <span class="kv">Depth ±1% $' + fmtUsd(m.bidDepth1 + m.askDepth1) + '</span><br>'
+    out += '<span class="kv">' + (s100 && s100.filled ? '$100k costs ' + s100.bps.toFixed(2) + ' bps' : '$100k will not fill') + '</span><br><br>'
+    out += sc.components.map(function (c) { return '&bull; <b>' + c.label + '</b> ' + Math.round(c.score) + '/100 — <span style="color:var(--muted)">' + esc(c.reason) + '</span>' }).join('<br>')
+    if (m.walls.length) {
+      out += '<br><br><b>Walls:</b> ' + m.walls.slice(0, 3).map(function (w) { return w.side + ' ' + pfmt(w.price) + ' (' + w.multiple.toFixed(0) + '×)' }).join(', ')
+    }
+    return out
+  }
+
+  // Cross-exchange: where the price actually differs, and whether it matters.
+  if (has('exchange') || has('exchanges') || has('venue') || has('venues') || has('arbitrage') || has('arb') || has('where to buy')) {
+    const rows = (state.crossEx as Array<{ name: string; last?: number; vol?: number; spread?: number; err?: string }>) || []
+    const live = rows.filter(function (r) { return r.last != null })
+    if (!live.length) return 'Venue data is still loading. I poll eleven public exchanges every fifteen seconds.'
+    const byPx = live.slice().sort(function (a, b) { return (b.last as number) - (a.last as number) })
+    const hi = byPx[0]
+    const lo = byPx[byPx.length - 1]
+    const gap = (((hi.last as number) - (lo.last as number)) / (lo.last as number)) * 1e4
+    let out = '<b>' + baseOf(state.symbol) + ' across ' + live.length + ' venues</b><br><br>'
+    out += 'Dearest <b>' + esc(hi.name) + '</b> ' + pfmt(hi.last as number) + ', cheapest <b>' + esc(lo.name) + '</b> ' + pfmt(lo.last as number) + ' — a gap of <b>' + gap.toFixed(2) + ' bps</b>.<br><br>'
+    out += live.slice().sort(function (a, b) { return (b.vol || 0) - (a.vol || 0) }).slice(0, 5)
+      .map(function (r) { return '&bull; <b>' + esc(r.name) + '</b> ' + pfmt(r.last as number) + (r.vol ? ' · $' + fmtUsd(r.vol) + ' 24h' : '') + (r.spread != null ? ' · ' + r.spread.toFixed(2) + ' bps' : '') }).join('<br>')
+    out += gap > 10
+      ? '<br><br><span class="hl-a">That gap is wide enough to notice</span> — but check withdrawal status and fees before calling it arbitrage; they usually eat it.'
+      : '<br><br><span style="color:var(--muted)">A normal spread between venues — nothing an arbitrage would survive fees on.</span>'
+    return out
+  }
+
+  // Market structure, from the same swing engine as the side panel.
+  if (has('structure') || has('bos') || has('choch') || has('swing') || has('higher high') || has('trend structure')) {
+    const c = state.candles
+    if (!c || c.length < 40) return 'I need at least forty candles loaded to read structure. Give the chart a moment.'
+    const win = c.length > 600 ? c.slice(-600) : c
+    const sw = swings(win)
+    const ev = structureEvents(win, sw).slice(-3).reverse()
+    const seq = sw.slice(-6).map(function (x) { return x.label || (x.type === 'high' ? 'H' : 'L') }).join(' → ')
+    const lastH = sw.slice().reverse().find(function (x) { return x.type === 'high' })
+    const lastL = sw.slice().reverse().find(function (x) { return x.type === 'low' })
+    const px = win[win.length - 1].c
+    let out = '<b>' + baseOf(state.symbol) + ' structure</b><br><br>'
+    out += 'Swing sequence: <b>' + (seq || 'not enough swings yet') + '</b><br>'
+    if (lastH) out += '<span class="kv">Resistance ' + pfmt(lastH.price) + ' (' + (((lastH.price - px) / px) * 100).toFixed(2) + '%)</span> '
+    if (lastL) out += '<span class="kv">Support ' + pfmt(lastL.price) + ' (' + (((lastL.price - px) / px) * 100).toFixed(2) + '%)</span>'
+    out += '<br><br>'
+    out += ev.length
+      ? '<b>Recent breaks:</b><br>' + ev.map(function (e) { return '&bull; <span class="' + (e.direction === 'bull' ? 'hl-g' : 'hl-r') + '">' + e.type + ' ' + e.direction + '</span> through ' + pfmt(e.price) }).join('<br>')
+      : 'No break of structure in the loaded range — price is still inside its last swing.'
+    out += '<br><br><span style="color:var(--muted)">Three-bar fractals; BOS continues the trend, CHoCH flips it.</span>'
+    return out
   }
 
   if (has('pattern') || has('patterns')) {
@@ -603,26 +692,35 @@ export async function generateReply(raw: string): Promise<string> {
   return 'I didn\'t catch that. I\'m sharpest on:<br>• <b>Coins</b> — btc, eth, sol, doge, pepe, trump, wif + 20 more (nicknames &amp; typos welcome)<br>• <b>Indicators</b> — rsi, macd, bollinger, ema, atr<br>• <b>Microstructure</b> — whales, funding, open interest, liquidations, support/resistance<br>• <b>Patterns</b> — rsi divergence, macd crossover, bb squeeze, volume spike<br>• <b>Signals</b> — "show signals", "best signal", "scan the market"<br>• <b>Economics</b> — inflation, fed rates, gdp, nfp, quantitative easing<br>• <b>Crypto basics</b> — bitcoin, ethereum, blockchain, defi, layer 2, nfts<br>• <b>Trading</b> — position sizing, stop loss, take profit, leverage, margin<br>• <b>News</b> — "show news", "forex events", "what is happening today"<br>• <b>Conversation</b> — greetings, jokes, opinions on any coin<br><br>Rephrase and fire again.'
 }
 
-const chatLog = $('chatLog')!
-const chatForm = $('chatForm')!
-const chatInput = $('chatInput') as HTMLInputElement
-const sendBtn = $('sendBtn') as HTMLButtonElement
+// Looked up on demand rather than at import time. The chat UI is a React
+// component now, so the module can be imported before — or after — the panel
+// exists without the lookups silently resolving to null.
+const el = <T extends HTMLElement>(id: string): T | null => $(id) as T | null
+
 export function pushMsg(html: string, who: string): HTMLElement {
   const div = document.createElement('div')
   div.className = 'msg ' + who
   if (who === 'user') div.textContent = html
   else div.innerHTML = html
-  chatLog.appendChild(div)
-  chatLog.scrollTop = chatLog.scrollHeight
+  const log = el('chatLog')
+  if (log) {
+    log.appendChild(div)
+    log.scrollTop = log.scrollHeight
+  }
   return div
 }
+
 let chatBusy = false
-async function sendChat(text: string): Promise<void> {
+
+/** Send one message and stream the reply into the log. Driven by the UI. */
+export async function sendChat(text: string): Promise<void> {
   if (!text.trim() || chatBusy) return
   chatBusy = true
-  sendBtn.disabled = true
+  const send = el<HTMLButtonElement>('sendBtn')
+  const input = el<HTMLInputElement>('chatInput')
+  if (send) send.disabled = true
   pushMsg(text, 'user')
-  chatInput.value = ''
+  if (input) input.value = ''
   const typing = pushMsg('<span class="typing"><i></i><i></i><i></i></span>', 'ai')
   try {
     await new Promise((r) => setTimeout(r, 420))
@@ -633,9 +731,8 @@ async function sendChat(text: string): Promise<void> {
   } catch (e) {
     typing.innerHTML = 'Connection hiccup — try again in a moment.'
   }
-  chatLog.scrollTop = chatLog.scrollHeight
+  const log = el('chatLog')
+  if (log) log.scrollTop = log.scrollHeight
   chatBusy = false
-  sendBtn.disabled = false
+  if (send) send.disabled = false
 }
-chatForm.addEventListener('submit', (e) => { e.preventDefault(); sendChat(chatInput.value) })
-document.querySelectorAll('#chatChips .chip').forEach((c) => c.addEventListener('click', () => sendChat((c as HTMLElement).dataset.q as string)))

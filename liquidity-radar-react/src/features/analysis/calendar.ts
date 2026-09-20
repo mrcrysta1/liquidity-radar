@@ -95,17 +95,80 @@ export async function fetchFromXoomar(): Promise<FxEv[]> {
   })
 }
 
+const FF_WEEK_URLS = [
+  'https://nfs.faireconomy.media/ff_calendar_lastweek.json',
+  'https://nfs.faireconomy.media/ff_calendar_thisweek.json',
+  'https://nfs.faireconomy.media/ff_calendar_nextweek.json',
+]
+
+function fxStop(e?: FxEv): number | null {
+  const iso =
+    e && e.date && /^\d{4}-\d{2}-\d{2}T/.test(e.date)
+      ? e.date
+      : e && e.date
+        ? e.date + 'T' + (e.time || '00:00') + ':00'
+        : null
+  if (!iso) return null
+  const t = new Date(iso)
+  return isNaN(t.getTime()) ? null : t.getTime()
+}
+
+/** Day-span covered by a list of events (FF weekly files alone ~7 days each). */
+function fxSpanDays(list: FxEv[]): number {
+  let min = Infinity
+  let max = -Infinity
+  let n = 0
+  list.forEach(function (e) {
+    const t = fxStop(e)
+    if (t !== null) {
+      if (t < min) min = t
+      if (t > max) max = t
+      n++
+    }
+  })
+  return n ? Math.max(1, Math.round((max - min) / 86400e3)) : 0
+}
+
+function dedupeFx(list: FxEv[]): FxEv[] {
+  const seen = new Set<string>()
+  const out: FxEv[] = []
+  list.forEach(function (e) {
+    const t = Math.floor((fxStop(e) ?? 0) / 60000)
+    const key = (e.title || e.event || '') + '|' + (e.country || '') + '|' + t
+    if (seen.has(key)) return
+    seen.add(key)
+    out.push(e)
+  })
+  return out
+}
+
 export async function fetchForexEvents(): Promise<void> {
   let events: FxEv[] | null
-  let source: string
+  let source = 'ForexFactory'
   try {
-    events = (await jgetProxied('https://nfs.faireconomy.media/ff_calendar_thisweek.json', {
-      to: 15000,
-      retries: 2,
-      dedup: true,
-    })) as FxEv[] | null
-    if (!events || !events.length) throw new Error('empty')
-    source = 'ForexFactory'
+    // Forex Factory publishes one JSON file per week; merge all available weeks
+    // and top up with the month-depth Xoomar feed when the span is < 28 days.
+    const weeks = await Promise.allSettled(
+      FF_WEEK_URLS.map(function (u) {
+        return jgetProxied(u, { to: 15000, dedup: true })
+      }),
+    )
+    const raw = weeks.flatMap(function (r) {
+      return r.status === 'fulfilled' && Array.isArray(r.value) ? (r.value as FxEv[]) : []
+    })
+    if (!raw || !raw.length) throw new Error('empty')
+    events = raw
+    if (fxSpanDays(raw) < 28) {
+      try {
+        const x = await fetchFromXoomar()
+        if (x && x.length) {
+          events = dedupeFx(raw.concat(x))
+          source = 'ForexFactory+Xoomar'
+        }
+      } catch {
+        /* keep the FF weeks we already have */
+      }
+    }
   } catch (e1) {
     try {
       const x = await fetchFromXoomar()
@@ -121,6 +184,7 @@ export async function fetchForexEvents(): Promise<void> {
       return
     }
   }
+  if (!events || !events.length) return
   try {
     const now = Date.now()
     const parsed = events
@@ -174,7 +238,12 @@ export function renderForex(): void {
     if (groups[k]) groups[k].push(o)
     else groups[k] = [o]
   })
-  const srcLabel = source === 'Xoomar' ? 'LIVE · Xoomar' : 'LIVE · ForexFactory'
+  const srcLabel =
+    source === 'Xoomar'
+      ? 'LIVE · Xoomar'
+      : source === 'ForexFactory+Xoomar'
+        ? 'LIVE · ForexFactory + depth'
+        : 'LIVE · ForexFactory'
   const fCount = sorted.filter(function (o) {
     return o.t.getTime() >= now && (f === 'All' || o.ev.impact === f)
   }).length
