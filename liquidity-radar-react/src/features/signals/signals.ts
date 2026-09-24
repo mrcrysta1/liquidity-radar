@@ -5,6 +5,7 @@
 // signalData is exported as a live binding so the engine's AI chat can keep
 // reading the latest scan results without a copy.
 import * as LightweightCharts from 'lightweight-charts'
+import { getNeuralRead, neuralAdjustment, setNeuralAllowed, trainOneNeural } from './neuralSignal'
 import { instrumentOf, isInstrument } from '../../constants/instruments'
 import { yahooCandles } from '../../services/yahoo'
 import { COINS } from '../../constants/market'
@@ -120,6 +121,7 @@ const modelWeights: Record<string, number> = {
   whale: 15,
   forecast: 10,
   master: 30,
+  neural: 20,
 }
 
 function loadPatternHistory(): void {
@@ -380,8 +382,14 @@ export function scanSignals(): void {
         else if (whale.imbalance < -0.15) whaleText = 'Whale distribution (sell ' + cfmt(whale.sellUsd) + ' vs buy ' + cfmt(whale.buyUsd) + ')'
         else whaleText = 'Whale flow balanced (buy ' + cfmt(whale.buyUsd) + ' / sell ' + cfmt(whale.sellUsd) + ')'
       }
-      // blend master with whale flow and learning-adjusted master weight
-      const blend = Math.max(-100, Math.min(100, Math.round(master.score * ((modelWeights.master || 30) / 30) + whaleAdj)))
+      // The in-browser direction model's read, when one has been trained for
+      // this market recently. It is weighted by its own measured out-of-sample
+      // accuracy, so a model with no demonstrated edge moves the score by
+      // nothing at all however confident it sounds.
+      const neural = getNeuralRead(sym)
+      const neuralAdj = neuralAdjustment(neural, modelWeights.neural || 20)
+      // blend master with whale flow, the neural read and the learning-adjusted master weight
+      const blend = Math.max(-100, Math.min(100, Math.round(master.score * ((modelWeights.master || 30) / 30) + whaleAdj + neuralAdj)))
       const allReasons: string[] = []
       tfScores.forEach((ts: Any) => { if (ts && ts.reasons.length) allReasons.push(ts.reasons[0]) })
       const t = state.tickers[sym]
@@ -424,7 +432,7 @@ export function scanSignals(): void {
       if (s1 && s1.rows) {
         fcObj = { rows: s1.rows, pUp: 1 / (1 + Math.exp(-blend / 45)) }
       }
-      return { sym: sym, score: blend, master: master, tfScores: tfScores, whale: whale, whaleText: whaleText, t: tk, fc: fcObj, reasons: allReasons.slice(0, 4), plan: plan, conv: conv }
+      return { sym: sym, score: blend, master: master, tfScores: tfScores, whale: whale, whaleText: whaleText, t: tk, fc: fcObj, neural: neural, neuralAdj: neuralAdj, reasons: allReasons.slice(0, 4), plan: plan, conv: conv }
     }).catch(function (e) {
       // A coin dropping out used to be silent, which made a scanner returning
       // nothing at all indistinguishable from a quiet market.
@@ -437,6 +445,30 @@ export function scanSignals(): void {
     signalData.sort(function (a, b) { return Math.abs(b.score) - Math.abs(a.score) })
     renderSignals()
     recordSignalOutcomes()
+    // Train at most one market's direction model per sweep, and only while
+    // the scanner is actually on screen. Nineteen models per sweep is the
+    // shape of the bug that pinned this app at 7fps; one every couple of
+    // minutes, yielded per batch, is not noticeable. Candles come from the
+    // scan cache, so this adds no requests.
+    const onScreen = !!document.getElementById('tab-signals')?.classList.contains('active')
+    setNeuralAllowed(onScreen)
+    if (onScreen) {
+      // One market's worth of deep history, fetched only for whichever
+      // market is actually being trained this sweep.
+      const loadDeep = function (sym: string): Promise<Any[]> {
+        if (isInstrument(sym)) return yahooCandles(sym, '1h', 400) as Promise<Any[]>
+        return jget('https://api.binance.com/api/v3/klines?symbol=' + sym + '&interval=1h&limit=400')
+          .then(function (data: Any) {
+            return data.map((k: Any) => ({ t: k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5] })).filter(mdVal.candle)
+          })
+      }
+      // Deliberately no re-render here. The score on a card already has the
+      // neural term folded in, so painting a freshly trained read onto cards
+      // whose scores were computed without it would show a number that
+      // disagrees with the signal beside it. It lands on the next sweep,
+      // where everything is recomputed together and stays consistent.
+      void trainOneNeural(SIGNAL_COINS, loadDeep as Any)
+    }
   }).catch(function (e) {
     console.warn('Signal scan failed:', e)
     if (badge) badge.textContent = 'SCAN FAILED'
@@ -545,6 +577,21 @@ function renderSignals(): void {
         + '</div>'
     }
     const learnHtml = hitRate ? '<div class="sc-learning">Model accuracy: ' + hitRate + '% across ' + totalPreds + ' predictions</div>' : ''
+    // The neural read, stated with the accuracy that earned it its weight —
+    // and stated plainly when that weight was zero, so a confident-looking
+    // probability is never mistaken for one the score actually used.
+    const nr = s.neural
+    const neuralHtml = nr
+      ? '<div class="sc-neural">'
+        + '<span class="sc-neural-k">Neural</span> P(up) <b>' + Math.round(nr.pUp * 100) + '%</b>'
+        + ' · holdout accuracy ' + (nr.accuracy * 100).toFixed(1) + '% over ' + nr.n + ' bars'
+        + (s.neuralAdj
+            ? ' · <b class="' + (s.neuralAdj > 0 ? 'up' : 'dn') + '">' + (s.neuralAdj > 0 ? '+' : '') + s.neuralAdj + '</b> to score'
+            : nr.accuracy <= 0.52
+              ? ' · <i>no edge over a coin flip, not counted</i>'
+              : ' · <i>reads this bar as a toss-up, nothing to add</i>')
+        + '</div>'
+      : ''
     const cv = s.conv
     const convHtml = cv
       ? '<span class="sc-conv ' + cv.tier.toLowerCase() + '" title="' + cv.agree + ' of ' + cv.of +
@@ -569,6 +616,7 @@ function renderSignals(): void {
       + '<div class="sc-conf"><div class="sc-conf-bar"><div class="sc-conf-fill" style="width:' + Math.min(100, conf) + '%;background:' + confColor + '"></div></div></div>'
       + '<div class="sc-reasons">' + s.reasons.map((r: string) => '&bull; ' + esc(r)).join('<br>') + '</div>'
       + planHtml
+      + neuralHtml
       + (s.whaleText ? '<div class="sc-whale ' + whaleClass + '">' + esc(s.whaleText) + '</div>' : '')
       + forecastHtml
       + learnHtml

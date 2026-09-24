@@ -1872,6 +1872,20 @@ footer{border-top:1px solid var(--border);margin-top:26px;padding:18px 14px;text
 .sc-whale.whale-sell{border-left-color:var(--red)}
 .sc-forecast{font-size:11px;color:var(--muted);margin-top:6px;font-family:var(--mono)}
 .sc-forecast b{color:var(--cyan)}
+/* Neural read on a signal card: probability, the accuracy that earned it its
+   weight, and what it actually contributed. */
+.sc-neural{
+  margin-top:7px;padding:6px 9px;border-radius:8px;font-size:10.5px;line-height:1.5;
+  color:var(--muted);background:rgb(var(--uRGB)/.08);border:1px solid rgb(var(--uRGB)/.22);
+}
+.sc-neural b{color:var(--txt)}
+.sc-neural b.up{color:var(--green)}
+.sc-neural b.dn{color:var(--red)}
+.sc-neural i{color:var(--dim);font-style:normal}
+.sc-neural-k{
+  font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:var(--purple);
+  font-size:9px;margin-right:4px;
+}
 .sc-learning{font-size:10px;color:var(--dim);margin-top:5px;font-style:italic}
 .sc-action-btn{background:var(--primary);color:#fff;border:none;border-radius:7px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;transition:all .15s}
 .sc-action-btn:hover{opacity:.85}
