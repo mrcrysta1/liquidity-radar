@@ -113,6 +113,13 @@ export async function trainModel(
   tfId: string,
   candles: CandleFlat[],
   horizon = 3,
+  /**
+   * Training budget. The ML panel is the headline feature and gets the full
+   * 40; the signal scanner runs this in the background for one market every
+   * couple of minutes and takes fewer, because a background read is not worth
+   * the frames a full run costs on a phone.
+   */
+  epochs = 40,
 ): Promise<TrainedModel | null> {
   const dataset = buildDataset(candles, horizon)
   if (dataset.length < MIN_SAMPLES) return null
@@ -126,7 +133,7 @@ export async function trainModel(
   const testScaled: Sample[] = testSet.map((s) => ({ x: standardize([s.x], trainStd)[0], y: s.y }))
 
   const evalModel = buildModel(FEATURE_NAMES.length)
-  await fit(evalModel, trainScaled, 40)
+  await fit(evalModel, trainScaled, epochs)
   const backtestAccuracy = evalAccuracy(evalModel, testScaled)
   evalModel.dispose()
 
@@ -134,7 +141,7 @@ export async function trainModel(
   const fullStd = computeStandardizer(dataset.map((s) => s.x))
   const fullScaled: Sample[] = dataset.map((s) => ({ x: standardize([s.x], fullStd)[0], y: s.y }))
   const liveModel = buildModel(FEATURE_NAMES.length)
-  await fit(liveModel, fullScaled, 40)
+  await fit(liveModel, fullScaled, epochs)
 
   return {
     model: liveModel,
