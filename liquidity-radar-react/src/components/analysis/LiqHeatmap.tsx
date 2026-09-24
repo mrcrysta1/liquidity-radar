@@ -15,6 +15,7 @@ import { loadCandleWindow } from '../../services/marketData'
 import type { CandleFlat } from '../../services/market'
 import { state } from '../../services/store'
 import { baseOf } from '../../utils/coins'
+import { poll } from '../../services/pollScheduler'
 
 const PAD = { l: 46, r: 66, t: 8, b: 22 }
 
@@ -71,10 +72,12 @@ export function LiqHeatmap() {
           setErr(e instanceof Error ? e.message : String(e))
         })
     load()
-    const id = setInterval(load, 60000)
+    // Was a raw setInterval — kept firing this REST fetch every 60s even
+    // with the tab backgrounded while this panel happened to be open.
+    const stop = poll(load, 60000)
     return () => {
       alive = false
-      clearInterval(id)
+      stop()
     }
   }, [symbol, r.tf, r.bars])
 

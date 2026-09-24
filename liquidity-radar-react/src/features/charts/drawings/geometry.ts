@@ -507,22 +507,26 @@ export function shape(d: Drawing, c: MapCtx): Shape | null {
 
     case 'long':
     case 'short': {
+      // Three independent points — entry, stop, target — so R:R is a real
+      // computed number from what the trader actually placed, not a fixed
+      // 2.00 baked into a formula that derived the stop from the target.
+      const C = P[2]
       const entry = d.points[0].price
-      const target = d.points[1].price
-      const risk = Math.abs(target - entry) / 2
-      const stop = d.type === 'long' ? entry - risk : entry + risk
+      const stop = d.points[1].price
+      const target = d.points[2].price
+      const risk = Math.abs(entry - stop)
+      const reward = Math.abs(target - entry)
       const yE = A.y
-      const yT = B.y
-      const yS = c.y(stop)
-      if (yS == null) return null
-      const x1 = Math.min(A.x, B.x)
-      const x2 = Math.max(A.x, B.x)
+      const yS = B.y
+      const yT = C.y
+      const x1 = Math.min(A.x, B.x, C.x)
+      const x2 = Math.max(A.x, B.x, C.x)
       s.fills.push({ pts: [x1, yE, x2, yE, x2, yT, x1, yT], color: 'rgba(0,230,118,.16)' })
       s.fills.push({ pts: [x1, yE, x2, yE, x2, yS, x1, yS], color: 'rgba(255,23,68,.16)' })
       s.segs.push({ x1, y1: yE, x2, y2: yE })
       s.segs.push({ x1, y1: yT, x2, y2: yT, color: '#00E676', soft: true })
       s.segs.push({ x1, y1: yS, x2, y2: yS, color: '#FF1744', soft: true })
-      const rr = risk ? Math.abs(target - entry) / risk : 0
+      const rr = risk ? reward / risk : 0
       s.labels.push({ x: x1 + 5, y: yT - 5, text: 'Target ' + c.fmt(target) })
       s.labels.push({ x: x1 + 5, y: yS + 13, text: 'Stop ' + c.fmt(stop) })
       s.labels.push({

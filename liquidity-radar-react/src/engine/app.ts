@@ -30,6 +30,8 @@ import { storageGet, storageSet } from '../services/storage'
 import { onTimeframeChange, syncChartTitle } from '../features/charts/timeframes'
 import { applyLayout, watchStageHeight } from '../features/charts/companionCharts'
 import { connectStreams } from '../services/streams'
+import { fetchMarketCaps } from '../services/coingecko'
+import { fetchFuturesSnapshot } from '../services/futures'
 import { poll } from '../services/pollScheduler'
 import { cooldownLeft } from '../api/rateLimit'
 import { initAdvanced } from '../features/advanced'
@@ -51,6 +53,7 @@ import {
   renderHero,
   renderTicker,
   mapCandle,
+  renderWhaleBubbles,
 } from '../features/charts/chartRender'
 import {
   initMultiCharts,
@@ -61,9 +64,13 @@ import {
 } from '../features/charts/multiCharts'
 import { switchTab, setSymbol, wireUserActions } from '../features/actions/userActions'
 import { analyzeSigCoin, onSigSearch, startAutoScan, switchSigMode, setSigFilter } from '../features/signals'
-import { initBubbles, renderBubbles, renderMemeUniverse } from '../features/bubbles'
+import { renderMemeUniverse } from '../features/bubbles'
 import { pushMsg } from '../features/chat'
-import { renderFG, renderTopCoins, renderWhales } from '../features/snapshots'
+import { renderFG, renderTopCoins, renderFutures, renderWhales } from '../features/snapshots'
+import { startConfluence } from '../features/analysis/confluence'
+import { startDivergenceWatch } from '../features/analysis/oiDivergence'
+import { trainForSymbol } from '../features/ml/store'
+import { checkRLPriceTick } from '../features/ml/rlStore'
 import { addAlert, checkAlerts, enableAlerts, removeAlert, renderAlerts } from '../features/alerts'
 import { initTheme, selectPalette } from '../features/theme'
 import { initKeyboard } from '../features/keyboard'
@@ -89,6 +96,7 @@ const streamCb={
   onStatus:setWsStatus,
   onHero:renderHero,
   onTickerLive:function(t){
+    checkRLPriceTick(state.symbol, t.last);
     document.querySelectorAll('#tickerTrack [data-sym="'+state.symbol+'"]').forEach(function(el){
     el.querySelector('.tp').textContent='$'+pfmt(t.last);
     const cEl=el.querySelector('.chg');
@@ -104,7 +112,6 @@ const streamCb={
   onAnalytics:runAnalytics,
 };
 
-document.querySelectorAll('.tab-btn').forEach(b=>b.addEventListener('click',()=>switchTab(b.dataset.tab)));
 $('tickerTrack').addEventListener('click',e=>{
   const t=e.target.closest('[data-sym]');
   if(t)setSymbol(t.dataset.sym);
@@ -143,11 +150,14 @@ function init(){
   fetchFR();
   fetchOI();
   fetchWhales();
+  fetchMarketCaps();
+  fetchFuturesSnapshot().then(renderFutures);
+  startConfluence();
+  startDivergenceWatch();
   connectStreams(streamCb);
   initTheme();
   initMultiCharts();
   renderMemeUniverse();
-  initBubbles();
   startAutoScan();
   initAdvanced();
   fetchNews();
@@ -156,12 +166,13 @@ function init(){
   wireNewsUI();
 
   poll(fetchTickers,20000);
+  poll(fetchMarketCaps,60000);
+  poll(function(){fetchFuturesSnapshot().then(renderFutures)},60000);
   poll(fetchWhales,10000);
   poll(fetchFR,30000);
   poll(fetchOI,30000);
   poll(fetchFG,300000);
   poll(function(){renderMemeUniverse();mdPill()},20000);
-  poll(renderBubbles,30000);
   poll(fetchNews,300000);
 }
 
@@ -197,10 +208,10 @@ export function initApp(){
   })
   wireMarketHooks({
     onTickers() {
-      renderTicker();renderHero();renderTopCoins();checkAlerts();renderBubbles();
+      renderTicker();renderHero();renderTopCoins();checkAlerts();
       $('topCoinsUpd').textContent='LIVE · '+new Date().toLocaleTimeString();
     },
-    onKlines(){ updateChartData(true);runAnalytics(); },
+    onKlines(){ updateChartData(true);runAnalytics();trainForSymbol(state.symbol, state.tf, state.candles); },
     onKlineCache(){
       updateChartData(true);runAnalytics();
       $('wsKlineState').textContent='CACHE';$('wsKlineState').className='badge b-amber';
@@ -230,7 +241,7 @@ export function initApp(){
     onOIfail(){ $('mOI').textContent='N/A'; },
     onFG(){ renderFG(); },
     onFGfail(){ $('fngClass').textContent='feed unreachable'; },
-    onWhales(){ renderWhales(); },
+    onWhales(){ renderWhales(); renderWhaleBubbles(); },
   })
   init()
 }

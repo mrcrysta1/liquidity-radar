@@ -7,6 +7,7 @@ import { state } from '../../services/store'
 import {
   attachIndicatorChart,
   indicatorLegend,
+  indicatorPaneCount,
   refreshIndicatorColors,
   renderIndicators,
 } from './indicators/render'
@@ -29,6 +30,11 @@ import {
 import { shape } from './drawings/geometry'
 import type { Drawing, MapCtx, Shape } from './drawings/geometry'
 import { fetchOlderKlines, historyExhausted } from '../../services/marketData'
+import { attachDeltaPane, renderDeltaPane } from './deltaPane'
+import { attachWhaleBubbles, renderWhaleBubbles, watchLiveWhales } from './whaleBubbles'
+import { attachVolumeProfile, renderVolumeProfile } from './volumeProfileOverlay'
+import { onDeltaChange } from '../delta/delta'
+import { onOverlayTogglesChange } from './overlayToggles'
 
 type Any = any
 ;(window as Any).LightweightCharts = LightweightCharts
@@ -248,6 +254,7 @@ function applyChartStyle(): void {
   }
   chartState.styleSeries = candleSeries
 }
+export { renderWhaleBubbles } from './whaleBubbles'
 export function initChart(): void {
   if (!(window as Any).LightweightCharts) {
     $('legendOHLC')!.textContent = 'Chart library failed to load'
@@ -283,6 +290,9 @@ export function initChart(): void {
   } as Any)
   applyChartStyle()
   attachIndicatorChart(chart)
+  attachDeltaPane(chart)
+  attachWhaleBubbles(candleSeries)
+  attachVolumeProfile(chart, candleSeries, $('chartWrap')!)
   // The countdown reads the live series each time, so a style change that
   // replaces the series does not strand it.
   mountCloseTimer(chart, () => candleSeries)
@@ -314,6 +324,8 @@ export function initChart(): void {
     const ts = chart.timeScale()
     const keep = ts.getVisibleLogicalRange()
     applyChartStyle()
+    attachWhaleBubbles(candleSeries)
+    attachVolumeProfile(chart, candleSeries, $('chartWrap')!)
     updateChartData(false)
     if (!keep) return
     ts.setVisibleLogicalRange(keep)
@@ -323,6 +335,24 @@ export function initChart(): void {
     })
   })
   watchForOlderHistory()
+  // Delta bars stream in far faster than the chart should repaint — coalesce
+  // to the next frame, same reasoning as the live-tick indicator refresh
+  // below (IND_REFRESH_MS): the eye cannot read faster than that anyway.
+  let deltaPending = false
+  onDeltaChange(() => {
+    if (deltaPending) return
+    deltaPending = true
+    requestAnimationFrame(() => {
+      deltaPending = false
+      renderDeltaPane(visibleCandles(), indicatorPaneCount())
+    })
+  })
+  onOverlayTogglesChange(() => {
+    renderDeltaPane(visibleCandles(), indicatorPaneCount())
+    renderWhaleBubbles()
+    renderVolumeProfile(visibleCandles())
+  })
+  watchLiveWhales()
   updateChartData(true)
 }
 function renderLegend(o: Any, h: Any, l: Any, c: Any, v: Any, isCross: Any): void {
@@ -409,6 +439,8 @@ export function updateChartData(fit = false): void {
     candleSeries.setData(candles.map((c) => ({ time: Math.floor(c.t / 1000), value: c.c })))
   }
   renderIndicators(candles)
+  renderDeltaPane(candles, indicatorPaneCount())
+  renderWhaleBubbles()
   if (fit) {
     ts.fitContent()
   } else if (keep) {
@@ -503,6 +535,7 @@ export function updateChartLast(c: Any): void {
       indLast = Date.now()
       if (!isReplayOn()) {
         renderIndicators(state.candles)
+        renderDeltaPane(state.candles, indicatorPaneCount())
         refreshIndicatorLegend()
         const lc = state.candles[state.candles.length - 1]
         if (lc) renderLegend(lc.o, lc.h, lc.l, lc.c, lc.v, false)
@@ -938,6 +971,7 @@ function paintShape(ctx: Any, sh: Shape, base: string, doomed: boolean): void {
 }
 
 function redrawDrawings(includePreview?: Any): void {
+  renderVolumeProfile(visibleCandles())
   const cv = chartState.drawCanvas
   if (!cv || !chart) return
   resizeDrawCanvas()

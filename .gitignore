@@ -1,1 +1,5 @@
 .aider*
+
+# local archives / scratch artifacts
+*.zip
+aider-autonomy-test.txt

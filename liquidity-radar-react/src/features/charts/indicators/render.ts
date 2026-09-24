@@ -23,6 +23,12 @@ const held = new Map<string, Held>()
 /** Price-scale margins recomputed whenever the set of panes changes. */
 let paneOrder: string[] = []
 
+/** How many indicator panes currently occupy the bottom of the chart — used
+ * by the Delta pane to stack under them instead of overlapping. */
+export function indicatorPaneCount(): number {
+  return paneOrder.length
+}
+
 export function attachIndicatorChart(c: Any): void {
   chart = c
   held.clear()

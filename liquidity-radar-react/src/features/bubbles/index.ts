@@ -1,1 +1,1 @@
-export { initBubbles, renderBubbles, renderMemeUniverse } from './bubbles'
+export { renderMemeUniverse } from './bubbles'

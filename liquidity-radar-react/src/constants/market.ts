@@ -30,6 +30,7 @@ export const COINS: Record<string, CoinMeta> = {
   INJ: { sym: 'INJUSDT', name: 'Injective', icon: '💉', color: '#00BFFF' },
   TIA: { sym: 'TIAUSDT', name: 'Celestia', icon: 'T', color: '#7B2BF9' },
   SEI: { sym: 'SEIUSDT', name: 'Sei', icon: '🌊', color: '#9E1F19' },
+  PAXG: { sym: 'PAXGUSDT', name: 'PAX Gold', icon: '🥇', color: '#D4AF37' },
 }
 
 export const TOP16 = [

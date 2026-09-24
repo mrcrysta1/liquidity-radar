@@ -37,15 +37,15 @@ export interface BookMetrics {
 
 const NOTIONALS = [10_000, 100_000, 1_000_000]
 
-export function bookMetrics(bids: Level[], asks: Level[]): BookMetrics | null {
+export function bookMetrics(bids: Level[], asks: Level[], band = 0.01): BookMetrics | null {
   if (!bids.length || !asks.length) return null
   const bestBid = bids[0].price
   const bestAsk = asks[0].price
   const mid = (bestBid + bestAsk) / 2
   if (!(mid > 0)) return null
   const spreadBps = ((bestAsk - bestBid) / mid) * 1e4
-  const lo = mid * 0.99
-  const hi = mid * 1.01
+  const lo = mid * (1 - band)
+  const hi = mid * (1 + band)
   let bidDepth1 = 0
   let askDepth1 = 0
   for (const l of bids) if (l.price >= lo) bidDepth1 += l.price * l.size

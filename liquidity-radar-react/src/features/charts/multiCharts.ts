@@ -100,6 +100,22 @@ export function mcRemove(id: number): void {
 }
 
 function renderMCGrid(): void {
+  // grid.innerHTML below throws away every panel's chart *host element*,
+  // but LightweightCharts instances aren't tied to DOM removal — each one
+  // keeps its own ResizeObserver, RAF loop and listeners alive until told
+  // to stop via chart.remove(). Without disposing them first here, every
+  // add/remove/symbol-change leaked one zombie chart instance per *other*
+  // panel still on the grid — mcChangeSymbol calls this on every coin swap.
+  mcPanels.forEach(function (p) {
+    if (p.chart) {
+      try {
+        p.chart.remove()
+      } catch (e) {
+        /* already detached */
+      }
+      p.chart = null
+    }
+  })
   const grid = $('mcGrid')!
   let html = ''
   mcPanels.forEach(function (p) {

@@ -96,18 +96,30 @@ export function renderFG(): void {
   $('fngNote')!.textContent = map[fg.classification] || ''
 }
 
+/** Colored pill for 24h change, CoinMarketCap-style (filled background,
+ * not just colored text) — visually distinct from the plain chgHtml() used
+ * elsewhere in the app, which stays as-is since this is the one table meant
+ * to read like a market-cap-site listing. */
+function chgPill(p: number): string {
+  const cls = p > 0.005 ? 'up' : p < -0.005 ? 'down' : 'flat'
+  return '<span class="cmc-pill ' + cls + '">' + (p > 0 ? '+' : '') + p.toFixed(2) + '%</span>'
+}
+
 export function renderTopCoins(): void {
-  $('coinsBody')!.innerHTML = TOP16.map((k) => {
+  $('coinsBody')!.innerHTML = TOP16.map((k, i) => {
     const c = COINS[k]
     const t = state.tickers[c.sym]
     if (!t) return ''
-    const sg = sigOf(t.pct)
+    const mc = state.marketCaps[k]
     return '<tr data-sym="' + c.sym + '">'
-      + '<td><div class="coin-cell"><div class="coin-ci" style="color:' + c.color + ';border-color:' + c.color + '44">' + c.icon + '</div><div class="coin-nm"><div class="cn">' + esc(c.name) + '</div><div class="cs">' + k + '/USDT</div></div></div></td>'
-      + '<td>$' + pfmt(t.last) + '</td>'
-      + '<td>' + chgHtml(t.pct) + '</td>'
-      + '<td class="vol-dim">' + cfmt(t.qvol) + '</td>'
-      + '<td><span class="badge ' + sg[1] + '">' + sg[0] + '</span></td>'
+      + '<td class="cmc-rank">' + (i + 1) + '</td>'
+      + '<td><div class="coin-cell"><div class="coin-ci cmc-ci" style="color:' + c.color + ';border-color:' + c.color + '44;background:' + c.color + '14">' + c.icon + '</div><div class="coin-nm"><div class="cn">' + esc(c.name) + '</div><div class="cs">' + k + '</div></div></div></td>'
+      + '<td class="cmc-price">$' + pfmt(t.last) + '</td>'
+      + '<td>' + (mc && mc.chg1h != null ? chgPill(mc.chg1h) : '<span class="cmc-pill flat">—</span>') + '</td>'
+      + '<td>' + chgPill(t.pct) + '</td>'
+      + '<td class="vol-dim">' + (mc ? '$' + cfmt(mc.marketCap) : '—') + '</td>'
+      + '<td class="vol-dim">' + (mc ? nfmt(mc.circulatingSupply) + ' ' + k : '—') + '</td>'
+      + '<td class="vol-dim">$' + cfmt(t.qvol) + '</td>'
       + '</tr>'
   }).join('')
 
@@ -146,6 +158,33 @@ export function renderTopCoins(): void {
 }
 
 interface WhalePrint { maker?: boolean; usd: number; price: number; qty: number; time: number }
+/** Filled bg pill for funding rate — same visual language as chgPill, but
+ * funding's "normal" range is much tighter (±0.01%/8h), so the sign
+ * thresholds are near zero rather than the 0.5% used for price moves. */
+function fundingPill(rate: number): string {
+  const cls = rate > 0.00005 ? 'up' : rate < -0.00005 ? 'down' : 'flat'
+  return '<span class="cmc-pill ' + cls + '">' + (rate * 100).toFixed(4) + '%</span>'
+}
+
+/** Perpetual futures table — mark price, funding rate, 24h change, open
+ * interest, for the same TOP16 set the spot table already tracks. */
+export function renderFutures(): void {
+  $('futuresBody')!.innerHTML = TOP16.map((k, i) => {
+    const c = COINS[k]
+    const f = state.futures[k]
+    if (!f) return ''
+    return '<tr data-sym="' + c.sym + '">'
+      + '<td class="cmc-rank">' + (i + 1) + '</td>'
+      + '<td><div class="coin-cell"><div class="coin-ci cmc-ci" style="color:' + c.color + ';border-color:' + c.color + '44;background:' + c.color + '14">' + c.icon + '</div><div class="coin-nm"><div class="cn">' + esc(c.name) + '</div><div class="cs">' + k + '-PERP</div></div></div></td>'
+      + '<td class="cmc-price">$' + pfmt(f.markPrice) + '</td>'
+      + '<td>' + chgPill(f.pct) + '</td>'
+      + '<td>' + fundingPill(f.fundingRate) + '</td>'
+      + '<td class="vol-dim">' + (f.openInterest != null ? '$' + cfmt(f.openInterest * f.markPrice) : '—') + '</td>'
+      + '<td class="vol-dim">$' + cfmt(f.qvol) + '</td>'
+      + '</tr>'
+  }).join('')
+}
+
 export function renderWhales(): void {
   const list = state.whales as WhalePrint[]
   $('whaleCount')!.textContent = list.length + ' BLOCK TRADES · ≥ $50,000'

@@ -17,6 +17,8 @@ import {
 } from './market'
 import { bucketEnd, mainFolder, tfDef } from './timeframe'
 import { noteStream } from './dataSources'
+import { ingestTrade } from '../features/delta/delta'
+import { ingestForWhaleDetection } from '../features/delta/liveWhales'
 
 type Any = any
 
@@ -222,6 +224,12 @@ export function connectStreams(cb: StreamsCallbacks): void {
   make('ag', 'wss://stream.binance.com:9443/ws/' + s + '@aggTrade', function (d: Any) {
     const p = +d.p
     if (!mdVal.price(p)) return
+    // Delta/whale tracking runs on every print (not coalesced to rAF like the
+    // tape paint below) — dropping ticks here would silently under-count CVD.
+    const arr = state.candles
+    const bucketStart = arr.length ? arr[arr.length - 1].t : +d.T
+    ingestTrade(state.symbol, bucketStart, +d.q, !!d.m)
+    ingestForWhaleDetection(state.symbol, p, +d.q, !!d.m)
     tradePending = { p: p, q: +d.q, T: +d.T }
     if (!tradeFrame) tradeFrame = raf(flushTrade)
   })
