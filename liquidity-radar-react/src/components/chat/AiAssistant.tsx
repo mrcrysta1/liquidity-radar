@@ -84,6 +84,26 @@ export function AiAssistant() {
   // thing that can open this.
   useEffect(() => subscribeDock(setOpen), [])
 
+  // The button is fixed over the page, and on a phone it sits on top of the
+  // market tables' price column. Fade it out while the page is actually
+  // moving and bring it back once scrolling settles. Repeated setScrolling
+  // (true) is free — React bails out when the value is unchanged — so this
+  // costs one state flip per scroll gesture, not one per frame.
+  const [scrolling, setScrolling] = useState(false)
+  useEffect(() => {
+    let idle = 0
+    const onScroll = () => {
+      setScrolling(true)
+      clearTimeout(idle)
+      idle = window.setTimeout(() => setScrolling(false), 450)
+    }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      window.removeEventListener('scroll', onScroll)
+      clearTimeout(idle)
+    }
+  }, [])
+
   useEffect(() => {
     if (!open) return
     // A hidden log has no scroll height, so the position it held while closed
@@ -113,7 +133,10 @@ export function AiAssistant() {
   }, [open])
 
   return (
-    <div className={'ai-dock-root' + (open ? ' open' : '')} ref={rootRef}>
+    <div
+      className={'ai-dock-root' + (open ? ' open' : '') + (scrolling && !open ? ' scrolled-away' : '')}
+      ref={rootRef}
+    >
       <div className="ai-dock" id="aiDock" role="dialog" aria-label="Radar AI Assistant" hidden={!open}>
         <div className="chat-head">
           <div className="ai-avatar">🤖</div>
