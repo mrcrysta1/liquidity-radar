@@ -834,6 +834,11 @@ html.radar-fs .cs-panel{height:100%;max-height:none}
   /* Stacked: the stage no longer shares one height between chart and panel —
      each takes its own, or the chart would be squeezed to a sliver. */
   .chart-stage{flex-direction:column}
+  /* `flex:1` on the chart means `flex-basis:0`. Across a row that only zeroes
+     its *width* basis and the height below still applies, but once the stage
+     stacks, basis is the height — so the chart collapsed to 30px on a phone
+     while staying 400px on a desktop. Hand it back a definite height. */
+  .chart-stage>.chart-layout{flex:0 0 auto;height:var(--stage-h,var(--ch))}
   .chart-stage.side-open .cs-panel{max-height:52vh}
   .chart-side{flex-direction:column-reverse;align-items:stretch}
   .cs-rail{flex-direction:row;align-self:stretch;justify-content:center}
@@ -1552,6 +1557,7 @@ html.radar-fs .cs-panel{height:100%;max-height:none}
 
 /* ---- AI assistant dock (launcher, bottom right) ---- */
 .ai-dock-root{
+  transition:opacity .18s ease,transform .18s ease;
   position:fixed;z-index:96;right:20px;
   bottom:calc(20px + env(safe-area-inset-bottom,0px));
   display:flex;flex-direction:column;align-items:flex-end;gap:12px;
@@ -2689,6 +2695,13 @@ header.top,.container,.search-wrap{margin-left:var(--nav-w);transition:margin-le
   body.sheet-open .ai-dock-root{opacity:0;pointer-events:none;transition:opacity .18s}
 }
 
+/* The assistant button floats over the page, and on a phone it landed square
+   on the price column of the market tables. Get it out of the way while the
+   page is actually moving; it comes back as soon as scrolling settles. */
+@media(max-width:900px){
+  .ai-dock-root.scrolled-away{opacity:.16;pointer-events:none;transform:translateY(8px)}
+}
+
 /* Narrow phones cannot hold three comfortable columns. */
 @media(max-width:360px){
   .navsheet-grid{grid-template-columns:repeat(2,1fr)}
@@ -2706,6 +2719,24 @@ header.top,.container,.search-wrap{margin-left:var(--nav-w);transition:margin-le
   .hw-list button,.hw-news button{padding:9px 8px}
   .hw-cta{padding:5px 9px}
   .sig-chip{padding:8px 13px}
+}
+
+/* ---- phone: tap targets ------------------------------------- */
+/* Audited at 320-430px: a row of controls sat between 19px and 24px tall,
+   well under what a fingertip hits reliably, and the 560px block above was
+   making some of them smaller still. Grown on small screens only — the
+   desktop density is deliberate and stays as it is. This block comes after
+   the narrower media queries on purpose, so it wins where they overlap. */
+@media(max-width:900px){
+  .tf-btn{min-height:32px;padding:6px 11px;font-size:11px}
+  .tf-more{min-height:32px;min-width:32px;padding:6px}
+  .hw-cta{min-height:30px;padding:7px 12px}
+  .sc-action-btn{min-height:32px;min-width:32px;padding:8px 14px}
+  .chart-tool-btn{min-height:32px}
+  .liqhm-cmap{width:30px;height:28px}
+  .ec-seg button,.ec-imps button,.ds-filters button{min-height:32px;padding:6px 12px}
+  /* The refresh control is an icon button, so it needs width as well. */
+  .ec-refresh{min-width:32px}
 }
 
 @media(min-width:1100px){.hw-wide{grid-column:span 2}}
