@@ -306,16 +306,15 @@ export function mdPill(): void {
   const h = mdRefreshHealth()
   const live = md.conn.ws.streams > 0
   const stale = h.staleWarn.length > 0
-  pill.classList.toggle('off', !live || stale)
-  if (!live) {
-    txt.textContent = 'CONNECTING…'
-    return
-  }
-  if (stale) {
-    txt.textContent = 'RECONNECTING…'
-    return
-  }
-  txt.textContent = 'LIVE · ' + md.conn.ws.streams + ' STREAMS'
+  const down = !live || stale
+  pill.classList.toggle('off', down)
+  // The pill says only Online/Offline; the detail lives in the tooltip.
+  txt.textContent = down ? 'Offline' : 'Online'
+  pill.title = !live
+    ? 'No live streams'
+    : stale
+      ? 'Stale feed: ' + h.staleWarn.join(', ')
+      : md.conn.ws.streams + ' live stream' + (md.conn.ws.streams === 1 ? '' : 's')
 }
 
 // --- Diagnostics / debug mode --------------------------------

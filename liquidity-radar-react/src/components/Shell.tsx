@@ -75,7 +75,7 @@ export function Shell() {
             <button className="theme-btn" id="alertBtn" title="Price alerts (desktop notifications)" style={{ 'fontSize': '13px', 'fontWeight': '800', 'fontFamily': 'var(--mono)' }} onClick={() => { renderAlerts(); openModal('alModal') }}>AL</button>
             <button className="theme-btn" id="paletteBtn" title="Color themes / palettes" style={{ 'fontSize': '15px', 'fontWeight': '800' }}>🎨</button>
             <button className="theme-btn" id="themeBtn" title="Toggle dark/light mode" style={{ 'fontSize': '12px', 'fontWeight': '800', 'fontFamily': 'var(--mono)' }}>D</button>
-            <div className="status-pill" id="statusPill"><span className="dot"></span><span id="statusTxt">CONNECTING…</span></div>
+            <div className="status-pill" id="statusPill"><span className="dot"></span><span id="statusTxt">Offline</span></div>
           </div>
         </div>
         <div className="tickerbar"><div className="ticker-track" id="tickerTrack"></div></div>
