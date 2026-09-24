@@ -14,6 +14,7 @@ import type { ColormapId, Heatmap, OiPoint } from '../../features/analysis/liqHe
 import { loadCandleWindow } from '../../services/marketData'
 import type { CandleFlat } from '../../services/market'
 import { state } from '../../services/store'
+import { instrumentOf } from '../../constants/instruments'
 import { baseOf } from '../../utils/coins'
 import { poll } from '../../services/pollScheduler'
 
@@ -61,7 +62,11 @@ export function LiqHeatmap() {
         .then((c) => {
           if (!alive) return
           setCandles(c)
-          const raw = state.oiHist as Array<{ ts: number; openInterest: number }> | null
+          // oiHist belongs to whichever crypto symbol was last charted. Using
+          // it here would scale gold's notional by Bitcoin's open interest.
+          const raw = instrumentOf(symbol)
+            ? null
+            : (state.oiHist as Array<{ ts: number; openInterest: number }> | null)
           setOi(Array.isArray(raw) ? raw.map((x) => ({ ts: x.ts, value: x.openInterest })) : [])
           setStatus('ok')
           setErr(undefined)
@@ -81,9 +86,22 @@ export function LiqHeatmap() {
     }
   }, [symbol, r.tf, r.bars])
 
+  // Funding is the one public number that says which side is actually crowded,
+  // so the model uses it instead of assuming a balanced book. It is re-read
+  // when the candles refresh rather than on its own timer — the engine already
+  // polls it every 30s, and a heatmap rebuilt on a funding tick alone would
+  // redraw for a number that barely moves.
+  const funding = useMemo(() => {
+    const fr = state.fr as { lastFundingRate?: string | number } | null
+    const v = fr?.lastFundingRate
+    const n = v == null ? NaN : Number(v)
+    return isFinite(n) ? n : null
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [candles, symbol])
+
   const heat: Heatmap | null = useMemo(
-    () => (candles.length ? buildHeatmap(candles, { bins: full ? 260 : 170, model, oi }) : null),
-    [candles, model, oi, full],
+    () => (candles.length ? buildHeatmap(candles, { bins: full ? 260 : 170, model, oi, funding }) : null),
+    [candles, model, oi, full, funding],
   )
 
   // Escape leaves full screen, and the page behind must not scroll under it.
@@ -268,7 +286,7 @@ export function LiqHeatmap() {
       <div className="sec-head">
         <div className="sec-title">Liquidation Heatmap</div>
         <div className="liqhm-tools">
-          <span className="badge b-cyan">{baseOf(symbol)}/USDT</span>
+          <span className="badge b-cyan">{instrumentOf(symbol) ? symbol : baseOf(symbol) + '/USDT'}</span>
           <div className="liqhm-seg">
             {MODELS.map((m) => (
               <button
@@ -389,9 +407,19 @@ export function LiqHeatmap() {
       )}
 
       <div className="disclaimer">
-        Estimated from Binance {r.tf} candles{oi.length ? ' + open-interest changes' : ''} using
-        leverage tiers {model.tiers.map((t) => t.lev + 'x').join('/')} — {model.description}. Bands
-        persist until price trades through them. This is a model, not exchange position data.
+        Estimated from {r.tf} candles{oi.length ? ' + open-interest changes' : ''} using leverage
+        tiers {model.tiers.map((t) => t.lev + 'x').join('/')} — {model.description}.{' '}
+        {funding != null ? (
+          <>
+            Long/short split skewed by live funding ({(funding * 100).toFixed(4)}%) rather than
+            assumed even.{' '}
+          </>
+        ) : (
+          <>No funding published for this market, so the split is the model&rsquo;s own. </>
+        )}
+        Positions are spread across each bar&rsquo;s range, not pinned to its close; bands persist
+        until price trades through them, and what sat inside a bar&rsquo;s body is cleared harder
+        than what a wick merely grazed. This is a model, not exchange position data.
       </div>
     </div>
   )

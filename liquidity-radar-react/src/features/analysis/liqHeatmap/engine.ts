@@ -71,6 +71,29 @@ export interface HeatmapOptions {
   bins: number
   model: HeatmapModel
   oi?: OiPoint[]
+  /**
+   * Latest funding rate, when the venue publishes one. Positive funding means
+   * longs are paying shorts to hold, which is the market saying the long side
+   * is the crowded one — so it is real evidence about positioning rather than
+   * an assumption.
+   */
+  funding?: number | null
+}
+
+/**
+ * Skew the long/short split using funding instead of assuming a 50/50 book.
+ *
+ * A balanced book is an assumption nobody has ever observed. The tilt is
+ * bounded on both ends: typical funding of 0.01% nudges the split to ~0.53,
+ * an extreme 0.1% pushes it to ~0.75, and it can never reach a degenerate 0
+ * or 1 — a book with literally no shorts would be a claim the data cannot
+ * support. With no funding available (spot metals, FX, indices) the model's
+ * own base share is used unchanged.
+ */
+function longShareFrom(base: number, funding?: number | null): number {
+  if (funding == null || !isFinite(funding)) return base
+  const tilt = Math.max(-0.25, Math.min(0.25, funding * 250))
+  return Math.max(0.2, Math.min(0.8, base + tilt))
 }
 export interface Heatmap {
   cols: number
@@ -111,29 +134,70 @@ export function buildHeatmap(candles: CandleFlat[], opts: HeatmapOptions): Heatm
 
   // Rising open interest means more new positions, so scale the notional by it.
   const oi = opts.oi
+  // Growth in open interest means new positions, so scale that bar's notional
+  // by it. Interpolated between the two surrounding samples rather than
+  // snapping to one: OI is sampled far more coarsely than candles, so
+  // snapping made a whole stretch of bars share one step change.
   const oiAt = (tsMs: number): number => {
     if (!oi || oi.length < 2) return 1
     let k = 0
     while (k + 1 < oi.length && oi[k + 1].ts <= tsMs) k++
-    const a = oi[Math.max(0, k - 1)].value
-    const b = oi[k].value
-    return a ? Math.max(0.5, Math.min(2, 1 + ((b - a) / a) * 10)) : 1
+    const prev = oi[Math.max(0, k - 1)]
+    const next = oi[Math.min(oi.length - 1, k + 1)]
+    if (!prev.value || next.ts === prev.ts) return 1
+    const span = next.ts - prev.ts
+    const f = Math.max(0, Math.min(1, (tsMs - prev.ts) / span))
+    const here = prev.value + (next.value - prev.value) * f
+    return Math.max(0.5, Math.min(2, 1 + ((here - prev.value) / prev.value) * 10))
   }
+
+  const longShare = longShareFrom(model.longShare, opts.funding)
+
+  // Positions open across the whole bar, not all at its close. Three anchors
+  // spanning the range, weighted toward the middle, spread the implied
+  // liquidation levels the way the trading actually happened — pinning every
+  // position to the close produced artificially sharp bands that moved in
+  // lockstep with one price.
+  const ANCHORS: Array<[number, number]> = [
+    [0.25, 0.25],
+    [0.5, 0.5],
+    [0.75, 0.25],
+  ]
 
   let max = 0
   for (let i = 0; i < n; i++) {
     const c = candles[i]
-    const notional = c.v * c.c * oiAt(c.t)
+    // FX, indices and spot metals report no volume at all, which made the
+    // whole grid zero and the panel blank. The bar's own range stands in for
+    // activity there — the grid is normalised by its maximum for display, so
+    // only the relative shape matters, not the unit.
+    const activity = c.v > 0 ? c.v * c.c : Math.max(1e-9, c.h - c.l)
+    const notional = activity * oiAt(c.t)
+    const span = c.h - c.l
+
     // 1) new positions become liquidation levels
-    for (const t of model.tiers) {
-      const w = notional * t.weight
-      cur[binOf(c.c * (1 - 1 / t.lev))] += w * model.longShare
-      cur[binOf(c.c * (1 + 1 / t.lev))] += w * (1 - model.longShare)
+    for (const [pos, aw] of ANCHORS) {
+      const px = span > 0 ? c.l + span * pos : c.c
+      for (const t of model.tiers) {
+        const w = notional * t.weight * aw
+        cur[binOf(px * (1 - 1 / t.lev))] += w * longShare
+        cur[binOf(px * (1 + 1 / t.lev))] += w * (1 - longShare)
+      }
     }
-    // 2) price traded through a band → those positions were liquidated
-    const a = binOf(c.l)
-    const b = binOf(c.h)
-    for (let k = a; k <= b; k++) cur[k] *= 0.08
+
+    // 2) price traded through a band → those positions were liquidated.
+    // The body is where price actually spent the bar, so what sits there is
+    // gone; a wick only grazed its levels, so some of that size survives.
+    // One flat 92% haircut across the whole range treated a long wick as
+    // though price had rested there, which wiped liquidity that never got hit.
+    const bodyLo = binOf(Math.min(c.o, c.c))
+    const bodyHi = binOf(Math.max(c.o, c.c))
+    const wickLo = binOf(c.l)
+    const wickHi = binOf(c.h)
+    for (let k = wickLo; k <= wickHi; k++) {
+      cur[k] *= k >= bodyLo && k <= bodyHi ? 0.02 : 0.35
+    }
+
     // 3) decay, then snapshot the column
     for (let k = 0; k < bins; k++) {
       cur[k] *= model.decayPerBar

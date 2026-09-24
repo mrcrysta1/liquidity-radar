@@ -218,6 +218,10 @@ export function renderAnalysis(s: AnalyticsSnapshot): void {
   $('liqSym')!.textContent = state.symbol
   $('vpSym')!.textContent = state.symbol + ' · 96 BARS'
   if (s.mark != null) $('liqMark')!.textContent = '$' + pfmt(s.mark)
+  // Only a perpetual has a premium index; for everything else this is simply
+  // the last traded price, and saying otherwise would misdescribe the number.
+  const markSrc = $('liqMarkSrc')
+  if (markSrc) markSrc.textContent = state.fr ? 'fapi premium index' : 'last traded price'
   if (state.fr) {
     const rate = parseFloat((state.fr as FrLike).lastFundingRate)
     $('mFR')!.textContent = (rate * 100).toFixed(4) + '%'
@@ -225,7 +229,16 @@ export function renderAnalysis(s: AnalyticsSnapshot): void {
     $('mFRNext')!.textContent = rate > 0 ? 'longs pay shorts' : rate < 0 ? 'shorts pay longs' : 'flat'
     if ((state.fr as FrLike).nextFundingTime) {
       const upd = () => {
-        const ms = (state.fr as FrLike).nextFundingTime! - Date.now()
+        // The symbol can change out from under this timer. Switching to a
+        // market with no funding — spot gold, EUR/USD, the S&P — nulls
+        // state.fr, and this kept reading it once a second.
+        const fr = state.fr as FrLike | null
+        if (!fr || !fr.nextFundingTime) {
+          clearInterval(state._frTimer as number | undefined)
+          state._frTimer = undefined
+          return
+        }
+        const ms = fr.nextFundingTime - Date.now()
         if (ms < 0) return
         const hh = Math.floor(ms / 3600000), mm = Math.floor((ms % 3600000) / 60000), ss = Math.floor((ms % 60000) / 1000)
         $('mFRNext')!.textContent = (rate > 0 ? 'longs pay · ' : 'shorts pay · ') + String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0') + ':' + String(ss).padStart(2, '0') + ' to funding'
@@ -234,6 +247,14 @@ export function renderAnalysis(s: AnalyticsSnapshot): void {
       clearInterval(state._frTimer as number | undefined)
       state._frTimer = setInterval(upd, 1000)
     }
+  } else {
+    // Nothing published for this market. Stop the countdown and say so,
+    // rather than leaving the previous symbol's funding on screen.
+    clearInterval(state._frTimer as number | undefined)
+    state._frTimer = undefined
+    $('mFR')!.textContent = '—'
+    $('mFR')!.style.color = 'var(--muted)'
+    $('mFRNext')!.textContent = 'no funding on this market'
   }
   if (s.liq) {
     const oiN = s.liq.oiN
@@ -249,6 +270,27 @@ export function renderAnalysis(s: AnalyticsSnapshot): void {
     if (lB) lB.style.width = s.liq.liqLBars + '%'
     if (sB) sB.style.width = s.liq.liqSBars + '%'
     $('liqLev')!.textContent = Math.abs(parseFloat(s.liq.srDist)) + '% below support at $' + pfmt(s.liq.sup)
+  } else {
+    // These panels are written straight into the DOM, so without this the
+    // previous symbol's numbers simply stayed on screen under the new
+    // symbol's heading — spot gold was showing Bitcoin's support level and
+    // liquidation clusters, which is far worse than showing nothing.
+    const dash = (id: string, txt = '—') => {
+      const el = $(id)
+      if (el) el.textContent = txt
+    }
+    dash('mOI')
+    dash('mOISub', 'no open interest on this market')
+    dash('liqOI')
+    dash('liqATR')
+    dash('liqLongRange')
+    dash('liqShortRange')
+    dash('liqLongEst', 'no perpetual futures for this market')
+    dash('liqShortEst', 'no perpetual futures for this market')
+    dash('liqLev', 'no liquidation model for this market')
+    const lB = $('liqLongBar'), sB = $('liqShortBar')
+    if (lB) lB.style.width = '0%'
+    if (sB) sB.style.width = '0%'
   }
   if (s.vpHtml != null) $('vpList')!.innerHTML = s.vpHtml
 }

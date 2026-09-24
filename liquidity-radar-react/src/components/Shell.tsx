@@ -317,7 +317,7 @@ export function Shell() {
           <div className="sec-head"><div className="sec-title">Liquidation Heat Zones</div><span className="badge b-amber" id="liqSym">BTCUSDT</span></div>
           <div className="metric-grid" style={{ 'marginBottom': '13px' }}>
             <div className="metric"><div className="ml"><span>Open Interest (notional)</span></div><div className="mv" id="liqOI">—</div><div className="ms">USD · perpetual futures</div></div>
-            <div className="metric"><div className="ml"><span>Mark Price</span></div><div className="mv" id="liqMark">—</div><div className="ms">fapi premium index</div></div>
+            <div className="metric"><div className="ml"><span>Mark Price</span></div><div className="mv" id="liqMark">—</div><div className="ms" id="liqMarkSrc">fapi premium index</div></div>
             <div className="metric"><div className="ml"><span>ATR (14×15m)</span></div><div className="mv" id="liqATR">—</div><div className="ms">average true range</div></div>
             <div className="metric"><div className="ml"><span>Support Distance</span></div><div className="mv" style={{ 'fontSize': '15px' }} id="liqLev">—</div><div className="ms">distance to major support</div></div>
           </div>
