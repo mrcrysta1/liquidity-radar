@@ -1,4 +1,5 @@
 import type { CandleLike } from '../types/market'
+import { isInstrument } from '../constants/instruments'
 import { state } from './store'
 import { $ } from '../utils/dom'
 import { DEFAULT_TF, TF_IDS, isTf, normalizeTf } from './timeframe'
@@ -12,6 +13,10 @@ export const mdTfs = TF_IDS
 export function mdSym(s: unknown): string | null {
   if (!s) return null
   const str = String(s).trim().toUpperCase().replace(/-/g, '')
+  // A Yahoo-priced instrument is already a whole symbol. Appending USDT to it
+  // produced things like XAUUSDUSDT, which every Binance endpoint rejects —
+  // guard at the root so no present or future caller has to remember.
+  if (isInstrument(str)) return str
   if (!/USDT$/.test(str)) return str + 'USDT'
   return str
 }

@@ -4,6 +4,7 @@
 // module stays free of UI/stream concerns. The classic-script globals are
 // re-exposed on window by the engine's exposeGlobals().
 import { $ } from '../../utils/dom'
+import { isInstrument } from '../../constants/instruments'
 import { primeInstrument } from '../../services/instrumentFeed'
 import { state } from '../../services/store'
 import { placeChartForTab } from '../charts/chartHost'
@@ -119,5 +120,12 @@ export async function setSymbol(sym: string): Promise<void> {
     cbs!.fetchWhales(),
   ])
   cbs!.connectStreams(cbs!.streamCb)
+  // These instruments have no stream, so leaving the badge on "WS LIVE" or
+  // "SYNCING" would claim a connection that does not exist.
+  if (isInstrument(sym)) {
+    const ks = $('wsKlineState')!
+    ks.textContent = 'POLLED'
+    ks.className = 'badge b-cyan'
+  }
   cbs!.renderHero()
 }
