@@ -4,6 +4,7 @@
 // module stays free of UI/stream concerns. The classic-script globals are
 // re-exposed on window by the engine's exposeGlobals().
 import { $ } from '../../utils/dom'
+import { primeInstrument } from '../../services/instrumentFeed'
 import { state } from '../../services/store'
 import { placeChartForTab } from '../charts/chartHost'
 import type { StreamsCallbacks } from '../../services/streams'
@@ -108,6 +109,9 @@ export async function setSymbol(sym: string): Promise<void> {
   cbs!.renderTicker()
   switchTab('radar')
   await Promise.all([
+    // A Yahoo instrument has no websocket to fill in its price, so fetch one
+    // up front rather than leaving the hero on a dash until the next poll.
+    primeInstrument(sym),
     cbs!.fetchKlines(sym),
     cbs!.fetchOB(),
     cbs!.fetchFR(),

@@ -3,6 +3,7 @@
 // used elsewhere (utils/indicators), so a trader can see whether timeframes
 // agree without switching between them one at a time.
 import { jget } from '../../api/client'
+import { isInstrument } from '../../constants/instruments'
 import { calcRSI, calcMACD, emaArr } from '../../utils/indicators'
 import { state } from '../../services/store'
 import { BASE_MS, tfDef } from '../../services/timeframe'
@@ -97,6 +98,10 @@ function score(closes: number[]): { verdict: Verdict; rsi: number; macdHist: num
 }
 
 async function loadOne(sym: string, tf: string): Promise<void> {
+  // This strip reads Binance klines directly rather than going through
+  // loadCandles, so it has nothing to say about a Yahoo-priced instrument.
+  // Bail out rather than 400 once per timeframe on every symbol switch.
+  if (isInstrument(sym)) return
   try {
     const data = (await jget(
       `${KLINE_URL}?symbol=${sym}&interval=${tf}&limit=120`,

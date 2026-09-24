@@ -8,7 +8,7 @@ export interface AppState {
   symbol: string
   tab: string
   tf: string
-  tickers: Record<string, { last: number; pct: number; qvol: number }>
+  tickers: Record<string, { last: number; pct: number; qvol: number; high?: number; low?: number }>
   candles: CandleFlat[]
   ob: { bids: Array<Array<number | string>>; asks: Array<Array<number | string>> }
   fr: unknown
