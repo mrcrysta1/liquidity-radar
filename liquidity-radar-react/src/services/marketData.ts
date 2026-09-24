@@ -293,8 +293,13 @@ export async function fetchKlines(sym: string): Promise<void> {
 export async function fetchOB(): Promise<void> {
   // Order books, funding, open interest and the trade tape are Binance
   // derivatives concepts. A Yahoo-priced instrument has none of them, so
-  // asking would just be a guaranteed 400 every poll.
-  if (isInstrument(state.symbol)) return
+  // asking would just be a guaranteed 400 every poll — and whatever the
+  // previous crypto symbol left in state has to go, or gold ends up skewed
+  // by Bitcoin's funding rate.
+  if (isInstrument(state.symbol)) {
+    state.ob = { bids: [], asks: [] }
+    return
+  }
   try {
     const d = (await jget(
       'https://api.binance.com/api/v3/depth?symbol=' + mdSym(state.symbol) + '&limit=15',
@@ -310,8 +315,13 @@ export async function fetchOB(): Promise<void> {
 export async function fetchFR(): Promise<void> {
   // Order books, funding, open interest and the trade tape are Binance
   // derivatives concepts. A Yahoo-priced instrument has none of them, so
-  // asking would just be a guaranteed 400 every poll.
-  if (isInstrument(state.symbol)) return
+  // asking would just be a guaranteed 400 every poll — and whatever the
+  // previous crypto symbol left in state has to go, or gold ends up skewed
+  // by Bitcoin's funding rate.
+  if (isInstrument(state.symbol)) {
+    state.fr = null
+    return
+  }
   try {
     state.fr = await jget('https://fapi.binance.com/fapi/v1/premiumIndex?symbol=' + state.symbol)
     hooks!.onFR()
@@ -324,8 +334,13 @@ export async function fetchFR(): Promise<void> {
 export async function fetchOI(): Promise<void> {
   // Order books, funding, open interest and the trade tape are Binance
   // derivatives concepts. A Yahoo-priced instrument has none of them, so
-  // asking would just be a guaranteed 400 every poll.
-  if (isInstrument(state.symbol)) return
+  // asking would just be a guaranteed 400 every poll — and whatever the
+  // previous crypto symbol left in state has to go, or gold ends up skewed
+  // by Bitcoin's funding rate.
+  if (isInstrument(state.symbol)) {
+    state.oi = null
+    return
+  }
   try {
     state.oi = await jget('https://fapi.binance.com/fapi/v1/openInterest?symbol=' + state.symbol)
     hooks!.onOI()
@@ -360,8 +375,13 @@ interface WhaleTape {
 export async function fetchWhales(): Promise<void> {
   // Order books, funding, open interest and the trade tape are Binance
   // derivatives concepts. A Yahoo-priced instrument has none of them, so
-  // asking would just be a guaranteed 400 every poll.
-  if (isInstrument(state.symbol)) return
+  // asking would just be a guaranteed 400 every poll — and whatever the
+  // previous crypto symbol left in state has to go, or gold ends up skewed
+  // by Bitcoin's funding rate.
+  if (isInstrument(state.symbol)) {
+    state.whales = []
+    return
+  }
   try {
     const trades = (await jget(
       'https://api.binance.com/api/v3/trades?symbol=' + state.symbol + '&limit=1000',
