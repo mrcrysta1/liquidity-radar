@@ -1,6 +1,8 @@
 import type { CandleFlat } from './market'
 import type { CrossExRow, DeepOb, LongShortRow, OiPoint } from '../features/advanced/advancedData'
 import type { Liq } from '../features/advanced/liquidations'
+import type { MarketCapEntry } from './coingecko'
+import type { FuturesEntry } from './futures'
 
 export interface AppState {
   symbol: string
@@ -23,6 +25,8 @@ export interface AppState {
   crossEx: CrossExRow[]
   liqs: Liq[]
   liqWs: string
+  marketCaps: Record<string, MarketCapEntry>
+  futures: Record<string, FuturesEntry>
   [key: string]: unknown
 }
 
@@ -49,4 +53,6 @@ export const state: AppState = {
   crossEx: [],
   liqs: [],
   liqWs: 'closed',
+  marketCaps: {},
+  futures: {},
 }

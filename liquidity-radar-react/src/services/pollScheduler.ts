@@ -68,14 +68,24 @@ function pause(): void {
  *
  * `always: true` opts a job out of pausing — use it only where a gap would
  * corrupt state rather than merely delay a number.
+ *
+ * Returns an unregister function. Most callers (the app's own boot-time
+ * loops) never call it — those jobs live for the session. A component that
+ * mounts/unmounts this loop (a lazy panel, say) must call it on cleanup, or
+ * reopening the panel stacks up duplicate jobs each time.
  */
-export function poll(fn: () => void, everyMs: number, opts?: { always?: boolean }): void {
+export function poll(fn: () => void, everyMs: number, opts?: { always?: boolean }): () => void {
   const job: Job = { fn, everyMs, always: !!opts?.always, last: Date.now(), timer: null }
   jobs.push(job)
   arm(job)
   if (!started && typeof document !== 'undefined') {
     started = true
     document.addEventListener('visibilitychange', () => (hidden() ? pause() : resume()))
+  }
+  return () => {
+    if (job.timer) clearTimeout(job.timer)
+    const i = jobs.indexOf(job)
+    if (i !== -1) jobs.splice(i, 1)
   }
 }
 

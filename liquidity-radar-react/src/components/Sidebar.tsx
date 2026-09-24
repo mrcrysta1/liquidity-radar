@@ -6,6 +6,7 @@
 // behaviour change — nothing downstream needs to know.
 import { useEffect, useState } from 'react'
 import { storageGetRaw, storageSetRaw } from '../services/storage'
+import { getActiveTab, subscribeActiveTab, switchTab } from '../features/actions/userActions'
 
 type TabId =
   | 'home'
@@ -16,6 +17,7 @@ type TabId =
   | 'bubbles'
   | 'analysis'
   | 'news'
+  | 'neuralnet'
   | 'pro'
   | 'settings'
 
@@ -101,6 +103,17 @@ function NavIcon({ id }: { id: TabId }) {
           <path d="M16.2 9h1.4v3.4h-1.4z" {...S} />
         </svg>
       )
+    case 'neuralnet':
+      return (
+        <svg {...p}>
+          <circle cx="5" cy="7" r="1.8" {...S} />
+          <circle cx="5" cy="17" r="1.8" {...S} />
+          <circle cx="12" cy="12" r="1.8" {...S} />
+          <circle cx="19" cy="7" r="1.8" {...S} />
+          <circle cx="19" cy="17" r="1.8" {...S} />
+          <path d="M6.6 8 10.6 11M6.6 16 10.6 13M13.4 11 17.4 8M13.4 13 17.4 16" {...S} opacity=".6" />
+        </svg>
+      )
     default:
       return (
         <svg {...p}>
@@ -117,6 +130,7 @@ const NAV: Array<{ id: TabId; label: string; key: string; group: string }> = [
   { id: 'multichart', label: 'Charts', key: 'C', group: 'main' },
   { id: 'signals', label: 'Signals', key: 'S', group: 'trade' },
   { id: 'analysis', label: 'Analysis', key: 'A', group: 'trade' },
+  { id: 'neuralnet', label: 'Neural net', key: '', group: 'trade' },
   { id: 'market', label: 'Market', key: 'M', group: 'explore' },
   { id: 'bubbles', label: 'Bubbles', key: 'B', group: 'explore' },
   { id: 'news', label: 'News', key: 'N', group: 'explore' },
@@ -139,6 +153,9 @@ const KEY = 'lr-navCollapsed'
 export function Sidebar() {
   const [collapsed, setCollapsed] = useState(() => storageGetRaw(KEY) === '1')
   const [drawer, setDrawer] = useState(false)
+  const [activeTab, setActiveTab] = useState(getActiveTab)
+
+  useEffect(() => subscribeActiveTab(setActiveTab), [])
 
   // The rail is a plain element in the shell, so the body carries the state the
   // layout keys off.
@@ -189,10 +206,13 @@ export function Sidebar() {
           return (
             <button
               key={id}
-              className={'tab-btn' + (id === 'home' ? ' active' : '')}
+              className={'tab-btn' + (id === activeTab ? ' active' : '')}
               data-tab={id}
               aria-label={item.label}
-              onClick={() => setDrawer(false)}
+              onClick={() => {
+                switchTab(id)
+                setDrawer(false)
+              }}
             >
               <span className="tabbar-ico">
                 <NavIcon id={id} />
@@ -248,12 +268,15 @@ export function Sidebar() {
               {NAV.filter((n) => n.group === g.id).map((n) => (
                 <button
                   key={n.id}
-                  className={'tab-btn' + (n.id === 'home' ? ' active' : '')}
+                  className={'tab-btn' + (n.id === activeTab ? ' active' : '')}
                   data-tab={n.id}
                   aria-label={n.label + ' tab'}
-                  aria-selected={n.id === 'home'}
+                  aria-selected={n.id === activeTab}
                   title={n.label}
-                  onClick={() => setDrawer(false)}
+                  onClick={() => {
+                    switchTab(n.id)
+                    setDrawer(false)
+                  }}
                 >
                   <span className="sidenav-ico">
                     <NavIcon id={n.id} />

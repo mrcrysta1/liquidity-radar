@@ -4,7 +4,6 @@
 // engine exclusively (chat reply generator, analysis section).
 import { calcRSI, calcMACD, calcBB, emaArr } from '../../utils/indicators'
 import { pfmt } from '../../utils/format'
-import { state } from '../../services/store'
 
 export interface ChatPattern {
   type: 'bullish' | 'bearish'
@@ -41,14 +40,19 @@ export function detectPatterns(closes: number[], vols: number[]): ChatPattern[] 
 }
 
 interface AiLike {
-  fc?: { rows: Array<{ pred: number }> } | null
   last?: number
   score: number
 }
-export function generateSignalSummary(base: string, ai: AiLike, fc: unknown): string {
+/**
+ * `closes` must be real historical price history — previously this derived
+ * a 4-point array from the forecast's own predicted prices (ai.fc.rows),
+ * which detectPatterns() then always rejected (`length < 20`) before ever
+ * computing anything. The PATTERN ALERTS section was silently empty on
+ * every call as a result.
+ */
+export function generateSignalSummary(base: string, ai: AiLike, closes: number[], vols: number[]): string {
   let s = ''
-  const closes = ai.fc ? ai.fc.rows.map((r) => r.pred) : [ai.last]
-  const patterns = detectPatterns(closes as number[], state.candles.map((c) => c.v).filter((x): x is number => typeof x === 'number'))
+  const patterns = detectPatterns(closes, vols)
   if (patterns.length) {
     s += '<b>PATTERN ALERTS:</b><br>'
     patterns.forEach(function (p) {

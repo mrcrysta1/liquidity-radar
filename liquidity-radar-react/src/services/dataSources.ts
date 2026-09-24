@@ -135,11 +135,23 @@ export const SOURCE_GROUPS: SourceGroup[] = [
         transport: 'REST',
         purpose:
           'Mark price, index price and the current funding rate — the basis figure and the funding countdown.',
-        usedBy: 'Funding tile, chart side panel (Futures), Cross-Exchange Radar',
+        usedBy: 'Funding tile, chart side panel (Futures), Cross-Exchange Radar, Market tab (Perpetual Futures table)',
         endpoint: 'fapi.binance.com/fapi/v1/premiumIndex?symbol=',
         cadence: 'Every 30s while visible',
         auth: 'none',
         match: /fapi\.binance\.com\/fapi\/v1\/premiumIndex/,
+      },
+      {
+        id: 'futuresTicker24h',
+        name: 'Perpetual 24h ticker',
+        provider: 'Binance USD-M',
+        transport: 'REST',
+        purpose: '24h change and quote volume for every perpetual pair in one call.',
+        usedBy: 'Market tab (Perpetual Futures table)',
+        endpoint: 'fapi.binance.com/fapi/v1/ticker/24hr',
+        cadence: 'Every 60s while visible',
+        auth: 'none',
+        match: /fapi\.binance\.com\/fapi\/v1\/ticker\/24hr/,
       },
       {
         id: 'openInterest',
@@ -147,7 +159,7 @@ export const SOURCE_GROUPS: SourceGroup[] = [
         provider: 'Binance USD-M',
         transport: 'REST',
         purpose: 'Contracts currently open — how much leverage is committed right now.',
-        usedBy: 'Open Interest tile, chart side panel (Futures)',
+        usedBy: 'Open Interest tile, chart side panel (Futures), Market tab (Perpetual Futures table)',
         endpoint: 'fapi.binance.com/fapi/v1/openInterest?symbol=',
         cadence: 'Every 30s while visible',
         auth: 'none',
@@ -388,6 +400,19 @@ export const SOURCE_GROUPS: SourceGroup[] = [
     label: 'Sentiment, news & calendar',
     blurb: 'Context around the price. None of these are required for the chart to work.',
     sources: [
+      {
+        id: 'coingecko',
+        name: 'Market cap & supply',
+        provider: 'CoinGecko',
+        transport: 'REST',
+        purpose:
+          'Market cap and circulating supply for the Market tab — Binance is an exchange, not an aggregator, and has no concept of either. Free public endpoint, no key.',
+        usedBy: 'Market tab — Top Coins table',
+        endpoint: 'api.coingecko.com/api/v3/coins/markets',
+        cadence: 'Every 60 seconds while visible',
+        auth: 'none',
+        match: /coingecko\.com/,
+      },
       {
         id: 'fng',
         name: 'Fear & Greed index',

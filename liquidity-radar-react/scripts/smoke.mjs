@@ -13,7 +13,32 @@ const MIME = {
   '.css': 'text/css',
   '.svg': 'image/svg+xml',
 }
-const CHROME = process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe'
+function findChrome() {
+  if (process.env.CHROME_PATH) return process.env.CHROME_PATH
+  const candidates =
+    process.platform === 'win32'
+      ? [
+          'C:/Program Files/Google/Chrome/Application/chrome.exe',
+          'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
+        ]
+      : process.platform === 'darwin'
+        ? ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome']
+        : [
+            '/usr/bin/google-chrome',
+            '/usr/bin/google-chrome-stable',
+            '/usr/bin/chromium',
+            '/usr/bin/chromium-browser',
+            '/snap/bin/chromium',
+          ]
+  const found = candidates.find((p) => existsSync(p))
+  if (!found) {
+    throw new Error(
+      'No Chrome/Chromium found. Set CHROME_PATH env var to your browser executable.',
+    )
+  }
+  return found
+}
+const CHROME = findChrome()
 
 if (!existsSync(DIST)) throw new Error('dist/ not found — run `npm run build` first')
 

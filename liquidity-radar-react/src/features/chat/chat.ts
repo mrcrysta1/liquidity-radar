@@ -22,6 +22,7 @@ import {
 import { detectPatterns, generateSignalSummary } from '../aiScanner'
 import { fetchFromXoomar } from '../analysis/calendar'
 import { fngColor } from '../snapshots'
+import { getMLState } from '../ml/store'
 import type { AIScore, CandleLike, Forecast } from '../../types/market'
 
 interface CtxData {
@@ -37,6 +38,19 @@ interface WhaleTape { maker?: boolean; usd: number; price: number; qty: number; 
 interface TickerLike { last: number; pct: number; qvol: number; low: number; high: number }
 interface TfBreak { tf: string; type: string }
 
+/** Coin-context cache has no natural expiry beyond the 60s freshness check —
+ * a long session asking about many different coins would otherwise grow it
+ * unbounded. Caps it to the most recently-used entries. */
+const CTX_CACHE_MAX = 30
+function pruneCtxCache(): void {
+  const keys = Object.keys(state.ctxCache)
+  if (keys.length <= CTX_CACHE_MAX) return
+  keys
+    .sort((a, b) => (state.ctxCache[a] as CtxEntry).ts - (state.ctxCache[b] as CtxEntry).ts)
+    .slice(0, keys.length - CTX_CACHE_MAX)
+    .forEach((k) => delete state.ctxCache[k])
+}
+
 async function loadCtx(base: string): Promise<CtxData> {
   const sym = COINS[base] ? COINS[base].sym : base + 'USDT'
   const c = state.ctxCache[base] as CtxEntry | null | undefined
@@ -51,6 +65,7 @@ async function loadCtx(base: string): Promise<CtxData> {
     fc: forecastFrom(closes),
   }
   state.ctxCache[base] = { ts: Date.now(), data: out }
+  pruneCtxCache()
   return out
 }
 async function safeCtx(base: string): Promise<CtxData> {
@@ -400,8 +415,23 @@ export async function generateReply(raw: string): Promise<string> {
       const px = state.tickers[(COINS[base] || {}).sym]
       const dir = a.score > 15 ? 'LONG bias' : a.score < -15 ? 'SHORT bias' : 'NO-TRADE / wait'
       const cls = a.score > 15 ? 'hl-g' : a.score < -15 ? 'hl-r' : 'hl-a'
-      const patStr = generateSignalSummary(base, a, fc)
-      return '<b>' + base + ' tactical read:</b> ' + (px ? 'spot ' + chip('$' + pfmt(px.last)) : '') + '<br>• AI composite: <span class="' + cls + '">' + (a.score > 0 ? '+' : '') + a.score + ' (' + a.label + ')</span><br>• Trend: price ' + (a.last > a.e20 ? '<span class="hl-g">above</span>' : '<span class="hl-r">below</span>') + ' EMA20 &middot; MACD ' + (a.macd.hist > 0 ? '<span class="hl-g">positive</span>' : '<span class="hl-r">negative</span>') + ' &middot; volume ' + a.vt.toLowerCase() + '<br>• ML projection: <span class="' + cls + '">' + fc.bias + '</span> (1H ~ $' + pfmt(fc.rows[0].pred) + ')<br><br>' + patStr + '<br><br><span class="hl-a">Not financial advice — markets can invalidate any model instantly.</span>'
+      const patStr = generateSignalSummary(base, a, d.closes, d.candles.map((c) => c.v as number))
+      // The trained-in-browser model only ever covers the symbol actually
+      // charted (it trains on state.candles) — for any other coin the chat
+      // is answering about, there's honestly nothing to report yet.
+      const ml = getMLState()
+      let mlLine = ''
+      if (base === baseOf(state.symbol) && ml.status === 'ready' && ml.prediction && ml.trained) {
+        const p = ml.prediction
+        const mlCls = p.direction === 'up' ? 'hl-g' : 'hl-r'
+        mlLine =
+          '<br>• ML model: <span class="' + mlCls + '">' + (p.direction === 'up' ? 'UP' : 'DOWN') + '</span> next ' +
+          ml.trained.horizon + ' candles (' + (p.confidence * 100).toFixed(0) + '% confidence, ' +
+          (ml.trained.backtestAccuracy * 100).toFixed(0) + '% backtested accuracy)'
+      } else if (base === baseOf(state.symbol) && ml.status === 'training') {
+        mlLine = '<br>• ML model: training…'
+      }
+      return '<b>' + base + ' tactical read:</b> ' + (px ? 'spot ' + chip('$' + pfmt(px.last)) : '') + '<br>• AI composite: <span class="' + cls + '">' + (a.score > 0 ? '+' : '') + a.score + ' (' + a.label + ')</span><br>• Trend: price ' + (a.last > a.e20 ? '<span class="hl-g">above</span>' : '<span class="hl-r">below</span>') + ' EMA20 &middot; MACD ' + (a.macd.hist > 0 ? '<span class="hl-g">positive</span>' : '<span class="hl-r">negative</span>') + ' &middot; volume ' + a.vt.toLowerCase() + '<br>• Trend projection: <span class="' + cls + '">' + fc.bias + '</span> (1H ~ $' + pfmt(fc.rows[0].pred) + ')' + mlLine + '<br><br>' + patStr + '<br><br><span class="hl-a">Not financial advice — markets can invalidate any model instantly.</span>'
     } catch (e) {
       return 'Couldn\'t pull live context for that one — try again shortly. Standing disclaimer: I provide analysis frameworks, not financial advice.'
     }
@@ -415,278 +445,278 @@ export async function generateReply(raw: string): Promise<string> {
     } catch (e) { /* ignore */ }
   }
 
+  // === CONVERSATION ===
+  if (/^(how are you|how r u|hru|you good|you ok)\s/.test(text) || has('how are you')) {
+    return 'Running at full strength — all streams connected, scanner humming. What do you need?'
+  }
+  if (/^(who made you|who built you|who created you|who are you|what are you|your name)/.test(text) || has('who made you') || has('your name')) {
+    return '<b>Liquidity Radar v5.0</b> — built by <b>Zain</b> as a self-contained crypto microstructure terminal. I run entirely in your browser with live Binance data. No backend, no API keys, no nonsense.'
+  }
+  if (has('tell me a joke') || has('joke') || has('funny')) {
+    const jokes = ['Why did the trader bring a ladder to the bar? Because the drinks were on the house and the charts were going to the moon.<br><br>...I\'ll stick to analyzing candles.', 'What\'s a crypto trader\'s favorite exercise? Jumping to conclusions.<br><br>...and then getting rekt.', 'Why don\'t traders trust atoms? Because they make up everything — including your portfolio value.<br><br>I prefer data.']
+    return jokes[Math.floor(Math.random() * jokes.length)]
+  }
+  if (has('best time') || has('when to trade') || has('trading hours')) {
+    return '<b>Best crypto trading windows:</b><br>• US market open (13:30-14:00 UTC) — highest volatility<br>• London session overlap (07:00-09:00 UTC) — EUR/GBP pairs + BTC spillover<br>• Asian session open (00:00-02:00 UTC) — JPY pairs, sometimes BTC dumps<br>• 24/7 nature means there\'s always a session — but liquidity clusters around banking hours. Weekends are thinner and easier to whipsaw.'
+  }
+  if (has('position sizing') || has('how much to') || has('risk per trade') || has('risk management')) {
+    return '<b>Position Sizing 101:</b><br>• Never risk more than 1-2% of total capital on a single trade<br>• Position size = (Account x Risk%) / (Entry - Stop Loss)<br>• Example: $10K account, 1% risk, $100 stop = $1,000 / $100 = 10 units<br>• Kelly criterion for the advanced: f* = (bp - q) / b<br>Most blowups come from sizing too large, not from bad analysis.'
+  }
+  if (has('stop loss') || has('sl') || has('where to put stop')) {
+    return '<b>Stop Loss placement:</b><br>• Below last swing low (longs) / above last swing high (shorts)<br>• ATR-based: entry ± 1.5x ATR(14)<br>• Structure-based: below support zone with buffer<br>• Never use round numbers (everyone else does too)<br><br>The stop is where your thesis is <i>wrong</i>, not where it hurts. If it\'s too tight, you get stopped out by noise. Too wide, and one trade ruins your month.'
+  }
+
+  // === ECONOMICS & MACRO ===
+  if (has('inflation') || has('cpi') || has('consumer price')) {
+    return '<b>Inflation / CPI explained:</b><br>• CPI measures average price change of a consumer basket<br>• Rising CPI = prices going up = USD purchasing power declining<br>• Fed raises rates to fight inflation = risk assets sell off (usually)<br>• Falling CPI = rate cut expectations = risk-on (usually)<br><br>Crypto correlation: BTC tends to rally when CPI comes in soft (rate cut bets) and dump on hot CPI (tightening fears). Not 1:1, but the first 30 minutes after CPI print are pure volatility.'
+  }
+  if (has('federal reserve') || has('fed rate') || has('interest rate') || has('rate cut') || has('rate hike')) {
+    return '<b>The Federal Reserve / Interest Rates:</b><br>• Fed funds rate = what banks charge each other overnight<br>• Higher rates = borrowing costs up = stocks/bonds reprice = crypto correlation varies<br>• Rate cuts = liquidity expectations = risk assets tend to rally<br>• "Higher for longer" = the market\'s worst nightmare in 2023-24<br><br>Crypto impact: BTC was born in a ZIRP (zero interest rate) world. True stress test came with rates at 5.25%. Watch FOMC statements and dot plots — they move everything.'
+  }
+  if (has('quantitative easing') || has('qe') || has('quantitative tightening') || has('qt') || has('money printing')) {
+    return '<b>QE vs QT — The Liquidity Machine:</b><br>• QE: Fed buys bonds, injects money into system = "money printing" = risk assets moon<br>• QT: Fed lets bonds mature off balance sheet = drains liquidity = headwind for risk<br>• QE started March 2020 → BTC went from $5K to $69K<br>• QT started mid-2022 → BTC dropped from $47K to $15K<br><br>Crypto is essentially a liquidity beta play. When the money printer goes brrr, crypto benefits first and most.'
+  }
+  if (has('gdp') || has('gross domestic product')) {
+    return '<b>GDP — Gross Domestic Product:</b><br>• Total value of goods/services produced in a country<br>• Rising GDP = economy growing = generally risk-on<br>• Falling GDP / negative = recession fears = flight to safety<br>• Crypto correlation: indirect. GDP growth supports risk appetite, but crypto is more driven by liquidity and monetary policy than by GDP itself.'
+  }
+  if (has('non farm') || has('nfp') || has('payroll') || has('jobs report')) {
+    return '<b>Non-Farm Payrolls (NFP):</b><br>• Released first Friday of each month<br>• Counts new jobs added excluding agriculture<br>• Strong jobs = economy hot = Fed keeps rates high = USD strong = BTC weak<br>• Weak jobs = economy cooling = Fed may cut = USD weak = BTC strong<br><br>First 5 minutes after NFP release are pure chaos. Wait for the dust to settle.'
+  }
+  if (has('recession') || has('economic downturn')) {
+    return '<b>Recession in Crypto Context:</b><br>• Recession = two consecutive quarters of negative GDP growth<br>• Historically, BTC drops 70-80% from ATH during macro recessions<br>• BUT recovery is also faster than traditional assets<br>• The "money printer will save us" trade has historically worked<br><br>Key indicator: yield curve inversion (2Y > 10Y Treasury). When it un-inverts, recession historically follows within 6-18 months.'
+  }
+
+  // === CRYPTO BASICS ===
+  if (has('what is bitcoin') || has('explain bitcoin') || has('about bitcoin') || has('tell me about btc')) {
+    return '<b>Bitcoin (BTC) — The Original:</b><br>• Created 2009 by Satoshi Nakamoto (pseudonymous)<br>• First decentralized digital currency — no middleman<br>• Fixed supply: 21M coins (deflationary by design)<br>• Proof-of-work mining secures the network<br>• Block time: ~10 minutes, halving every 4 years<br><br>Current price and analysis: try <i>"analyze btc"</i> for live data.'
+  }
+  if (has('what is ethereum') || has('explain ethereum') || has('about eth')) {
+    return '<b>Ethereum (ETH) — The World Computer:</b><br>• Created 2015 by Vitalik Buterin<br>• Smart contract platform — runs dApps, DeFi, NFTs, tokens<br>• Transitioned to Proof-of-Stake (The Merge, Sept 2022)<br>• EIP-1559 burns base fee — deflationary pressure<br>• Gas fees = cost of computation on Ethereum<br><br>ETH is the collateral layer of DeFi. Everything runs on top of it.'
+  }
+  if (has('what is blockchain') || has('explain blockchain')) {
+    return '<b>Blockchain — Distributed Ledger 101:</b><br>• Chain of blocks, each containing verified transactions<br>• Every node holds a copy = no single point of failure<br>• Immutability: once confirmed, altering a block requires 51% of network hash<br>• Consensus mechanisms: PoW (Bitcoin) or PoS (Ethereum)<br><br>It\'s not magic — it\'s an agreed-upon way to maintain a shared truth without trusting a middleman.'
+  }
+  if (has('what is an nft') || has('explain nft')) {
+    return '<b>NFTs — Non-Fungible Tokens:</b><br>• Unique tokens on a blockchain representing ownership<br>• "Non-fungible" = one-of-one, not interchangeable like ETH<br>• Use cases: digital art, collectibles, game items, membership passes<br>• Most speculation was in JPEGs during 2021-22 mania<br><br>The tech has utility (provenance, royalties, ticketing) even if most profile-picture projects went to zero.'
+  }
+  if (has('what is defi') || has('explain defi')) {
+    return '<b>DeFi — Decentralized Finance:</b><br>• Financial services built on smart contracts, no banks<br>• Lending (Aave/Compound), swaps (Uniswap), derivatives (dYdX)<br>• TVL (Total Value Locked) = health metric of the sector<br>• Yield farming: earn tokens by providing liquidity<br><br>DeFi is how crypto earns its "financial system replacement" narrative. Most of it runs on Ethereum.'
+  }
+  if (has('what is solana') || has('about sol')) {
+    return '<b>Solana (SOL) — High-Performance L1:</b><br>• PoH (Proof of History) + PoS = extremely fast<br>• 65,000 TPS theoretical, ~4,000 actual<br>• Near-zero fees (fractions of a cent)<br>• Has had multiple outages — reliability is its Achilles heel<br><br>Solana is Ethereum\'s main competitor for speed-sensitive applications. The "Ethereum killer" narrative comes and goes.'
+  }
+  if (has('layer 2') || has('l2') || has('scaling solution')) {
+    return '<b>Layer 2 Scaling Solutions:</b><br>• Ethereum L2s: Arbitrum, Optimism, Base, zkSync<br>• Off-chain execution, on-chain settlement = faster + cheaper<br>• Rollups batch transactions and post compressed data to L1<br>• ZK-rollups vs Optimistic rollups: different tradeoffs in proof generation<br><br>L2s are how Ethereum scales without compromising decentralization.'
+  }
+  if (has('altcoin') || has('alt season') || has('altcoin season')) {
+    return '<b>Altcoins / Alt Season:</b><br>• Everything that isn\'t Bitcoin = altcoin<br>• "Alt season" = capital rotates from BTC into alts (usually after BTC stabilizes near ATH)<br>• BTC dominance chart is the alt season indicator<br>• Alt season playbook: BTC moons → BTC consolidates → ETH follows → large caps → mid → small caps → everything bleeds back to BTC<br><br>Alt seasons make people rich and then destroy them. Know where you are in the cycle.'
+  }
+
+  // === TRADING CONCEPTS ===
+  if (has('what is leverage') || has('explain leverage')) {
+    return '<b>Leverage — Amplified Exposure:</b><br>• 10x leverage: $1,000 controls $10,000 worth<br>• Your PnL is multiplied by 10x, but so are losses<br>• Liquidation happens when losses eat your margin<br>• At 10x: a ~10% adverse move wipes you out<br>• At 50x: a ~2% adverse move wipes you out<br><br>Leverage is a tool for capital efficiency, not a money multiplier. Most leveraged traders lose. The house (exchange) always wins.'
+  }
+  if (has('margin call') || has('margin')) {
+    return '<b>Margin Call — The Warning Bell:</b><br>• When your account equity falls below maintenance margin<br>• Exchange demands you deposit more funds or they liquidate<br>• On Binance: margin ratio below 1.1 triggers auto-liquidation<br><br>Prevention: use stop losses, reduce leverage, don\'t over-allocate. A margin call is the exchange telling you "your trade is wrong and I\'m closing it for you."'
+  }
+  if (has('what is short') || has('short selling') || has('shorting')) {
+    return '<b>Short Selling — Profiting From Drops:</b><br>• Borrow an asset, sell it high, buy it back low, return it<br>• In futures: open a short position = same economic exposure<br>• Risk: theoretically unlimited upside = unlimited loss potential<br>• Short squeezes: when shorts are forced to buy back, accelerating the rally<br><br>Famous squeeze: GameStop 2021. In crypto: short squeezes happen when funding is heavily negative and price starts rising.'
+  }
+  if (has('liquidation cascade') || has('cascade')) {
+    return '<b>Liquidation Cascades — The Domino Effect:</b><br>• Price drops → overleveraged longs get liquidated → their forced sells push price lower → more longs liquidated → repeat<br>• Creates violent V-shaped moves (both directions)<br>• Most common when OI is high and funding is positive<br><br>This is why I track liquidation zones on the Analysis tab. Dense liquidation clusters act as magnets for price.'
+  }
+  if (has('take profit') || has('when to take profit') || has('tp')) {
+    return '<b>Take Profit Strategy:</b><br>• Scale out in portions, not all at once<br>• First target: 1:1 risk-reward (take 50%)<br>• Second target: move stop to breakeven, let rest run<br>• Trail with ATR: stop moves 1.5x ATR behind price<br>• Key: have a plan BEFORE entry, not after<br><br>The hardest part isn\'t getting in — it\'s selling at the right time. Most traders give back gains by holding too long.'
+  }
+
+  // === ON-CHAIN & NETWORK ===
+  if (has('what is tvl') || has('explain tvl')) {
+    return '<b>TVL — Total Value Locked:</b><br>• Sum of assets deposited in DeFi protocols<br>• Higher TVL = more capital trusting the protocols<br>• Aave, Lido, MakerDAO typically lead<br>• TVL/Market Cap ratio indicates DeFi utilization<br><br>TVL rising + token price rising = healthy growth. TVL rising + price flat = value hasn\'t been priced in yet.'
+  }
+  if (has('what are gas fees') || has('gas fees explained')) {
+    return '<b>Gas Fees — Transaction Cost:</b><br>• Fee paid to process transactions on blockchain<br>• Ethereum: measured in gwei (1 gwei = 0.000000001 ETH)<br>• High demand = high gas = expensive transactions<br>• L2s (Arbitrum, Base) reduce gas by 10-100x<br><br>Gas is the "toll booth" of blockchain. During NFT mints or market crashes, gas can spike 100x.'
+  }
+  if (has('proof of work') || has('pow') || has('proof of stake') || has('pos') || has('mining') || has('staking explained')) {
+    return '<b>PoW vs PoS — Consensus Mechanisms:</b><br>• PoW: miners compete to solve puzzles, winner adds block (Bitcoin, pre-merge ETH)<br>• PoS: validators stake coins, random selection adds block (Ethereum, Solana)<br>• PoW: energy-intensive but battle-tested, very secure<br>• PoS: energy-efficient, faster, but newer and more centralized<br><br>BTC will always be PoW. ETH switched to PoS. The debate is philosophical, not technical.'
+  }
+
+  // === NEWS & EVENTS ===
+  if (has('news') || has('breaking') || has('what is happening') || has('what is going on')) {
+    try {
+      const newsData = (await jget('https://cryptocurrency.cv/api/news')) as { data?: Array<{ title?: string; source?: string; date?: string }> } | null
+      if (newsData && newsData.data && newsData.data.length) {
+        let s = '<b>Latest Crypto News:</b><br><br>'
+        newsData.data.slice(0, 6).forEach(function (n, i) {
+          s += (i + 1) + '. <b>' + esc(n.title || '') + '</b><br><span style="color:var(--dim);font-size:11px">' + esc(n.source || '') + ' · ' + esc(n.date || '') + '</span><br><br>'
+        })
+        s += 'Source: cryptocurrency.cv — updates in real time.'
+        return s
+      }
+    } catch (e) { /* ignore */ }
+    return 'News feed temporarily unavailable. Try the <b>News tab</b> for live updates.'
+  }
+  if (has('forex') || has('forex event') || has('macro event') || has('economic calendar') || has('this week event')) {
+    let calData: Array<{ impact?: string; title?: string; country?: string; date?: string; time?: string }> | null = null
+    try {
+      calData = (await jget2('https://nfs.faireconomy.media/ff_calendar_thisweek.json', { to: 10000, retries: 1, dedup: true })) as Array<{ impact?: string; title?: string; country?: string; date?: string; time?: string }> | null
+      if (!calData || !calData.length) throw new Error('empty')
+    } catch (e1) {
+      try { calData = (await fetchFromXoomar()) as unknown as Array<{ impact?: string; title?: string; country?: string; date?: string; time?: string }> } catch (e2) { /* ignore */ }
+    }
+    if (calData && calData.length) {
+      let s = '<b>This Week\'s Macro Events:</b><br><br>'
+      const important = calData.filter(function (e) { return e.impact === 'High' })
+      if (important.length) {
+        important.slice(0, 6).forEach(function (e, i) {
+          s += '<span style="color:' + (e.impact === 'High' ? 'var(--amber)' : 'var(--dim)') + '">[IMPACT: ' + e.impact + ']</span> <b>' + esc(e.title || '') + '</b><br>' + esc(e.country || '') + ' · ' + esc(e.date || '') + ' ' + esc(e.time || '') + '<br><br>'
+        })
+      } else {
+        calData.slice(0, 6).forEach(function (e, i) {
+          s += esc(e.title || '') + ' — ' + esc(e.country || '') + ' · ' + esc(e.date || '') + '<br>'
+        })
+      }
+      s += 'Source: economic calendar — High impact events move crypto via USD correlation.'
+      return s
+    }
+    return 'Forex calendar temporarily unavailable.'
+  }
+  if (has('crypto today') || has('market today') || has('what is happening in crypto')) {
+    try {
+      const newsData2 = (await jget('https://cryptocurrency.cv/api/news')) as { data?: Array<{ title?: string }> } | null
+      const fg = state.fg as FgLike | null
+      const fgText = fg ? 'Fear &amp; Greed: ' + fg.value + ' (' + fg.classification + ')' : 'sentiment unavailable'
+      let s = '<b>Crypto Market Overview — Today:</b><br><br>'
+      s += 'Sentiment: <b>' + fgText + '</b><br><br>'
+      const top5 = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT']
+      top5.forEach(function (sym2) {
+        const t = state.tickers[sym2]
+        if (t) s += '&bull; <b>' + baseOf(sym2) + '</b>: ' + chip('$' + pfmt(t.last)) + ' ' + chip((t.pct > 0 ? '+' : '') + t.pct.toFixed(2) + '%', t.pct >= 0 ? 'hl-g' : 'hl-r') + '<br>'
+      })
+      if (newsData2 && newsData2.data && newsData2.data.length) {
+        s += '<br><b>Headlines:</b><br>'
+        newsData2.data.slice(0, 3).forEach(function (n) {
+          s += '&bull; ' + esc(n.title || '') + '<br>'
+        })
+      }
+      return s
+    } catch (e) { /* ignore */ }
+    return 'Market overview temporarily unavailable. Check the Radar tab for live prices.'
+  }
+  if (has('opinion') || has('your opinion') || has('what do you think')) {
+    if (coin) {
+      const t2 = state.tickers[COINS[coin].sym]
+      if (t2) {
+        let dir = t2.pct > 2 ? 'bullish momentum' : 'cautiously positive'
+        if (t2.pct < -2) dir = 'bearish pressure'
+        if (t2.pct > -0.5 && t2.pct < 0.5) dir = 'consolidation zone — no clear bias'
+        return '<b>' + coin + ' opinion:</b> Currently in ' + dir + ' (' + (t2.pct > 0 ? '+' : '') + t2.pct.toFixed(2) + '% today). For a real view, say <i>"analyze ' + coin.toLowerCase() + '"</i> and check the multi-TF signals, whale flow, and verdict. Don\'t trade on opinions — trade on confluence.'
+      }
+    }
+    return 'Give me a coin name and I\'ll share a data-driven view. "Opinion" without data is just a guess.'
+  }
+
+  // === MARKET PHILOSOPHY ===
+  if (has('how to trade') || has('trading strategy') || has('how to make money')) {
+    return '<b>Framework for Trading:</b><br>1. <b>Plan:</b> Define entry, stop, target BEFORE the trade<br>2. <b>Edge:</b> What is your statistical advantage? (momentum, mean reversion, breakout)<br>3. <b>Size:</b> Risk 1-2% max per trade<br>4. <b>Execute:</b> Follow the plan, no emotional overrides<br>5. <b>Review:</b> Journal every trade — patterns emerge<br><br>The market doesn\'t care about your entry. It will humble anyone who trades on feelings instead of process.'
+  }
+  if (has('what is an edge') || has('trading edge')) {
+    return '<b>Trading Edge — The Whole Game:</b><br>• An edge = a repeatable statistical advantage<br>• Without an edge, you\'re gambling with extra steps<br>• Edges decay over time as others discover them<br>• Building an edge: backtest → paper trade → small live → scale<br><br>My signal scanner is one such edge: multi-TF confluence + whale flow + auto-learning. Use it as input, not as gospel.'
+  }
+
+  // === FLOW & MACRO QUERY (when user asks about the market broadly) ===
+  if (has('scan the market') || has('scan market') || has('market scan')) {
+    if (signalData.length) {
+      let s = '<b>Market Scan — Top Signals:</b><br><br>'
+      signalData.slice(0, 5).forEach(function (sig) {
+        const type = sig.master.type
+        const cls = type === 'BUY' ? 'hl-g' : type === 'SELL' ? 'hl-r' : 'hl-a'
+        s += '&bull; <b>' + baseOf(sig.sym) + '</b>: <span class="' + cls + '">' + type + '</span> (' + (sig.score > 0 ? '+' : '') + sig.score + ')<br>'
+        if (sig.whaleText) s += '&nbsp;&nbsp;' + esc(sig.whaleText) + '<br>'
+      })
+      s += '<br>Full scanner on the <b>Signals tab</b>.'
+      return s
+    }
+    return 'Scanner warming up — ask again in 30 seconds.'
+  }
+  if (has('best signal') || has('strongest signal') || has('top signal')) {
+    if (signalData.length) {
+      const top = signalData[0]
+      const type2 = top.master.type
+      const cls2 = type2 === 'BUY' ? 'hl-g' : type2 === 'SELL' ? 'hl-r' : 'hl-a'
+      return '<b>Strongest Signal Right Now:</b><br><br>&bull; <b>' + baseOf(top.sym) + '</b>: <span class="' + cls2 + '">' + type2 + '</span> (' + (top.score > 0 ? '+' : '') + top.score + ')<br>' + top.master.breakdown.map(function (b: TfBreak) { return b.tf + ': ' + b.type }).join(' | ') + '<br>' + (top.whaleText ? esc(top.whaleText) + '<br>' : '') + '<br>Check the <b>Signals tab</b> for full multi-TF breakdown.'
+    }
+    return 'Scanner still warming up.'
+  }
+  if (has('whales doing') || has('whale activity') || has('smart money doing')) {
+    if (signalData.length) {
+      const whaleSignals = signalData.filter(function (s) { return s.whaleText && s.whaleText.indexOf('balanced') === -1 })
+      if (whaleSignals.length) {
+        let s = '<b>Whale Activity Across Scanner Coins:</b><br><br>'
+        whaleSignals.slice(0, 5).forEach(function (s2) {
+          s += '&bull; <b>' + baseOf(s2.sym) + '</b>: ' + esc(s2.whaleText) + '<br>'
+        })
+        return s
+      }
+      return 'Whale flow is balanced across scanner coins right now — no strong accumulation or distribution signals.'
+    }
+    return 'Whale data loading. Ask again shortly.'
+  }
+
   if (has('pump') || has('mooning') || has('moon') || has('to the moon')) {
-    // === CONVERSATION ===
-    if (/^(how are you|how r u|hru|you good|you ok)\s/.test(text) || has('how are you')) {
-      return 'Running at full strength — all streams connected, scanner humming. What do you need?'
-    }
-    if (/^(who made you|who built you|who created you|who are you|what are you|your name)/.test(text) || has('who made you') || has('your name')) {
-      return '<b>Liquidity Radar v5.0</b> — built by <b>Zain</b> as a self-contained crypto microstructure terminal. I run entirely in your browser with live Binance data. No backend, no API keys, no nonsense.'
-    }
-    if (has('tell me a joke') || has('joke') || has('funny')) {
-      const jokes = ['Why did the trader bring a ladder to the bar? Because the drinks were on the house and the charts were going to the moon.<br><br>...I\'ll stick to analyzing candles.', 'What\'s a crypto trader\'s favorite exercise? Jumping to conclusions.<br><br>...and then getting rekt.', 'Why don\'t traders trust atoms? Because they make up everything — including your portfolio value.<br><br>I prefer data.']
-      return jokes[Math.floor(Math.random() * jokes.length)]
-    }
-    if (has('best time') || has('when to trade') || has('trading hours')) {
-      return '<b>Best crypto trading windows:</b><br>• US market open (13:30-14:00 UTC) — highest volatility<br>• London session overlap (07:00-09:00 UTC) — EUR/GBP pairs + BTC spillover<br>• Asian session open (00:00-02:00 UTC) — JPY pairs, sometimes BTC dumps<br>• 24/7 nature means there\'s always a session — but liquidity clusters around banking hours. Weekends are thinner and easier to whipsaw.'
-    }
-    if (has('position sizing') || has('how much to') || has('risk per trade') || has('risk management')) {
-      return '<b>Position Sizing 101:</b><br>• Never risk more than 1-2% of total capital on a single trade<br>• Position size = (Account x Risk%) / (Entry - Stop Loss)<br>• Example: $10K account, 1% risk, $100 stop = $1,000 / $100 = 10 units<br>• Kelly criterion for the advanced: f* = (bp - q) / b<br>Most blowups come from sizing too large, not from bad analysis.'
-    }
-    if (has('stop loss') || has('sl') || has('where to put stop')) {
-      return '<b>Stop Loss placement:</b><br>• Below last swing low (longs) / above last swing high (shorts)<br>• ATR-based: entry ± 1.5x ATR(14)<br>• Structure-based: below support zone with buffer<br>• Never use round numbers (everyone else does too)<br><br>The stop is where your thesis is <i>wrong</i>, not where it hurts. If it\'s too tight, you get stopped out by noise. Too wide, and one trade ruins your month.'
-    }
-
-    // === ECONOMICS & MACRO ===
-    if (has('inflation') || has('cpi') || has('consumer price')) {
-      return '<b>Inflation / CPI explained:</b><br>• CPI measures average price change of a consumer basket<br>• Rising CPI = prices going up = USD purchasing power declining<br>• Fed raises rates to fight inflation = risk assets sell off (usually)<br>• Falling CPI = rate cut expectations = risk-on (usually)<br><br>Crypto correlation: BTC tends to rally when CPI comes in soft (rate cut bets) and dump on hot CPI (tightening fears). Not 1:1, but the first 30 minutes after CPI print are pure volatility.'
-    }
-    if (has('federal reserve') || has('fed rate') || has('interest rate') || has('rate cut') || has('rate hike')) {
-      return '<b>The Federal Reserve / Interest Rates:</b><br>• Fed funds rate = what banks charge each other overnight<br>• Higher rates = borrowing costs up = stocks/bonds reprice = crypto correlation varies<br>• Rate cuts = liquidity expectations = risk assets tend to rally<br>• "Higher for longer" = the market\'s worst nightmare in 2023-24<br><br>Crypto impact: BTC was born in a ZIRP (zero interest rate) world. True stress test came with rates at 5.25%. Watch FOMC statements and dot plots — they move everything.'
-    }
-    if (has('quantitative easing') || has('qe') || has('quantitative tightening') || has('qt') || has('money printing')) {
-      return '<b>QE vs QT — The Liquidity Machine:</b><br>• QE: Fed buys bonds, injects money into system = "money printing" = risk assets moon<br>• QT: Fed lets bonds mature off balance sheet = drains liquidity = headwind for risk<br>• QE started March 2020 → BTC went from $5K to $69K<br>• QT started mid-2022 → BTC dropped from $47K to $15K<br><br>Crypto is essentially a liquidity beta play. When the money printer goes brrr, crypto benefits first and most.'
-    }
-    if (has('gdp') || has('gross domestic product')) {
-      return '<b>GDP — Gross Domestic Product:</b><br>• Total value of goods/services produced in a country<br>• Rising GDP = economy growing = generally risk-on<br>• Falling GDP / negative = recession fears = flight to safety<br>• Crypto correlation: indirect. GDP growth supports risk appetite, but crypto is more driven by liquidity and monetary policy than by GDP itself.'
-    }
-    if (has('non farm') || has('nfp') || has('payroll') || has('jobs report')) {
-      return '<b>Non-Farm Payrolls (NFP):</b><br>• Released first Friday of each month<br>• Counts new jobs added excluding agriculture<br>• Strong jobs = economy hot = Fed keeps rates high = USD strong = BTC weak<br>• Weak jobs = economy cooling = Fed may cut = USD weak = BTC strong<br><br>First 5 minutes after NFP release are pure chaos. Wait for the dust to settle.'
-    }
-    if (has('recession') || has('economic downturn')) {
-      return '<b>Recession in Crypto Context:</b><br>• Recession = two consecutive quarters of negative GDP growth<br>• Historically, BTC drops 70-80% from ATH during macro recessions<br>• BUT recovery is also faster than traditional assets<br>• The "money printer will save us" trade has historically worked<br><br>Key indicator: yield curve inversion (2Y > 10Y Treasury). When it un-inverts, recession historically follows within 6-18 months.'
-    }
-
-    // === CRYPTO BASICS ===
-    if (has('what is bitcoin') || has('explain bitcoin') || has('about bitcoin') || has('tell me about btc')) {
-      return '<b>Bitcoin (BTC) — The Original:</b><br>• Created 2009 by Satoshi Nakamoto (pseudonymous)<br>• First decentralized digital currency — no middleman<br>• Fixed supply: 21M coins (deflationary by design)<br>• Proof-of-work mining secures the network<br>• Block time: ~10 minutes, halving every 4 years<br><br>Current price and analysis: try <i>"analyze btc"</i> for live data.'
-    }
-    if (has('what is ethereum') || has('explain ethereum') || has('about eth')) {
-      return '<b>Ethereum (ETH) — The World Computer:</b><br>• Created 2015 by Vitalik Buterin<br>• Smart contract platform — runs dApps, DeFi, NFTs, tokens<br>• Transitioned to Proof-of-Stake (The Merge, Sept 2022)<br>• EIP-1559 burns base fee — deflationary pressure<br>• Gas fees = cost of computation on Ethereum<br><br>ETH is the collateral layer of DeFi. Everything runs on top of it.'
-    }
-    if (has('what is blockchain') || has('explain blockchain')) {
-      return '<b>Blockchain — Distributed Ledger 101:</b><br>• Chain of blocks, each containing verified transactions<br>• Every node holds a copy = no single point of failure<br>• Immutability: once confirmed, altering a block requires 51% of network hash<br>• Consensus mechanisms: PoW (Bitcoin) or PoS (Ethereum)<br><br>It\'s not magic — it\'s an agreed-upon way to maintain a shared truth without trusting a middleman.'
-    }
-    if (has('what is an nft') || has('explain nft')) {
-      return '<b>NFTs — Non-Fungible Tokens:</b><br>• Unique tokens on a blockchain representing ownership<br>• "Non-fungible" = one-of-one, not interchangeable like ETH<br>• Use cases: digital art, collectibles, game items, membership passes<br>• Most speculation was in JPEGs during 2021-22 mania<br><br>The tech has utility (provenance, royalties, ticketing) even if most profile-picture projects went to zero.'
-    }
-    if (has('what is defi') || has('explain defi')) {
-      return '<b>DeFi — Decentralized Finance:</b><br>• Financial services built on smart contracts, no banks<br>• Lending (Aave/Compound), swaps (Uniswap), derivatives (dYdX)<br>• TVL (Total Value Locked) = health metric of the sector<br>• Yield farming: earn tokens by providing liquidity<br><br>DeFi is how crypto earns its "financial system replacement" narrative. Most of it runs on Ethereum.'
-    }
-    if (has('what is solana') || has('about sol')) {
-      return '<b>Solana (SOL) — High-Performance L1:</b><br>• PoH (Proof of History) + PoS = extremely fast<br>• 65,000 TPS theoretical, ~4,000 actual<br>• Near-zero fees (fractions of a cent)<br>• Has had multiple outages — reliability is its Achilles heel<br><br>Solana is Ethereum\'s main competitor for speed-sensitive applications. The "Ethereum killer" narrative comes and goes.'
-    }
-    if (has('layer 2') || has('l2') || has('scaling solution')) {
-      return '<b>Layer 2 Scaling Solutions:</b><br>• Ethereum L2s: Arbitrum, Optimism, Base, zkSync<br>• Off-chain execution, on-chain settlement = faster + cheaper<br>• Rollups batch transactions and post compressed data to L1<br>• ZK-rollups vs Optimistic rollups: different tradeoffs in proof generation<br><br>L2s are how Ethereum scales without compromising decentralization.'
-    }
-    if (has('altcoin') || has('alt season') || has('altcoin season')) {
-      return '<b>Altcoins / Alt Season:</b><br>• Everything that isn\'t Bitcoin = altcoin<br>• "Alt season" = capital rotates from BTC into alts (usually after BTC stabilizes near ATH)<br>• BTC dominance chart is the alt season indicator<br>• Alt season playbook: BTC moons → BTC consolidates → ETH follows → large caps → mid → small caps → everything bleeds back to BTC<br><br>Alt seasons make people rich and then destroy them. Know where you are in the cycle.'
-    }
-
-    // === TRADING CONCEPTS ===
-    if (has('what is leverage') || has('explain leverage')) {
-      return '<b>Leverage — Amplified Exposure:</b><br>• 10x leverage: $1,000 controls $10,000 worth<br>• Your PnL is multiplied by 10x, but so are losses<br>• Liquidation happens when losses eat your margin<br>• At 10x: a ~10% adverse move wipes you out<br>• At 50x: a ~2% adverse move wipes you out<br><br>Leverage is a tool for capital efficiency, not a money multiplier. Most leveraged traders lose. The house (exchange) always wins.'
-    }
-    if (has('margin call') || has('margin')) {
-      return '<b>Margin Call — The Warning Bell:</b><br>• When your account equity falls below maintenance margin<br>• Exchange demands you deposit more funds or they liquidate<br>• On Binance: margin ratio below 1.1 triggers auto-liquidation<br><br>Prevention: use stop losses, reduce leverage, don\'t over-allocate. A margin call is the exchange telling you "your trade is wrong and I\'m closing it for you."'
-    }
-    if (has('what is short') || has('short selling') || has('shorting')) {
-      return '<b>Short Selling — Profiting From Drops:</b><br>• Borrow an asset, sell it high, buy it back low, return it<br>• In futures: open a short position = same economic exposure<br>• Risk: theoretically unlimited upside = unlimited loss potential<br>• Short squeezes: when shorts are forced to buy back, accelerating the rally<br><br>Famous squeeze: GameStop 2021. In crypto: short squeezes happen when funding is heavily negative and price starts rising.'
-    }
-    if (has('liquidation cascade') || has('cascade')) {
-      return '<b>Liquidation Cascades — The Domino Effect:</b><br>• Price drops → overleveraged longs get liquidated → their forced sells push price lower → more longs liquidated → repeat<br>• Creates violent V-shaped moves (both directions)<br>• Most common when OI is high and funding is positive<br><br>This is why I track liquidation zones on the Analysis tab. Dense liquidation clusters act as magnets for price.'
-    }
-    if (has('take profit') || has('when to take profit') || has('tp')) {
-      return '<b>Take Profit Strategy:</b><br>• Scale out in portions, not all at once<br>• First target: 1:1 risk-reward (take 50%)<br>• Second target: move stop to breakeven, let rest run<br>• Trail with ATR: stop moves 1.5x ATR behind price<br>• Key: have a plan BEFORE entry, not after<br><br>The hardest part isn\'t getting in — it\'s selling at the right time. Most traders give back gains by holding too long.'
-    }
-
-    // === ON-CHAIN & NETWORK ===
-    if (has('what is tvl') || has('explain tvl')) {
-      return '<b>TVL — Total Value Locked:</b><br>• Sum of assets deposited in DeFi protocols<br>• Higher TVL = more capital trusting the protocols<br>• Aave, Lido, MakerDAO typically lead<br>• TVL/Market Cap ratio indicates DeFi utilization<br><br>TVL rising + token price rising = healthy growth. TVL rising + price flat = value hasn\'t been priced in yet.'
-    }
-    if (has('what are gas fees') || has('gas fees explained')) {
-      return '<b>Gas Fees — Transaction Cost:</b><br>• Fee paid to process transactions on blockchain<br>• Ethereum: measured in gwei (1 gwei = 0.000000001 ETH)<br>• High demand = high gas = expensive transactions<br>• L2s (Arbitrum, Base) reduce gas by 10-100x<br><br>Gas is the "toll booth" of blockchain. During NFT mints or market crashes, gas can spike 100x.'
-    }
-    if (has('proof of work') || has('pow') || has('proof of stake') || has('pos') || has('mining') || has('staking explained')) {
-      return '<b>PoW vs PoS — Consensus Mechanisms:</b><br>• PoW: miners compete to solve puzzles, winner adds block (Bitcoin, pre-merge ETH)<br>• PoS: validators stake coins, random selection adds block (Ethereum, Solana)<br>• PoW: energy-intensive but battle-tested, very secure<br>• PoS: energy-efficient, faster, but newer and more centralized<br><br>BTC will always be PoW. ETH switched to PoS. The debate is philosophical, not technical.'
-    }
-
-    // === NEWS & EVENTS ===
-    if (has('news') || has('breaking') || has('what is happening') || has('what is going on')) {
-      try {
-        const newsData = (await jget('https://cryptocurrency.cv/api/news')) as { data?: Array<{ title?: string; source?: string; date?: string }> } | null
-        if (newsData && newsData.data && newsData.data.length) {
-          let s = '<b>Latest Crypto News:</b><br><br>'
-          newsData.data.slice(0, 6).forEach(function (n, i) {
-            s += (i + 1) + '. <b>' + esc(n.title || '') + '</b><br><span style="color:var(--dim);font-size:11px">' + esc(n.source || '') + ' · ' + esc(n.date || '') + '</span><br><br>'
-          })
-          s += 'Source: cryptocurrency.cv — updates in real time.'
-          return s
-        }
-      } catch (e) { /* ignore */ }
-      return 'News feed temporarily unavailable. Try the <b>News tab</b> for live updates.'
-    }
-    if (has('forex') || has('forex event') || has('macro event') || has('economic calendar') || has('this week event')) {
-      let calData: Array<{ impact?: string; title?: string; country?: string; date?: string; time?: string }> | null = null
-      try {
-        calData = (await jget2('https://nfs.faireconomy.media/ff_calendar_thisweek.json', { to: 10000, retries: 1, dedup: true })) as Array<{ impact?: string; title?: string; country?: string; date?: string; time?: string }> | null
-        if (!calData || !calData.length) throw new Error('empty')
-      } catch (e1) {
-        try { calData = (await fetchFromXoomar()) as unknown as Array<{ impact?: string; title?: string; country?: string; date?: string; time?: string }> } catch (e2) { /* ignore */ }
-      }
-      if (calData && calData.length) {
-        let s = '<b>This Week\'s Macro Events:</b><br><br>'
-        const important = calData.filter(function (e) { return e.impact === 'High' })
-        if (important.length) {
-          important.slice(0, 6).forEach(function (e, i) {
-            s += '<span style="color:' + (e.impact === 'High' ? 'var(--amber)' : 'var(--dim)') + '">[IMPACT: ' + e.impact + ']</span> <b>' + esc(e.title || '') + '</b><br>' + esc(e.country || '') + ' · ' + esc(e.date || '') + ' ' + esc(e.time || '') + '<br><br>'
-          })
-        } else {
-          calData.slice(0, 6).forEach(function (e, i) {
-            s += esc(e.title || '') + ' — ' + esc(e.country || '') + ' · ' + esc(e.date || '') + '<br>'
-          })
-        }
-        s += 'Source: economic calendar — High impact events move crypto via USD correlation.'
-        return s
-      }
-      return 'Forex calendar temporarily unavailable.'
-    }
-    if (has('crypto today') || has('market today') || has('what is happening in crypto')) {
-      try {
-        const newsData2 = (await jget('https://cryptocurrency.cv/api/news')) as { data?: Array<{ title?: string }> } | null
-        const fg = state.fg as FgLike | null
-        const fgText = fg ? 'Fear &amp; Greed: ' + fg.value + ' (' + fg.classification + ')' : 'sentiment unavailable'
-        let s = '<b>Crypto Market Overview — Today:</b><br><br>'
-        s += 'Sentiment: <b>' + fgText + '</b><br><br>'
-        const top5 = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT']
-        top5.forEach(function (sym2) {
-          const t = state.tickers[sym2]
-          if (t) s += '&bull; <b>' + baseOf(sym2) + '</b>: ' + chip('$' + pfmt(t.last)) + ' ' + chip((t.pct > 0 ? '+' : '') + t.pct.toFixed(2) + '%', t.pct >= 0 ? 'hl-g' : 'hl-r') + '<br>'
-        })
-        if (newsData2 && newsData2.data && newsData2.data.length) {
-          s += '<br><b>Headlines:</b><br>'
-          newsData2.data.slice(0, 3).forEach(function (n) {
-            s += '&bull; ' + esc(n.title || '') + '<br>'
-          })
-        }
-        return s
-      } catch (e) { /* ignore */ }
-      return 'Market overview temporarily unavailable. Check the Radar tab for live prices.'
-    }
-    if (has('opinion') || has('your opinion') || has('what do you think')) {
-      if (coin) {
-        const t2 = state.tickers[COINS[coin].sym]
-        if (t2) {
-          let dir = t2.pct > 2 ? 'bullish momentum' : 'cautiously positive'
-          if (t2.pct < -2) dir = 'bearish pressure'
-          if (t2.pct > -0.5 && t2.pct < 0.5) dir = 'consolidation zone — no clear bias'
-          return '<b>' + coin + ' opinion:</b> Currently in ' + dir + ' (' + (t2.pct > 0 ? '+' : '') + t2.pct.toFixed(2) + '% today). For a real view, say <i>"analyze ' + coin.toLowerCase() + '"</i> and check the multi-TF signals, whale flow, and verdict. Don\'t trade on opinions — trade on confluence.'
-        }
-      }
-      return 'Give me a coin name and I\'ll share a data-driven view. "Opinion" without data is just a guess.'
-    }
-
-    // === MARKET PHILOSOPHY ===
-    if (has('how to trade') || has('trading strategy') || has('how to make money')) {
-      return '<b>Framework for Trading:</b><br>1. <b>Plan:</b> Define entry, stop, target BEFORE the trade<br>2. <b>Edge:</b> What is your statistical advantage? (momentum, mean reversion, breakout)<br>3. <b>Size:</b> Risk 1-2% max per trade<br>4. <b>Execute:</b> Follow the plan, no emotional overrides<br>5. <b>Review:</b> Journal every trade — patterns emerge<br><br>The market doesn\'t care about your entry. It will humble anyone who trades on feelings instead of process.'
-    }
-    if (has('what is an edge') || has('trading edge')) {
-      return '<b>Trading Edge — The Whole Game:</b><br>• An edge = a repeatable statistical advantage<br>• Without an edge, you\'re gambling with extra steps<br>• Edges decay over time as others discover them<br>• Building an edge: backtest → paper trade → small live → scale<br><br>My signal scanner is one such edge: multi-TF confluence + whale flow + auto-learning. Use it as input, not as gospel.'
-    }
-
-    // === FLOW & MACRO QUERY (when user asks about the market broadly) ===
-    if (has('scan the market') || has('scan market') || has('market scan')) {
-      if (signalData.length) {
-        let s = '<b>Market Scan — Top Signals:</b><br><br>'
-        signalData.slice(0, 5).forEach(function (sig) {
-          const type = sig.master.type
-          const cls = type === 'BUY' ? 'hl-g' : type === 'SELL' ? 'hl-r' : 'hl-a'
-          s += '&bull; <b>' + baseOf(sig.sym) + '</b>: <span class="' + cls + '">' + type + '</span> (' + (sig.score > 0 ? '+' : '') + sig.score + ')<br>'
-          if (sig.whaleText) s += '&nbsp;&nbsp;' + esc(sig.whaleText) + '<br>'
-        })
-        s += '<br>Full scanner on the <b>Signals tab</b>.'
-        return s
-      }
-      return 'Scanner warming up — ask again in 30 seconds.'
-    }
-    if (has('best signal') || has('strongest signal') || has('top signal')) {
-      if (signalData.length) {
-        const top = signalData[0]
-        const type2 = top.master.type
-        const cls2 = type2 === 'BUY' ? 'hl-g' : type2 === 'SELL' ? 'hl-r' : 'hl-a'
-        return '<b>Strongest Signal Right Now:</b><br><br>&bull; <b>' + baseOf(top.sym) + '</b>: <span class="' + cls2 + '">' + type2 + '</span> (' + (top.score > 0 ? '+' : '') + top.score + ')<br>' + top.master.breakdown.map(function (b: TfBreak) { return b.tf + ': ' + b.type }).join(' | ') + '<br>' + (top.whaleText ? esc(top.whaleText) + '<br>' : '') + '<br>Check the <b>Signals tab</b> for full multi-TF breakdown.'
-      }
-      return 'Scanner still warming up.'
-    }
-    if (has('whales doing') || has('whale activity') || has('smart money doing')) {
-      if (signalData.length) {
-        const whaleSignals = signalData.filter(function (s) { return s.whaleText && s.whaleText.indexOf('balanced') === -1 })
-        if (whaleSignals.length) {
-          let s = '<b>Whale Activity Across Scanner Coins:</b><br><br>'
-          whaleSignals.slice(0, 5).forEach(function (s2) {
-            s += '&bull; <b>' + baseOf(s2.sym) + '</b>: ' + esc(s2.whaleText) + '<br>'
-          })
-          return s
-        }
-        return 'Whale flow is balanced across scanner coins right now — no strong accumulation or distribution signals.'
-      }
-      return 'Whale data loading. Ask again shortly.'
-    }
-
     if (coin) {
       const t = state.tickers[COINS[coin].sym]
       if (t) return '🌙 ' + COINS[coin].icon + ' <b>' + coin + '</b> is ' + (t.pct > 5 ? '<span class="hl-g">pumping +' + t.pct.toFixed(1) + '%</span> right now' : t.pct > 0 ? 'up ' + t.pct.toFixed(2) + '% — drifting, not mooning' : t.pct > -5 ? 'flat-ish (' + t.pct.toFixed(2) + '%) — rocket still on the pad' : '<span class="hl-r">dumping ' + t.pct.toFixed(1) + '% today</span> — more lunar debris than launch') + '. Chasing green candles after +10% is how bags get made (the wrong kind). Ask <i>"analyze ' + coin.toLowerCase() + '"</i> first.'
     }
     return '🌙 "To the moon" energy is fun; portfolio math is survival. Name a coin and I\'ll tell you whether it\'s actually moving or just trending on X.'
-    if (has('dump') || has('crash') || has('rekt') || has('rug')) {
-      const t = state.tickers[state.symbol]
-      return '💀 Dump/rekt checklist:<br>• Is 24h change worse than −8%? ' + (t && t.pct < -8 ? '<span class="hl-r">Yes — active flush on ' + baseOf(state.symbol) + '</span>' : 'Not currently on the active chart') + '<br>• Volume spike + close back inside range = capitulation wick, sometimes a gift<br>• No-bid slow bleed = worse than violent dumps<br><br>Anti-rekt protocol: hard stops pre-placed, no averaging into falling knives without a thesis, never leverage a meme. <span class="hl-a">Survive first, profit second.</span>'
+  }
+  if (has('dump') || has('crash') || has('rekt') || has('rug')) {
+    const t = state.tickers[state.symbol]
+    return '💀 Dump/rekt checklist:<br>• Is 24h change worse than −8%? ' + (t && t.pct < -8 ? '<span class="hl-r">Yes — active flush on ' + baseOf(state.symbol) + '</span>' : 'Not currently on the active chart') + '<br>• Volume spike + close back inside range = capitulation wick, sometimes a gift<br>• No-bid slow bleed = worse than violent dumps<br><br>Anti-rekt protocol: hard stops pre-placed, no averaging into falling knives without a thesis, never leverage a meme. <span class="hl-a">Survive first, profit second.</span>'
+  }
+  if (has('hodl') || has('diamond hands')) {
+    return '💎🙌 <b>HODL doctrine:</b> fine for spot BTC/ETH with a multi-year horizon and money you don\'t need. Fatal when applied to leveraged positions or low-liquidity memes — those need exits because they can go structurally to zero. HODL is a strategy for assets, not an excuse for absent risk management.'
+  }
+  if (has('ath') || has('all time high')) {
+    const cc = coin as string
+    const t = state.tickers[cc ? COINS[cc].sym : state.symbol] as TickerLike
+    return '[ATH] <b>All-time high</b> = the highest price ever printed. Psychologically massive — old bagholders sell into it, breakout traders buy through it.' + (t ? '<br><br>' + (cc || baseOf(state.symbol)) + ' 24h high: ' + chip('$' + pfmt(t.high)) + ' — current ' + chip('$' + pfmt(t.last)) + ' sits ' + (((t.last / t.high) - 1) * 100).toFixed(2) + '% from it. (Full ATH history needs longer lookbacks than this terminal\'s feeds.)' : '')
+  }
+  if (has('atl') || has('all time low')) {
+    return '[ATL] All-time lows mark maximum pessimism. Some become generational entries; others become delistings. The tell: does volume dry up at the lows (seller exhaustion) or keep accelerating (no floor yet)?'
+  }
+  if (has('bull run') || has('bull market') || has('bullish cycle')) {
+    const v = state.fg ? parseInt((state.fg as FgLike).value, 10) : null
+    return '[BULL] <b>Bull run dashboard:</b><br>• Sentiment: ' + (v != null ? 'Fear &amp; Greed at <span style="color:' + fngColor(v) + '">' + v + ' (' + (state.fg as FgLike).classification + ')</span>' : 'unavailable') + '<br>• Breadth: check advancers vs decliners on the Market tab<br>• Structure test: are 15m pullbacks holding above prior highs?<br><br>Textbook bulls: price above rising EMA20/50, funding positive-but-not-extreme, alt breadth expanding. Extreme greed + vertical candles = late-stage, not early-stage.'
+  }
+  if (has('bear market') || has('bearish cycle') || (has('bear') && !coin)) {
+    return '[BEAR] Bear-market tells: lower highs stacking on higher timeframes, rallies sold within days, funding pinned negative while OI decays, blue chips bleeding slower than alts. Survival kit: smaller size, fewer trades, stablecoin yield starts outcompeting delta. Every bear in history has been someone\'s buying opportunity eventually.'
+  }
+  if (has('dip') || has('buy the dip')) {
+    const a = state._ai as AIScore | undefined
+    const base = coin || baseOf(state.symbol)
+    let extra = ''
+    if (a && !coin) {
+      const ri = (a as AIScore).rsi
+      extra = '<br><br>Active chart (' + base + '): RSI ' + ri.toFixed(0) + ' — ' + (ri < 35 ? '<span class="hl-g">technically dipped into value zone</span>' : ri > 65 ? 'this isn\'t a dip, it\'s a summit' : 'mid-range, not a dip by oscillator standards') + '.'
     }
-    if (has('hodl') || has('diamond hands')) {
-      return '💎🙌 <b>HODL doctrine:</b> fine for spot BTC/ETH with a multi-year horizon and money you don\'t need. Fatal when applied to leveraged positions or low-liquidity memes — those need exits because they can go structurally to zero. HODL is a strategy for assets, not an excuse for absent risk management.'
-    }
-    if (has('ath') || has('all time high')) {
-      const cc = coin as string
-      const t = state.tickers[cc ? COINS[cc].sym : state.symbol] as TickerLike
-      return '[ATH] <b>All-time high</b> = the highest price ever printed. Psychologically massive — old bagholders sell into it, breakout traders buy through it.' + (t ? '<br><br>' + (cc || baseOf(state.symbol)) + ' 24h high: ' + chip('$' + pfmt(t.high)) + ' — current ' + chip('$' + pfmt(t.last)) + ' sits ' + (((t.last / t.high) - 1) * 100).toFixed(2) + '% from it. (Full ATH history needs longer lookbacks than this terminal\'s feeds.)' : '')
-    }
-    if (has('atl') || has('all time low')) {
-      return '[ATL] All-time lows mark maximum pessimism. Some become generational entries; others become delistings. The tell: does volume dry up at the lows (seller exhaustion) or keep accelerating (no floor yet)?'
-    }
-    if (has('bull run') || has('bull market') || has('bullish cycle')) {
-      const v = state.fg ? parseInt((state.fg as FgLike).value, 10) : null
-      return '[BULL] <b>Bull run dashboard:</b><br>• Sentiment: ' + (v != null ? 'Fear &amp; Greed at <span style="color:' + fngColor(v) + '">' + v + ' (' + (state.fg as FgLike).classification + ')</span>' : 'unavailable') + '<br>• Breadth: check advancers vs decliners on the Market tab<br>• Structure test: are 15m pullbacks holding above prior highs?<br><br>Textbook bulls: price above rising EMA20/50, funding positive-but-not-extreme, alt breadth expanding. Extreme greed + vertical candles = late-stage, not early-stage.'
-    }
-    if (has('bear market') || has('bearish cycle') || (has('bear') && !coin)) {
-      return '[BEAR] Bear-market tells: lower highs stacking on higher timeframes, rallies sold within days, funding pinned negative while OI decays, blue chips bleeding slower than alts. Survival kit: smaller size, fewer trades, stablecoin yield starts outcompeting delta. Every bear in history has been someone\'s buying opportunity eventually.'
-    }
-    if (has('dip') || has('buy the dip')) {
-      const a = state._ai as AIScore | undefined
-      const base = coin || baseOf(state.symbol)
-      let extra = ''
-      if (a && !coin) {
-        const ri = (a as AIScore).rsi
-        extra = '<br><br>Active chart (' + base + '): RSI ' + ri.toFixed(0) + ' — ' + (ri < 35 ? '<span class="hl-g">technically dipped into value zone</span>' : ri > 65 ? 'this isn\'t a dip, it\'s a summit' : 'mid-range, not a dip by oscillator standards') + '.'
-      }
-      return '🩸 <b>"Buy the dip"</b> only works with definitions:<br>1. Dip to <i>what</i>? Prior resistance-turned-support or a measured level — not just "red"<br>2. Confirmation: selling volume exhausting while price holds the level<br>3. Invalidation pre-defined — if the level breaks, the dip was actually a trend change' + extra + '<br><br>Catching knives without levels is called donating.'
-    }
+    return '🩸 <b>"Buy the dip"</b> only works with definitions:<br>1. Dip to <i>what</i>? Prior resistance-turned-support or a measured level — not just "red"<br>2. Confirmation: selling volume exhausting while price holds the level<br>3. Invalidation pre-defined — if the level breaks, the dip was actually a trend change' + extra + '<br><br>Catching knives without levels is called donating.'
+  }
 
-    if (coin) {
-      const cc = coin as string
-      try {
-        const d = await safeCtx(cc)
-        return coinBrief(cc, d)
-      } catch (e) {
-        const t = state.tickers[COINS[cc].sym] as TickerLike
-        if (t) return COINS[cc].icon + ' <b>' + cc + '</b>: ' + chip('$' + pfmt(t.last)) + ' · 24h ' + chip((t.pct > 0 ? '+' : '') + t.pct.toFixed(2) + '%', t.pct >= 0 ? 'hl-g' : 'hl-r') + ' (deeper analytics temporarily unavailable)'
-        return 'I recognize <b>' + cc + '</b> but couldn\'t reach the API just now.'
-      }
+  if (coin) {
+    const cc = coin as string
+    try {
+      const d = await safeCtx(cc)
+      return coinBrief(cc, d)
+    } catch (e) {
+      const t = state.tickers[COINS[cc].sym] as TickerLike
+      if (t) return COINS[cc].icon + ' <b>' + cc + '</b>: ' + chip('$' + pfmt(t.last)) + ' · 24h ' + chip((t.pct > 0 ? '+' : '') + t.pct.toFixed(2) + '%', t.pct >= 0 ? 'hl-g' : 'hl-r') + ' (deeper analytics temporarily unavailable)'
+      return 'I recognize <b>' + cc + '</b> but couldn\'t reach the API just now.'
     }
+  }
 
-    if (has('price') || has('chart') || has('analysis') || has('market') || has('crypto')) {
-      const t = state.tickers[state.symbol]
-      return 'You\'re looking for specifics — give me a ticker! Try <i>"bitcoin"</i>, <i>"solana"</i>, <i>"trump coin"</i>, <i>"wif"</i>… or ask for <i>"best performer today"</i>.' + (t ? ' Meanwhile: ' + baseOf(state.symbol) + ' is ' + chip('$' + pfmt(t.last)) + ' ' + chip((t.pct > 0 ? '+' : '') + t.pct.toFixed(2) + '%', t.pct >= 0 ? 'hl-g' : 'hl-r') + '.' : '')
-    }
+  if (has('price') || has('chart') || has('analysis') || has('market') || has('crypto')) {
+    const t = state.tickers[state.symbol]
+    return 'You\'re looking for specifics — give me a ticker! Try <i>"bitcoin"</i>, <i>"solana"</i>, <i>"trump coin"</i>, <i>"wif"</i>… or ask for <i>"best performer today"</i>.' + (t ? ' Meanwhile: ' + baseOf(state.symbol) + ' is ' + chip('$' + pfmt(t.last)) + ' ' + chip((t.pct > 0 ? '+' : '') + t.pct.toFixed(2) + '%', t.pct >= 0 ? 'hl-g' : 'hl-r') + '.' : '')
   }
 
   return 'I didn\'t catch that. I\'m sharpest on:<br>• <b>Coins</b> — btc, eth, sol, doge, pepe, trump, wif + 20 more (nicknames &amp; typos welcome)<br>• <b>Indicators</b> — rsi, macd, bollinger, ema, atr<br>• <b>Microstructure</b> — whales, funding, open interest, liquidations, support/resistance<br>• <b>Patterns</b> — rsi divergence, macd crossover, bb squeeze, volume spike<br>• <b>Signals</b> — "show signals", "best signal", "scan the market"<br>• <b>Economics</b> — inflation, fed rates, gdp, nfp, quantitative easing<br>• <b>Crypto basics</b> — bitcoin, ethereum, blockchain, defi, layer 2, nfts<br>• <b>Trading</b> — position sizing, stop loss, take profit, leverage, margin<br>• <b>News</b> — "show news", "forex events", "what is happening today"<br>• <b>Conversation</b> — greetings, jokes, opinions on any coin<br><br>Rephrase and fire again.'

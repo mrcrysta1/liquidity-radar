@@ -9,18 +9,41 @@ import { LayoutPicker } from './chart/LayoutPicker'
 import { IndicatorPicker } from './chart/IndicatorPicker'
 import { ReplayBar, ReplayButton } from './chart/ReplayBar'
 import { ChartStylePicker } from './chart/ChartStylePicker'
-import { LiqHeatmap } from './analysis/LiqHeatmap'
-import { CrossExchangeTable } from './analysis/CrossExchangeTable'
+import { lazy, Suspense } from 'react'
+const LiqHeatmap = lazy(() => import('./analysis/LiqHeatmap').then((m) => ({ default: m.LiqHeatmap })))
+const CrossExchangeTable = lazy(() =>
+  import('./analysis/CrossExchangeTable').then((m) => ({ default: m.CrossExchangeTable })),
+)
 import { DrawToolPicker } from './chart/DrawToolPicker'
+import { OverlayTogglePicker } from './chart/OverlayTogglePicker'
+import { ConfluencePanel } from './chart/ConfluencePanel'
+import { OBImbalanceGauge } from './chart/OBImbalanceGauge'
+import { DivergenceBanner } from './chart/DivergenceBanner'
+const MLPredictionPanel = lazy(() =>
+  import('./chart/MLPredictionPanel').then((m) => ({ default: m.MLPredictionPanel })),
+)
+const RLPolicyPanel = lazy(() =>
+  import('./chart/RLPolicyPanel').then((m) => ({ default: m.RLPolicyPanel })),
+)
+const NeuralNetPage = lazy(() =>
+  import('./chart/NeuralNetViz').then((m) => ({ default: m.NeuralNetPage })),
+)
+const BubblesCanvas = lazy(() =>
+  import('./BubblesCanvas').then((m) => ({ default: m.BubblesCanvas })),
+)
+import { renderAlerts } from '../features/alerts/alerts'
+import { openModal } from '../utils/dom'
 import { ChartSidePanel } from './chart/ChartSidePanel'
 import { Footer } from './footer/Footer'
 import { DashHead } from './DashHead'
 import { Sidebar } from './Sidebar'
 import { Guard } from './ErrorBoundary'
 import { HomeDashboard } from './HomeDashboard'
-import { SettingsPage } from './SettingsPage'
-import { AiAssistant } from './chat/AiAssistant'
-import { EconomicCalendar } from './news/EconomicCalendar'
+const SettingsPage = lazy(() => import('./SettingsPage').then((m) => ({ default: m.SettingsPage })))
+const AiAssistant = lazy(() => import('./chat/AiAssistant').then((m) => ({ default: m.AiAssistant })))
+const EconomicCalendar = lazy(() =>
+  import('./news/EconomicCalendar').then((m) => ({ default: m.EconomicCalendar })),
+)
 import { useEffect, useRef } from 'react'
 const w = window as any
 
@@ -49,7 +72,7 @@ export function Shell() {
         <div className="top-inner">
           <div className="logo"><span className="dish">📡</span><span className="logo-text"><b>LIQUIDITY</b>&nbsp;RADAR</span></div>
           <div style={{ 'display': 'flex', 'alignItems': 'center', 'gap': '8px' }}>
-            <button className="theme-btn" id="alertBtn" title="Price alerts (desktop notifications)" style={{ 'fontSize': '13px', 'fontWeight': '800', 'fontFamily': 'var(--mono)' }}>AL</button>
+            <button className="theme-btn" id="alertBtn" title="Price alerts (desktop notifications)" style={{ 'fontSize': '13px', 'fontWeight': '800', 'fontFamily': 'var(--mono)' }} onClick={() => { renderAlerts(); openModal('alModal') }}>AL</button>
             <button className="theme-btn" id="paletteBtn" title="Color themes / palettes" style={{ 'fontSize': '15px', 'fontWeight': '800' }}>🎨</button>
             <button className="theme-btn" id="themeBtn" title="Toggle dark/light mode" style={{ 'fontSize': '12px', 'fontWeight': '800', 'fontFamily': 'var(--mono)' }}>D</button>
             <div className="status-pill" id="statusPill"><span className="dot"></span><span id="statusTxt">CONNECTING…</span></div>
@@ -106,6 +129,11 @@ export function Shell() {
         </div>
       
         <DashHead zone="chart" name="Price Action" sub="Chart, drawing tools and the order-book side panel" />
+        <DivergenceBanner />
+        <Suspense fallback={null}><MLPredictionPanel /></Suspense>
+        <Suspense fallback={null}><RLPolicyPanel /></Suspense>
+        <ConfluencePanel />
+        <OBImbalanceGauge />
         <div className="chart-host" id="chartHostRadar">
         <div className="card" id="radarChartCard">
           <div className="sec-head">
@@ -125,6 +153,7 @@ export function Shell() {
               <ChartStylePicker />
               <DrawToolPicker />
               <IndicatorPicker />
+              <OverlayTogglePicker />
               <ReplayButton />
             </div>
             <span className="tv-hint" id="drawHint"></span>
@@ -182,7 +211,7 @@ export function Shell() {
         <div className="desktop-grid grid-2">
           <div className="card">
             <div className="sec-head"><div className="sec-title">Cross-Exchange Radar</div><span className="badge b-cyan" id="advXexBadge">—</span></div>
-            <Guard name="Cross-exchange radar"><CrossExchangeTable /></Guard>
+            <Guard name="Cross-exchange radar"><Suspense fallback={null}><CrossExchangeTable /></Suspense></Guard>
           </div>
 
           <div className="card">
@@ -242,11 +271,22 @@ export function Shell() {
         <div className="card">
           <div className="sec-head"><div className="sec-title">Top Coins</div><span className="badge b-cyan" id="topCoinsUpd">LIVE · BINANCE</span></div>
           <div className="table-scroll">
-            <table className="coins-table">
-              <thead><tr><th>Coin</th><th>Last Price</th><th>24h Change</th><th>24h Volume</th><th>Signal</th></tr></thead>
+            <table className="coins-table cmc-table">
+              <thead><tr><th className="cmc-rank">#</th><th>Coin</th><th>Price</th><th>1h %</th><th>24h %</th><th>Market Cap</th><th>Circulating Supply</th><th>Volume (24h)</th></tr></thead>
               <tbody id="coinsBody"></tbody>
             </table>
           </div>
+        </div>
+      
+        <div className="card">
+          <div className="sec-head"><div className="sec-title">Perpetual Futures</div><span className="badge b-purple">USDT-M · BINANCE</span></div>
+          <div className="table-scroll">
+            <table className="coins-table cmc-table">
+              <thead><tr><th className="cmc-rank">#</th><th>Contract</th><th>Mark Price</th><th>24h %</th><th>Funding (8h)</th><th>Open Interest</th><th>Volume (24h)</th></tr></thead>
+              <tbody id="futuresBody"></tbody>
+            </table>
+          </div>
+          <div className="disclaimer">Funding is charged/paid every 8h between longs and shorts — positive means longs pay shorts. Open interest is notional (contracts × mark price).</div>
         </div>
       
         <div className="card">
@@ -268,22 +308,7 @@ export function Shell() {
       </section>
       
       <section className="tab-section" id="tab-bubbles">
-        <div className="card">
-          <div className="sec-head"><div className="sec-title">Crypto Bubbles</div><span className="badge b-cyan" id="bubCount">—</span></div>
-          <div className="bub-ctrl">
-            <div className="bub-filter">
-              <button className="bub-f on" data-f="all">All Coins</button>
-              <button className="bub-f" data-f="major">Majors</button>
-              <button className="bub-f" data-f="meme">Memes</button>
-            </div>
-            <div className="bub-legend">
-              <span><i className="lg sog"></i>Gainers</span>
-              <span><i className="lg sor"></i>Losers</span>
-              <span className="bub-hint">Size = 24h traded volume · color = 24h change · click a bubble to open its chart</span>
-            </div>
-          </div>
-          <div className="bub-wrap" id="bubWrap"><div className="bub-empty">Loading live prices…</div></div>
-        </div>
+        <Suspense fallback={null}><BubblesCanvas /></Suspense>
       </section>
       
       <section className="tab-section" id="tab-analysis">
@@ -312,13 +337,18 @@ export function Shell() {
           <div className="disclaimer">Zones are heuristic estimates derived from swing structure + ATR offsets applied to open interest — Binance does not expose public liquidation heatmaps on REST. Treat magnitudes as directional intuition only.</div>
         </div>
       
-        <Guard name="Liquidation heatmap"><LiqHeatmap /></Guard>
+        <Guard name="Liquidation heatmap"><Suspense fallback={null}><LiqHeatmap /></Suspense></Guard>
       
         <div className="card">
           <div className="sec-head"><div className="sec-title">Volume Profile</div><span className="badge b-cyan" id="vpSym">BTCUSDT · 96 BARS</span></div>
           <div id="vpList"></div>
           <div className="fc-note">Distribution of traded volume across price bins over the last 96 × 15m candles. ★ POC = Point of Control (highest-volume node) — historically acts as a magnet price.</div>
         </div>
+      </section>
+      
+      <section className="tab-section" id="tab-neuralnet">
+        <DashHead zone="analytics" name="Neural network" sub="Live weights and activations from whichever model you've trained" />
+        <Suspense fallback={null}><NeuralNetPage /></Suspense>
       </section>
       
       <section className="tab-section" id="tab-news">
@@ -328,7 +358,7 @@ export function Shell() {
           <div id="breakingList"></div>
         </div>
 
-        <Guard name="Economic calendar"><EconomicCalendar /></Guard>
+        <Guard name="Economic calendar"><Suspense fallback={null}><EconomicCalendar /></Suspense></Guard>
 
         <div className="news-grid">
           <div className="card">
@@ -359,7 +389,7 @@ export function Shell() {
 
       <section className="tab-section" id="tab-settings">
         <DashHead zone="analytics" name="Settings" sub="Every data source this app uses, what it is for, and whether it is answering" />
-        <Guard name="Settings"><SettingsPage /></Guard>
+        <Guard name="Settings"><Suspense fallback={null}><SettingsPage /></Suspense></Guard>
       </section>
 
       <section className="tab-section" id="tab-pro">
@@ -374,7 +404,7 @@ export function Shell() {
       
       <div className="toast" id="toast"></div>
 
-      <Guard name="Radar AI"><AiAssistant /></Guard>
+      <Guard name="Radar AI"><Suspense fallback={null}><AiAssistant /></Suspense></Guard>
       
       <div className="modal-overlay" id="alModal" role="dialog" aria-modal="true" aria-label="Price alerts" onClick={(e) => { if(e.target=== e.currentTarget)w.closeModal('alModal') }}>
         <div className="modal-box" style={{ 'maxWidth': '480px' }}>
