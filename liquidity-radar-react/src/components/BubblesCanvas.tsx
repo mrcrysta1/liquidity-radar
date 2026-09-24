@@ -17,7 +17,7 @@ type Any = any
 type Timeframe = '1h' | '24h' | '7d'
 type FilterKey = 'all' | 'major' | 'meme'
 
-const MAJORS = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'DOGE', 'AVAX', 'DOT', 'LINK', 'UNI', 'SUI']
+const MAJORS = ['BTC', 'ETH', 'PAXG', 'SOL', 'BNB', 'XRP', 'ADA', 'DOGE', 'AVAX', 'DOT', 'LINK', 'UNI', 'SUI']
 const MEMES = ['DOGE', 'PEPE', 'WIF', 'FLOKI', 'SHIB', 'BONK', 'TRUMP']
 const WALL_THICKNESS = 60
 

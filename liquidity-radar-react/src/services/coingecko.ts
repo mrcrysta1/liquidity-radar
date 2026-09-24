@@ -17,7 +17,7 @@ export interface MarketCapEntry {
 
 /** Our internal COINS key -> CoinGecko's own id. CoinGecko ids don't follow
  * the ticker symbol, so this has to be a manual table rather than a
- * lowercase() of the symbol. Limited to TOP16 - that's the only table this
+ * lowercase() of the symbol. Limited to HOT_LIST - that's the only table this
  * data feeds. */
 const COINGECKO_IDS: Record<string, string> = {
   BTC: 'bitcoin',

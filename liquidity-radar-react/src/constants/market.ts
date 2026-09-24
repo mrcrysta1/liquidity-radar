@@ -33,9 +33,13 @@ export const COINS: Record<string, CoinMeta> = {
   PAXG: { sym: 'PAXGUSDT', name: 'PAX Gold', icon: '🥇', color: '#D4AF37' },
 }
 
-export const TOP16 = [
+/* The hot list: what the Top Coins table, the movers strip and the futures
+   snapshot all track. Gold sits third, straight after the two majors — it is
+   a different asset class to everything else here and is meant to be seen. */
+export const HOT_LIST = [
   'BTC',
   'ETH',
+  'PAXG',
   'SOL',
   'BNB',
   'DOGE',
@@ -57,6 +61,7 @@ export const CELEBS = ['TRUMP', 'DOGE', 'PEPE', 'WIF', 'FLOKI', 'SHIB', 'BONK']
 export const TICKER_COINS = [
   'BTC',
   'ETH',
+  'PAXG',
   'SOL',
   'BNB',
   'DOGE',
@@ -69,6 +74,7 @@ export const TICKER_COINS = [
 
 export const COIN_ALIASES: Record<string, string[]> = {
   BTC: ['bitcoin', 'btc', 'btcusdt', 'satoshi', 'digital gold', 'xapo'],
+  PAXG: ['gold', 'paxg', 'pax gold', 'xau', 'xauusd', 'bullion', 'precious metal'],
   ETH: ['ethereum', 'eth', 'ether', 'ethusdt', 'vitalik', 'buterin'],
   SOL: ['solana', 'sol', 'solusdt'],
   BNB: ['bnb', 'binance coin', 'binance', 'bsc', 'binance smart chain'],

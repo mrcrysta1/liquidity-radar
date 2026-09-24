@@ -4,7 +4,7 @@
 // conversation/economics section only runs when the prompt mentions
 // pump/moon/mooning), and the chat DOM send/append wiring. The engine only
 // imports pushMsg for the welcome message.
-import { COINS, TOP16 } from '../../constants/market'
+import { COINS, HOT_LIST } from '../../constants/market'
 import { esc, pfmt, cfmt, nfmt, timeAgo } from '../../utils/format'
 import { baseOf, findCoin } from '../../utils/coins'
 import { aiComposite, forecastFrom } from '../../utils/indicators'
@@ -371,7 +371,7 @@ export async function generateReply(raw: string): Promise<string> {
   }
 
   if (has('best performer') || has('top gainer') || has('biggest gainer') || has('worst performer') || has('biggest loser')) {
-    const ts = TOP16.map((k) => ({ k, t: state.tickers[COINS[k].sym] })).filter((x) => x.t)
+    const ts = HOT_LIST.map((k) => ({ k, t: state.tickers[COINS[k].sym] })).filter((x) => x.t)
     if (!ts.length) return 'Market snapshot still loading — give me a few seconds and ask again.'
     ts.sort((a, b) => b.t.pct - a.t.pct)
     if (has('worst') || has('loser')) {
