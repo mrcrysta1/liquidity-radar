@@ -143,7 +143,15 @@ async function trainQNet(qNet: tf.LayersModel, transitions: Transition[], epochs
       const xs = tf.tensor2d(currentStates)
       const ys = tf.tensor2d(targets)
       try {
-        await qNet.fit(xs, ys, { epochs: 1, batchSize: 64, shuffle: true, verbose: 0 })
+        // Same reason as model.ts's fit(): yield per batch so training the
+        // policy does not freeze the page on a phone.
+        await qNet.fit(xs, ys, {
+          epochs: 1,
+          batchSize: 64,
+          shuffle: true,
+          verbose: 0,
+          yieldEvery: 'batch',
+        })
       } finally {
         xs.dispose()
         ys.dispose()

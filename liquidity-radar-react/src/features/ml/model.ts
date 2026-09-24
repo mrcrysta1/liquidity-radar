@@ -67,7 +67,18 @@ async function fit(model: tf.LayersModel, train: Sample[], epochs: number): Prom
   const xs = tf.tensor2d(train.map((s) => s.x))
   const ys = tf.tensor2d(train.map((s) => [s.y]))
   try {
-    await model.fit(xs, ys, { epochs, batchSize: 32, shuffle: true, verbose: 0 })
+    // yieldEvery defaults to 'auto', which hands the main thread back only
+    // about every 125ms — long enough that every frame during training misses
+    // its deadline and the page stops scrolling on a phone. Yielding per
+    // batch costs wall-clock time but changes nothing about the maths or the
+    // resulting model, and the page stays interactive while it runs.
+    await model.fit(xs, ys, {
+      epochs,
+      batchSize: 32,
+      shuffle: true,
+      verbose: 0,
+      yieldEvery: 'batch',
+    })
   } finally {
     xs.dispose()
     ys.dispose()

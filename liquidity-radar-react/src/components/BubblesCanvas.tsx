@@ -148,9 +148,30 @@ export function BubblesCanvas() {
     })
     ro.observe(container)
 
+    // Every tab section stays mounted and is merely display:none when it is
+    // not the active one, but requestAnimationFrame keeps firing — so the
+    // matter-js collision pass below was running the whole time the user was
+    // on some other tab. Watch whether the canvas is actually on screen and
+    // idle the simulation when it is not.
+    let onScreen = false
+    const vis = new IntersectionObserver(
+      ([e]) => {
+        onScreen = e.isIntersecting
+      },
+      { threshold: 0 },
+    )
+    vis.observe(container)
+
     let raf = 0
     let last = performance.now()
     const step = (t: number) => {
+      if (!onScreen) {
+        // Keep `last` current so the first visible frame steps by one frame's
+        // worth of time instead of the whole time spent hidden.
+        last = t
+        raf = requestAnimationFrame(step)
+        return
+      }
       const delta = Math.min(32, t - last)
       last = t
       bodiesRef.current.forEach((body) => {
@@ -195,6 +216,7 @@ export function BubblesCanvas() {
 
     return () => {
       cancelAnimationFrame(raf)
+      vis.disconnect()
       ro.disconnect()
       Matter.Composite.clear(engine.world, false)
       Matter.Engine.clear(engine)
