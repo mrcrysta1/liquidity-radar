@@ -87,8 +87,11 @@ function runAnalytics(){
 function setWsStatus(){
   // primary status derived from live stream count (unchanged behavior)
   const ok=state.wsOpen>0;
-  $('statusPill').classList.toggle('off',!ok);
-  $('statusTxt').textContent=ok?('LIVE · '+state.wsOpen+' STREAMS'):'RECONNECTING…';
+  const pill=$('statusPill');
+  pill.classList.toggle('off',!ok);
+  $('statusTxt').textContent=ok?'Online':'Offline';
+  // The stream count still matters when diagnosing, so keep it on hover.
+  pill.title=ok?(state.wsOpen+' live stream'+(state.wsOpen===1?'':'s')):'No live streams';
   // secondary: refresh health monitor + pill (non-disruptive augmentation)
   try{mdPill()}catch(e){}
 }

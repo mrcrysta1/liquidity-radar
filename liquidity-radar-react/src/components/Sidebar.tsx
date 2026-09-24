@@ -4,7 +4,7 @@
 // wires every one of them to switchTab at boot and the keyboard shortcuts read
 // the same map. Moving navigation into a sidebar is a layout change, not a
 // behaviour change — nothing downstream needs to know.
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { storageGetRaw, storageSetRaw } from '../services/storage'
 import { getActiveTab, subscribeActiveTab, switchTab } from '../features/actions/userActions'
 
@@ -147,13 +147,34 @@ const GROUPS: Array<{ id: string; label: string }> = [
 
 /** The destinations that earn a slot on a phone's bottom bar. */
 const QUICK: TabId[] = ['home', 'radar', 'multichart', 'signals']
+/** Everything else lives in the "More" sheet that rises from that bar. */
+const REST = NAV.filter((n) => !QUICK.includes(n.id))
 
 const KEY = 'lr-navCollapsed'
 
+/** How far the sheet must be pulled down before letting go dismisses it. */
+const DISMISS_PX = 90
+
 export function Sidebar() {
   const [collapsed, setCollapsed] = useState(() => storageGetRaw(KEY) === '1')
-  const [drawer, setDrawer] = useState(false)
+  const [sheet, setSheet] = useState(false)
   const [activeTab, setActiveTab] = useState(getActiveTab)
+  // How far the finger has dragged the sheet down, in px. 0 = resting.
+  const [drag, setDrag] = useState(0)
+  const startY = useRef<number | null>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+
+  const closeSheet = useCallback(() => {
+    startY.current = null
+    setDrag(0)
+    setSheet(false)
+  }, [])
+
+  const openSheet = useCallback(() => {
+    startY.current = null
+    setDrag(0)
+    setSheet(true)
+  }, [])
 
   useEffect(() => subscribeActiveTab(setActiveTab), [])
 
@@ -164,20 +185,20 @@ export function Sidebar() {
     return () => document.body.classList.remove('nav-collapsed')
   }, [collapsed])
 
+  // The sheet covers the page, so freeze what is behind it while it is up.
   useEffect(() => {
-    document.body.classList.toggle('nav-open', drawer)
-    return () => document.body.classList.remove('nav-open')
-  }, [drawer])
+    document.body.classList.toggle('sheet-open', sheet)
+    return () => document.body.classList.remove('sheet-open')
+  }, [sheet])
 
-  // On a phone the rail is a drawer; picking a destination should close it.
   useEffect(() => {
-    if (!drawer) return
+    if (!sheet) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setDrawer(false)
+      if (e.key === 'Escape') closeSheet()
     }
     document.addEventListener('keydown', onKey, true)
     return () => document.removeEventListener('keydown', onKey, true)
-  }, [drawer])
+  }, [sheet, closeSheet])
 
   const toggle = () => {
     setCollapsed((c) => {
@@ -186,20 +207,36 @@ export function Sidebar() {
     })
   }
 
+  const go = (id: TabId) => {
+    switchTab(id)
+    closeSheet()
+  }
+
+  // Swipe down to dismiss. The pull is ignored while the list is scrolled away
+  // from its top, otherwise dragging back up through the list would move the
+  // whole sheet instead of scrolling it.
+  const onTouchStart = (e: React.TouchEvent) => {
+    startY.current = (listRef.current?.scrollTop ?? 0) <= 0 ? e.touches[0].clientY : null
+  }
+  const onTouchMove = (e: React.TouchEvent) => {
+    if (startY.current == null) return
+    const dy = e.touches[0].clientY - startY.current
+    setDrag(dy > 0 ? dy : 0)
+  }
+  const onTouchEnd = () => {
+    if (drag > DISMISS_PX) closeSheet()
+    else {
+      startY.current = null
+      setDrag(0)
+    }
+  }
+
+  // With the active section tucked away in the sheet, More is what is lit up.
+  const restActive = REST.some((n) => n.id === activeTab)
+
   return (
     <>
-      <button
-        type="button"
-        className="nav-burger"
-        aria-label="Open navigation"
-        aria-expanded={drawer}
-        onClick={() => setDrawer(true)}
-      >
-        <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M4 7h16M4 12h16M4 17h16" {...S} strokeWidth={1.9} />
-        </svg>
-      </button>
-
+      {/* Phone: the primary destinations, always reachable along the bottom. */}
       <nav className="tabbar" aria-label="Primary">
         {QUICK.map((id) => {
           const item = NAV.find((n) => n.id === id)!
@@ -209,10 +246,8 @@ export function Sidebar() {
               className={'tab-btn' + (id === activeTab ? ' active' : '')}
               data-tab={id}
               aria-label={item.label}
-              onClick={() => {
-                switchTab(id)
-                setDrawer(false)
-              }}
+              aria-current={id === activeTab ? 'page' : undefined}
+              onClick={() => go(id)}
             >
               <span className="tabbar-ico">
                 <NavIcon id={id} />
@@ -223,10 +258,11 @@ export function Sidebar() {
         })}
         <button
           type="button"
-          className="tabbar-more"
+          className={'tabbar-more' + (restActive ? ' active' : '')}
           aria-label="More sections"
-          aria-expanded={drawer}
-          onClick={() => setDrawer(true)}
+          aria-expanded={sheet}
+          aria-haspopup="dialog"
+          onClick={openSheet}
         >
           <span className="tabbar-ico">
             <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
@@ -238,7 +274,65 @@ export function Sidebar() {
           <span className="tabbar-label">More</span>
         </button>
       </nav>
-      <div className="nav-scrim" onClick={() => setDrawer(false)} aria-hidden="true" />
+
+      {/* Phone: the remaining sections, as a sheet that rises from that bar. */}
+      <div
+        className={'navsheet-scrim' + (sheet ? ' show' : '')}
+        onClick={closeSheet}
+        aria-hidden="true"
+      />
+      <div
+        className={'navsheet' + (sheet ? ' show' : '')}
+        role="dialog"
+        aria-modal="true"
+        aria-label="More sections"
+        style={drag ? { transform: `translateY(${drag}px)`, transition: 'none' } : undefined}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        onTouchCancel={onTouchEnd}
+      >
+        <button type="button" className="navsheet-grip" aria-label="Close" onClick={closeSheet}>
+          <span aria-hidden="true" />
+        </button>
+        <div className="navsheet-head">
+          <b>All sections</b>
+          <button type="button" className="navsheet-x" aria-label="Close" onClick={closeSheet}>
+            <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M6 6l12 12M18 6L6 18" {...S} strokeWidth={1.9} />
+            </svg>
+          </button>
+        </div>
+        <div className="navsheet-list" ref={listRef}>
+          {GROUPS.map((g) => {
+            const items = REST.filter((n) => n.group === g.id)
+            if (!items.length) return null
+            return (
+              <div className="navsheet-group" key={g.id}>
+                <span className="navsheet-group-label">{g.label}</span>
+                <div className="navsheet-grid">
+                  {items.map((n) => (
+                    <button
+                      key={n.id}
+                      type="button"
+                      className={'navsheet-item' + (n.id === activeTab ? ' active' : '')}
+                      aria-current={n.id === activeTab ? 'page' : undefined}
+                      onClick={() => go(n.id)}
+                    >
+                      <span className="navsheet-ico">
+                        <NavIcon id={n.id} />
+                      </span>
+                      <span className="navsheet-name">{n.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Tablet and up: the persistent rail. Hidden entirely on a phone. */}
       <aside className="sidenav" aria-label="Sections">
         <div className="sidenav-top">
           <span className="sidenav-mark" aria-hidden="true">
@@ -273,10 +367,7 @@ export function Sidebar() {
                   aria-label={n.label + ' tab'}
                   aria-selected={n.id === activeTab}
                   title={n.label}
-                  onClick={() => {
-                    switchTab(n.id)
-                    setDrawer(false)
-                  }}
+                  onClick={() => go(n.id)}
                 >
                   <span className="sidenav-ico">
                     <NavIcon id={n.id} />

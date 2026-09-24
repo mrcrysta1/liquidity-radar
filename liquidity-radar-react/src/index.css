@@ -2340,6 +2340,7 @@ body::after{
 /* ---- motion off --------------------------------------------- */
 @media(prefers-reduced-motion:reduce){
   body::before,body::after,.hero-card::after,.hero-price,.status-pill .dot{animation:none}
+  .navsheet,.navsheet-scrim{transition:none}
   .card,.metric{transition:none}
   .card:hover,.metric:hover{transform:none}
 }
@@ -2433,25 +2434,12 @@ header.top,.container,.search-wrap{margin-left:var(--nav-w);transition:margin-le
    max-width alone left the box 1400px wide *after* the rail's offset and it
    ran off the screen. Cap it against the space the rail actually leaves. */
 .container{max-width:min(1400px,calc(100% - var(--nav-w)))}
-.nav-burger,.nav-scrim{display:none}
-
 @media(max-width:900px){
-  .sidenav{transform:translateX(-102%);box-shadow:var(--shade-3);width:248px}
-  body.nav-open .sidenav{transform:none}
+  /* A phone gets no rail at all: navigation is the bottom bar plus the
+     "More" sheet. A 248px drawer over a 360px screen covered the app. */
+  .sidenav{display:none}
   header.top,.container,.search-wrap{margin-left:0}
   .container{max-width:1400px}
-  .nav-scrim{
-    display:block;position:fixed;inset:0;z-index:69;opacity:0;pointer-events:none;
-    background:rgba(4,2,12,.6);backdrop-filter:blur(2px);transition:opacity .2s;
-  }
-  body.nav-open .nav-scrim{opacity:1;pointer-events:auto}
-  .nav-burger{
-    display:grid;place-items:center;position:fixed;left:12px;top:10px;z-index:71;
-    width:38px;height:38px;border-radius:11px;cursor:pointer;
-    border:1px solid var(--border2);color:var(--txt);
-    background:var(--sunk-3);backdrop-filter:blur(12px);
-  }
-  header.top .top-inner{padding-left:58px}
 }
 
 /* ---- home widgets ------------------------------------------ */
@@ -2583,14 +2571,6 @@ header.top,.container,.search-wrap{margin-left:var(--nav-w);transition:margin-le
 .tabbar{display:none}
 
 @media(max-width:900px){
-  /* The burger lives in the header rather than floating over the drawer. */
-  .nav-burger{top:calc(8px + env(safe-area-inset-top,0px))}
-  body.nav-open .nav-burger{display:none}
-  .sidenav-collapse{display:none}
-  .sidenav{padding-top:calc(14px + env(safe-area-inset-top,0px))}
-  .sidenav-list{gap:10px}
-  .sidenav .tab-btn{padding:11px 10px;font-size:13.5px}
-
   .tabbar{
     position:fixed;left:0;right:0;bottom:0;z-index:68;
     display:grid;grid-auto-flow:column;grid-auto-columns:1fr;align-items:stretch;
@@ -2616,7 +2596,17 @@ header.top,.container,.search-wrap{margin-left:var(--nav-w);transition:margin-le
     background:linear-gradient(90deg,var(--primary),rgb(var(--uRGB)/1));
     box-shadow:0 0 10px rgb(var(--pRGB)/.7);
   }
-  .tabbar .tab-btn{position:relative}
+  .tabbar .tab-btn,.tabbar-more{position:relative}
+  .tabbar-more.active{
+    color:var(--primary);
+    background:linear-gradient(180deg,rgb(var(--pRGB)/.16),transparent);
+  }
+  .tabbar-more.active::after{
+    content:'';position:absolute;left:50%;top:2px;transform:translateX(-50%);
+    width:22px;height:2.5px;border-radius:2px;
+    background:linear-gradient(90deg,var(--primary),rgb(var(--uRGB)/1));
+    box-shadow:0 0 10px rgb(var(--pRGB)/.7);
+  }
   .tabbar-ico{display:grid;place-items:center;width:20px;height:20px}
   .tabbar-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 
@@ -2625,6 +2615,83 @@ header.top,.container,.search-wrap{margin-left:var(--nav-w);transition:margin-le
   .ai-dock-root{bottom:calc(74px + env(safe-area-inset-bottom,0px))}
   .toast{bottom:calc(80px + env(safe-area-inset-bottom,0px))}
   footer{margin-bottom:6px}
+}
+
+/* ---- phone: the "More" sheet -------------------------------- */
+/* Rises from the tab bar with everything that did not fit on it. Desktop
+   never sees it — the rail already lists every section. */
+.navsheet,.navsheet-scrim{display:none}
+
+@media(max-width:900px){
+  .navsheet-scrim{
+    display:block;position:fixed;inset:0;z-index:97;opacity:0;pointer-events:none;
+    background:rgba(4,2,12,.62);backdrop-filter:blur(3px);transition:opacity .24s;
+  }
+  .navsheet-scrim.show{opacity:1;pointer-events:auto}
+
+  .navsheet{
+    display:flex;flex-direction:column;position:fixed;left:0;right:0;bottom:0;z-index:98;
+    max-height:min(76vh,560px);
+    padding:0 12px calc(14px + env(safe-area-inset-bottom,0px));
+    border-top:1px solid var(--border2);border-radius:20px 20px 0 0;
+    background:linear-gradient(180deg,rgb(var(--uRGB)/.12),transparent 32%),var(--sunk-3);
+    backdrop-filter:blur(18px);box-shadow:0 -18px 44px rgb(4 2 12 / .5);
+    /* visibility keeps the buttons out of the tab order while it is down. */
+    transform:translateY(102%);visibility:hidden;
+    transition:transform .28s cubic-bezier(.2,.8,.2,1),visibility .28s;
+  }
+  .navsheet.show{transform:none;visibility:visible}
+
+  .navsheet-grip{
+    flex-shrink:0;display:grid;place-items:center;width:100%;padding:11px 0 5px;
+    border:none;background:none;cursor:pointer;
+  }
+  .navsheet-grip>span{display:block;width:40px;height:4px;border-radius:2px;background:var(--border2)}
+
+  .navsheet-head{flex-shrink:0;display:flex;align-items:center;gap:10px;padding:2px 4px 11px}
+  .navsheet-head b{
+    flex:1;font-size:10.5px;font-weight:800;letter-spacing:.14em;
+    text-transform:uppercase;color:var(--muted);
+  }
+  .navsheet-x{
+    flex-shrink:0;display:grid;place-items:center;width:30px;height:30px;padding:0;
+    border:1px solid var(--border2);border-radius:9px;background:transparent;
+    color:var(--dim);cursor:pointer;
+  }
+
+  .navsheet-list{overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+  .navsheet-list::-webkit-scrollbar{width:0}
+  .navsheet-group{margin-bottom:15px}
+  .navsheet-group:last-child{margin-bottom:0}
+  .navsheet-group-label{
+    display:block;padding:0 4px 7px;font-size:9px;font-weight:800;letter-spacing:.16em;
+    text-transform:uppercase;color:var(--dim);
+  }
+  .navsheet-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .navsheet-item{
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;
+    min-height:78px;padding:10px 6px;border:1px solid var(--border);border-radius:14px;
+    background:var(--glass);color:var(--muted);cursor:pointer;
+    font-size:10.5px;font-weight:700;line-height:1.25;text-align:center;
+    transition:color .15s,border-color .15s,background .15s;
+  }
+  .navsheet-item.active{
+    color:var(--txt);border-color:rgb(var(--pRGB)/.55);
+    background:linear-gradient(180deg,rgb(var(--pRGB)/.20),rgb(var(--uRGB)/.08));
+  }
+  .navsheet-ico{display:grid;place-items:center;width:22px;height:22px}
+  .navsheet-item.active .navsheet-ico{color:var(--primary)}
+  .navsheet-name{display:block;width:100%;overflow:hidden;text-overflow:ellipsis}
+
+  /* Nothing behind the sheet should scroll while it is up, and the chat FAB
+     should not float over a nav surface it cannot be used from. */
+  body.sheet-open{overflow:hidden}
+  body.sheet-open .ai-dock-root{opacity:0;pointer-events:none;transition:opacity .18s}
+}
+
+/* Narrow phones cannot hold three comfortable columns. */
+@media(max-width:360px){
+  .navsheet-grid{grid-template-columns:repeat(2,1fr)}
 }
 
 /* ---- phone: denser chrome ----------------------------------- */
