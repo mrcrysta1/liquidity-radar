@@ -59,6 +59,10 @@ export function BubblesCanvas() {
   const metaRef = useRef<Map<string, BubbleMeta>>(new Map())
   const wallsRef = useRef<Matter.Body[]>([])
   const sizeRef = useRef({ w: 800, h: 560 })
+  // Mirrored into state as well: the radius pass below sizes bubbles against
+  // the stage, so it has to re-run once the real width is known and again on
+  // rotation. A ref alone would leave a phone showing desktop-sized bubbles.
+  const [stage, setStage] = useState({ w: 800, h: 560 })
   const dragRef = useRef<{ k: string; x: number; y: number; moved: boolean } | null>(null)
 
   useEffect(() => {
@@ -138,6 +142,7 @@ export function BubblesCanvas() {
     const ro = new ResizeObserver(() => {
       const rect = container.getBoundingClientRect()
       sizeRef.current = { w: rect.width, h: 560 }
+      setStage((p) => (Math.abs(p.w - rect.width) < 1 ? p : { w: rect.width, h: 560 }))
       const dpr = window.devicePixelRatio || 1
       canvas.width = rect.width * dpr
       canvas.height = 560 * dpr
@@ -226,7 +231,7 @@ export function BubblesCanvas() {
   useEffect(() => {
     const engine = engineRef.current
     if (!engine) return
-    const { w, h } = sizeRef.current
+    const { w, h } = stage
     const caps = filtered.map((k) => state.marketCaps[k]?.marketCap ?? 0)
     const vols = filtered.map((k) => state.tickers[COINS[k].sym]?.qvol ?? 0)
     const maxCap = Math.max(...caps, 0)
@@ -241,14 +246,36 @@ export function BubblesCanvas() {
       metaRef.current.delete(k)
     })
 
+    // Radii used to be fixed in pixels, which only ever suited a desktop-width
+    // canvas. The same thirty bubbles that fill about a sixth of a 1400px
+    // stage tried to fill two-thirds of a phone's, so the solver shoved them
+    // straight through the walls and half the coins sat clipped off the left
+    // edge. Size them against the area actually available instead.
+    const metricOf = (k: string): number => {
+      const mc = state.marketCaps[k]
+      return useCap && mc ? mc.marketCap : (state.tickers[COINS[k].sym]?.qvol ?? 0)
+    }
+    const maxMetricOf = (k: string): number => {
+      const mc = state.marketCaps[k]
+      return useCap && mc ? maxCap : maxVol
+    }
+    const baseR = (k: string): number =>
+      22 + 56 * Math.sqrt(Math.max(0, metricOf(k)) / (maxMetricOf(k) || 1))
+
+    // Aim for roughly a third of the stage covered — dense enough to look
+    // alive, loose enough that the solver can still separate everything.
+    const stageArea = Math.max(1, w * h)
+    const baseArea = filtered.reduce((acc, k) => acc + Math.PI * baseR(k) ** 2, 0)
+    const fit = baseArea > 0 ? Math.min(1, Math.sqrt((stageArea * 0.33) / baseArea)) : 1
+    // No single coin may swallow the stage, however large its cap.
+    const capR = Math.min(w, h) * 0.22
+    const radiusOf = (k: string): number => Math.max(9, Math.min(capR, baseR(k) * fit))
+
     for (const k of filtered) {
       const c = COINS[k]
       const t = state.tickers[c.sym]!
       const pct = pctFor(k, tf, t.pct) ?? 0
-      const mc = state.marketCaps[k]
-      const metric = useCap && mc ? mc.marketCap : t.qvol
-      const maxMetric = useCap && mc ? maxCap : maxVol
-      const r = 22 + 56 * Math.sqrt(Math.max(0, metric) / (maxMetric || 1))
+      const r = radiusOf(k)
 
       const existing = bodiesRef.current.get(k)
       if (existing) {
@@ -267,7 +294,7 @@ export function BubblesCanvas() {
       }
       metaRef.current.set(k, { sym: c.sym, name: c.name, color: colorFor(pct), pct, r })
     }
-  }, [filtered, tf])
+  }, [filtered, tf, stage])
 
   const anyCapData = filtered.some((k) => state.marketCaps[k])
 
