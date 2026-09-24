@@ -5,6 +5,8 @@
 // signalData is exported as a live binding so the engine's AI chat can keep
 // reading the latest scan results without a copy.
 import * as LightweightCharts from 'lightweight-charts'
+import { instrumentOf, isInstrument } from '../../constants/instruments'
+import { yahooCandles } from '../../services/yahoo'
 import { COINS } from '../../constants/market'
 import { esc, pfmt, cfmt, chgHtml } from '../../utils/format'
 import { aiComposite, calcATR, calcRSI, forecastFrom } from '../../utils/indicators'
@@ -19,7 +21,18 @@ import { chartTheme, mapCandle } from '../charts/chartRender'
 
 type Any = any
 
-const SIGNAL_COINS = ['BTCUSDT', 'ETHUSDT', 'PAXGUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'SUIUSDT', 'LINKUSDT']
+// What the scanner sweeps. Crypto pairs and Yahoo-priced instruments sit in
+// one list on purpose: every score below is computed from candles alone, so
+// gold, the euro and the S&P go through exactly the same scoring as BTC
+// rather than a parallel, less-tested path.
+const SIGNAL_COINS = [
+  'BTCUSDT', 'ETHUSDT', 'PAXGUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT',
+  'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'SUIUSDT', 'LINKUSDT',
+  // Non-crypto: spot gold and silver, the dollar's majors, the two US
+  // indices and crude. These have no order book or trade tape, so the
+  // whale-flow term simply does not contribute for them.
+  'XAUUSD', 'XAGUSD', 'EURUSD', 'GBPUSD', 'USDJPY', 'SPX500', 'NAS100', 'WTIUSD',
+]
 const TF_LIST = [
   { key: '1h', label: '1H', limit: 100, weight: 0.25 },
   { key: '4h', label: '4H', limit: 100, weight: 0.4 },
@@ -85,6 +98,14 @@ function conviction(score: number, breakdown: Any[]): { tier: Conviction; agree:
   else if (mag >= 45) tier = 'MODERATE'
   return { tier, agree, of: breakdown.length }
 }
+/** How a scanned market is written on a card. Not everything is a pair —
+ *  "XAUUSD/USDT" would be nonsense, and so would "Gold/USDT". */
+function marketLabel(sym: string): string {
+  const inst = instrumentOf(sym)
+  if (inst) return inst.sym + ' · ' + inst.name
+  return baseOf(sym) + '/USDT'
+}
+
 export let signalData: Any[] = []
 const whaleFlowCache: Record<string, Any> = {}
 let patternHistory: Record<string, { correct: number; total: number }> = {}
@@ -243,6 +264,10 @@ function scoreTimeframe(candles: Any[]): Any {
 }
 
 function getWhaleFlow(sym: string): Promise<Any> {
+  // Metals, FX, indices and equities have no public trade tape. Returning
+  // null leaves the whale term out of the blend rather than scoring them
+  // against a zero they never had the chance to earn.
+  if (isInstrument(sym)) return Promise.resolve(null)
   const cached = whaleFlowCache[sym]
   if (cached && Date.now() - cached.ts < 30000) return cached
   return jget('https://api.binance.com/api/v3/trades?symbol=' + sym + '&limit=500').then(function (trades: Any) {
@@ -312,6 +337,12 @@ function scanKlineFetch(sym: string, tfKey: string): Promise<Any[]> {
     scanCache[key] = { ts: Date.now(), candles: state.candles.slice() }
     return Promise.resolve(scanCache[key].candles)
   }
+  if (isInstrument(sym)) {
+    return yahooCandles(sym, tfKey, 60).then(function (candles) {
+      if (candles.length) scanCache[key] = { ts: Date.now(), candles: candles }
+      return candles as Any[]
+    })
+  }
   return jget('https://api.binance.com/api/v3/klines?symbol=' + sym + '&interval=' + tfKey + '&limit=60').then(function (data: Any) {
     const candles = data.map((k: Any) => ({ t: k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5] })).filter(mdVal.candle)
     if (candles.length) scanCache[key] = { ts: Date.now(), candles: candles }
@@ -363,7 +394,24 @@ export function scanSignals(): void {
           .map((i) => tfScores[i])
           .find((x: Any) => x && x.candles && x.candles.length >= 20) || null
       const atr = swing && swing.candles ? calcATR(swing.candles, 14) : 0
-      const px = (t && t.last) || (swing && swing.last) || 0
+      // A market we just scored should never render without a price. The
+      // instruments are polled rather than streamed, so on the first sweep
+      // the quote often has not landed yet — fall back to the very candles
+      // the score was computed from instead of printing a dash.
+      let tk: Any = t
+      if (!tk) {
+        const daily = tfScores[2] as Any
+        const cs: Any[] =
+          (daily && daily.candles && daily.candles.length >= 2 ? daily.candles : null) ||
+          (swing && swing.candles && swing.candles.length >= 2 ? swing.candles : null) ||
+          []
+        if (cs.length >= 2) {
+          const last = cs[cs.length - 1].c
+          const prev = cs[cs.length - 2].c
+          tk = { last, pct: prev ? ((last - prev) / prev) * 100 : 0, qvol: 0 }
+        }
+      }
+      const px = (tk && tk.last) || (swing && swing.last) || 0
       const conv = conviction(blend, master.breakdown)
       const dir = blend > 15 ? 'BUY' : blend < -15 ? 'SELL' : null
       // The badge classified the pre-whale score while the card printed the
@@ -376,7 +424,7 @@ export function scanSignals(): void {
       if (s1 && s1.rows) {
         fcObj = { rows: s1.rows, pUp: 1 / (1 + Math.exp(-blend / 45)) }
       }
-      return { sym: sym, score: blend, master: master, tfScores: tfScores, whale: whale, whaleText: whaleText, t: t, fc: fcObj, reasons: allReasons.slice(0, 4), plan: plan, conv: conv }
+      return { sym: sym, score: blend, master: master, tfScores: tfScores, whale: whale, whaleText: whaleText, t: tk, fc: fcObj, reasons: allReasons.slice(0, 4), plan: plan, conv: conv }
     }).catch(function (e) {
       // A coin dropping out used to be silent, which made a scanner returning
       // nothing at all indistinguishable from a quiet market.
@@ -393,7 +441,7 @@ export function scanSignals(): void {
     console.warn('Signal scan failed:', e)
     if (badge) badge.textContent = 'SCAN FAILED'
     if (badge) badge.style.background = 'rgba(255,23,68,.15)'
-    $('signalGrid')!.innerHTML = '<div style="text-align:center;padding:40px;color:var(--dim)"><b style="color:var(--red);font-size:14px">Scanner Error</b><br><span style="font-size:12px;margin-top:6px;display:block">Could not reach Binance API. Retrying in 2 minutes.</span></div>'
+    $('signalGrid')!.innerHTML = '<div style="text-align:center;padding:40px;color:var(--dim)"><b style="color:var(--red);font-size:14px">Scanner Error</b><br><span style="font-size:12px;margin-top:6px;display:block">Could not reach the market data APIs. Retrying in 2 minutes.</span></div>'
   })
 }
 
@@ -438,7 +486,7 @@ export function setSigFilter(f: string): void {
 }
 
 function renderSignals(): void {
-  $('sigCount')!.textContent = signalData.length + ' COINS · ' + TF_LIST.length + ' TIMEFRAMES'
+  $('sigCount')!.textContent = signalData.length + ' MARKETS · ' + TF_LIST.length + ' TIMEFRAMES'
   const counts = { all: signalData.length, BUY: 0, SELL: 0, WAIT: 0 } as Record<string, number>
   signalData.forEach((s: Any) => { counts[s.master.type] = (counts[s.master.type] || 0) + 1 })
   const bar = $('sigFilters')
@@ -516,7 +564,7 @@ function renderSignals(): void {
         + '</div>'
       : ''
     return '<div class="signal-card ' + typeCls + '">'
-      + '<div class="sc-head"><span class="sc-coin">' + baseOf(s.sym) + '/USDT ' + price + ' ' + chg + '</span><span class="sc-type ' + badgeCls + '">' + type + '</span></div>'
+      + '<div class="sc-head"><span class="sc-coin">' + marketLabel(s.sym) + ' ' + price + ' ' + chg + '</span><span class="sc-type ' + badgeCls + '">' + type + '</span></div>'
       + '<div class="sc-tf-row">' + tfBadges + convHtml + '</div>'
       + '<div class="sc-conf"><div class="sc-conf-bar"><div class="sc-conf-fill" style="width:' + Math.min(100, conf) + '%;background:' + confColor + '"></div></div></div>'
       + '<div class="sc-reasons">' + s.reasons.map((r: string) => '&bull; ' + esc(r)).join('<br>') + '</div>'
@@ -566,7 +614,7 @@ export function analyzeSigCoin(input: string): void {
   const sym = resolveSigSym(input)
   if (!sym || sym === 'USDT') return
   const el = $('sigAnalysisResult')!
-  el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--dim)">Analyzing ' + baseOf(sym) + '...</div>'
+  el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--dim)">Analyzing ' + marketLabel(sym) + '...</div>'
   const tfs = ['1h', '4h', '1d']
   const tfLabels = ['1H', '4H', '1D']
   const tfPromises: Promise<Any>[] = tfs.map(function (tf) {
@@ -582,7 +630,10 @@ export function analyzeSigCoin(input: string): void {
       return { tf: tf, label: tfLabels[tfs.indexOf(tf)], candles: [], closes: [], a: null, fc: null, sc: null }
     })
   })
-  const newsPromise: Promise<Any> = jget('https://cryptocurrency.cv/api/news?coin=' + baseOf(sym).toLowerCase()).catch(function () {
+  // The crypto news endpoint has nothing to say about the S&P or the euro.
+  const newsPromise: Promise<Any> = isInstrument(sym)
+    ? Promise.resolve(null)
+    : jget('https://cryptocurrency.cv/api/news?coin=' + baseOf(sym).toLowerCase()).catch(function () {
     return { articles: [] }
   })
   const whalePromise = getWhaleFlow(sym)
@@ -639,7 +690,7 @@ export function analyzeSigCoin(input: string): void {
         + '</div></div>'
     }
     const html = '<div class="sig-analysis">'
-      + '<div class="sig-ana-head"><span class="sig-ana-coin">' + baseOf(sym) + '/USDT</span><span class="sig-ana-price" style="color:' + (t && t.pct >= 0 ? 'var(--green)' : 'var(--red)') + '">' + (t ? '$' + pfmt(t.last) : '--') + ' ' + chg + '</span></div>'
+      + '<div class="sig-ana-head"><span class="sig-ana-coin">' + marketLabel(sym) + '</span><span class="sig-ana-price" style="color:' + (t && t.pct >= 0 ? 'var(--green)' : 'var(--red)') + '">' + (t ? '$' + pfmt(t.last) : '--') + ' ' + chg + '</span></div>'
       + '<div class="sig-ana-chart" id="sigAnaChartWrap"></div>'
       + '<div class="sig-tf-grid">' + tfHtml + '</div>'
       + '<div class="sig-verdict ' + vc + '"><div class="sv-label">MASTER VERDICT</div><div class="sv-type">' + masterType + ' (' + (masterScore > 0 ? '+' : '') + masterScore + ')</div><div class="sv-reason">' + reasons.slice(0, 4).join(' · ') + '</div></div>'
@@ -651,7 +702,7 @@ export function analyzeSigCoin(input: string): void {
     setTimeout(() => renderSigAnaChart(tfData[0].candles, sym), 100)
   }).catch(function (e) {
     console.warn('Analysis failed:', e)
-    el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--dim)"><b style="color:var(--red)">Analysis Failed</b><br><span style="font-size:12px;margin-top:6px;display:block">Could not load data for ' + baseOf(sym) + '. Check the symbol and try again.</span></div>'
+    el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--dim)"><b style="color:var(--red)">Analysis Failed</b><br><span style="font-size:12px;margin-top:6px;display:block">Could not load data for ' + marketLabel(sym) + '. Check the symbol and try again.</span></div>'
   })
 }
 

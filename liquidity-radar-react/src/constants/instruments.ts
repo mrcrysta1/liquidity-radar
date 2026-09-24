@@ -175,8 +175,15 @@ export function instrumentOf(sym: string): Instrument | null {
   return INSTRUMENTS[sym] ?? null
 }
 
-/** The non-crypto names that earn a permanent slot in the scanner. */
-export const INSTRUMENT_HOT_LIST = ['XAUUSD', 'XAGUSD', 'WTIUSD', 'EURUSD', 'SPX500', 'NAS100']
+/**
+ * The non-crypto names the scanner sweeps, and therefore the ones that need a
+ * polled price so their signal cards are not blank. Keep this in step with
+ * SIGNAL_COINS in features/signals — a scanned market with no quote renders
+ * without a price or a change.
+ */
+export const INSTRUMENT_HOT_LIST = [
+  'XAUUSD', 'XAGUSD', 'EURUSD', 'GBPUSD', 'USDJPY', 'SPX500', 'NAS100', 'WTIUSD',
+]
 
 export const ASSET_CLASS_LABEL: Record<AssetClass, string> = {
   metal: 'Metals',
