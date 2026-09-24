@@ -1022,7 +1022,23 @@ export function renderHero(): void {
   $('heroIcon')!.style.borderColor = meta.color + '55'
   $('heroName')!.textContent = meta.name
   $('heroPair')!.textContent = meta.sym + ' · ' + venueOf(state.symbol)
-  if (!t) return
+  if (!t) {
+    // The name and venue above have already switched to the new market. If we
+    // simply returned here, the price block kept the *previous* symbol's
+    // numbers — so selecting spot gold showed Bitcoin's price under a XAUUSD
+    // heading until the first quote landed. Blank it instead; an instrument
+    // is polled rather than streamed, so that gap is a second or two.
+    const el = $('heroPrice')!
+    el.textContent = '—'
+    el.dataset.p = '0'
+    $('heroChg')!.innerHTML = ''
+    $('heroUpdated')!.textContent = ''
+    $('hsHigh')!.textContent = '—'
+    $('hsLow')!.textContent = '—'
+    $('hsVol')!.textContent = '—'
+    $('hsTrades')!.textContent = '—'
+    return
+  }
   const el = $('heroPrice')!
   const prev = parseFloat(el.dataset.p || '0')
   const cur = t.last
