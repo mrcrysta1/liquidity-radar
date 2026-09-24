@@ -6,7 +6,7 @@
 // request per row.
 import { state } from './store'
 import { jget } from '../api/client'
-import { COINS, TOP16 } from '../constants/market'
+import { COINS, HOT_LIST } from '../constants/market'
 import { noteCall } from './dataSources'
 
 export interface FuturesEntry {
@@ -35,7 +35,7 @@ interface OiRow {
 const FAPI = 'https://fapi.binance.com'
 
 export async function fetchFuturesSnapshot(): Promise<void> {
-  const symbols = new Set(TOP16.map((k) => COINS[k].sym))
+  const symbols = new Set(HOT_LIST.map((k) => COINS[k].sym))
   try {
     const [premiums, tickers] = (await Promise.all([
       jget(FAPI + '/fapi/v1/premiumIndex'),
@@ -46,11 +46,11 @@ export async function fetchFuturesSnapshot(): Promise<void> {
     const tickerBySym = new Map(tickers.filter((t) => symbols.has(t.symbol)).map((t) => [t.symbol, t]))
 
     const oiResults = await Promise.allSettled(
-      TOP16.map((k) => jget(FAPI + '/fapi/v1/openInterest?symbol=' + COINS[k].sym) as Promise<OiRow>),
+      HOT_LIST.map((k) => jget(FAPI + '/fapi/v1/openInterest?symbol=' + COINS[k].sym) as Promise<OiRow>),
     )
 
     const out: Record<string, FuturesEntry> = {}
-    TOP16.forEach((k, i) => {
+    HOT_LIST.forEach((k, i) => {
       const sym = COINS[k].sym
       const p = premiumBySym.get(sym)
       const t = tickerBySym.get(sym)

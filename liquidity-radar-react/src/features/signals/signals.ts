@@ -19,7 +19,7 @@ import { chartTheme, mapCandle } from '../charts/chartRender'
 
 type Any = any
 
-const SIGNAL_COINS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'SUIUSDT', 'LINKUSDT']
+const SIGNAL_COINS = ['BTCUSDT', 'ETHUSDT', 'PAXGUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'SUIUSDT', 'LINKUSDT']
 const TF_LIST = [
   { key: '1h', label: '1H', limit: 100, weight: 0.25 },
   { key: '4h', label: '4H', limit: 100, weight: 0.4 },

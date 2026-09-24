@@ -5,10 +5,10 @@ import { noteCall } from '../../services/dataSources'
 // into #searchResults, so it can be fully owned by React. Behavior is preserved
 // 1:1: exchangeInfo preload (module-level, once per page load), type-ahead
 // filtering capped at 30, live price + 24h change from state.tickers, popular
-// coin (COIN_ALIASES / TOP16) highlight, no-match + pair-count footer, setSymbol
+// coin (COIN_ALIASES / HOT_LIST) highlight, no-match + pair-count footer, setSymbol
 // on select, outside-click close, and / focus shortcut via the preserved input id.
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { COIN_ALIASES, TOP16 } from '../../constants/market'
+import { COINS, COIN_ALIASES, HOT_LIST } from '../../constants/market'
 import { state } from '../../services/store'
 import { setSymbol } from '../../features/actions/userActions'
 import { chgCls, pfmt } from '../../utils/format'
@@ -27,6 +27,12 @@ interface SearchSymbol {
   quote: string
   prec: string | undefined
 }
+
+/** Display names, lowercased once, keyed by ticker — so the query can be
+ *  matched against "pax gold" as well as "PAXG". */
+const COIN_NAMES: Record<string, string> = Object.fromEntries(
+  Object.entries(COINS).map(([k, meta]) => [k, meta.name.toLowerCase()]),
+)
 
 // Module-level cache: fetched once, shared across remounts (same as before).
 let allBinanceSymbols: SearchSymbol[] = []
@@ -76,11 +82,32 @@ export function CoinSearchWidget() {
 
   const matches = useMemo(() => {
     if (q.length < 1) return []
-    return symbols
-      .filter(
-        (s) => s.base.toLowerCase().indexOf(q) !== -1 || s.sym.toLowerCase().indexOf(q) !== -1,
-      )
-      .slice(0, 30)
+    // Match the ticker, the coin's display name and its aliases, not just the
+    // pair text — "gold" has to find PAXG and "ripple" has to find XRP, and
+    // neither word appears anywhere in the Binance symbol. Ranked so an exact
+    // ticker beats a name that merely contains the query, otherwise typing
+    // "btc" buries BTCUSDT under every pair with those letters in its name.
+    const scored: Array<{ s: SearchSymbol; rank: number }> = []
+    for (const s of symbols) {
+      const upper = s.base.toUpperCase()
+      const base = s.base.toLowerCase()
+      const name = COIN_NAMES[upper]
+      const aliases = COIN_ALIASES[upper]
+      let rank = -1
+      if (base === q) rank = 0
+      else if (aliases && aliases.indexOf(q) !== -1) rank = 1
+      else if (base.indexOf(q) === 0) rank = 2
+      else if (name && name.indexOf(q) === 0) rank = 3
+      else if (aliases && aliases.some((a) => a.indexOf(q) === 0)) rank = 4
+      else if (base.indexOf(q) !== -1 || s.sym.toLowerCase().indexOf(q) !== -1) rank = 5
+      else if (name && name.indexOf(q) !== -1) rank = 6
+      else if (aliases && aliases.some((a) => a.indexOf(q) !== -1)) rank = 7
+      if (rank === -1) continue
+      // Within a rank, a coin the app already knows about comes first.
+      scored.push({ s, rank: rank * 2 + (COIN_NAMES[upper] ? 0 : 1) })
+    }
+    scored.sort((a, b) => a.rank - b.rank || a.s.base.localeCompare(b.s.base))
+    return scored.slice(0, 30).map((x) => x.s)
   }, [q, symbols])
 
   useEffect(() => {
@@ -176,7 +203,7 @@ export function CoinSearchWidget() {
                   <span className="chg flat">—</span>
                 )
                 const known = COIN_ALIASES[s.base.toUpperCase()]
-                const isPopular = Boolean(known) || TOP16.indexOf(s.base.toUpperCase()) !== -1
+                const isPopular = Boolean(known) || HOT_LIST.indexOf(s.base.toUpperCase()) !== -1
                 const active = i === index
                 return (
                   <div
@@ -201,7 +228,7 @@ export function CoinSearchWidget() {
                   </div>
                 )
               })}
-              <div className="search-count">{matches.length} pairs found</div>
+              <div className="search-count">{matches.length} {matches.length === 1 ? 'pair' : 'pairs'} found</div>
             </>
           ) : (
             <div className="search-count">No coins found</div>

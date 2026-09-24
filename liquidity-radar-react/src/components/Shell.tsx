@@ -37,6 +37,7 @@ import { ChartSidePanel } from './chart/ChartSidePanel'
 import { Footer } from './footer/Footer'
 import { DashHead } from './DashHead'
 import { Sidebar } from './Sidebar'
+import { HOT_LIST } from '../constants/market'
 import { Guard } from './ErrorBoundary'
 import { HomeDashboard } from './HomeDashboard'
 const SettingsPage = lazy(() => import('./SettingsPage').then((m) => ({ default: m.SettingsPage })))
@@ -262,7 +263,7 @@ export function Shell() {
       
       <section className="tab-section" id="tab-market">
         <div className="mo-strip">
-          <div className="metric"><div className="ml"><span>Tracked Volume</span></div><div className="mv" id="moVol">—</div><div className="ms">sum of 16 majors (24h)</div></div>
+          <div className="metric"><div className="ml"><span>Tracked Volume</span></div><div className="mv" id="moVol">—</div><div className="ms">sum of {HOT_LIST.length} majors (24h)</div></div>
           <div className="metric"><div className="ml"><span>Advancers</span></div><div className="mv" style={{ 'color': 'var(--green)' }} id="moAdv">—</div><div className="ms">of tracked set</div></div>
           <div className="metric"><div className="ml"><span>Decliners</span></div><div className="mv" style={{ 'color': 'var(--red)' }} id="moDec">—</div><div className="ms">of tracked set</div></div>
           <div className="metric"><div className="ml"><span>Fear &amp; Greed</span></div><div className="mv" id="moFG">—</div><div className="ms" id="moFGc">market sentiment</div></div>

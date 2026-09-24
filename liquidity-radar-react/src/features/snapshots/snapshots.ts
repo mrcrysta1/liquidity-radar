@@ -2,7 +2,7 @@
 // whale-watch feed. Faithful extraction of the engine's fngColor/drawGauge/
 // renderFG/renderTopCoins/renderWhales blocks; the engine repaints these from
 // the fetchTickers/fetchFG/fetchWhales loops.
-import { COINS, TOP16, CELEBS } from '../../constants/market'
+import { COINS, HOT_LIST, CELEBS } from '../../constants/market'
 import { esc, pfmt, cfmt, nfmt, timeAgo, chgHtml, sigOf } from '../../utils/format'
 import { baseOf } from '../../utils/coins'
 import { $ } from '../../utils/dom'
@@ -106,7 +106,7 @@ function chgPill(p: number): string {
 }
 
 export function renderTopCoins(): void {
-  $('coinsBody')!.innerHTML = TOP16.map((k, i) => {
+  $('coinsBody')!.innerHTML = HOT_LIST.map((k, i) => {
     const c = COINS[k]
     const t = state.tickers[c.sym]
     if (!t) return ''
@@ -136,7 +136,7 @@ export function renderTopCoins(): void {
       + '</div>'
   }).join('')
 
-  const ts = TOP16.map((k) => state.tickers[COINS[k].sym]).filter((t) => !!t)
+  const ts = HOT_LIST.map((k) => state.tickers[COINS[k].sym]).filter((t) => !!t)
   if (ts.length) {
     const vol = ts.reduce((a, t) => a + t.qvol, 0)
     const adv = ts.filter((t) => t.pct > 0).length
@@ -167,9 +167,9 @@ function fundingPill(rate: number): string {
 }
 
 /** Perpetual futures table — mark price, funding rate, 24h change, open
- * interest, for the same TOP16 set the spot table already tracks. */
+ * interest, for the same HOT_LIST set the spot table already tracks. */
 export function renderFutures(): void {
-  $('futuresBody')!.innerHTML = TOP16.map((k, i) => {
+  $('futuresBody')!.innerHTML = HOT_LIST.map((k, i) => {
     const c = COINS[k]
     const f = state.futures[k]
     if (!f) return ''
