@@ -79,6 +79,49 @@ export async function trainForSymbol(symbol: string, tf: string, candles: Candle
   }
 }
 
+// --- when training is allowed to run ---------------------------------
+//
+// trainModel fits two 40-epoch networks, which is tens of seconds of WebGL
+// work on a phone. This used to be kicked off from the first kline load
+// regardless of what the user was looking at, so a page opened on the
+// Dashboard sat at ~7fps for its first minute and barely scrolled. Nothing
+// trains now until something that actually displays a prediction is on
+// screen; engine/app.ts owns that call because it can see both the active
+// tab and the overlay toggles without this module importing either.
+
+let wanted = false
+let latest: { symbol: string; tf: string; candles: CandleFlat[] } | null = null
+
+/** Called on every kline load. Trains at most once per symbol+timeframe, and
+ * only while a prediction is actually being shown. */
+export function mlOnCandles(symbol: string, tf: string, candles: CandleFlat[]): void {
+  latest = { symbol, tf, candles }
+  if (wanted) runForLatest()
+}
+
+/** Told by app.ts when the ML panel or the neural-net page comes into or goes
+ * out of view. Turning it on trains against whatever candles are already in
+ * hand, so opening the panel doesn't wait for the next kline load. */
+export function setMLWanted(v: boolean): void {
+  if (v === wanted) return
+  wanted = v
+  if (v) runForLatest()
+}
+
+function runForLatest(): void {
+  if (!latest) return
+  const { symbol, tf, candles } = latest
+  const same = state.symbol === symbol && state.tf === tf
+  // Already training this pair, or already gave a verdict on it — either way
+  // retraining from scratch would just burn the main thread again.
+  if (same && (state.status === 'training' || state.status === 'insufficient-data' || state.status === 'error')) return
+  if (same && state.status === 'ready') {
+    void refreshPrediction(candles)
+    return
+  }
+  void trainForSymbol(symbol, tf, candles)
+}
+
 /** Re-run the live prediction against fresh candles without retraining —
  * cheap, so it's fine to call on every new candle close. */
 export async function refreshPrediction(candles: CandleFlat[]): Promise<void> {

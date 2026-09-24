@@ -62,19 +62,30 @@ import {
   mcChangeInterval,
   mcChangeSymbol,
 } from '../features/charts/multiCharts'
-import { switchTab, setSymbol, wireUserActions } from '../features/actions/userActions'
+import { switchTab, setSymbol, wireUserActions, getActiveTab, subscribeActiveTab } from '../features/actions/userActions'
 import { analyzeSigCoin, onSigSearch, startAutoScan, switchSigMode, setSigFilter } from '../features/signals'
 import { renderMemeUniverse } from '../features/bubbles'
 import { pushMsg } from '../features/chat'
 import { renderFG, renderTopCoins, renderFutures, renderWhales } from '../features/snapshots'
 import { startConfluence } from '../features/analysis/confluence'
 import { startDivergenceWatch } from '../features/analysis/oiDivergence'
-import { trainForSymbol } from '../features/ml/store'
+import { mlOnCandles, setMLWanted } from '../features/ml/store'
+import { getShowMLPrediction, onOverlayTogglesChange } from '../features/charts/overlayToggles'
 import { checkRLPriceTick } from '../features/ml/rlStore'
 import { addAlert, checkAlerts, enableAlerts, removeAlert, renderAlerts } from '../features/alerts'
 import { initTheme, selectPalette } from '../features/theme'
 import { initKeyboard } from '../features/keyboard'
 
+
+// The direction model is only worth its main-thread cost while something
+// that displays it is visible: the chart's ML panel, or the neural-net page.
+// Training it eagerly on load froze phones for the first minute.
+function syncMLWanted(){
+  const tab=getActiveTab();
+  setMLWanted(tab==='neuralnet' || (tab==='radar' && getShowMLPrediction()));
+}
+subscribeActiveTab(syncMLWanted);
+onOverlayTogglesChange(syncMLWanted);
 
 function runAnalytics(){
   const s = computeAnalytics()
@@ -157,6 +168,7 @@ function init(){
   fetchFuturesSnapshot().then(renderFutures);
   startConfluence();
   startDivergenceWatch();
+  syncMLWanted();
   connectStreams(streamCb);
   initTheme();
   initMultiCharts();
@@ -214,7 +226,7 @@ export function initApp(){
       renderTicker();renderHero();renderTopCoins();checkAlerts();
       $('topCoinsUpd').textContent='LIVE · '+new Date().toLocaleTimeString();
     },
-    onKlines(){ updateChartData(true);runAnalytics();trainForSymbol(state.symbol, state.tf, state.candles); },
+    onKlines(){ updateChartData(true);runAnalytics();mlOnCandles(state.symbol, state.tf, state.candles); },
     onKlineCache(){
       updateChartData(true);runAnalytics();
       $('wsKlineState').textContent='CACHE';$('wsKlineState').className='badge b-amber';
