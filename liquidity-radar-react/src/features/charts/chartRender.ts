@@ -1,4 +1,5 @@
 import * as LightweightCharts from 'lightweight-charts'
+import { venueOf } from '../../utils/coins'
 import { COINS, TICKER_COINS } from '../../constants/market'
 import { pfmt, nfmt, cfmt, chgHtml } from '../../utils/format'
 import { baseOf, coinMeta } from '../../utils/coins'
@@ -1020,7 +1021,7 @@ export function renderHero(): void {
   $('heroIcon')!.textContent = meta.icon
   $('heroIcon')!.style.borderColor = meta.color + '55'
   $('heroName')!.textContent = meta.name
-  $('heroPair')!.textContent = meta.sym + ' · BINANCE SPOT'
+  $('heroPair')!.textContent = meta.sym + ' · ' + venueOf(state.symbol)
   if (!t) return
   const el = $('heroPrice')!
   const prev = parseFloat(el.dataset.p || '0')
@@ -1035,11 +1036,18 @@ export function renderHero(): void {
   el.dataset.p = cur
   $('heroChg')!.innerHTML = chgHtml(t.pct) + ' <span style="color:var(--dim)">24h</span>'
   $('heroUpdated')!.textContent = '· ' + new Date().toLocaleTimeString()
-  $('hsHigh')!.textContent = '$' + pfmt(t.high)
-  $('hsLow')!.textContent = '$' + pfmt(t.low)
-  $('hsVol')!.textContent = cfmt(t.qvol)
-  $('hsTrades')!.textContent = nfmt(t.trades)
-  if (state.fr) $('hsMark')!.textContent = '$' + pfmt(parseFloat((state.fr as Any).markPrice))
+  // An instrument priced by Yahoo reports no trade count, and FX and indices
+  // report no volume at all. Printing a formatted undefined — or a confident
+  // "0 trades" for Apple — would be worse than saying nothing.
+  const dash = (v: unknown, fmt: (x: Any) => string): string =>
+    v == null || (typeof v === 'number' && !isFinite(v)) ? '—' : fmt(v)
+  $('hsHigh')!.textContent = dash(t.high, (v) => '$' + pfmt(v))
+  $('hsLow')!.textContent = dash(t.low, (v) => '$' + pfmt(v))
+  $('hsVol')!.textContent = t.qvol ? cfmt(t.qvol) : '—'
+  $('hsTrades')!.textContent = dash(t.trades, (v) => nfmt(v))
+  $('hsMark')!.textContent = state.fr
+    ? '$' + pfmt(parseFloat((state.fr as Any).markPrice))
+    : '—'
 }
 
 export function renderTicker(): void {

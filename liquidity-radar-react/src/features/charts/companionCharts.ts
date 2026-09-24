@@ -7,6 +7,7 @@
 // loading goes through the shared resampling loader so companions support the
 // same intervals as the main chart.
 import * as LightweightCharts from 'lightweight-charts'
+import { isInstrument } from '../../constants/instruments'
 import { COINS } from '../../constants/market'
 import { baseOf, coinMeta } from '../../utils/coins'
 import { pfmt } from '../../utils/format'
@@ -328,6 +329,10 @@ function draw(p: Panel, candles: CandleFlat[]): void {
 }
 
 function connect(p: Panel, token: number): void {
+  // Its candles come from loadCandles and so work for any instrument, but
+  // there is no Binance socket for one — the panel stays on its REST snapshot
+  // instead of retrying a stream that can never open.
+  if (isInstrument(p.sym)) return
   const def = tfDef(p.tf)
   const url =
     'wss://stream.binance.com:9443/ws/' + String(mdSym(p.sym)).toLowerCase() + '@kline_' + def.base

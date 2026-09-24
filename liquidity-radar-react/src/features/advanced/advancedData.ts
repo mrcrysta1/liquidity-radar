@@ -3,6 +3,7 @@
 // positioning) and a cross-exchange fan-out. Uses the app's shared jget and
 // writes into the single app state object, matching services/marketData.ts.
 import { jget } from '../../api/client'
+import { isInstrument } from '../../constants/instruments'
 import { state } from '../../services/store'
 import { VENUES, isUsdQuoted } from './venues'
 
@@ -92,6 +93,14 @@ async function safe<T>(p: Promise<T>): Promise<{ ok: true; v: T } | { ok: false 
 }
 
 export async function fetchCrossExchange(): Promise<void> {
+  // None of these venues list metals, FX, indices or equities. "No market" is
+  // already how this table says so, which beats firing a 400 at every venue.
+  if (isInstrument(state.symbol)) {
+    state.crossEx = VENUES.map((v) => ({
+      id: v.id, name: v.name, kind: v.kind, usd: isUsdQuoted(v.id), err: 'no market',
+    }))
+    return
+  }
   const base = baseOf(state.symbol)
   const rows = await Promise.all(
     VENUES.map(async (v): Promise<CrossExRow> => {

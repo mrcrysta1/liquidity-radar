@@ -5,6 +5,8 @@
 // delegated through the hooks wired by the engine via wireMarketHooks()
 // (the same pattern as userActions), so the engine stays pure orchestration.
 import { COINS } from '../constants/market'
+import { isInstrument } from '../constants/instruments'
+import { yahooCandles } from './yahoo'
 import { jget } from '../api/client'
 import { cooldownLeft } from '../api/rateLimit'
 import { state } from './store'
@@ -95,6 +97,16 @@ async function fetchBase(
   need: number,
   before = 0,
 ): Promise<CandleFlat[]> {
+  // Metals, energy, FX, indices and equities are priced by Yahoo, not
+  // Binance. Dispatching here — the one place candles enter the app — means
+  // the chart, the indicators, the ML model and the scanner all work on a
+  // non-crypto instrument without any of them knowing where the bars came
+  // from. Yahoo has no endTime paging, so a history request past the first
+  // page simply ends; the chart stops at the loaded range instead of looping.
+  if (isInstrument(sym)) {
+    if (before) return []
+    return yahooCandles(sym, base, need)
+  }
   const pages = Math.max(1, Math.min(MAX_PAGES, Math.ceil(need / 1000)))
   let out: CandleFlat[] = []
   let endTime = before
@@ -279,6 +291,10 @@ export async function fetchKlines(sym: string): Promise<void> {
 }
 
 export async function fetchOB(): Promise<void> {
+  // Order books, funding, open interest and the trade tape are Binance
+  // derivatives concepts. A Yahoo-priced instrument has none of them, so
+  // asking would just be a guaranteed 400 every poll.
+  if (isInstrument(state.symbol)) return
   try {
     const d = (await jget(
       'https://api.binance.com/api/v3/depth?symbol=' + mdSym(state.symbol) + '&limit=15',
@@ -292,6 +308,10 @@ export async function fetchOB(): Promise<void> {
 }
 
 export async function fetchFR(): Promise<void> {
+  // Order books, funding, open interest and the trade tape are Binance
+  // derivatives concepts. A Yahoo-priced instrument has none of them, so
+  // asking would just be a guaranteed 400 every poll.
+  if (isInstrument(state.symbol)) return
   try {
     state.fr = await jget('https://fapi.binance.com/fapi/v1/premiumIndex?symbol=' + state.symbol)
     hooks!.onFR()
@@ -302,6 +322,10 @@ export async function fetchFR(): Promise<void> {
 }
 
 export async function fetchOI(): Promise<void> {
+  // Order books, funding, open interest and the trade tape are Binance
+  // derivatives concepts. A Yahoo-priced instrument has none of them, so
+  // asking would just be a guaranteed 400 every poll.
+  if (isInstrument(state.symbol)) return
   try {
     state.oi = await jget('https://fapi.binance.com/fapi/v1/openInterest?symbol=' + state.symbol)
     hooks!.onOI()
@@ -334,6 +358,10 @@ interface WhaleTape {
 }
 
 export async function fetchWhales(): Promise<void> {
+  // Order books, funding, open interest and the trade tape are Binance
+  // derivatives concepts. A Yahoo-priced instrument has none of them, so
+  // asking would just be a guaranteed 400 every poll.
+  if (isInstrument(state.symbol)) return
   try {
     const trades = (await jget(
       'https://api.binance.com/api/v3/trades?symbol=' + state.symbol + '&limit=1000',

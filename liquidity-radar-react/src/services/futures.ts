@@ -45,18 +45,28 @@ export async function fetchFuturesSnapshot(): Promise<void> {
     const premiumBySym = new Map(premiums.filter((p) => symbols.has(p.symbol)).map((p) => [p.symbol, p]))
     const tickerBySym = new Map(tickers.filter((t) => symbols.has(t.symbol)).map((t) => [t.symbol, t]))
 
+    // premiumIndex lists every pair that actually has a futures market, so
+    // use it to skip the ones that do not. FLOKI, PEPE and SHIB were failing
+    // an open-interest call apiece on every poll and showing up in the data
+    // source register as permanently unhealthy.
+    const oiKeys = HOT_LIST.filter((k) => premiumBySym.has(COINS[k].sym))
     const oiResults = await Promise.allSettled(
-      HOT_LIST.map((k) => jget(FAPI + '/fapi/v1/openInterest?symbol=' + COINS[k].sym) as Promise<OiRow>),
+      oiKeys.map((k) => jget(FAPI + '/fapi/v1/openInterest?symbol=' + COINS[k].sym) as Promise<OiRow>),
     )
+    const oiByKey = new Map<string, number | null>()
+    oiKeys.forEach((k, i) => {
+      const r = oiResults[i]
+      const n = r.status === 'fulfilled' ? Number(r.value.openInterest) : NaN
+      oiByKey.set(k, isFinite(n) ? n : null)
+    })
 
     const out: Record<string, FuturesEntry> = {}
-    HOT_LIST.forEach((k, i) => {
+    HOT_LIST.forEach((k) => {
       const sym = COINS[k].sym
       const p = premiumBySym.get(sym)
       const t = tickerBySym.get(sym)
       if (!p || !t) return
-      const oiRes = oiResults[i]
-      const oi = oiRes.status === 'fulfilled' ? Number(oiRes.value.openInterest) : null
+      const oi = oiByKey.get(k) ?? null
       out[k] = {
         markPrice: Number(p.markPrice),
         fundingRate: Number(p.lastFundingRate),

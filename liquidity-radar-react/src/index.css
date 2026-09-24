@@ -1705,7 +1705,12 @@ footer{border-top:1px solid var(--border);margin-top:26px;padding:18px 14px;text
   .hero-price-block{min-width:0;flex-basis:100%}
   .search-item{flex-wrap:wrap;row-gap:4px}
   .search-item .si-sym{flex-basis:auto}
-  .search-item .si-name{flex-basis:calc(100% - 140px)}
+  /* Asset-class / exchange chip on a search row: "FX", "Metals", "NASDAQ". */
+.si-tag{
+  flex-shrink:0;font-size:9px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--dim);border:1px solid var(--border2);border-radius:5px;padding:2px 6px;
+}
+.search-item .si-name{flex-basis:calc(100% - 140px)}
   .search-item .si-price,.search-item .si-chg{min-width:60px}
   .chart-toolbar{gap:6px}
   .tf-btn{padding:4px 7px;font-size:10.5px}

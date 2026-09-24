@@ -2,6 +2,7 @@
 // block previously living in the engine; DOM updates are delegated to an
 // injected callback set so this module stays free of UI concerns.
 import { state } from './store'
+import { isInstrument } from '../constants/instruments'
 import {
   md,
   mdDebug,
@@ -72,6 +73,19 @@ export function connectStreams(cb: StreamsCallbacks): void {
   if (tradeFrame) unraf(tradeFrame)
   tradeFrame = 0
   tradePending = null
+  // A Yahoo-priced instrument has no Binance stream at all — every socket
+  // below is symbol-scoped, so there is nothing here to subscribe to. Bail
+  // out after the teardown above rather than opening four sockets against an
+  // empty symbol and letting them reconnect forever. The ticker bar keeps
+  // updating from the market-wide fetchTickers poll, and the instrument's own
+  // price is polled by services/instrumentFeed.
+  if (isInstrument(state.symbol)) {
+    state.wsOpen = 0
+    md.conn.ws.streams = 0
+    md.conn.ws.up = false
+    cb.onStatus()
+    return
+  }
   const s = mdSym(state.symbol)?.toLowerCase() ?? ''
   const tf = mdTf(state.tf)
   const def = tfDef(tf)

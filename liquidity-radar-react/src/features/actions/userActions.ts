@@ -4,6 +4,8 @@
 // module stays free of UI/stream concerns. The classic-script globals are
 // re-exposed on window by the engine's exposeGlobals().
 import { $ } from '../../utils/dom'
+import { isInstrument } from '../../constants/instruments'
+import { primeInstrument } from '../../services/instrumentFeed'
 import { state } from '../../services/store'
 import { placeChartForTab } from '../charts/chartHost'
 import type { StreamsCallbacks } from '../../services/streams'
@@ -108,6 +110,9 @@ export async function setSymbol(sym: string): Promise<void> {
   cbs!.renderTicker()
   switchTab('radar')
   await Promise.all([
+    // A Yahoo instrument has no websocket to fill in its price, so fetch one
+    // up front rather than leaving the hero on a dash until the next poll.
+    primeInstrument(sym),
     cbs!.fetchKlines(sym),
     cbs!.fetchOB(),
     cbs!.fetchFR(),
@@ -115,5 +120,12 @@ export async function setSymbol(sym: string): Promise<void> {
     cbs!.fetchWhales(),
   ])
   cbs!.connectStreams(cbs!.streamCb)
+  // These instruments have no stream, so leaving the badge on "WS LIVE" or
+  // "SYNCING" would claim a connection that does not exist.
+  if (isInstrument(sym)) {
+    const ks = $('wsKlineState')!
+    ks.textContent = 'POLLED'
+    ks.className = 'badge b-cyan'
+  }
   cbs!.renderHero()
 }

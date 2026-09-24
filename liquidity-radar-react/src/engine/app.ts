@@ -70,6 +70,7 @@ import { renderFG, renderTopCoins, renderFutures, renderWhales } from '../featur
 import { startConfluence } from '../features/analysis/confluence'
 import { startDivergenceWatch } from '../features/analysis/oiDivergence'
 import { mlOnCandles, setMLWanted } from '../features/ml/store'
+import { refreshInstrumentQuotes } from '../services/instrumentFeed'
 import { getShowMLPrediction, onOverlayTogglesChange } from '../features/charts/overlayToggles'
 import { checkRLPriceTick } from '../features/ml/rlStore'
 import { addAlert, checkAlerts, enableAlerts, removeAlert, renderAlerts } from '../features/alerts'
@@ -158,6 +159,7 @@ function init(){
   pushMsg('Welcome to <b>Liquidity Radar v5.0</b>. Multi-chart workspace, live signal scanner, and AI analysis. Try: <i>"analyze eth"</i>, <i>"show meme coins"</i>, <i>"should i buy pepe?"</i>, <i>"what is inflation?"</i>, <i>"show news"</i>, <i>"forex events"</i>, <i>"tell me a joke"</i>.','ai');
 
   fetchTickers();
+  refreshInstrumentQuotes();
   fetchFG();
   fetchKlines(state.symbol);
   fetchOB();
@@ -181,6 +183,7 @@ function init(){
   wireNewsUI();
 
   poll(fetchTickers,20000);
+  poll(refreshInstrumentQuotes,20000);
   poll(fetchMarketCaps,60000);
   poll(function(){fetchFuturesSnapshot().then(renderFutures)},60000);
   poll(fetchWhales,10000);

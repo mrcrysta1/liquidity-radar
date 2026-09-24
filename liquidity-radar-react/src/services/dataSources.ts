@@ -396,6 +396,54 @@ export const SOURCE_GROUPS: SourceGroup[] = [
     ],
   },
   {
+    id: 'traditional',
+    label: 'Traditional markets — Yahoo Finance',
+    blurb:
+      'Everything that is not a crypto pair: spot metals, energy, FX majors, indices and equities. Keyless, like the rest of the register, and routed through the same /api/fetch proxy the feeds use because Yahoo sends no CORS headers.',
+    sources: [
+      {
+        id: 'yf-chart',
+        name: 'Instrument candles',
+        provider: 'Yahoo Finance',
+        transport: 'REST',
+        purpose:
+          'OHLCV history for metals, energy, FX, indices and equities. Fetched at an interval that divides the requested one and aggregated up, so a bar is always the width it claims to be.',
+        usedBy: 'Chart, indicators, ML model for any non-crypto instrument',
+        endpoint: 'query1.finance.yahoo.com/v8/finance/chart/{symbol}',
+        cadence: 'On symbol or timeframe change',
+        auth: 'none',
+        match: /finance\.yahoo\.com\/v8/,
+        note: 'Unofficial endpoint and rate-limited. No order book, funding or open interest exists for these instruments, so those panels stay empty by design.',
+      },
+      {
+        id: 'yf-quote',
+        name: 'Instrument quotes',
+        provider: 'Yahoo Finance',
+        transport: 'REST',
+        purpose:
+          'Last price, session change, range and volume. These instruments have no websocket, so they are polled rather than streamed.',
+        usedBy: 'Hero panel, search rows, instrument hot list',
+        endpoint: 'query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d',
+        cadence: 'Every 20 seconds, one symbol at a time',
+        auth: 'none',
+        match: /finance\.yahoo\.com\/v8\/finance\/chart\/[^?]+\?interval=1d/,
+      },
+      {
+        id: 'yf-search',
+        name: 'Symbol directory',
+        provider: 'Yahoo Finance',
+        transport: 'REST',
+        purpose:
+          'Resolves a company or ticker the curated table does not list, which is what makes any listed equity or ETF reachable from search.',
+        usedBy: 'Coin/market search',
+        endpoint: 'query1.finance.yahoo.com/v1/finance/search',
+        cadence: 'On demand, debounced 260ms while typing',
+        auth: 'none',
+        match: /finance\.yahoo\.com\/v1\/finance\/search/,
+      },
+    ],
+  },
+  {
     id: 'context',
     label: 'Sentiment, news & calendar',
     blurb: 'Context around the price. None of these are required for the chart to work.',
