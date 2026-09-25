@@ -158,29 +158,67 @@ function init(){
 
   pushMsg('Welcome to <b>Liquidity Radar v5.0</b>. Multi-chart workspace, live signal scanner, and AI analysis. Try: <i>"analyze eth"</i>, <i>"show meme coins"</i>, <i>"should i buy pepe?"</i>, <i>"what is inflation?"</i>, <i>"show news"</i>, <i>"forex events"</i>, <i>"tell me a joke"</i>.','ai');
 
+  // Boot in waves rather than all at once.
+  //
+  // Everything below used to fire in the same tick: sixteen network
+  // operations, including three news feeds and a nineteen-market scanner
+  // sweep, all competing with the one request the user is actually waiting
+  // for. On a fast connection that is invisible. Measured on a ~450 KB/s link
+  // with ~1s to open a connection, it put the first live price 22-39 seconds
+  // after load, because the chart's own data queued behind a scanner warming
+  // up markets nobody was looking at yet.
+  //
+  // Nothing is removed and no cadence changes — the polls below still own the
+  // steady state. This only decides what goes first.
+  const wave = (ms: number, label: string, fn: () => void): void => {
+    setTimeout(() => {
+      try { fn() } catch (e) { console.warn('boot wave ' + label, e) }
+    }, ms)
+  }
+
+  // Wave 0 — the screen the user is looking at. Price, chart, live stream.
   fetchTickers();
-  refreshInstrumentQuotes();
-  fetchFG();
   fetchKlines(state.symbol);
-  fetchOB();
-  fetchFR();
-  fetchOI();
-  fetchWhales();
-  fetchMarketCaps();
-  fetchFuturesSnapshot().then(renderFutures);
-  startConfluence();
-  startDivergenceWatch();
-  syncMLWanted();
   connectStreams(streamCb);
   initTheme();
-  initMultiCharts();
-  renderMemeUniverse();
-  startAutoScan();
-  initAdvanced();
-  fetchNews();
-  fetchTrending();
-  fetchBreaking();
+  syncMLWanted();
   wireNewsUI();
+
+  // Wave 1 — the rest of the charted symbol's own context.
+  wave(1200, 'symbol-context', () => {
+    fetchOB();
+    fetchFR();
+    fetchOI();
+    fetchWhales();
+    initMultiCharts();
+    initAdvanced();
+  });
+
+  // Wave 2 — panels that are real but not what anyone opens the app for.
+  wave(4000, 'secondary-panels', () => {
+    refreshInstrumentQuotes();
+    fetchMarketCaps();
+    fetchFuturesSnapshot().then(renderFutures);
+    fetchFG();
+    renderMemeUniverse();
+    startConfluence();
+    startDivergenceWatch();
+  });
+
+  // Wave 3 — the scanner. It sweeps nineteen markets across three timeframes,
+  // which is by far the heaviest thing here, and its own loop is two minutes
+  // wide, so starting it a few seconds late costs nothing.
+  wave(8000, 'scanner', () => {
+    startAutoScan();
+  });
+
+  // Wave 4 — the wire. Several different hosts, each needing its own
+  // connection, and none of it is why the app was opened.
+  wave(12000, 'news', () => {
+    fetchNews();
+    fetchTrending();
+    fetchBreaking();
+  });
 
   poll(fetchTickers,20000);
   poll(refreshInstrumentQuotes,20000);

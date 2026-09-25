@@ -65,7 +65,10 @@ export function useProNews(): ProNewsState {
       // Forex Factory publishes one JSON file per week; last/next are only
       // guaranteed around week boundaries, so tolerate missing files and merge.
       const weeks = await Promise.allSettled(
-        [FF_URLS.lastWeek, FF_URLS.thisWeek, FF_URLS.nextWeek].map((u) => fetchText(u)),
+        // lastWeek is gone upstream — it 404s on every request and the
+        // calendar only looks forward, so asking for it bought a guaranteed
+        // failed request per load and nothing else.
+        [FF_URLS.thisWeek, FF_URLS.nextWeek].map((u) => fetchText(u)),
       )
       const parsed = weeks.flatMap((r) => (r.status === 'fulfilled' ? parseFF(r.value) : []))
       let merged = mergeCalendar(parsed)

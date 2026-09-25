@@ -20,6 +20,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!--
+      The hosts the first paint actually waits on. Only the fonts were hinted
+      before, so every API connection began its DNS, TCP and TLS handshake
+      only once the bundle had parsed and the first fetch fired. On a link
+      that takes ~1s to open a connection that is a second of dead time per
+      host, serialised behind the JavaScript. Hinting them lets the handshakes
+      run while the bundle is still downloading.
+
+      Binance spot REST and its websocket carry the price, the chart and the
+      order book; the futures host carries funding and open interest. The
+      others (Yahoo, the news feeds, the other exchanges) are deliberately
+      absent — they are on later boot waves, and preconnecting to everything
+      would just move the contention rather than remove it.
+    -->
+    <link rel="preconnect" href="https://api.binance.com" crossorigin />
+    <link rel="preconnect" href="https://stream.binance.com" crossorigin />
+    <link rel="preconnect" href="https://fapi.binance.com" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
       rel="stylesheet"

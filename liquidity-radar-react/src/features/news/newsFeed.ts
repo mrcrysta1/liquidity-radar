@@ -334,9 +334,13 @@ async function rawNewsFetchFallback(i: number, to?: number): Promise<RssResponse
   const url = NEWS_RSS[i][1]
   try {
     const t0 = Date.now()
-    const r = await fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(url), {
-      signal: c.signal,
-    })
+    // Through our own proxy, not straight at allorigins. A direct call is
+    // cross-origin and allorigins sends no CORS header for it, so in
+    // production this branch could only ever fail — it produced a blocked
+    // request and a console error every time the two feeds above did not
+    // answer. The host is already on the proxy allow-list.
+    const relay = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url)
+    const r = await fetch('/api/fetch?url=' + encodeURIComponent(relay), { signal: c.signal })
     noteCall('https://api.allorigins.win/raw', r.ok, r.status, Date.now() - t0)
     if (!r.ok) throw new Error('http ' + r.status)
     return parseRssXml(await r.text())
