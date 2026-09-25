@@ -5,9 +5,14 @@
 // pump/moon/mooning), and the chat DOM send/append wiring. The engine only
 // imports pushMsg for the welcome message.
 import { COINS, HOT_LIST } from '../../constants/market'
+import { instrumentOf } from '../../constants/instruments'
+import { latestNews } from '../news/newsFeed'
+import { marketBySymbol, resolveMarket } from '../../services/symbolIndex'
+import { yahooCandles } from '../../services/yahoo'
+import type { CandleFlat } from '../../services/market'
 import { LlmUnavailable, askLlm, renderMarkdown } from './llm'
 import { esc, pfmt, cfmt, nfmt, timeAgo } from '../../utils/format'
-import { baseOf, findCoin } from '../../utils/coins'
+import { baseOf, coinMeta } from '../../utils/coins'
 import { aiComposite, forecastFrom } from '../../utils/indicators'
 import { jget, jget2 } from '../../api/client'
 import { $ } from '../../utils/dom'
@@ -25,6 +30,10 @@ import { fetchFromXoomar } from '../analysis/calendar'
 import { fngColor } from '../snapshots'
 import { getMLState } from '../ml/store'
 import type { AIScore, CandleLike, Forecast } from '../../types/market'
+
+// Same alias the sibling feature modules use for values that cross the
+// untyped engine boundary.
+type Any = any
 
 interface CtxData {
   closes: number[]
@@ -53,11 +62,21 @@ function pruneCtxCache(): void {
 }
 
 async function loadCtx(base: string): Promise<CtxData> {
-  const sym = COINS[base] ? COINS[base].sym : base + 'USDT'
   const c = state.ctxCache[base] as CtxEntry | null | undefined
   if (c && Date.now() - c.ts < 60000) return c.data
-  const data = (await jget('https://api.binance.com/api/v3/klines?symbol=' + sym + '&interval=15m&limit=120')) as Array<Array<number | string>>
-  const candles = data.map((k) => ({ t: +k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5] }))
+  // Gold, the euro and Apple are not Binance pairs. Resolving the market
+  // first means the assistant can analyse anything the chart can open, which
+  // is the whole point — it used to be able to discuss thirty-two coins.
+  const market = marketBySymbol(base)
+  let candles: CandleFlat[]
+  if (market && market.kind === 'instrument') {
+    candles = await yahooCandles(market.sym, '15m', 120)
+  } else {
+    const sym = market ? market.sym : COINS[base] ? COINS[base].sym : base + 'USDT'
+    const data = (await jget('https://api.binance.com/api/v3/klines?symbol=' + sym + '&interval=15m&limit=120')) as Array<Array<number | string>>
+    candles = data.map((k) => ({ t: +k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5] }))
+  }
+  if (candles.length < 30) throw new Error('not enough history for ' + base)
   const closes = candles.map((x) => x.c)
   const out: CtxData = {
     closes,
@@ -70,7 +89,8 @@ async function loadCtx(base: string): Promise<CtxData> {
   return out
 }
 async function safeCtx(base: string): Promise<CtxData> {
-  if (COINS[base] && COINS[base].sym === state.symbol && state.candles.length >= 30) {
+  const activeBase = baseOf(state.symbol)
+  if (base === activeBase && state.candles.length >= 30) {
     const closes = state.candles.map((c) => c.c)
     return {
       closes,
@@ -89,8 +109,12 @@ async function ensureAnalysis(base: string): Promise<void> {
 function chip(txt: string | number, cls?: string): string { return '<span class="kv ' + (cls || '') + '">' + txt + '</span>' }
 
 function coinBrief(base: string, d: CtxData): string {
-  const meta = COINS[base] || { name: base, icon: '🪙' }
-  const t = state.tickers[(COINS[base] || {}).sym] as TickerLike | undefined
+  // coinMeta already knows about instruments and falls back sensibly for a
+  // pair it has never heard of, which is most of the 400 Binance lists.
+  const market = marketBySymbol(base)
+  const sym = market ? market.sym : (COINS[base] || {}).sym
+  const meta = market ? coinMeta(market.sym) : COINS[base] || { name: base, icon: '🪙', sym: base, color: '' }
+  const t = state.tickers[sym] as TickerLike | undefined
   const a = d.ai
   const fc = d.fc
   let s = '<b>' + (meta.icon || '') + ' ' + esc(meta.name || base) + ' (' + base + ')</b><br>'
@@ -103,6 +127,32 @@ function coinBrief(base: string, d: CtxData): string {
   s += '<b>AI composite:</b> <span class="' + (a.score > 15 ? 'hl-g' : a.score < -15 ? 'hl-r' : 'hl-a') + '">' + (a.score > 0 ? '+' : '') + a.score + ' — ' + a.label + '</span><br>'
   const fcCol = fc.bias.indexOf('UP') === 0 ? 'hl-g' : 'hl-r'
   s += '<b>ML bias (linreg):</b> <span class="' + fcCol + '">' + fc.bias + '</span> · 1H target ~' + chip('$' + pfmt(fc.rows[0].pred)) + ', 24H ~' + chip('$' + pfmt(fc.rows[3].pred))
+
+  // What the scanner and the neural model make of it, when they have swept
+  // this market. Leaving it out would hide the most considered read the app
+  // has; claiming one it has not produced would be worse.
+  const sig = signalData.find((x: Any) => x.sym === sym) as Any
+  if (sig) {
+    const cls = sig.master.type === 'BUY' ? 'hl-g' : sig.master.type === 'SELL' ? 'hl-r' : 'hl-a'
+    s += '<br><br><b>Scanner:</b> <span class="' + cls + '">' + sig.master.type + '</span> ' + chip((sig.score > 0 ? '+' : '') + sig.score)
+      + (sig.conv ? ' · ' + sig.conv.tier.toLowerCase() + ', ' + sig.conv.agree + '/' + sig.conv.of + ' timeframes agree' : '')
+    if (sig.plan) {
+      s += '<br>Plan: entry ' + chip(pfmt(sig.plan.entry)) + ' stop ' + chip(pfmt(sig.plan.stop))
+        + ' T1 ' + chip(pfmt(sig.plan.t1)) + ' T2 ' + chip(pfmt(sig.plan.t2)) + ' · R:R ' + sig.plan.rr.toFixed(1) + ':1'
+    }
+    if (sig.neural) {
+      const nr = sig.neural
+      s += '<br><b>Neural forecast:</b> P(up) ' + chip(Math.round(nr.pUp * 100) + '%')
+        + ' · holdout accuracy ' + chip((nr.accuracy * 100).toFixed(1) + '%') + ' over ' + nr.n + ' bars'
+        + (sig.neuralAdj ? ' · moved the score by ' + chip((sig.neuralAdj > 0 ? '+' : '') + sig.neuralAdj)
+           : nr.accuracy <= 0.52 ? ' · <span style="color:var(--dim)">no edge over a coin flip, so it was not counted</span>'
+           : ' · <span style="color:var(--dim)">reads this bar as a toss-up</span>')
+    } else {
+      s += '<br><span style="color:var(--dim)">The neural model has not trained on this market yet — it trains one market every couple of minutes while the Signals tab is open.</span>'
+    }
+  } else {
+    s += '<br><br><span style="color:var(--dim)">Not part of the 19-market scanner sweep, so there is no multi-timeframe signal or trade plan for it — the read above comes from its own 15m candles.</span>'
+  }
   return s
 }
 
@@ -231,6 +281,17 @@ export async function generateReply(raw: string): Promise<string> {
     return out
   }
 
+  if (has('microstructure') || has('market structure') || has('order flow')) {
+    return '<b>Market microstructure</b> is the study of how a price is actually produced — the order book, who is resting liquidity and who is taking it, and what that does to the next tick. It is the layer beneath the candle.<br><br>'
+      + 'The pieces this terminal measures:<br>'
+      + '&bull; <b>Order book depth</b> — how much size sits within ±1% of mid. Thin books move further per dollar traded.<br>'
+      + '&bull; <b>Spread</b> — the cost of crossing, in basis points. Widening spreads mean market makers are pulling back.<br>'
+      + '&bull; <b>Walls</b> — resting orders far larger than their neighbours. They attract price, and they are often pulled before it gets there.<br>'
+      + '&bull; <b>Trade tape / whale flow</b> — whether large prints are hitting the bid or lifting the offer, which is direction with conviction behind it.<br>'
+      + '&bull; <b>Funding and open interest</b> — who is crowded, and whether new money is entering or old positions are closing.<br>'
+      + '&bull; <b>Liquidation clusters</b> — where leveraged positions get force-closed, which is why price often accelerates into them.<br><br>'
+      + 'Ask me <i>"liquidity"</i>, <i>"whale activity"</i>, <i>"funding"</i> or <i>"open interest"</i> for the live read on whatever is charted.'
+  }
   if (has('pattern') || has('patterns')) {
     const patBase = coin || baseOf(state.symbol)
     try {
@@ -298,7 +359,7 @@ export async function generateReply(raw: string): Promise<string> {
   }
 
   const indMatch = ['rsi', 'macd', 'bollinger', 'ema', 'sma', 'atr'].find(has)
-  coin = findCoin(text)
+  coin = resolveMarket(raw)?.base ?? null
   const followUp = has('it') || has('its') || has('that') || has('this') || has('the coin') || has('same') || has('again')
   if (!coin && followUp && state.mem.lastCoin) coin = state.mem.lastCoin
   if (coin) state.mem.lastCoin = coin
@@ -542,7 +603,30 @@ export async function generateReply(raw: string): Promise<string> {
   }
 
   // === NEWS & EVENTS ===
-  if (has('news') || has('breaking') || has('what is happening') || has('what is going on')) {
+  if (has('news') || has('breaking') || has('what is happening') || has('what is going on') || has('headline')) {
+    // The radar's own wire first. It is already on screen, carries sentiment
+    // and coin tags, and filters to the market being asked about — going out
+    // to a third-party endpoint for news we already hold made no sense.
+    const wire = latestNews() || []
+    const want = coin
+    const picked = want ? wire.filter((n) => (n.coins || []).indexOf(want) !== -1) : wire
+    const rows = (picked.length ? picked : wire).slice(0, 6)
+    if (rows.length) {
+      const sentWord = (x: string) => (x === 'pos' ? 'bullish' : x === 'neg' ? 'bearish' : 'neutral')
+      const sentCls = (x: string) => (x === 'pos' ? 'hl-g' : x === 'neg' ? 'hl-r' : '')
+      let out = '<b>' + (want && picked.length ? esc(want) + ' headlines' : 'Radar news wire') + '</b> '
+        + '<span style="color:var(--dim)">— pulled from the feed on this terminal</span><br><br>'
+      rows.forEach((n, i) => {
+        const mins = Math.max(0, Math.round((Date.now() - n.time) / 60000))
+        const age = mins < 60 ? mins + 'm ago' : Math.round(mins / 60) + 'h ago'
+        out += (i + 1) + '. <b>' + esc(n.title) + '</b><br>'
+          + '<span style="color:var(--dim);font-size:11px">' + esc(n.src) + ' · ' + age
+          + ' · <span class="' + sentCls(n.sent) + '">' + sentWord(n.sent) + '</span>'
+          + ((n.coins || []).length ? ' · ' + esc(n.coins.slice(0, 3).join(', ')) : '') + '</span><br><br>'
+      })
+      if (want && !picked.length) out += '<span style="color:var(--dim)">Nothing tagged ' + esc(want) + ' on the wire right now, so that is the general feed.</span>'
+      return out
+    }
     try {
       const newsData = (await jget('https://cryptocurrency.cv/api/news')) as { data?: Array<{ title?: string; source?: string; date?: string }> } | null
       if (newsData && newsData.data && newsData.data.length) {
@@ -709,9 +793,13 @@ export async function generateReply(raw: string): Promise<string> {
       const d = await safeCtx(cc)
       return coinBrief(cc, d)
     } catch (e) {
-      const t = state.tickers[COINS[cc].sym] as TickerLike
-      if (t) return COINS[cc].icon + ' <b>' + cc + '</b>: ' + chip('$' + pfmt(t.last)) + ' · 24h ' + chip((t.pct > 0 ? '+' : '') + t.pct.toFixed(2) + '%', t.pct >= 0 ? 'hl-g' : 'hl-r') + ' (deeper analytics temporarily unavailable)'
-      return 'I recognize <b>' + cc + '</b> but couldn\'t reach the API just now.'
+      // cc is any listed market now, not just one of the thirty in COINS,
+      // so nothing here may assume that table has an entry for it.
+      const mk = marketBySymbol(cc)
+      const t = mk ? (state.tickers[mk.sym] as TickerLike) : undefined
+      const icon = mk ? coinMeta(mk.sym).icon : '🪙'
+      if (t) return icon + ' <b>' + esc(cc) + '</b>: ' + chip('$' + pfmt(t.last)) + ' · 24h ' + chip((t.pct > 0 ? '+' : '') + t.pct.toFixed(2) + '%', t.pct >= 0 ? 'hl-g' : 'hl-r') + ' (deeper analytics temporarily unavailable)'
+      return 'I know <b>' + esc(cc) + '</b>, but its history did not come back just now. Open it from the search bar and ask again — the chart pulls a fuller series than I do.'
     }
   }
 
@@ -720,7 +808,34 @@ export async function generateReply(raw: string): Promise<string> {
     return 'You\'re looking for specifics — give me a ticker! Try <i>"bitcoin"</i>, <i>"solana"</i>, <i>"trump coin"</i>, <i>"wif"</i>… or ask for <i>"best performer today"</i>.' + (t ? ' Meanwhile: ' + baseOf(state.symbol) + ' is ' + chip('$' + pfmt(t.last)) + ' ' + chip((t.pct > 0 ? '+' : '') + t.pct.toFixed(2) + '%', t.pct >= 0 ? 'hl-g' : 'hl-r') + '.' : '')
   }
 
-  return 'I didn\'t catch that. I\'m sharpest on:<br>• <b>Coins</b> — btc, eth, sol, doge, pepe, trump, wif + 20 more (nicknames &amp; typos welcome)<br>• <b>Indicators</b> — rsi, macd, bollinger, ema, atr<br>• <b>Microstructure</b> — whales, funding, open interest, liquidations, support/resistance<br>• <b>Patterns</b> — rsi divergence, macd crossover, bb squeeze, volume spike<br>• <b>Signals</b> — "show signals", "best signal", "scan the market"<br>• <b>Economics</b> — inflation, fed rates, gdp, nfp, quantitative easing<br>• <b>Crypto basics</b> — bitcoin, ethereum, blockchain, defi, layer 2, nfts<br>• <b>Trading</b> — position sizing, stop loss, take profit, leverage, margin<br>• <b>News</b> — "show news", "forex events", "what is happening today"<br>• <b>Conversation</b> — greetings, jokes, opinions on any coin<br><br>Rephrase and fire again.'
+  // Never dead-end. Not following the wording is no reason to hand back
+  // nothing: the terminal always knows what is on screen and what the scanner
+  // just found, and that is usually what was being asked about anyway.
+  const activeBase = baseOf(state.symbol)
+  const at = state.tickers[state.symbol] as TickerLike | undefined
+  const flagged = signalData.filter((x: Any) => x.master.type !== 'WAIT').slice(0, 3) as Any[]
+  let fb = 'I did not follow that one. Here is where things stand, and what I can go deeper on.<br><br>'
+  if (at) {
+    fb += '<b>On your chart:</b> ' + esc(activeBase) + ' ' + chip('$' + pfmt(at.last))
+      + ' · 24h ' + chip((at.pct > 0 ? '+' : '') + at.pct.toFixed(2) + '%', at.pct >= 0 ? 'hl-g' : 'hl-r') + '<br><br>'
+  }
+  if (flagged.length) {
+    fb += '<b>Scanner is flagging:</b><br>'
+    flagged.forEach((x) => {
+      const label = instrumentOf(x.sym) ? x.sym : baseOf(x.sym)
+      const cls = x.master.type === 'BUY' ? 'hl-g' : 'hl-r'
+      fb += '&bull; <b>' + esc(label) + '</b> <span class="' + cls + '">' + x.master.type + '</span> '
+        + chip((x.score > 0 ? '+' : '') + x.score) + '<br>'
+    })
+    fb += '<br>'
+  }
+  fb += 'Try me with:<br>'
+    + '&bull; <b>Any market</b> — <i>"analyze bonk"</i>, <i>"how is gold looking"</i>, <i>"what about nvidia"</i>. Every Binance pair, plus metals, FX, indices and stocks.<br>'
+    + '&bull; <b>Concepts</b> — <i>"what is microstructure"</i>, <i>"explain rsi"</i>, <i>"what is leverage"</i>. I define it first, then show the live number on whatever is charted.<br>'
+    + '&bull; <b>The scanner</b> — <i>"show signals"</i>, <i>"plan for eth"</i>, <i>"best signal"</i><br>'
+    + '&bull; <b>Flow</b> — <i>"liquidity"</i>, <i>"whale activity"</i>, <i>"funding"</i>, <i>"liquidation zones"</i><br>'
+    + '&bull; <b>News</b> — <i>"show news"</i>, or <i>"pepe news"</i> for one market'
+  return fb
 }
 
 // Looked up on demand rather than at import time. The chat UI is a React

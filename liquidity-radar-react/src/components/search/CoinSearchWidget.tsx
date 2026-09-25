@@ -1,5 +1,4 @@
 // CoinSearchWidget — Phase 3 first componentization slice (CR-P3-004).
-import { noteCall } from '../../services/dataSources'
 // React extraction of the former imperative search feature
 // (src/features/search/search.ts). P0 isolated widget: the engine never writes
 // into #searchResults, so it can be fully owned by React. Behavior is preserved
@@ -10,26 +9,13 @@ import { noteCall } from '../../services/dataSources'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { COINS, COIN_ALIASES, HOT_LIST } from '../../constants/market'
 import { ASSET_CLASS_LABEL, INSTRUMENTS, registerInstrument } from '../../constants/instruments'
+import { allBinanceSymbols, loadExchangeInfo } from '../../services/symbolIndex'
+import type { ExchangeSymbol } from '../../services/symbolIndex'
 import { yahooSearch } from '../../services/yahoo'
 import type { YahooHit } from '../../services/yahoo'
 import { state } from '../../services/store'
 import { setSymbol } from '../../features/actions/userActions'
 import { chgCls, pfmt } from '../../utils/format'
-
-interface RawSymbol {
-  symbol: string
-  status: string
-  baseAsset: string
-  quoteAsset: string
-  filters: Array<{ filterType: string; tickSize?: string }>
-}
-
-interface SearchSymbol {
-  sym: string
-  base: string
-  quote: string
-  prec: string | undefined
-}
 
 /** One row of the dropdown, whatever kind of thing it points at. */
 interface Row {
@@ -52,48 +38,15 @@ const COIN_NAMES: Record<string, string> = Object.fromEntries(
   Object.entries(COINS).map(([k, meta]) => [k, meta.name.toLowerCase()]),
 )
 
-// Module-level cache: fetched once, shared across remounts (same as before).
-let allBinanceSymbols: SearchSymbol[] = []
-let exchangeInfoFetch: Promise<void> | null = null
-
-function loadExchangeInfo(): Promise<void> {
-  if (!exchangeInfoFetch) {
-    exchangeInfoFetch = (async () => {
-      try {
-        const url = 'https://api.binance.com/api/v3/exchangeInfo'
-        const t0 = Date.now()
-        const r = await fetch(url)
-        noteCall(url, r.ok, r.status, Date.now() - t0)
-        const d = (await r.json()) as { symbols: RawSymbol[] }
-        allBinanceSymbols = d.symbols
-          .filter((s) => s.status === 'TRADING' && s.symbol.endsWith('USDT'))
-          .map((s) => {
-            const pf = s.filters.find((f) => f.filterType === 'PRICE_FILTER')
-            return {
-              sym: s.symbol,
-              base: s.baseAsset,
-              quote: s.quoteAsset,
-              prec: pf ? pf.tickSize : '0.01',
-            }
-          })
-        allBinanceSymbols.sort((a, b) => a.base.localeCompare(b.base))
-      } catch {
-        /* silent — empty list → "No coins found" empty state */
-      }
-    })()
-  }
-  return exchangeInfoFetch
-}
-
 export function CoinSearchWidget() {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
   const [index, setIndex] = useState(-1)
-  const [symbols, setSymbols] = useState<SearchSymbol[]>(allBinanceSymbols)
+  const [symbols, setSymbols] = useState<ExchangeSymbol[]>(allBinanceSymbols())
   const resultsRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
-    loadExchangeInfo().then(() => setSymbols(allBinanceSymbols))
+    loadExchangeInfo().then(() => setSymbols(allBinanceSymbols()))
   }, [])
 
   const q = query.trim().toLowerCase()
