@@ -5,6 +5,7 @@
 // pump/moon/mooning), and the chat DOM send/append wiring. The engine only
 // imports pushMsg for the welcome message.
 import { COINS, HOT_LIST } from '../../constants/market'
+import { LlmUnavailable, askLlm, renderMarkdown } from './llm'
 import { esc, pfmt, cfmt, nfmt, timeAgo } from '../../utils/format'
 import { baseOf, findCoin } from '../../utils/coins'
 import { aiComposite, forecastFrom } from '../../utils/indicators'
@@ -128,7 +129,7 @@ export async function generateReply(raw: string): Promise<string> {
   let coin: string | null = null
 
   if (/^(hi|hello|hey|yo|sup|gm|good morning)\s/.test(text) || has('help') || has('what can you do') || has('commands')) {
-    return 'I\'m <b>Radar AI</b>, your microstructure co-pilot. Try me with:<br><br>• Any coin — <i>"analyze solana"</i>, <i>"pepe price"</i>, <i>"should I buy trump?"</i><br>• Indicators — <i>"explain rsi"</i>, <i>"current macd"</i>, <i>"bollinger squeeze?"</i><br>• Derivatives — <i>"funding rate"</i>, <i>"open interest"</i>, <i>"liquidation zones"</i><br>• Flow — <i>"whale activity"</i>, <i>"support and resistance"</i>, <i>"breakout levels"</i><br>• Signals — <i>"show signals"</i>, <i>"best signal"</i>, <i>"scan the market"</i><br>• Economics — <i>"what is inflation?"</i>, <i>"fed rates"</i>, <i>"nfp impact"</i><br>• Crypto basics — <i>"what is bitcoin?"</i>, <i>"explain defi"</i>, <i>"layer 2 scaling"</i><br>• Trading — <i>"position sizing"</i>, <i>"stop loss"</i>, <i>"take profit strategy"</i><br>• News — <i>"show news"</i>, <i>"forex events"</i>, <i>"what is happening today?"</i><br>• Conversation — <i>"tell me a joke"</i>, <i>"how to trade?"</i><br><br>I scan 10 coins every 2 min, detect patterns, track whale flow, and auto-learn from predictions.'
+    return 'I\'m <b>Radar AI</b>, your microstructure co-pilot. Try me with:<br><br>• Any market — <i>"analyze solana"</i>, <i>"how is gold looking?"</i>, <i>"compare eurusd and the dollar index"</i>, <i>"what is nvidia doing?"</i><br>• Any coin — <i>"pepe price"</i>, <i>"should I buy trump?"</i><br>• Indicators — <i>"explain rsi"</i>, <i>"current macd"</i>, <i>"bollinger squeeze?"</i><br>• Derivatives — <i>"funding rate"</i>, <i>"open interest"</i>, <i>"liquidation zones"</i><br>• Flow — <i>"whale activity"</i>, <i>"support and resistance"</i>, <i>"breakout levels"</i><br>• Signals — <i>"show signals"</i>, <i>"best signal"</i>, <i>"scan the market"</i><br>• Economics — <i>"what is inflation?"</i>, <i>"fed rates"</i>, <i>"nfp impact"</i><br>• Crypto basics — <i>"what is bitcoin?"</i>, <i>"explain defi"</i>, <i>"layer 2 scaling"</i><br>• Trading — <i>"position sizing"</i>, <i>"stop loss"</i>, <i>"take profit strategy"</i><br>• News — <i>"show news"</i>, <i>"forex events"</i>, <i>"what is happening today?"</i><br>• Conversation — <i>"tell me a joke"</i>, <i>"how to trade?"</i><br><br>I sweep 19 markets every 2 min — crypto, spot gold and silver, FX majors, the S&amp;P and Nasdaq, and crude — across 1H/4H/1D, track whale flow, and train a direction model on them in the background.'
   }
   if (has('thank')) return 'Anytime — Radar never sleeps.'
   if ((has('what did i ask') || has('history') || has('remember') || has('repeat that') || has('what were we')) && state.mem.topics.length) {
@@ -752,16 +753,43 @@ export async function sendChat(text: string): Promise<void> {
   pushMsg(text, 'user')
   if (input) input.value = ''
   const typing = pushMsg('<span class="typing"><i></i><i></i><i></i></span>', 'ai')
+  const log = el('chatLog')
   try {
-    await new Promise((r) => setTimeout(r, 420))
-    const reply = await generateReply(text)
-    typing.innerHTML = reply
+    // The model first, when this deployment has one. It sees the same live
+    // context the panels do, so it can answer things the keyword matcher
+    // below was never going to — a follow-up, a comparison, a "why".
+    let streamed = ''
+    try {
+      streamed = await askLlm(text, (full) => {
+        typing.innerHTML = renderMarkdown(full)
+        if (log) log.scrollTop = log.scrollHeight
+      })
+    } catch (e) {
+      if (!(e instanceof LlmUnavailable)) throw e
+      // No key configured, or no serverless functions (plain `vite dev`).
+      // Fall through to the local analyst without bothering the user.
+      streamed = ''
+    }
+    if (streamed.trim()) {
+      typing.innerHTML = renderMarkdown(streamed)
+    } else {
+      // The local analyst: deterministic, offline, and still the thing that
+      // answers when there is no model behind the app.
+      await new Promise((r) => setTimeout(r, 200))
+      typing.innerHTML = await generateReply(text)
+    }
     state.mem.topics.push(text)
     if (state.mem.topics.length > 6) state.mem.topics.shift()
   } catch (e) {
-    typing.innerHTML = 'Connection hiccup — try again in a moment.'
+    // A configured model that actually failed is worth naming, because it is
+    // something the owner of the deployment can go and fix.
+    const why = e instanceof Error && e.message ? ' (' + esc(e.message) + ')' : ''
+    try {
+      typing.innerHTML = await generateReply(text)
+    } catch {
+      typing.innerHTML = 'Connection hiccup' + why + ' — try again in a moment.'
+    }
   }
-  const log = el('chatLog')
   if (log) log.scrollTop = log.scrollHeight
   chatBusy = false
   if (send) send.disabled = false

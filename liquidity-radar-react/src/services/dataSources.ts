@@ -396,6 +396,28 @@ export const SOURCE_GROUPS: SourceGroup[] = [
     ],
   },
   {
+    id: 'assistant',
+    label: 'Radar AI assistant',
+    blurb:
+      'The only source here that needs a key, and the only one that is optional. Without it the assistant falls back to its built-in rule-based analyst, which answers from the same live terminal data and works entirely offline.',
+    sources: [
+      {
+        id: 'groq',
+        name: 'Chat model',
+        provider: 'Groq (Llama 3.3 70B)',
+        transport: 'REST',
+        purpose:
+          'Answers questions about any market on screen, grounded in a live context block assembled from this terminal: prices, indicators, scanner output, derivatives, venues and the news wire. The model is told that block is its only source of fact.',
+        usedBy: 'Radar AI chat',
+        endpoint: '/api/chat (server-side proxy to api.groq.com)',
+        cadence: 'On demand, one request per message',
+        auth: 'key',
+        match: /\/api\/chat/,
+        note: 'GROQ_API_KEY lives in the deployment environment and never enters the browser bundle. Shows as unseen until someone actually chats. Replies stream, and the model returns Markdown rather than HTML so nothing it emits can become markup.',
+      },
+    ],
+  },
+  {
     id: 'traditional',
     label: 'Traditional markets — Yahoo Finance',
     blurb:
