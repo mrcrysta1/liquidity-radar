@@ -30,7 +30,17 @@ async function read(url: string, timeoutMs: number): Promise<string> {
 export async function fetchText(url: string, timeoutMs = 12_000): Promise<string> {
   try {
     return await read(proxied(url), timeoutMs)
-  } catch {
-    return await read(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`, timeoutMs)
+  } catch (first) {
+    // A 404 from upstream is an answer, not a transport failure. Forex
+    // Factory only publishes next week's calendar partway through the week,
+    // so that file legitimately does not exist for days at a time. Retrying
+    // it through a second relay cannot conjure it up — it just buys another
+    // failed request and another console error on every load.
+    if (String((first as Error)?.message || '').includes('HTTP 404')) throw first
+    // The mirror goes through our own proxy too. Called directly it is
+    // cross-origin and allorigins sends no CORS header, so in production that
+    // branch could only ever fail.
+    const relay = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`
+    return await read(proxied(relay), timeoutMs)
   }
 }
