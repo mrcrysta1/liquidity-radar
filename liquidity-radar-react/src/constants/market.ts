@@ -74,7 +74,7 @@ export const TICKER_COINS = [
 
 export const COIN_ALIASES: Record<string, string[]> = {
   BTC: ['bitcoin', 'btc', 'btcusdt', 'satoshi', 'digital gold', 'xapo'],
-  PAXG: ['gold', 'paxg', 'pax gold', 'xau', 'xauusd', 'bullion', 'precious metal'],
+  PAXG: ['paxg', 'pax gold', 'tokenized gold', 'gold token'],
   ETH: ['ethereum', 'eth', 'ether', 'ethusdt', 'vitalik', 'buterin'],
   SOL: ['solana', 'sol', 'solusdt'],
   BNB: ['bnb', 'binance coin', 'binance', 'bsc', 'binance smart chain'],
