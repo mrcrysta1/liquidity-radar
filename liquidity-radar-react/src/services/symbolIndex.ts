@@ -80,8 +80,12 @@ const AMBIGUOUS = new Set([
   'me', 'id', 'go', 'for', 'not', 'ai', 'sun', 'win', 'now', 'one', 'own', 'so', 'up', 'on',
   'in', 'at', 'it', 'is', 'be', 'do', 'by', 'or', 'if', 'us', 'we', 'my', 'no', 'an', 'as',
   'are', 'and', 'the', 'you', 'can', 'get', 'how', 'why', 'who', 'new', 'top', 'buy', 'sell',
-  'high', 'low', 'good', 'bad', 'best', 'next', 'time', 'data', 'cake', 'gas', 'move', 'push',
-  'super', 'alpha', 'beta', 'form', 'front', 'cream', 'dash', 'flow', 'grt', 'hot', 'key',
+  'high', 'low', 'good', 'bad', 'best', 'next', 'time', 'data', 'gas', 'move', 'push',
+  'alpha', 'beta', 'form', 'front', 'flow', 'hot', 'key',
+  // CAKE, DASH, GRT, CREAM and SUPER came off this list: in a trading chat
+  // they are far likelier to be the token than the English word, and GRT is
+  // not a word at all. The ones that genuinely recur in market talk — gas
+  // fees, alpha, beta, order flow, front-running — stay guarded.
 ])
 
 function norm(s: string): string {
