@@ -95,8 +95,11 @@ export async function fetchFromXoomar(): Promise<FxEv[]> {
   })
 }
 
+// Forex Factory stopped publishing the last-week file: it answers 404 every
+// time, which then dragged the request through the whole fallback chain and
+// left a failed request plus a console error on every single page load. The
+// calendar only ever looks forward anyway, so nothing is lost by not asking.
 const FF_WEEK_URLS = [
-  'https://nfs.faireconomy.media/ff_calendar_lastweek.json',
   'https://nfs.faireconomy.media/ff_calendar_thisweek.json',
   'https://nfs.faireconomy.media/ff_calendar_nextweek.json',
 ]
