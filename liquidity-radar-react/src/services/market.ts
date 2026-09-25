@@ -313,8 +313,8 @@ export function mdPill(): void {
   const stale = h.staleWarn.length > 0
   const down = !live || stale
   pill.classList.toggle('off', down)
-  // The pill says only Online/Offline; the detail lives in the tooltip.
-  txt.textContent = down ? 'Offline' : 'Online'
+  // The pill says only Live/Try; the detail lives in the tooltip.
+  txt.textContent = down ? 'Try' : 'Live'
   pill.title = !live
     ? 'No live streams'
     : stale

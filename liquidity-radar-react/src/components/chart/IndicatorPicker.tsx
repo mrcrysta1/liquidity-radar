@@ -86,12 +86,13 @@ export function IndicatorPicker() {
     <div className="ind-picker" ref={wrapRef}>
       <button
         type="button"
-        className={'tv-chip ind-open' + (open ? ' on' : '')}
+        className={'cs-rail-btn ind-open' + (open ? ' on' : '')}
         aria-haspopup="dialog"
         aria-expanded={open}
+        aria-label={'Indicators (' + items.length + ')'}
         onClick={() => setOpen((o) => !o)}
       >
-        <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
           <path
             d="M3 17.5 9 11l4 4 8-9"
             fill="none"
@@ -101,8 +102,8 @@ export function IndicatorPicker() {
             strokeLinejoin="round"
           />
         </svg>
-        Indicators
-        <span className="ind-count">{items.length}</span>
+        {items.length > 0 && <span className="rail-count">{items.length}</span>}
+        <span className="cs-rail-tip">Indicators</span>
       </button>
 
       {open && (

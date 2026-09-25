@@ -407,7 +407,7 @@ export function syncStageHeight(): void {
   const base = rows > 1 ? Math.max(ch, rows * 175) : ch
   // Stacked on a narrow screen, or with no panel out, the chart keeps its own
   // height; side by side it grows so the panel has somewhere to live.
-  const stacked = window.matchMedia('(max-width:900px)').matches
+  const stacked = window.matchMedia('(max-width:900px) and (orientation:portrait)').matches
   const sideOpen = stage.classList.contains('side-open')
   const h =
     stacked || !sideOpen

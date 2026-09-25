@@ -101,7 +101,7 @@ function setWsStatus(){
   const ok=state.wsOpen>0;
   const pill=$('statusPill');
   pill.classList.toggle('off',!ok);
-  $('statusTxt').textContent=ok?'Online':'Offline';
+  $('statusTxt').textContent=ok?'Live':'Try';
   // The stream count still matters when diagnosing, so keep it on hover.
   pill.title=ok?(state.wsOpen+' live stream'+(state.wsOpen===1?'':'s')):'No live streams';
   // secondary: refresh health monitor + pill (non-disruptive augmentation)

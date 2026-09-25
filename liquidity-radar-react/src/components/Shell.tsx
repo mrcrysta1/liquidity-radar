@@ -8,6 +8,7 @@ import { TimeframePicker } from './chart/TimeframePicker'
 import { LayoutPicker } from './chart/LayoutPicker'
 import { IndicatorPicker } from './chart/IndicatorPicker'
 import { ReplayBar, ReplayButton } from './chart/ReplayBar'
+import { CoinPicker } from './chart/CoinPicker'
 import { ChartStylePicker } from './chart/ChartStylePicker'
 import { lazy, Suspense } from 'react'
 const LiqHeatmap = lazy(() => import('./analysis/LiqHeatmap').then((m) => ({ default: m.LiqHeatmap })))
@@ -76,7 +77,7 @@ export function Shell() {
             <button className="theme-btn" id="alertBtn" title="Price alerts (desktop notifications)" style={{ 'fontSize': '13px', 'fontWeight': '800', 'fontFamily': 'var(--mono)' }} onClick={() => { renderAlerts(); openModal('alModal') }}>AL</button>
             <button className="theme-btn" id="paletteBtn" title="Color themes / palettes" style={{ 'fontSize': '15px', 'fontWeight': '800' }}>🎨</button>
             <button className="theme-btn" id="themeBtn" title="Toggle dark/light mode" style={{ 'fontSize': '12px', 'fontWeight': '800', 'fontFamily': 'var(--mono)' }}>D</button>
-            <div className="status-pill" id="statusPill"><span className="dot"></span><span id="statusTxt">Offline</span></div>
+            <div className="status-pill" id="statusPill"><span className="dot"></span><span id="statusTxt">Try</span></div>
           </div>
         </div>
         <div className="tickerbar"><div className="ticker-track" id="tickerTrack"></div></div>
@@ -141,23 +142,13 @@ export function Shell() {
             <div className="sec-title" id="chartTitle">Price Action · 15m Candles</div>
             <div className="chart-toolbar">
               <TimeframePicker />
-              <select id="symSelect"></select>
+              <CoinPicker />
+              {/* Filled and kept in sync by the engine; the picker above is its face. */}
+              <select id="symSelect" hidden aria-hidden="true" tabIndex={-1}></select>
               <span className="badge b-cyan" id="wsKlineState">WS SYNCING</span>
               <LayoutPicker />
               <button className="chart-tool-btn" id="fsBtn" title="Full screen [F]" aria-label="Full screen">⛶</button>
             </div>
-          </div>
-      
-          <div className="chart-btnrow" id="chartBtnRow">
-            <div className="tv-group">
-              <span className="tv-lbl">Chart</span>
-              <ChartStylePicker />
-              <DrawToolPicker />
-              <IndicatorPicker />
-              <OverlayTogglePicker />
-              <ReplayButton />
-            </div>
-            <span className="tv-hint" id="drawHint"></span>
           </div>
       
           <ReplayBar />
@@ -166,9 +157,22 @@ export function Shell() {
               <div className="chart-wrap" id="chartWrap">
                 <div className="legend" id="legendOHLC">Loading chart…</div>
                 <div id="chart"></div>
+                <span className="chart-draw-hint" id="drawHint"></span>
               </div>
             </div>
-            <Guard name="Chart side panel"><ChartSidePanel /></Guard>
+            <Guard name="Chart side panel">
+              <ChartSidePanel
+                tools={
+                  <>
+                    <ChartStylePicker />
+                    <DrawToolPicker />
+                    <IndicatorPicker />
+                    <OverlayTogglePicker />
+                    <ReplayButton />
+                  </>
+                }
+              />
+            </Guard>
           </div>
         </div>
         </div>

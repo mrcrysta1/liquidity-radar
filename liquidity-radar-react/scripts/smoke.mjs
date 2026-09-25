@@ -183,8 +183,8 @@ server.listen(PORT, async () => {
     ['no nav button points at a missing section', results.nav.dangling.length === 0],
     ['tab sections rendered', results.sections >= 9],
     [
-      'streams live (status pill reads Online)',
-      !missing(results['t+15s']) && /^Online$/i.test(results['t+15s'].status),
+      'streams live (status pill reads Live)',
+      !missing(results['t+15s']) && /^Live$/i.test(results['t+15s'].status),
     ],
     ['live hero price present', !missing(results['t+15s']) && !missing(results['t+15s'].heroPrice)],
     ['ticker populated', !missing(results['t+15s']) && results['t+15s'].tickerCount >= 1],
