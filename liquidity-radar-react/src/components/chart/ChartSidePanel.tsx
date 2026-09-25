@@ -2,6 +2,7 @@
 // Order book, Liquidity, Futures or Structure — the Pro terminal's side tabs,
 // built on this app's own market state.
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import { state } from '../../services/store'
 import { cfmt, pfmt } from '../../utils/format'
 import { calcATR, calcRSI } from '../../utils/indicators'
@@ -78,7 +79,13 @@ const TABS: Array<{ id: TabId; label: string }> = [
 const OPEN_KEY = 'lr-chartSide'
 const TAB_KEY = 'lr-chartSideTab'
 
-export function ChartSidePanel() {
+/**
+ * `tools` are the chart's own controls (style, drawings, indicators, panes,
+ * replay). They share the rail with the panel tabs so the chart has one
+ * toolbar: down the right side on a wide or landscape screen, along the bottom
+ * on a portrait phone.
+ */
+export function ChartSidePanel({ tools }: { tools?: ReactNode }) {
   const rootRef = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(() => storageGetRaw(OPEN_KEY) === '1')
   const [tab, setTab] = useState<TabId>(() => {
@@ -121,22 +128,32 @@ export function ChartSidePanel() {
 
   return (
     <div className={'chart-side' + (open ? ' open' : '')} ref={rootRef}>
-      <div className="cs-rail" role="tablist" aria-label="Chart side panels">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            role="tab"
-            aria-selected={open && tab === t.id}
-            className={'cs-rail-btn' + (open && tab === t.id ? ' on' : '')}
-            title={t.label}
-            aria-label={t.label}
-            onClick={() => pick(t.id)}
-          >
-            <TabIcon id={t.id} />
-            <span className="cs-rail-tip">{t.label}</span>
-          </button>
-        ))}
+      <div className="cs-rail">
+        {tools && (
+          <>
+            <div className="cs-tools" role="toolbar" aria-label="Chart tools">
+              {tools}
+            </div>
+            <span className="cs-rail-sep" aria-hidden="true" />
+          </>
+        )}
+        <div className="cs-tabs" role="tablist" aria-label="Chart side panels">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={open && tab === t.id}
+              className={'cs-rail-btn' + (open && tab === t.id ? ' on' : '')}
+              title={t.label}
+              aria-label={t.label}
+              onClick={() => pick(t.id)}
+            >
+              <TabIcon id={t.id} />
+              <span className="cs-rail-tip">{t.label}</span>
+            </button>
+          ))}
+        </div>
       </div>
       {open && (
         <div

@@ -398,7 +398,6 @@ section.tab-section{scroll-margin-top:120px}
   padding:4px 8px;font-size:11px;font-family:var(--mono);outline:none;
 }
 .tv-hint{font-size:10px;color:var(--dim);font-family:var(--mono);margin-left:auto;align-self:center}
-#chartBtnRow .tv-chip.on svg{color:currentColor}
 
 /* Full-screen chart — the chart card alone owns the viewport: the header,
    search bar, hero, metric grid and every panel below step aside so nothing
@@ -429,7 +428,6 @@ html.radar-fs .tabbar,html.radar-fs .ai-dock-root,html.radar-fs .navsheet,
 html.radar-fs .navsheet-scrim{display:none !important}
 html.radar-fs #radarChartCard:hover{transform:none;box-shadow:none}
 html.radar-fs #radarChartCard .sec-head{flex-shrink:0}
-html.radar-fs #chartBtnRow{flex-shrink:0}
 html.radar-fs .chart-stage{flex:1;min-height:0}
 html.radar-fs #chart{height:100% !important}
 
@@ -841,7 +839,10 @@ html.radar-fs .chart-stage>.chart-layout{min-height:0 !important;height:100% !im
 html.radar-fs .chart-stage.side-open>.chart-layout{height:100% !important}
 html.radar-fs .cs-panel{height:100%;max-height:none}
 
-@media(max-width:900px){
+/* Stacked — portrait phones and tablets only. A phone on its side keeps the
+   chart and the rail side by side like a desktop, so the tool rail stays on
+   the right. (syncStageHeight in companionCharts uses the same query.) */
+@media(max-width:900px) and (orientation:portrait){
   /* Stacked: the stage no longer shares one height between chart and panel —
      each takes its own, or the chart would be squeezed to a sliver. */
   .chart-stage{flex-direction:column}
@@ -852,26 +853,216 @@ html.radar-fs .cs-panel{height:100%;max-height:none}
   .chart-stage>.chart-layout{flex:0 0 auto;height:var(--stage-h,var(--ch))}
   .chart-stage.side-open .cs-panel{max-height:52vh}
   .chart-side{flex-direction:column-reverse;align-items:stretch}
-  .cs-rail{flex-direction:row;align-self:stretch;justify-content:center}
+  .cs-rail{flex-direction:row;align-self:stretch;justify-content:center;flex-wrap:wrap;row-gap:4px}
+  /* .chart-side raises these over the base rail rules further down. */
+  .chart-side .cs-tools,.chart-side .cs-tabs{flex-direction:row;gap:4px}
+  .chart-side .cs-rail-sep{width:1px;height:auto;margin:4px 3px}
   .cs-rail-tip{display:none}
   .cs-panel{width:auto;height:auto;max-height:52vh}
-}
 
-/* Stacked full screen: the chart takes what the rail below it leaves, instead
-   of a forced 100% that pushed the rail off the bottom of the screen. */
-@media(max-width:900px){
-  html.radar-fs .chart-stage{flex-direction:column}
+  /* Stacked full screen: the chart takes what the rail below it leaves,
+     instead of a forced 100% that pushed the rail off the screen. */
   html.radar-fs .chart-stage>.chart-layout{flex:1 1 auto;height:auto !important;min-height:0 !important}
   html.radar-fs .chart-stage.side-open>.chart-layout{height:auto !important}
   html.radar-fs .chart-stage.side-open .cs-panel{max-height:40vh;height:auto}
 }
+@media(max-width:420px) and (orientation:portrait){
+  .chart-side .cs-rail-btn,.chart-side .cs-tools .chart-tool-btn{width:31px;height:31px}
+  .chart-side .cs-rail{padding:4px;gap:3px}
+  .chart-side .cs-tools,.chart-side .cs-tabs{gap:2px}
+}
+
+/* ---- Tool rail -------------------------------------------------------
+   Chart style, drawings, indicators, panes and replay share the rail with the
+   Order book / Liquidity / Futures / Structure tabs: one icon toolbar down the
+   right of the chart, along its bottom on a portrait phone. */
+.cs-tools,.cs-tabs{display:flex;flex-direction:column;gap:5px}
+.cs-rail-sep{display:block;height:1px;margin:2px 5px;background:var(--border2);flex-shrink:0}
+.cs-tools .cs-rail-btn,.cs-tools .chart-tool-btn{color:var(--muted)}
+.cs-tools .chart-tool-btn{
+  position:relative;display:flex;align-items:center;justify-content:center;
+  width:34px;height:34px;min-height:0;padding:0;border-radius:9px;
+  background:transparent;border:1px solid transparent;
+}
+.cs-tools .chart-tool-btn:hover,.cs-tools .cs-rail-btn:hover{color:var(--txt);background:rgb(var(--pRGB)/.12);border-color:var(--border2);box-shadow:none}
+.cs-tools .chart-tool-btn.open,.cs-tools .cs-rail-btn.on{color:var(--txt);background:rgb(var(--pRGB)/.2);border-color:var(--primary);box-shadow:0 0 10px rgb(var(--pRGB)/.28)}
+.cs-tools .draw-btn.armed{color:var(--amber);border-color:var(--amber);box-shadow:0 0 0 2px rgb(var(--aRGB)/.16)}
+.cs-tools .style-caret,.cs-tools .draw-caret{display:none}
+/* The picker tooltips sit under a horizontal toolbar; on the rail they open
+   to the left like the tab tooltips do. */
+.cs-tools .style-tip,.cs-tools .draw-tip{
+  top:50%;left:auto;right:calc(100% + 8px);transform:translateY(-50%) translateX(4px);z-index:20;
+}
+.cs-tools .style-btn:hover .style-tip,.cs-tools .style-btn:focus-visible .style-tip,
+.cs-tools .draw-btn:hover .draw-tip,.cs-tools .draw-btn:focus-visible .draw-tip{transform:translateY(-50%) translateX(0)}
+.rail-count{
+  position:absolute;bottom:-3px;right:-3px;min-width:14px;height:14px;padding:0 3px;
+  display:flex;align-items:center;justify-content:center;pointer-events:none;
+  background:var(--primary);color:#fff;border-radius:999px;
+  font-family:var(--mono);font-size:9px;font-weight:800;line-height:1;
+}
+.cs-tools .draw-count{top:auto;bottom:-3px;right:-3px;min-width:14px;height:14px}
+.panes-picker{position:relative;display:flex}
+
+/* Menus open to the left of the rail, over the chart. */
+.cs-tools .style-menu,.cs-tools .draw-menu,.cs-tools .ind-menu,.cs-tools .rail-menu{
+  top:-6px;left:auto;right:calc(100% + 12px);
+  max-height:min(600px,78vh);overflow-y:auto;overscroll-behavior:contain;
+}
+.rail-menu{
+  position:absolute;z-index:94;width:292px;padding:5px;
+  background:var(--card);border:1px solid var(--border2);border-radius:12px;
+  box-shadow:var(--shade-2);
+  animation:tfMenuIn .14s cubic-bezier(.2,.8,.2,1);
+}
+.rail-menu-head{
+  display:flex;align-items:baseline;justify-content:space-between;gap:8px;
+  padding:6px 8px 3px;font-size:11px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:var(--txt);
+}
+.rail-menu-head small{font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:0;text-transform:none;color:var(--dim)}
+.pane-opt{
+  display:flex;align-items:center;gap:10px;width:100%;
+  background:transparent;border:1px solid transparent;border-radius:9px;cursor:pointer;
+  padding:6px 8px;text-align:left;color:var(--txt);transition:background .14s,border-color .14s;
+}
+.pane-opt:hover{background:rgb(var(--pRGB)/.1)}
+.pane-opt.sel{background:rgb(var(--pRGB)/.1)}
+.pane-opt:focus-visible{outline:2px solid var(--primary);outline-offset:-2px}
+.pane-glyph{
+  display:grid;place-items:center;width:30px;height:30px;flex-shrink:0;border-radius:8px;
+  background:var(--bg);border:1px solid var(--border);
+  font-family:var(--mono);font-size:10px;font-weight:800;color:var(--muted);transition:all .14s;
+}
+.pane-opt.sel .pane-glyph{color:var(--primary);border-color:rgb(var(--pRGB)/.55);background:rgb(var(--pRGB)/.12)}
+.pane-text{display:flex;flex-direction:column;gap:1px;min-width:0;flex:1}
+.pane-text b{font-size:11.5px;font-weight:600;line-height:1.2;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.pane-text small{font-size:9.5px;color:var(--dim);line-height:1.25}
+.pane-opt .draw-switch{flex-shrink:0}
+[data-theme="light"] .rail-menu{box-shadow:0 18px 44px rgba(15,23,42,.16)}
+[data-theme="light"] .pane-glyph{background:var(--card);border-color:var(--border)}
+
+/* Drawing hint — floats over the chart instead of taking a toolbar row. */
+.chart-draw-hint{
+  position:absolute;left:8px;bottom:30px;z-index:5;pointer-events:none;max-width:calc(100% - 96px);
+  font-family:var(--mono);font-size:10px;color:var(--txt);
+  background:var(--sunk-3);border:1px solid var(--border2);border-radius:7px;padding:3px 8px;
+}
+.chart-draw-hint:empty{display:none}
+
+/* ---- Coin picker ----------------------------------------------------- */
+.coin-picker{position:relative;min-width:0;display:flex}
+.cp-trigger{
+  display:flex;align-items:center;gap:9px;min-width:230px;max-width:100%;
+  padding:4px 10px 4px 5px;border-radius:11px;cursor:pointer;color:var(--txt);text-align:left;
+  background:linear-gradient(180deg,var(--card2),var(--card));border:1px solid var(--border2);
+  transition:border-color .15s,box-shadow .15s;
+}
+.cp-trigger:hover{border-color:rgb(var(--pRGB)/.6)}
+.coin-picker.open .cp-trigger{border-color:var(--primary);box-shadow:0 0 0 2px rgb(var(--pRGB)/.18)}
+.cp-trigger:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.cp-ico{
+  display:grid;place-items:center;width:28px;height:28px;flex-shrink:0;border-radius:50%;
+  border:1px solid var(--border2);font-size:14px;font-weight:700;line-height:1;
+}
+.cp-id{display:flex;flex-direction:column;align-items:flex-start;min-width:0;line-height:1.2}
+.cp-id b{font-family:var(--mono);font-size:12.5px;font-weight:800;white-space:nowrap}
+.cp-id b i{font-style:normal;font-weight:600;font-size:10.5px;color:var(--dim)}
+.cp-id small{font-size:10px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px}
+.cp-quote{margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;font-family:var(--mono);line-height:1.2;flex-shrink:0}
+.cp-quote b{font-size:12px;font-weight:700}
+.cp-chg{font-size:10px;font-weight:700;color:var(--muted)}
+.cp-chg.up{color:var(--green)}
+.cp-chg.dn{color:var(--red)}
+.cp-caret{color:var(--dim);flex-shrink:0;transition:transform .16s,color .16s}
+.coin-picker.open .cp-caret{transform:rotate(180deg);color:var(--primary)}
+.cp-menu{
+  position:absolute;top:calc(100% + 6px);left:0;z-index:96;width:min(360px,calc(100vw - 24px));
+  background:var(--card);border:1px solid var(--border2);border-radius:14px;overflow:hidden;
+  box-shadow:var(--shade-3);animation:tfMenuIn .14s cubic-bezier(.2,.8,.2,1);
+}
+.cp-search-wrap{
+  display:flex;align-items:center;gap:8px;margin:8px;padding:0 10px;color:var(--dim);
+  background:var(--bg);border:1px solid var(--border2);border-radius:10px;transition:border-color .15s;
+}
+.cp-search-wrap:focus-within{border-color:var(--primary);color:var(--primary)}
+.cp-search{flex:1;min-width:0;background:transparent;border:none;outline:none;color:var(--txt);padding:9px 0;font-size:12.5px}
+.cp-search:focus-visible{outline:none}
+.cp-clear{background:none;border:none;color:var(--dim);cursor:pointer;font-size:11px;padding:4px}
+.cp-clear:hover{color:var(--txt)}
+.cp-list{max-height:min(380px,55vh);overflow-y:auto;overscroll-behavior:contain;padding:0 6px 6px}
+.cp-row{
+  display:flex;align-items:center;gap:10px;width:100%;padding:7px 8px;margin-bottom:1px;
+  background:transparent;border:1px solid transparent;border-radius:10px;
+  color:var(--txt);cursor:pointer;text-align:left;
+}
+.cp-row.hi{background:rgb(var(--pRGB)/.1)}
+.cp-row.sel{background:rgb(var(--pRGB)/.15);border-color:rgb(var(--pRGB)/.55)}
+.cp-custom .cp-ico{color:var(--primary);border-color:rgb(var(--pRGB)/.5);background:rgb(var(--pRGB)/.12)}
+.cp-empty{padding:14px;text-align:center;font-size:11.5px;color:var(--dim)}
+[data-theme="light"] .cp-search-wrap{background:var(--card2)}
+[data-theme="light"] .cp-menu{box-shadow:0 20px 50px rgba(15,23,42,.18)}
+
+/* Touch screens have no hover, so the tooltips would only ever flash. */
+@media(hover:none){
+  .cs-rail-tip,.cs-tools .style-tip,.cs-tools .draw-tip{display:none}
+}
+
+/* ---- Phones and small tablets: rail menus become sheets ---------------
+   A menu hung off a rail button runs off a small screen, so there they are
+   pinned to the viewport instead: a bottom sheet in portrait, a panel beside
+   the rail in landscape. The card lift / will-change would make the card the
+   containing block for anything fixed inside it, so it is switched off. */
+@media(max-width:900px),(max-height:500px) and (orientation:landscape){
+  #radarChartCard{will-change:auto}
+  #radarChartCard:hover{transform:none}
+  .cs-tools .style-menu,.cs-tools .draw-menu,.cs-tools .ind-menu,.cs-tools .rail-menu{
+    position:fixed;z-index:1200;max-height:none;overflow-y:auto;
+  }
+}
+@media(max-width:900px) and (orientation:portrait){
+  .cs-tools .style-menu,.cs-tools .draw-menu,.cs-tools .ind-menu,.cs-tools .rail-menu{
+    top:auto;left:8px;right:8px;width:auto;
+    bottom:calc(84px + env(safe-area-inset-bottom,0px));max-height:min(68dvh,560px);
+    border-radius:16px;
+  }
+  html.radar-fs .cs-tools .style-menu,html.radar-fs .cs-tools .draw-menu,
+  html.radar-fs .cs-tools .ind-menu,html.radar-fs .cs-tools .rail-menu{
+    bottom:calc(62px + env(safe-area-inset-bottom,0px));
+  }
+}
+@media(max-height:500px) and (orientation:landscape){
+  .cs-tools .style-menu,.cs-tools .draw-menu,.cs-tools .ind-menu,.cs-tools .rail-menu{
+    top:calc(8px + env(safe-area-inset-top,0px));bottom:calc(8px + env(safe-area-inset-bottom,0px));
+    left:auto;right:calc(62px + env(safe-area-inset-right,0px));
+    width:min(380px,calc(100vw - 90px));max-height:none;
+  }
+  .cs-tools .ind-menu{width:min(560px,calc(100vw - 90px))}
+  /* The rail is taller than a phone on its side: tighten it, and let it
+     scroll in full screen rather than run off the bottom. */
+  .cs-rail{padding:4px;gap:3px}
+  .cs-tools,.cs-tabs{gap:2px}
+  .cs-rail-btn,.cs-tools .chart-tool-btn{width:30px;height:30px}
+  html.radar-fs .cs-rail{max-height:100%;overflow-y:auto;scrollbar-width:none}
+  html.radar-fs .cs-rail::-webkit-scrollbar{display:none}
+  .cs-panel{width:250px}
+
+  /* Header on one line so the chart keeps the height. */
+  #radarChartCard .sec-title{display:none}
+  #radarChartCard .sec-head{margin-bottom:6px}
+  #radarChartCard .chart-toolbar{flex:1;flex-wrap:nowrap;gap:6px;min-width:0}
+  #radarChartCard .tf-picker{min-width:0;flex-shrink:1}
+  #radarChartCard .tf-switch{max-width:100%;overflow-x:auto;scrollbar-width:none}
+  #radarChartCard .tf-switch::-webkit-scrollbar{display:none}
+  #radarChartCard .coin-picker{flex:0 1 auto;min-width:0}
+  .cp-trigger{min-width:0}
+  .cp-id small{display:none}
+  #radarChartCard .chart-stage{margin-top:6px}
+}
 
 /* ---- Phone: price-action card ----------------------------------------
-   The header used to wrap into four ragged rows with the full-screen button
-   stranded on its own line, the chip row took three rows, and the legend
-   covered most of a 280px chart. Here the timeframes get their own
-   scrolling row, symbol + status + layout + full screen share the next,
-   the chips shrink to fit two rows, and the legend is compacted. */
+   Timeframes get their own scrolling row; coin + status + layout + full
+   screen share the next, and the legend is compacted so it does not bury a
+   small chart. */
 @media(max-width:640px){
   #radarChartCard .sec-head{flex-wrap:wrap;gap:8px;margin-bottom:8px}
   #radarChartCard .sec-title{font-size:11.5px;letter-spacing:.07em;min-width:0}
@@ -879,17 +1070,16 @@ html.radar-fs .cs-panel{height:100%;max-height:none}
   #radarChartCard .tf-picker{flex:1 1 100%;min-width:0}
   #radarChartCard .tf-switch{width:max-content;max-width:100%;overflow-x:auto;scrollbar-width:none}
   #radarChartCard .tf-switch::-webkit-scrollbar{display:none}
-  #symSelect{flex:1 1 0;min-width:0;padding:6px 8px;font-size:11.5px}
+  #radarChartCard .coin-picker{flex:1 1 0}
+  .cp-trigger{min-width:0;width:100%}
+  .cp-id{flex:1 1 auto;overflow:hidden}
+  .cp-id b,.cp-id small{max-width:100%;overflow:hidden;text-overflow:ellipsis}
+  .cp-trigger .cp-id b i{display:none}
+  /* 16px stops iOS zooming the page when the search box takes focus. */
+  .cp-search{font-size:16px}
   #wsKlineState{flex-shrink:0;font-size:9px;padding:3px 6px}
   #radarChartCard .layout-picker,#fsBtn{flex-shrink:0}
-  #fsBtn{min-width:36px;min-height:34px;font-size:15px}
-
-  #chartBtnRow{margin-top:6px;padding:6px 7px;gap:6px}
-  #chartBtnRow .tv-group{gap:4px}
-  #chartBtnRow .tv-lbl{display:none}
-  #chartBtnRow .tv-chip,#chartBtnRow .chart-tool-btn{min-height:30px;padding:4px 7px;font-size:10.5px}
-  #drawHint:empty{display:none}
-  #drawHint{margin-left:0;flex-basis:100%;font-size:9.5px}
+  #fsBtn{min-width:36px;min-height:38px;font-size:15px}
 
   #radarChartCard .legend{
     top:4px;left:4px;max-width:calc(100% - 78px);
@@ -897,20 +1087,22 @@ html.radar-fs .cs-panel{height:100%;max-height:none}
     background:rgb(6 11 24/.55);backdrop-filter:blur(2px);
   }
   #radarChartCard .legend .leg-ind i{font-size:8.5px}
+  [data-theme="light"] #radarChartCard .legend{background:rgb(255 255 255/.7)}
 
   /* Full screen on a phone: every pixel the toolbar gives back goes to the
      candles. */
   html.radar-fs #radarChartCard .sec-head{margin-bottom:4px;gap:6px}
   html.radar-fs #radarChartCard .sec-title{display:none}
-  html.radar-fs #chartBtnRow{margin-top:4px}
   html.radar-fs .chart-stage{margin-top:4px}
+}
+@media(max-width:360px){
+  .cp-quote{display:none}
 }
 /* A tall phone in portrait has room for a proper chart; a phone on its side
    keeps the old height so the toolbar is still reachable. */
 @media(max-width:640px) and (min-height:640px){
   :root{--ch:380px}
 }
-@media(max-width:640px){[data-theme="light"] #radarChartCard .legend{background:rgb(255 255 255/.7)}}
 
 /* Chart-style picker — icon trigger, illustrated menu */
 .style-picker{position:relative;display:flex}
