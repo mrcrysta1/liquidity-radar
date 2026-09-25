@@ -9,9 +9,10 @@
 // #tab-neuralnet section) rather than as a small panel above the chart -
 // it was easy to miss up there and easy to confuse for a status banner.
 import { useEffect, useState } from 'react'
+import { TradeLedger } from './TradeLedger'
 import type React from 'react'
 import { state } from '../../services/store'
-import { getMLState, onMLChange } from '../../features/ml/store'
+import { getMLState, onMLChange, trainForSymbol } from '../../features/ml/store'
 import { getRLState, onRLChange } from '../../features/ml/rlStore'
 import type { DirectionActivations } from '../../features/ml/model'
 import type { RLActivations } from '../../features/ml/rl'
@@ -125,6 +126,15 @@ export function NeuralNetPage() {
   const [rlAct, setRlAct] = useState<RLActivations | null>(null)
   const ml = getMLState()
   const rl = getRLState()
+  const [busy, setBusy] = useState(false)
+  const trainDirection = async () => {
+    setBusy(true)
+    try {
+      await trainForSymbol(state.symbol, state.tf, state.candles)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   useEffect(() => {
     const recompute = async () => {
@@ -205,15 +215,38 @@ export function NeuralNetPage() {
         </button>
       </div>
 
+      {/* Sending someone to another tab to press a button is the kind of
+          friction that makes a feature feel broken. Train it from here. */}
       {mode === 'direction' && !hasDirection && (
-        <span style={{ fontSize: 12, color: 'var(--muted)' }}>
-          No direction model trained yet — go to the ML Direction Model panel on the Radar tab and train it.
-        </span>
+        <div className="nn-empty">
+          <span>
+            {ml.status === 'training'
+              ? 'Training the direction model on this market…'
+              : ml.status === 'insufficient-data'
+                ? 'Not enough history on this market to train a direction model.'
+                : 'No direction model for this market yet.'}
+          </span>
+          <button
+            type="button"
+            className="chart-tool-btn"
+            disabled={ml.status === 'training' || busy}
+            onClick={() => void trainDirection()}
+          >
+            {ml.status === 'training' || busy ? 'Training…' : 'Train direction model'}
+          </button>
+        </div>
       )}
       {mode === 'rl' && !hasRL && (
-        <span style={{ fontSize: 12, color: 'var(--muted)' }}>
-          No RL policy trained yet — go to the RL Trading Policy panel on the Radar tab and train it.
-        </span>
+        <div className="nn-empty">
+          <span>
+            {rl.status === 'training'
+              ? 'Training the policy on this market…'
+              : rl.status === 'insufficient-data'
+                ? 'Not enough history on this market to train a policy.'
+                : 'No RL policy for this market yet.'}
+          </span>
+          <span className="nn-empty-hint">Use the Train policy button in the ledger below.</span>
+        </div>
       )}
       {mode === 'direction' && hasDirection && <NetSvg layers={layers} weights={weights} colors={colors} />}
       {mode === 'rl' && hasRL && <NetSvg layers={layers} weights={weights} colors={colors} />}
@@ -223,6 +256,11 @@ export function NeuralNetPage() {
         (green positive, red negative); line opacity = its magnitude. Recomputes whenever the model retrains,
         fine-tunes from a closed paper trade, or you switch symbol.
       </span>
+
+      {/* The ledger belongs next to the network that produced it: the weights
+          above are what these trades were taken with, and every closed trade
+          below is what changed them. */}
+      <TradeLedger />
     </div>
   )
 }

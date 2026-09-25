@@ -135,6 +135,36 @@ export interface PaperStats {
   totalReturn: number
   avgReturn: number
 }
+/** Every position currently open, across every symbol that has one. */
+export function getOpenTrades(): PaperTrade[] {
+  return Object.values(openTrades).sort((a, b) => b.openedAt - a.openedAt)
+}
+
+/**
+ * The record across every symbol, not one.
+ *
+ * Per-symbol stats answer "is it any good at BTC"; this answers "is the
+ * policy any good", which is the question the ledger is actually about.
+ * Returns compound rather than summed, because a run of trades compounds.
+ */
+export function getOverallStats(): PaperStats {
+  const closed = history.filter((t) => t.outcome)
+  const wins = closed.filter((t) => t.outcome === 'tp').length
+  let equity = 1
+  let sum = 0
+  closed.forEach((t) => {
+    equity *= 1 + (t.pnlPct ?? 0)
+    sum += t.pnlPct ?? 0
+  })
+  return {
+    count: closed.length,
+    wins,
+    winRate: closed.length ? wins / closed.length : 0,
+    totalReturn: equity - 1,
+    avgReturn: closed.length ? sum / closed.length : 0,
+  }
+}
+
 export function getStats(symbol: string): PaperStats {
   const closed = history.filter((t) => t.symbol === symbol && t.outcome)
   const wins = closed.filter((t) => t.outcome === 'tp').length

@@ -36,6 +36,9 @@ interface RLState {
   openTrade: PaperTrade | null
   stats: PaperStats
   learnEvents: number
+  /** Epoch progress while status is 'training'; null otherwise. A button that
+   *  says "Training…" for minutes with no movement reads as broken. */
+  progress: { epoch: number; of: number } | null
 }
 
 const EMPTY_STATS: PaperStats = { count: 0, wins: 0, winRate: 0, totalReturn: 0, avgReturn: 0 }
@@ -49,6 +52,7 @@ let state: RLState = {
   openTrade: null,
   stats: EMPTY_STATS,
   learnEvents: 0,
+  progress: null,
 }
 
 type Listener = () => void
@@ -87,16 +91,20 @@ export async function trainRLPolicy(symbol: string, tf: string, candles: CandleF
   latestCandles = candles
   const { disposePolicy, trainPolicy, currentAction } = await import('./rl')
   disposePolicy(state.policy)
-  state = { ...state, status: 'training', policy: null, action: null, symbol, tf }
+  state = { ...state, status: 'training', policy: null, action: null, symbol, tf, progress: { epoch: 0, of: 1 } }
   emit()
   try {
-    const policy = await trainPolicy(symbol, tf, candles)
+    const policy = await trainPolicy(symbol, tf, candles, (epoch, of) => {
+      if (token !== trainToken) return
+      state = { ...state, progress: { epoch, of } }
+      emit()
+    })
     if (token !== trainToken) {
       disposePolicy(policy)
       return
     }
     if (!policy) {
-      state = { ...state, status: 'insufficient-data', policy: null, action: null, symbol, tf }
+      state = { ...state, status: 'insufficient-data', progress: null, policy: null, action: null, symbol, tf }
       emit()
       return
     }
@@ -104,6 +112,7 @@ export async function trainRLPolicy(symbol: string, tf: string, candles: CandleF
     state = {
       ...state,
       status: 'ready',
+      progress: null,
       policy,
       action,
       symbol,
@@ -118,6 +127,7 @@ export async function trainRLPolicy(symbol: string, tf: string, candles: CandleF
     state = {
       ...state,
       status: 'error',
+      progress: null,
       policy: null,
       action: null,
       symbol,
@@ -181,6 +191,7 @@ export async function resetRL(): Promise<void> {
   latestCandles = []
   state = {
     status: 'idle',
+    progress: null,
     policy: null,
     action: null,
     symbol: '',

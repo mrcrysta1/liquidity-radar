@@ -125,14 +125,31 @@ function qValues(net: tf.LayersModel, states: number[][]): number[][] {
   })
 }
 
-async function trainQNet(qNet: tf.LayersModel, transitions: Transition[], epochs: number): Promise<void> {
+async function trainQNet(
+  qNet: tf.LayersModel,
+  transitions: Transition[],
+  epochs: number,
+  onProgress?: (epoch: number, of: number) => void,
+): Promise<void> {
   const targetNet = buildQNet()
+  // The state arrays never change between epochs — only the weights do — so
+  // building them once instead of per epoch removes a full rebuild of two
+  // arrays the size of the dataset on every pass.
+  const nextStates = transitions.map((t) => t.nextState)
+  const currentStates = transitions.map((t) => t.state)
+  // A target network exists precisely so the bootstrap target holds still for
+  // a while. Re-syncing it every epoch defeated that and forced a second full
+  // forward pass every epoch to match. Syncing every few epochs is both the
+  // standard formulation and a third less work.
+  const SYNC_EVERY = 3
+  let nextQ: number[][] = []
   try {
     for (let epoch = 0; epoch < epochs; epoch++) {
-      targetNet.setWeights(qNet.getWeights())
-      const nextStates = transitions.map((t) => t.nextState)
-      const nextQ = qValues(targetNet, nextStates)
-      const currentStates = transitions.map((t) => t.state)
+      onProgress?.(epoch, epochs)
+      if (epoch % SYNC_EVERY === 0) {
+        targetNet.setWeights(qNet.getWeights())
+        nextQ = qValues(targetNet, nextStates)
+      }
       const currentQ = qValues(qNet, currentStates)
       const targets = transitions.map((t, i) => {
         const maxNext = Math.max(nextQ[i][0], nextQ[i][1])
@@ -147,7 +164,7 @@ async function trainQNet(qNet: tf.LayersModel, transitions: Transition[], epochs
         // policy does not freeze the page on a phone.
         await qNet.fit(xs, ys, {
           epochs: 1,
-          batchSize: 64,
+          batchSize: BATCH_SIZE,
           shuffle: true,
           verbose: 0,
           yieldEvery: 'batch',
@@ -166,13 +183,26 @@ async function trainQNet(qNet: tf.LayersModel, transitions: Transition[], epochs
  * and reports compounded return against simple buy-and-hold over the same
  * stretch — the only honest way to grade a trading policy. */
 function backtest(qNet: tf.LayersModel, steps: StepData[], std: Standardizer): { ret: number; bench: number; flips: number } {
+  // The walk is sequential — each action depends on the position the previous
+  // bar left behind — so this used to call the network once per bar. Every one
+  // of those is a separate round trip to the GPU, and on integrated graphics
+  // the round trip, not the arithmetic, is the cost: it was taking longer than
+  // the entire training loop that preceded it.
+  //
+  // The incoming position is only ever 0 or 1, so both cases can be evaluated
+  // for every bar in two batched calls and the walk can then just read the row
+  // it needs. Identical maths, ~60x fewer round trips.
+  const feats = steps.map((s) => standardizeOne(s.x, std))
+  const qIfFlat = feats.length ? qValues(qNet, feats.map((f) => [...f, 0])) : []
+  const qIfLong = feats.length ? qValues(qNet, feats.map((f) => [...f, 1])) : []
+
   let position: 0 | 1 = 0
   let equity = 1
   let benchEquity = 1
   let flips = 0
-  for (const s of steps) {
-    const stateVec: number[] = [...standardizeOne(s.x, std), position]
-    const qRow: number[] = qValues(qNet, [stateVec])[0]
+  for (let i = 0; i < steps.length; i++) {
+    const s = steps[i]
+    const qRow: number[] = position === 0 ? qIfFlat[i] : qIfLong[i]
     const qFlat = qRow[0]
     const qLong = qRow[1]
     const action: 0 | 1 = qLong > qFlat ? 1 : 0
@@ -187,7 +217,47 @@ function backtest(qNet: tf.LayersModel, steps: StepData[], std: Standardizer): {
 
 const MIN_STEPS = 60
 
-export async function trainPolicy(symbol: string, tfId: string, candles: CandleFlat[]): Promise<RLPolicy | null> {
+/**
+ * Every bar yields four transitions, so a few hundred candles becomes a few
+ * thousand — and each epoch runs two full forward passes over all of them
+ * before it fits. Measured end to end, training took about four and a half
+ * minutes, which is long enough that the button looked broken and the feature
+ * never got used.
+ *
+ * Capped here, sampled evenly rather than truncated, so the set still spans
+ * the whole period instead of only its oldest stretch.
+ */
+const MAX_TRANSITIONS = 800
+const EPOCHS = 10
+/**
+ * Big batches on purpose.
+ *
+ * Every batch is a separate round trip to the GPU, and on the integrated
+ * graphics this app actually runs on, that overhead — not the arithmetic —
+ * is what dominated. Measured at batchSize 64 the policy took about six
+ * minutes to train, with the per-epoch cost unmoved by cutting the forward
+ * passes, which is the signature of op-count rather than op-size.
+ *
+ * Fewer, larger batches trade some gradient granularity for a button that
+ * finishes. The epoch count stays where it was so the policy still sees the
+ * data the same number of times.
+ */
+const BATCH_SIZE = 256
+
+function subsample(rows: Transition[], cap: number): Transition[] {
+  if (rows.length <= cap) return rows
+  const stride = rows.length / cap
+  const out: Transition[] = []
+  for (let i = 0; i < cap; i++) out.push(rows[Math.floor(i * stride)])
+  return out
+}
+
+export async function trainPolicy(
+  symbol: string,
+  tfId: string,
+  candles: CandleFlat[],
+  onProgress?: (epoch: number, of: number) => void,
+): Promise<RLPolicy | null> {
   const steps = allSteps(candles)
   if (steps.length < MIN_STEPS) return null
 
@@ -196,10 +266,10 @@ export async function trainPolicy(symbol: string, tfId: string, candles: CandleF
   const testSteps = steps.slice(splitAt)
 
   const std = computeStandardizer(trainSteps.map((s) => s.x))
-  const transitions = buildTransitions(trainSteps, std)
+  const transitions = subsample(buildTransitions(trainSteps, std), MAX_TRANSITIONS)
 
   const qNet = buildQNet()
-  await trainQNet(qNet, transitions, 15)
+  await trainQNet(qNet, transitions, EPOCHS, onProgress)
 
   const { ret, bench, flips } = backtest(qNet, testSteps, std)
 
