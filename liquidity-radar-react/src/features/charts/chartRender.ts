@@ -590,19 +590,84 @@ function syncDrawHint(): void {
 }
 
 // ---- Full screen ----
+// Two layers. The `radar-fs` class pins the chart card over the whole
+// viewport (every browser). On top of that the Fullscreen API asks the
+// browser to drop its own chrome — address bar, tab strip, and on a phone the
+// status bar and system navigation too. iPhone Safari has no element
+// fullscreen, so there the class alone does the work.
+type FsDoc = Document & {
+  webkitFullscreenElement?: Element | null
+  webkitExitFullscreen?: () => Promise<void> | void
+}
+type FsEl = HTMLElement & { webkitRequestFullscreen?: () => Promise<void> | void }
+
+function nativeFsElement(): Element | null {
+  const d = document as FsDoc
+  return d.fullscreenElement || d.webkitFullscreenElement || null
+}
+
+function enterNativeFs(): void {
+  const el = document.documentElement as FsEl
+  try {
+    const p = el.requestFullscreen
+      ? el.requestFullscreen({ navigationUI: 'hide' })
+      : el.webkitRequestFullscreen?.()
+    if (p && typeof p.catch === 'function') p.catch(function () {})
+  } catch {
+    /* refused (not a user gesture, iframe without allowfullscreen) — the CSS layer still applies */
+  }
+}
+
+function exitNativeFs(): void {
+  if (!nativeFsElement()) return
+  const d = document as FsDoc
+  try {
+    const p = d.exitFullscreen ? d.exitFullscreen() : d.webkitExitFullscreen?.()
+    if (p && typeof p.catch === 'function') p.catch(function () {})
+  } catch {
+    /* already out */
+  }
+}
+
+function applyFsState(fs: boolean): void {
+  document.documentElement.classList.toggle('radar-fs', fs)
+  const btn = $('fsBtn')
+  if (btn) {
+    btn.textContent = fs ? '✕' : '⛶'
+    btn.title = fs ? 'Exit full screen [F]' : 'Full screen [F]'
+  }
+  // The stage-height sync (companionCharts) listens for resize; entering
+  // native fullscreen fires one too, but the CSS-only path would not.
+  window.dispatchEvent(new Event('resize'))
+  resizeChart()
+  if (fs && window.scrollTo) window.scrollTo(0, 0)
+}
+
+export function isFullScreen(): boolean {
+  return document.documentElement.classList.contains('radar-fs')
+}
+
+export function setFullScreen(fs: boolean): void {
+  if (fs === isFullScreen()) return
+  applyFsState(fs)
+  if (fs) enterNativeFs()
+  else exitNativeFs()
+}
+
 function initFullScreen(): void {
   const btn = $('fsBtn')
   if (!btn) return
   btn.addEventListener('click', function () {
-    const fs = document.documentElement.classList.toggle('radar-fs')
-    btn.textContent = fs ? '✕' : '⛶'
-    btn.title = fs ? 'Exit full screen [F]' : 'Full screen [F]'
-    requestAnimationFrame(function () {
-      redrawDrawings()
-      updateCloseTimer()
-    })
-    if (fs && window.scrollTo) window.scrollTo(0, 0)
+    setFullScreen(!isFullScreen())
   })
+  // The browser can leave fullscreen on its own — Esc, the Android back
+  // gesture, a swipe from the edge. Follow it so the chart does not stay
+  // pinned over a page whose browser bars have come back.
+  const onNativeChange = function () {
+    if (!nativeFsElement() && isFullScreen()) applyFsState(false)
+  }
+  document.addEventListener('fullscreenchange', onNativeChange)
+  document.addEventListener('webkitfullscreenchange', onNativeChange)
 }
 
 export function resizeChart(): void {

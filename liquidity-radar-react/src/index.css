@@ -410,12 +410,23 @@ html.radar-fs .container{max-width:none;margin:0;padding:0}
 html.radar-fs main{padding-top:0}
 html.radar-fs .tab-section.active>*:not(.chart-host){display:none}
 .chart-host{min-width:0}
+/* Pinned over the viewport rather than relying on its siblings stepping
+   aside — the phone tab bar, the assistant button and any panel with its own
+   display rule would otherwise still show through. Safe-area padding keeps
+   the toolbar clear of the notch and the home indicator once the browser
+   drops its chrome. */
 html.radar-fs #radarChartCard{
-  margin:0;padding:10px;border:none;border-radius:0;
+  position:fixed;inset:0;z-index:1000;
+  margin:0;border:none;border-radius:0;
+  padding:calc(8px + env(safe-area-inset-top,0px)) calc(8px + env(safe-area-inset-right,0px))
+    calc(8px + env(safe-area-inset-bottom,0px)) calc(8px + env(safe-area-inset-left,0px));
   width:100vw;height:100vh;height:100dvh;
   display:flex;flex-direction:column;overflow:hidden;
+  background:var(--bg);
   animation:none;transform:none;will-change:auto;
 }
+html.radar-fs .tabbar,html.radar-fs .ai-dock-root,html.radar-fs .navsheet,
+html.radar-fs .navsheet-scrim{display:none !important}
 html.radar-fs #radarChartCard:hover{transform:none;box-shadow:none}
 html.radar-fs #radarChartCard .sec-head{flex-shrink:0}
 html.radar-fs #chartBtnRow{flex-shrink:0}
@@ -845,6 +856,61 @@ html.radar-fs .cs-panel{height:100%;max-height:none}
   .cs-rail-tip{display:none}
   .cs-panel{width:auto;height:auto;max-height:52vh}
 }
+
+/* Stacked full screen: the chart takes what the rail below it leaves, instead
+   of a forced 100% that pushed the rail off the bottom of the screen. */
+@media(max-width:900px){
+  html.radar-fs .chart-stage{flex-direction:column}
+  html.radar-fs .chart-stage>.chart-layout{flex:1 1 auto;height:auto !important;min-height:0 !important}
+  html.radar-fs .chart-stage.side-open>.chart-layout{height:auto !important}
+  html.radar-fs .chart-stage.side-open .cs-panel{max-height:40vh;height:auto}
+}
+
+/* ---- Phone: price-action card ----------------------------------------
+   The header used to wrap into four ragged rows with the full-screen button
+   stranded on its own line, the chip row took three rows, and the legend
+   covered most of a 280px chart. Here the timeframes get their own
+   scrolling row, symbol + status + layout + full screen share the next,
+   the chips shrink to fit two rows, and the legend is compacted. */
+@media(max-width:640px){
+  #radarChartCard .sec-head{flex-wrap:wrap;gap:8px;margin-bottom:8px}
+  #radarChartCard .sec-title{font-size:11.5px;letter-spacing:.07em;min-width:0}
+  #radarChartCard .chart-toolbar{width:100%;flex-wrap:wrap;gap:6px}
+  #radarChartCard .tf-picker{flex:1 1 100%;min-width:0}
+  #radarChartCard .tf-switch{width:max-content;max-width:100%;overflow-x:auto;scrollbar-width:none}
+  #radarChartCard .tf-switch::-webkit-scrollbar{display:none}
+  #symSelect{flex:1 1 0;min-width:0;padding:6px 8px;font-size:11.5px}
+  #wsKlineState{flex-shrink:0;font-size:9px;padding:3px 6px}
+  #radarChartCard .layout-picker,#fsBtn{flex-shrink:0}
+  #fsBtn{min-width:36px;min-height:34px;font-size:15px}
+
+  #chartBtnRow{margin-top:6px;padding:6px 7px;gap:6px}
+  #chartBtnRow .tv-group{gap:4px}
+  #chartBtnRow .tv-lbl{display:none}
+  #chartBtnRow .tv-chip,#chartBtnRow .chart-tool-btn{min-height:30px;padding:4px 7px;font-size:10.5px}
+  #drawHint:empty{display:none}
+  #drawHint{margin-left:0;flex-basis:100%;font-size:9.5px}
+
+  #radarChartCard .legend{
+    top:4px;left:4px;max-width:calc(100% - 78px);
+    font-size:9.5px;line-height:1.35;gap:1px 7px;padding:3px 6px;border-radius:6px;
+    background:rgb(6 11 24/.55);backdrop-filter:blur(2px);
+  }
+  #radarChartCard .legend .leg-ind i{font-size:8.5px}
+
+  /* Full screen on a phone: every pixel the toolbar gives back goes to the
+     candles. */
+  html.radar-fs #radarChartCard .sec-head{margin-bottom:4px;gap:6px}
+  html.radar-fs #radarChartCard .sec-title{display:none}
+  html.radar-fs #chartBtnRow{margin-top:4px}
+  html.radar-fs .chart-stage{margin-top:4px}
+}
+/* A tall phone in portrait has room for a proper chart; a phone on its side
+   keeps the old height so the toolbar is still reachable. */
+@media(max-width:640px) and (min-height:640px){
+  :root{--ch:380px}
+}
+@media(max-width:640px){[data-theme="light"] #radarChartCard .legend{background:rgb(255 255 255/.7)}}
 
 /* Chart-style picker — icon trigger, illustrated menu */
 .style-picker{position:relative;display:flex}
