@@ -2,7 +2,7 @@
 // handler + SHORTCUT_TABS: Escape (exit fullscreen, close modals), / (focus
 // search), ? (shortcut cheat-sheet), F (fullscreen) and one-key tab
 // switching. Registered by the engine during init().
-import { resizeChart } from '../charts/chartRender'
+import { isFullScreen, setFullScreen } from '../charts/chartRender'
 import { $, showToast } from '../../utils/dom'
 import { switchTab } from '../actions/userActions'
 import { toggleDock } from '../chat/dock'
@@ -21,15 +21,7 @@ export const SHORTCUT_TABS: Record<string, string> = {
 export function initKeyboard(): void {
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') {
-      if (document.documentElement.classList.contains('radar-fs')) {
-        document.documentElement.classList.remove('radar-fs')
-        const b = $('fsBtn')
-        if (b) {
-          b.textContent = '⛶'
-          b.title = 'Full screen [F]'
-        }
-        resizeChart()
-      }
+      if (isFullScreen()) setFullScreen(false)
       const modals = document.querySelectorAll('.modal-overlay.open')
       modals.forEach((m) => m.classList.remove('open'))
       return
