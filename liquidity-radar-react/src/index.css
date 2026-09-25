@@ -1430,6 +1430,16 @@ html.radar-fs .cs-panel{height:100%;max-height:none}
 .chat-head{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:11px;background:linear-gradient(90deg,rgb(var(--pRGB)/.12),transparent)}
 .ai-avatar{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;font-size:18px;background:linear-gradient(135deg,var(--primary),var(--amber));box-shadow:0 0 16px rgb(var(--pRGB)/.5)}
 .chat-log{flex:1;overflow-y:auto;padding:18px;display:flex;flex-direction:column;gap:13px}
+/* Markdown the assistant is allowed to produce. Everything is escaped before
+   these tags are added, so this is the complete set that can appear. */
+.msg .ai-ul{margin:6px 0 6px 2px;padding-left:16px;list-style:disc}
+.msg .ai-ul li{margin:3px 0}
+.msg code{
+  font-family:var(--mono);font-size:11.5px;padding:1px 5px;border-radius:4px;
+  background:var(--hair-2);color:var(--cyan);
+}
+.msg>div{margin:2px 0}
+.msg>br+br{display:none}
 .msg{max-width:88%;padding:11px 14px;border-radius:14px;font-size:13.5px;line-height:1.55;animation:fadeUp .25s ease;word-wrap:break-word}
 .msg.user{align-self:flex-end;background:linear-gradient(135deg,var(--primary),color-mix(in srgb,var(--primary) 66%,#000));border-bottom-right-radius:4px;box-shadow:0 4px 14px rgb(var(--pRGB)/.3)}
 .msg.ai{align-self:flex-start;background:var(--card2);border:1px solid var(--border2);border-bottom-left-radius:4px}

@@ -17,6 +17,9 @@ import {
 
 const CHIPS: Array<{ q: string; label: string }> = [
   { q: 'Analyze BTC', label: '📈 Analyze BTC' },
+  // Advertise the coverage that is easy to miss: this is no longer crypto-only.
+  { q: 'How is gold looking right now?', label: '🥇 Gold now' },
+  { q: 'Compare EURUSD and the S&P 500', label: '🌍 FX vs stocks' },
   { q: 'What is RSI?', label: '🧠 What is RSI?' },
   { q: 'Should I buy pepe?', label: 'Buy PEPE?' },
   { q: 'Show meme coins', label: '🐕 Meme coins' },
@@ -142,7 +145,7 @@ export function AiAssistant() {
           <div className="ai-avatar">🤖</div>
           <div className="ai-dock-id">
             <div className="ai-dock-name">Radar AI Assistant</div>
-            <div className="ai-dock-sub">29 coins live · indicators · whales · sentiment</div>
+            <div className="ai-dock-sub">crypto · gold · FX · indices · stocks — live from this terminal</div>
           </div>
           <span className="badge b-green">ONLINE</span>
           <button
