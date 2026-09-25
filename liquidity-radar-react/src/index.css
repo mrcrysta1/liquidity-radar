@@ -2770,6 +2770,75 @@ header.top,.container,.search-wrap{margin-left:var(--nav-w);transition:margin-le
 
 @media(min-width:1100px){.hw-wide{grid-column:span 2}}
 
+/* ---- Neural net: the policy's trading ledger -------------------- */
+.tl{display:flex;flex-direction:column;gap:12px;margin-top:18px;width:100%}
+.tl-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.tl-title{
+  font-size:11px;font-weight:800;letter-spacing:.13em;text-transform:uppercase;color:var(--primary);
+}
+.tl-auto{
+  display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);cursor:pointer;
+  border:1px solid var(--border2);border-radius:8px;padding:5px 10px;
+}
+.tl-auto input{accent-color:var(--primary);cursor:pointer}
+.tl-note{font-size:11.5px;line-height:1.6;color:var(--dim);max-width:78ch}
+
+.tl-stats{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(min(100%,140px),1fr))}
+.tl-stats>div{
+  display:flex;flex-direction:column;gap:2px;padding:10px 12px;
+  border:1px solid var(--border);border-radius:10px;background:var(--glass);
+}
+.tl-stats small,.tl-open-grid small{
+  font-size:9px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);
+}
+.tl-stats b,.tl-open-grid b{font-size:16px;font-family:var(--mono);color:var(--txt)}
+.tl-stats i,.tl-open-grid i{font-size:10.5px;font-style:normal;color:var(--dim)}
+.tl .up{color:var(--green)}
+.tl .dn{color:var(--red)}
+
+.tl-open{
+  border:1px solid rgb(var(--gRGB)/.35);border-radius:12px;padding:12px 13px;
+  background:linear-gradient(180deg,rgb(var(--gRGB)/.08),transparent);
+}
+.tl-open-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.tl-open-sym{font-weight:800;font-size:12.5px;color:var(--txt)}
+.tl-open-age{font-size:10.5px;color:var(--dim);margin-left:auto}
+.tl-open-grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(min(100%,120px),1fr))}
+.tl-open-grid>div{display:flex;flex-direction:column;gap:2px}
+
+.tl-empty{
+  font-size:12px;color:var(--dim);padding:16px;border:1px dashed var(--border2);
+  border-radius:10px;line-height:1.6;
+}
+/* The ledger grows without bound, so it scrolls rather than the page. */
+.tl-scroll{max-height:420px;overflow:auto;border:1px solid var(--border);border-radius:10px}
+.tl-scroll::-webkit-scrollbar{width:8px;height:8px}
+.tl-scroll::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px}
+.tl-table{width:100%;border-collapse:collapse;font-size:11.5px;min-width:620px}
+.tl-table thead th{
+  position:sticky;top:0;z-index:1;text-align:left;padding:8px 10px;white-space:nowrap;
+  font-size:9px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);
+  background:var(--card2);border-bottom:1px solid var(--border);
+}
+.tl-table td{padding:8px 10px;border-bottom:1px solid var(--hair-1);white-space:nowrap}
+.tl-table tbody tr:hover{background:var(--glass)}
+.tl-num{text-align:right;font-family:var(--mono)}
+.tl-dim{color:var(--dim)}
+.tl-tf{
+  margin-left:6px;font-size:9px;color:var(--dim);border:1px solid var(--border2);
+  border-radius:4px;padding:1px 4px;
+}
+.tl-tag{
+  font-size:9.5px;font-weight:800;letter-spacing:.06em;border-radius:5px;padding:2px 7px;
+}
+.tl-tag.win{color:var(--green);background:rgb(var(--gRGB)/.14);border:1px solid rgb(var(--gRGB)/.35)}
+.tl-tag.loss{color:var(--red);background:rgb(var(--rRGB)/.12);border:1px solid rgb(var(--rRGB)/.35)}
+
+@media(max-width:900px){
+  .tl-note{font-size:11px}
+  .tl-stats b{font-size:15px}
+}
+
 /* ---- error boundary fallback ---- */
 .eb{padding:16px;border:1px solid rgb(var(--rRGB)/.4);border-radius:var(--rad);background:rgb(var(--rRGB)/.05);margin-bottom:14px}
 .eb-head{display:flex;align-items:center;gap:8px;font-weight:800;font-size:12.5px;color:var(--red);margin-bottom:7px}
