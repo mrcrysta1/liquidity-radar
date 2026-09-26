@@ -39,6 +39,7 @@ import { HOT_LIST } from '../constants/market'
 import { Guard } from './ErrorBoundary'
 import { HomeDashboard, HomeHero } from './HomeDashboard'
 import { RadarHero, RadarLower, RadarMetrics, RadarSide } from './radar/RadarViews'
+import { ChartIntel, QuickTools, WorkspaceHead } from './charts/ChartsViews'
 import { ClockChip } from './home/ClockChip'
 import { WhenTab } from './WhenTab'
 const loadSettings = () => import('./SettingsPage')
@@ -248,11 +249,15 @@ export function Shell() {
       </section>
       
       <section className="tab-section" id="tab-multichart">
-        <div className="chart-host" id="chartHostCharts"></div>
-        <div className="card">
-          <div className="sec-head"><div className="sec-title">Multi-Chart Workspace</div><span className="badge b-cyan">LIVE WS</span></div>
+        <div className="ch-top">
+          <div className="chart-host" id="chartHostCharts"></div>
+          <Guard name="Chart intelligence"><ChartIntel /></Guard>
+        </div>
+        <div className="card ws-card">
+          <Guard name="Workspace header"><WorkspaceHead /></Guard>
           <div className="multi-chart-grid" id="mcGrid"></div>
         </div>
+        <Guard name="Quick tools"><QuickTools /></Guard>
       </section>
       
       <section className="tab-section" id="tab-signals">
