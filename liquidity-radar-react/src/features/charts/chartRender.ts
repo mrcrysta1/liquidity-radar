@@ -647,6 +647,12 @@ function applyFsState(fs: boolean): void {
   window.dispatchEvent(new Event('resize'))
   resizeChart()
   if (fs && window.scrollTo) window.scrollTo(0, 0)
+  // The chart keeps its bar spacing as it grows, which left the candles in
+  // the right half of a full-screen chart. Fit them to the new size once the
+  // layout has settled (native fullscreen resizes a frame or two later).
+  setTimeout(() => {
+    if (chart && state.candles.length) chart.timeScale().fitContent()
+  }, 350)
 }
 
 export function isFullScreen(): boolean {

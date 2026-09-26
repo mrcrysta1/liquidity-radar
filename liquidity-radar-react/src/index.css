@@ -412,7 +412,13 @@ html.radar-fs .top,html.radar-fs .tickerbar,html.radar-fs .search-wrap,html.rada
 html.radar-fs footer,html.radar-fs .toast{display:none}
 html.radar-fs .container{max-width:none;margin:0;padding:0}
 html.radar-fs main{padding-top:0}
-html.radar-fs .tab-section.active>*:not(.chart-host){display:none}
+html.radar-fs .tab-section.active>*:not(.chart-host):not(.rd-chart-row):not(.ch-top){display:none}
+/* The chart host can sit inside a layout row (Radar: chart + side column,
+   Charts: chart + intelligence panel). In full screen that row stays — the
+   chart card is fixed to the viewport from inside it — and everything else
+   in it steps aside. Hiding the row itself hid the chart (0 x 0). */
+html.radar-fs .rd-chart-row>*:not(.chart-host),html.radar-fs .ch-top>*:not(.chart-host){display:none}
+html.radar-fs .rd-chart-row,html.radar-fs .ch-top{display:block;margin:0}
 .chart-host{min-width:0}
 /* Pinned over the viewport rather than relying on its siblings stepping
    aside — the phone tab bar, the assistant button and any panel with its own
