@@ -508,6 +508,15 @@ function recordSignalOutcomes(): void {
   storageSet('lr-lastSignals', current)
 }
 
+/** How often the scanner's direction calls came true (a call counts when
+ *  price moved 0.3% its way by the next sweep). Null until there are enough. */
+export function signalHitRate(): { rate: number; n: number } | null {
+  let hits = 0
+  let n = 0
+  Object.keys(patternHistory).forEach((k) => { hits += patternHistory[k].correct; n += patternHistory[k].total })
+  return n > 10 ? { rate: hits / n, n } : null
+}
+
 type SigFilter = 'all' | 'BUY' | 'SELL' | 'WAIT'
 let sigFilter: SigFilter = 'all'
 

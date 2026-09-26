@@ -40,6 +40,7 @@ import { Guard } from './ErrorBoundary'
 import { HomeDashboard, HomeHero } from './HomeDashboard'
 import { RadarHero, RadarLower, RadarMetrics, RadarSide } from './radar/RadarViews'
 import { ChartIntel, QuickTools, WorkspaceHead } from './charts/ChartsViews'
+import { SignalsBoard, SignalsHead } from './signals/SignalsViews'
 import { ClockChip } from './home/ClockChip'
 import { WhenTab } from './WhenTab'
 const loadSettings = () => import('./SettingsPage')
@@ -261,17 +262,20 @@ export function Shell() {
       </section>
       
       <section className="tab-section" id="tab-signals">
+        <Guard name="Signals header"><SignalsHead /></Guard>
         <div className="sig-mode-tabs">
           <div className="sig-mode-tab active" data-sigmode="auto" onClick={() => { w.switchSigMode('auto') }}>Auto Scanner</div>
           <div className="sig-mode-tab" data-sigmode="search" onClick={() => { w.switchSigMode('search') }}>Coin Analysis</div>
         </div>
       
         <div id="sigAutoView">
-          <div className="card">
-            <div className="sec-head"><div className="sec-title">Live Signal Scanner</div><span className="badge b-green" id="sigCount">SCANNING</span></div>
-            <div className="sig-filters" id="sigFilters"></div>
-            <div className="signal-grid" id="signalGrid"></div>
-            <div className="disclaimer" style={{ 'marginTop': '14px' }}>Signals are generated from multi-indicator confluence (RSI, MACD, EMA, BB, volume, divergence). This is algorithmic analysis — not financial advice. Always do your own research.</div>
+          <Guard name="Signal scanner"><SignalsBoard /></Guard>
+          <div className="disclaimer sg-disc">Signals are generated from multi-indicator confluence (RSI, MACD, EMA, BB, volume, divergence). This is algorithmic analysis — not financial advice. Always do your own research.</div>
+          {/* The engine still renders its own card list into these; kept for its writes, not shown. */}
+          <div className="sg-legacy" hidden>
+            <span id="sigCount">SCANNING</span>
+            <div id="sigFilters"></div>
+            <div id="signalGrid"></div>
           </div>
         </div>
       
