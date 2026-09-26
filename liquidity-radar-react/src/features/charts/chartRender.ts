@@ -292,7 +292,7 @@ export function initChart(): void {
   applyChartStyle()
   attachIndicatorChart(chart)
   attachDeltaPane(chart)
-  attachWhaleBubbles(candleSeries)
+  attachWhaleBubbles(chart, candleSeries, $('chartWrap')!)
   attachVolumeProfile(chart, candleSeries, $('chartWrap')!)
   // The countdown reads the live series each time, so a style change that
   // replaces the series does not strand it.
@@ -325,7 +325,7 @@ export function initChart(): void {
     const ts = chart.timeScale()
     const keep = ts.getVisibleLogicalRange()
     applyChartStyle()
-    attachWhaleBubbles(candleSeries)
+    attachWhaleBubbles(chart, candleSeries, $('chartWrap')!)
     attachVolumeProfile(chart, candleSeries, $('chartWrap')!)
     updateChartData(false)
     if (!keep) return
@@ -1038,6 +1038,7 @@ function paintShape(ctx: Any, sh: Shape, base: string, doomed: boolean): void {
 
 function redrawDrawings(includePreview?: Any): void {
   renderVolumeProfile(visibleCandles())
+  renderWhaleBubbles()
   const cv = chartState.drawCanvas
   if (!cv || !chart) return
   resizeDrawCanvas()

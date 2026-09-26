@@ -9,6 +9,7 @@ import { LayoutPicker } from './chart/LayoutPicker'
 import { IndicatorPicker } from './chart/IndicatorPicker'
 import { ReplayBar, ReplayButton } from './chart/ReplayBar'
 import { CoinPicker } from './chart/CoinPicker'
+import { WhaleLegend } from './chart/WhaleLegend'
 import { ChartStylePicker } from './chart/ChartStylePicker'
 import { lazy, Suspense } from 'react'
 const LiqHeatmap = lazy(() => import('./analysis/LiqHeatmap').then((m) => ({ default: m.LiqHeatmap })))
@@ -158,6 +159,7 @@ export function Shell() {
                 <div className="legend" id="legendOHLC">Loading chart…</div>
                 <div id="chart"></div>
                 <span className="chart-draw-hint" id="drawHint"></span>
+                <Guard name="Whale legend"><WhaleLegend /></Guard>
               </div>
             </div>
             <Guard name="Chart side panel">
