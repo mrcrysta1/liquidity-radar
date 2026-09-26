@@ -20,18 +20,15 @@ const LiqHeatmap = lazy(() => loadLiqHeatmap().then((m) => ({ default: m.LiqHeat
 const CrossExchangeTable = lazy(() => loadCrossExchange().then((m) => ({ default: m.CrossExchangeTable })))
 import { DrawToolPicker } from './chart/DrawToolPicker'
 import { OverlayTogglePicker } from './chart/OverlayTogglePicker'
-import { ConfluencePanel } from './chart/ConfluencePanel'
 import { OBImbalanceGauge } from './chart/OBImbalanceGauge'
 import { DivergenceBanner } from './chart/DivergenceBanner'
-const loadMLPanel = () => import('./chart/MLPredictionPanel')
 const loadRLPanel = () => import('./chart/RLPolicyPanel')
 const loadNeuralNet = () => import('./chart/NeuralNetViz')
 const loadBubbles = () => import('./BubblesCanvas')
-const MLPredictionPanel = lazy(() => loadMLPanel().then((m) => ({ default: m.MLPredictionPanel })))
 const RLPolicyPanel = lazy(() => loadRLPanel().then((m) => ({ default: m.RLPolicyPanel })))
 const NeuralNetPage = lazy(() => loadNeuralNet().then((m) => ({ default: m.NeuralNetPage })))
 const BubblesCanvas = lazy(() => loadBubbles().then((m) => ({ default: m.BubblesCanvas })))
-const loadRadarPanels = () => Promise.all([loadMLPanel(), loadRLPanel(), loadCrossExchange()])
+const loadRadarPanels = () => Promise.all([loadRLPanel(), loadCrossExchange()])
 import { renderAlerts } from '../features/alerts/alerts'
 import { openModal } from '../utils/dom'
 import { ChartSidePanel } from './chart/ChartSidePanel'
@@ -41,6 +38,7 @@ import { Sidebar } from './Sidebar'
 import { HOT_LIST } from '../constants/market'
 import { Guard } from './ErrorBoundary'
 import { HomeDashboard, HomeHero } from './HomeDashboard'
+import { RadarHero, RadarLower, RadarMetrics, RadarSide } from './radar/RadarViews'
 import { ClockChip } from './home/ClockChip'
 import { WhenTab } from './WhenTab'
 const loadSettings = () => import('./SettingsPage')
@@ -101,6 +99,10 @@ export function Shell() {
 
       <section className="tab-section" id="tab-radar">
         <DashHead zone="overview" name="Overview" sub="Live price, derivatives and momentum at a glance" />
+        <Guard name="Radar hero"><RadarHero /></Guard>
+        <Guard name="Radar metrics"><RadarMetrics /></Guard>
+        {/* The engine writes into these ids without null checks; the new views above read the same state. */}
+        <div className="rd-legacy" hidden>
         <div className="card hero-card">
           <div className="hero-main">
             <div className="hero-id">
@@ -136,14 +138,9 @@ export function Shell() {
           <div className="metric"><div className="ml"><span>Volume Trend</span><span className="badge b-gray" id="mVTZone">—</span></div><div className="mv" id="mVT">—</div><div className="ms">last 10 vs prior 10 bars</div></div>
         </div>
       
-        <DashHead zone="chart" name="Price Action" sub="Chart, drawing tools and the order-book side panel" />
+        </div>
         <DivergenceBanner />
-        <WhenTab tab="radar" preload={loadRadarPanels}>
-          <Suspense fallback={null}><MLPredictionPanel /></Suspense>
-          <Suspense fallback={null}><RLPolicyPanel /></Suspense>
-        </WhenTab>
-        <ConfluencePanel />
-        <OBImbalanceGauge />
+        <div className="rd-chart-row">
         <div className="chart-host" id="chartHostRadar">
         <div className="card" id="radarChartCard">
           <div className="sec-head">
@@ -185,7 +182,15 @@ export function Shell() {
           </div>
         </div>
         </div>
-      
+        <Guard name="Radar side"><RadarSide /></Guard>
+        </div>
+
+        <Guard name="Radar lower"><RadarLower /></Guard>
+        <WhenTab tab="radar" preload={loadRadarPanels}>
+          <Suspense fallback={null}><RLPolicyPanel /></Suspense>
+        </WhenTab>
+        <OBImbalanceGauge />
+
         <DashHead zone="analytics" name="Intelligence" sub="Sentiment, forecast and large-order flow" />
         <div className="desktop-grid">
           <div className="card">
