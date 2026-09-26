@@ -367,15 +367,15 @@ export function VolumeProfile() {
 type Flow = { buyUsd: number; sellUsd: number; lb: number; ls: number; rb: number; rs: number; mins: number; n: number }
 const LARGE = 25000
 
-export function OrderFlow() {
-  useTick(5000, ANALYSIS)
+export function OrderFlow({ tab = 'analysis', id = 'anFlow' }: { tab?: string; id?: string }) {
+  useTick(5000, [tab])
   const sym = state.symbol
   const [flow, setFlow] = useState<{ sym: string; f: Flow } | null>(null)
   useEffect(() => {
     if (isInstrument(sym)) return
     let alive = true
     const load = () => {
-      if (getActiveTab() !== 'analysis') return
+      if (getActiveTab() !== tab) return
       jget('https://api.binance.com/api/v3/trades?symbol=' + sym + '&limit=1000')
         .then((d) => {
           if (!alive || !Array.isArray(d) || !d.length) return
@@ -399,14 +399,14 @@ export function OrderFlow() {
     load()
     const stop = poll(load, 15000)
     const off = subscribeActiveTab((t) => {
-      if (t === 'analysis') load()
+      if (t === tab) load()
     })
     return () => {
       alive = false
       stop()
       off()
     }
-  }, [sym])
+  }, [sym, tab])
   const f = flow?.sym === sym ? flow.f : null
   const tot = f ? f.buyUsd + f.sellUsd : 0
   const bp = f && tot ? (f.buyUsd / tot) * 100 : 50
@@ -414,7 +414,7 @@ export function OrderFlow() {
   const c = 2 * Math.PI * r
   const net = f ? f.buyUsd - f.sellUsd : 0
   return (
-    <Card title="Order Flow" icon={I.flow} id="anFlow" className="an-of" right={<span className="an-live on">Live</span>}>
+    <Card title="Order Flow" icon={I.flow} id={id} className="an-of" right={<span className="an-live on">Live</span>}>
       <small className="an-sub">Buy vs sell volume · last {f ? f.n.toLocaleString() + ' trades' + (f.mins ? ` (${f.mins < 1 ? '<1' : Math.round(f.mins)} min)` : '') : '1,000 trades'}</small>
       {isInstrument(sym) ? <p className="an-empty">No public trade tape for {sym}.</p> : !f ? <p className="an-empty">Loading trades…</p> : (
         <div className="an-ofb">

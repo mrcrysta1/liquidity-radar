@@ -22,10 +22,12 @@ import { OverlayTogglePicker } from './chart/OverlayTogglePicker'
 import { OBImbalanceGauge } from './chart/OBImbalanceGauge'
 import { DivergenceBanner } from './chart/DivergenceBanner'
 const loadRLPanel = () => import('./chart/RLPolicyPanel')
-const loadNeuralNet = () => import('./chart/NeuralNetViz')
+const loadNeuralNet = () => import('./neural/NeuralDashboard')
+const loadLab = () => import('./neural/LearningLab')
 const loadBubbles = () => import('./BubblesCanvas')
 const RLPolicyPanel = lazy(() => loadRLPanel().then((m) => ({ default: m.RLPolicyPanel })))
-const NeuralNetPage = lazy(() => loadNeuralNet().then((m) => ({ default: m.NeuralNetPage })))
+const NeuralDashboard = lazy(() => loadNeuralNet().then((m) => ({ default: m.NeuralDashboard })))
+const LearningLab = lazy(() => loadLab().then((m) => ({ default: m.LearningLab })))
 const BubblesCanvas = lazy(() => loadBubbles().then((m) => ({ default: m.BubblesCanvas })))
 const loadRadarPanels = () => Promise.all([loadRLPanel(), loadCrossExchange()])
 import { renderAlerts } from '../features/alerts/alerts'
@@ -63,6 +65,14 @@ import { useEffect, useRef } from 'react'
 const w = window as any
 
 export function Shell() {
+  // The self-learning engine trades on its own, whichever tab is open. It is
+  // started once the page has settled so it never competes with first paint.
+  useEffect(() => {
+    const id = setTimeout(() => {
+      void import('../features/selflearn/engine').then((m) => m.startSelfLearning())
+    }, 8000)
+    return () => clearTimeout(id)
+  }, [])
   // Pro Terminal embed — the iframe src is only set once the Pro tab becomes
   // visible (IntersectionObserver) so the embedded app's streams don't run in
   // the background while the user is on another tab. Dev serves pro-terminal on
@@ -402,8 +412,11 @@ export function Shell() {
       </section>
 
       <section className="tab-section" id="tab-neuralnet">
-        <DashHead zone="analytics" name="Neural network" sub="Live weights and activations from whichever model you've trained" />
-        <WhenTab tab="neuralnet" preload={loadNeuralNet}><Suspense fallback={null}><NeuralNetPage /></Suspense></WhenTab>
+        <WhenTab tab="neuralnet" preload={loadNeuralNet}><Suspense fallback={null}><NeuralDashboard /></Suspense></WhenTab>
+      </section>
+
+      <section className="tab-section" id="tab-selflearn">
+        <WhenTab tab="selflearn" preload={loadLab}><Suspense fallback={null}><LearningLab /></Suspense></WhenTab>
       </section>
       
       <section className="tab-section" id="tab-news">

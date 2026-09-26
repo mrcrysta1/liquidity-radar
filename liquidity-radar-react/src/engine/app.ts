@@ -83,7 +83,7 @@ import { initKeyboard } from '../features/keyboard'
 // Training it eagerly on load froze phones for the first minute.
 function syncMLWanted(){
   const tab=getActiveTab();
-  setMLWanted(tab==='neuralnet' || (tab==='radar' && getShowMLPrediction()));
+  setMLWanted(tab==='selflearn' || (tab==='radar' && getShowMLPrediction()));
 }
 subscribeActiveTab(syncMLWanted);
 onOverlayTogglesChange(syncMLWanted);
