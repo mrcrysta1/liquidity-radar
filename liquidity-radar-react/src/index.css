@@ -977,6 +977,11 @@ html.radar-fs .cs-panel{height:100%;max-height:none}
   padding:1px 7px;font-size:9.5px;font-family:var(--mono);font-weight:700;cursor:pointer;
 }
 .wl-more:hover{background:rgb(var(--pRGB)/.12)}
+.wl-srv{
+  font-style:normal;font-size:8.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--green);border:1px solid rgb(var(--gRGB)/.45);border-radius:4px;padding:0 4px;flex-shrink:0;
+}
+.wl-srv.off{color:var(--amber);border-color:rgb(var(--aRGB)/.5)}
 .wl-spin{
   width:9px;height:9px;border-radius:50%;flex-shrink:0;
   border:1.5px solid rgb(var(--pRGB)/.3);border-top-color:var(--primary);animation:wlSpin .8s linear infinite;
