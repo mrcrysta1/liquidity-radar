@@ -31,6 +31,68 @@ export interface Palette {
 
 export const PALETTES: Palette[] = [
   {
+    // The reference design: deep navy with glowing blue edges, one orange
+    // brand accent, neon green / red for up / down. WCAG AA on cards —
+    // dark: txt 15.9, muted 7.3, primary 6.9, green 10.4, red 5.6;
+    // light: txt 17.3, muted 6.9, primary 5.2, green 5.5, red 5.5.
+    id: 'navy',
+    name: 'Radar Navy',
+    desc: 'Deep navy, glowing blue edges, orange accent — the reference look',
+    sw: ['#FF7A1A', '#22D3EE', '#22E08A', '#FF4D5E', '#A78BFA'],
+    rgb: {
+      p: '255,122,26',
+      c: '34,211,238',
+      g: '34,224,138',
+      r: '255,77,94',
+      a: '255,176,32',
+      u: '167,139,250',
+      k: '255,122,26',
+    },
+    rgbLight: {
+      p: '194,65,12',
+      c: '14,116,144',
+      g: '4,120,87',
+      r: '200,40,58',
+      a: '180,83,9',
+      u: '109,40,217',
+      k: '194,65,12',
+    },
+    dark: {
+      bg: '#060E1C',
+      card: '#0B1628',
+      card2: '#0F1D33',
+      border: '#1A2C47',
+      border2: '#24406A',
+      primary: '#FF7A1A',
+      green: '#22E08A',
+      red: '#FF4D5E',
+      amber: '#FFB020',
+      cyan: '#22D3EE',
+      purple: '#A78BFA',
+      pink: '#FF7A1A',
+      txt: '#EAF1FB',
+      muted: '#93A6C4',
+      dim: '#6B7FA3',
+    },
+    light: {
+      bg: '#EEF3FA',
+      card: '#FFFFFF',
+      card2: '#F6F9FD',
+      border: '#DCE5F1',
+      border2: '#C5D3E6',
+      primary: '#C2410C',
+      green: '#047857',
+      red: '#C8283A',
+      amber: '#B45309',
+      cyan: '#0E7490',
+      purple: '#6D28D9',
+      pink: '#C2410C',
+      txt: '#0F1B2D',
+      muted: '#4B5B73',
+      dim: '#6E7D94',
+    },
+  },
+  {
     // The house style: warm charcoal surfaces, one orange brand accent, and
     // green / red kept for up / down only. Every text colour is checked
     // against WCAG AA on its card: txt 15.9, muted 7.0, primary 6.9, green
@@ -460,8 +522,8 @@ export function activePalette(): Palette {
   return PALETTES.find((p) => p.id === storageGetRaw(PALETTE_KEY)) || PALETTES[0]
 }
 
-/** v2: the Ember redesign — moving the key shows it to everyone once. */
-const PALETTE_KEY = 'lr-palette-v2'
+/** v3: the reference (Radar Navy) redesign — moving the key shows it to everyone once. */
+const PALETTE_KEY = 'lr-palette-v3'
 
 export function applyPalette(id: string): void {
   const p = PALETTES.find((x) => x.id === id) || PALETTES[0]
@@ -554,7 +616,7 @@ export function initTheme(): void {
   if (saved === 'light') {
     document.documentElement.setAttribute('data-theme', 'light')
   }
-  applyPalette(storageGetRaw(PALETTE_KEY) || 'ember')
+  applyPalette(storageGetRaw(PALETTE_KEY) || 'navy')
   $('paletteBtn')!.addEventListener('click', function () {
     renderPalettePicker()
     openModal('thModal')

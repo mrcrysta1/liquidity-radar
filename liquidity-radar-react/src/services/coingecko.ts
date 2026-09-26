@@ -13,6 +13,8 @@ export interface MarketCapEntry {
   circulatingSupply: number
   chg1h: number | null
   chg7d: number | null
+  /** CoinGecko's logo URL for the coin, for the dashboard and ticker chips. */
+  image?: string
 }
 
 /** Our internal COINS key -> CoinGecko's own id. CoinGecko ids don't follow
@@ -44,6 +46,7 @@ interface CgRow {
   circulating_supply: number
   price_change_percentage_1h_in_currency?: number
   price_change_percentage_7d_in_currency?: number
+  image?: string
 }
 
 export async function fetchMarketCaps(): Promise<void> {
@@ -68,6 +71,7 @@ export async function fetchMarketCaps(): Promise<void> {
         circulatingSupply: row.circulating_supply,
         chg1h: row.price_change_percentage_1h_in_currency ?? null,
         chg7d: row.price_change_percentage_7d_in_currency ?? null,
+        image: row.image,
       }
     }
     state.marketCaps = out

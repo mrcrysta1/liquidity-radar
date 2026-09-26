@@ -40,7 +40,8 @@ import { DashHead } from './DashHead'
 import { Sidebar } from './Sidebar'
 import { HOT_LIST } from '../constants/market'
 import { Guard } from './ErrorBoundary'
-import { HomeDashboard } from './HomeDashboard'
+import { HomeDashboard, HomeHero } from './HomeDashboard'
+import { ClockChip } from './home/ClockChip'
 import { WhenTab } from './WhenTab'
 const loadSettings = () => import('./SettingsPage')
 const loadCalendar = () => import('./news/EconomicCalendar')
@@ -85,13 +86,16 @@ export function Shell() {
         <div className="tickerbar"><div className="ticker-track" id="tickerTrack"></div></div>
       </header>
       
-      <CoinSearchWidget />
+      <div className="search-row">
+        <CoinSearchWidget />
+        <ClockChip />
+      </div>
       
       <div className="container">
       <main>
       
       <section className="tab-section active" id="tab-home">
-        <DashHead zone="overview" name="Dashboard" sub="Every section at a glance — open one to go deeper" />
+        <Guard name="Dashboard hero"><HomeHero /></Guard>
         <Guard name="Dashboard"><HomeDashboard /></Guard>
       </section>
 

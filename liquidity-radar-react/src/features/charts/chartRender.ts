@@ -1132,6 +1132,13 @@ export function renderHero(): void {
     : '—'
 }
 
+/** A round coin badge: the CoinGecko logo once it is known, else the glyph. */
+function tickIcon(key: string, glyph: string, color: string): string {
+  const img = (state.marketCaps as Record<string, { image?: string }> | undefined)?.[key]?.image
+  const inner = img && /^https:\/\//.test(img) ? '<img src="' + img.replace(/"/g, '') + '" alt="" loading="lazy">' : glyph
+  return '<i class="tk-ico" style="border-color:' + color + '66;background:' + color + '1f">' + inner + '</i>'
+}
+
 export function renderTicker(): void {
   const items = TICKER_COINS.map((k) => {
     const c = COINS[k]
@@ -1146,8 +1153,7 @@ export function renderTicker(): void {
       '"><span class="ts" style="color:' +
       c.color +
       '">' +
-      c.icon +
-      ' ' +
+      tickIcon(k, c.icon, c.color) +
       k +
       '</span><span class="tp">' +
       pr +
