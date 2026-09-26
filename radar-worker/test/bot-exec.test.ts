@@ -14,6 +14,33 @@ test('mainnet needs an explicit opt-in', () => {
   assert.ok(new Futures('k', 's').isTestnet)
 })
 
+test('a -1021 clock rejection re-syncs and retries once; stamps stay behind server time', async () => {
+  const real = globalThis.fetch
+  const serverSkew = -1500 // the exchange clock runs 1.5s behind this machine
+  let rejected = 0
+  const stamps: number[] = []
+  globalThis.fetch = (async (url: string) => {
+    const u = new URL(url)
+    const now = Date.now() + serverSkew
+    if (u.pathname === '/fapi/v1/time') return new Response(JSON.stringify({ serverTime: now }))
+    const ts = Number(u.searchParams.get('timestamp'))
+    stamps.push(ts - now)
+    if (rejected === 0) {
+      rejected++
+      return new Response(JSON.stringify({ code: -1021, msg: 'Timestamp for this request was 1000ms ahead' }), { status: 400 })
+    }
+    return new Response(JSON.stringify([{ asset: 'USDT', balance: '5000', crossUnPnl: '0' }]))
+  }) as typeof fetch
+  try {
+    const f = new Futures('k', 's')
+    assert.equal(await f.balanceUsdt(), 5000)
+    assert.equal(rejected, 1, 'first attempt was rejected, the retry went through')
+    assert.ok(stamps.every((d) => d < 0), 'every stamp is behind server time: ' + stamps.join(','))
+  } finally {
+    globalThis.fetch = real
+  }
+})
+
 test('rounding follows exchange steps', () => {
   assert.equal(roundStep(0.123456, 0.001, 3), '0.123')
   assert.equal(roundStep(0.3, 0.1, 1), '0.3', 'no float drift below the step')

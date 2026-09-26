@@ -41,13 +41,32 @@ const cfg: TraderConfig = {
 const db = connect(env.DATABASE_URL!, env.DATABASE_CA_FILE)
 const store = new BotStore(db)
 const ex = new Futures(env.BINANCE_API_KEY!, env.BINANCE_API_SECRET!, env.FUTURES_BASE || TESTNET)
-await ex.syncTime()
+for (let attempt = 1; ; attempt++) {
+  try {
+    await ex.syncTime()
+    break
+  } catch (e) {
+    const wait = Math.min(120, 5 * 2 ** (attempt - 1))
+    console.warn(`cannot reach ${ex.base} (attempt ${attempt}): ${(e as Error).message} — retrying in ${wait}s`)
+    await new Promise((r) => setTimeout(r, wait * 1000))
+  }
+}
 await store.event('info', null, `bot starting on ${ex.base} (${ex.isTestnet ? 'TESTNET' : 'MAINNET'}) · mode ${cfg.mode} · ${SYMBOLS.join(', ')} · ${cfg.interval} bars · risk ${(cfg.risk.riskPerTrade * 100).toFixed(2)}%/trade`)
 
 const traders: SymbolTrader[] = []
 for (const s of SYMBOLS) {
   const t = new SymbolTrader(ex, store, s, cfg)
-  await t.init()
+  // A slow or flaky link should delay startup, not kill it.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await t.init()
+      break
+    } catch (e) {
+      const wait = Math.min(300, 10 * 2 ** (attempt - 1))
+      await store.event('warn', s, `setup failed (attempt ${attempt}): ${(e as Error).message} — retrying in ${wait}s`)
+      await new Promise((r) => setTimeout(r, wait * 1000))
+    }
+  }
   traders.push(t)
 }
 
@@ -94,6 +113,8 @@ async function shutdown(): Promise<void> {
   await db.end().catch(() => {})
   process.exit(0)
 }
+// A stray network rejection must not take down a process that guards open positions.
+process.on('unhandledRejection', (e) => console.error(new Date().toISOString(), 'unhandled:', (e as Error)?.message || e))
 process.on('SIGINT', () => void shutdown())
 process.on('SIGTERM', () => void shutdown())
 void loop()
