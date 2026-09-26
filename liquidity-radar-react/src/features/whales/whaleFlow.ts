@@ -49,6 +49,10 @@ export interface WhaleView {
   loading: boolean
   /** Open time of the chart's first candle — how far back a scan could go. */
   earliest: number
+  /** History came from the radar-worker database. */
+  server: boolean
+  /** The collector's last heartbeat (ms), 0 if unknown. */
+  serverUpdated: number
 }
 
 const HOSTS = ['https://data-api.binance.vision', 'https://api.binance.com']
@@ -80,6 +84,17 @@ let pending: Agg[] = []
 let held = -1
 let flushTimer: ReturnType<typeof setTimeout> | null = null
 let liveCov: Coverage | null = null
+// Optional history server (radar-worker → Supabase). Both values are public:
+// the anon key can only read the whale tables (see radar-worker/sql).
+const DB_URL = (import.meta.env.VITE_WHALE_DB_URL as string | undefined)?.replace(/\/+$/, '')
+const DB_KEY = import.meta.env.VITE_WHALE_DB_KEY as string | undefined
+const SERVER = !!(DB_URL && DB_KEY)
+/** Smallest order size loaded from the server for the current symbol. */
+let serverMin = Infinity
+let serverUpdated = 0
+let serverLoaded = false
+/** Earliest time server orders have been loaded from. */
+let serverFrom = Infinity
 let mult = (() => {
   const v = Number(storageGetRaw(MULT_KEY))
   return WHALE_MULTS.includes(v) ? v : 1
@@ -109,6 +124,8 @@ export function getWhaleView(): WhaleView {
     mult,
     loading,
     earliest: earliestT,
+    server: serverLoaded,
+    serverUpdated,
   }
 }
 
@@ -117,6 +134,9 @@ export function setWhaleMult(m: number): void {
   mult = m
   storageSetRaw(MULT_KEY, String(m))
   emit()
+  // A lower threshold than the server rows already loaded: fetch the rest.
+  if (serverLoaded && auto * m < serverMin)
+    void loadServerOrders(gen, sym, earliestT).catch(() => {})
 }
 
 /** Merge orders into the book: dedupe by id, and re-join orders a page edge split. */
@@ -234,7 +254,8 @@ function scheduleSave(): void {
 }
 
 function save(): void {
-  if (!sym || !floor) return
+  // With a history server the browser keeps nothing of its own.
+  if (!sym || !floor || serverLoaded) return
   const cutoff = Date.now() - KEEP_MS
   // Only keep orders the floor still admits (page-edge candidates that never
   // got re-joined are dropped here).
@@ -307,6 +328,89 @@ async function quoteVolume(s: string): Promise<number> {
   return 0
 }
 
+// ---- history server -----------------------------------------------------------
+
+async function rest<T>(path: string): Promise<T> {
+  const r = await fetch(DB_URL + '/rest/v1/' + path, {
+    headers: { apikey: DB_KEY!, Authorization: 'Bearer ' + DB_KEY },
+    signal: AbortSignal.timeout(15_000),
+  })
+  if (!r.ok) throw new Error('whale history server: HTTP ' + r.status)
+  return (await r.json()) as T
+}
+
+type OrderRow = {
+  a0: number
+  a1: number
+  t: string
+  price: number
+  usd: number
+  qty: number
+  side: number
+  fills: number
+}
+
+async function loadServerOrders(g: number, s: string, from: number, to?: number): Promise<void> {
+  const min = Math.max(floor, auto * mult)
+  const base =
+    'whale_orders?symbol=eq.' +
+    s +
+    '&t=gte.' +
+    encodeURIComponent(new Date(from).toISOString()) +
+    (to ? '&t=lt.' + encodeURIComponent(new Date(to).toISOString()) : '') +
+    '&usd=gte.' +
+    min +
+    '&select=a0,a1,t,price,usd,qty,side,fills&order=t.asc&limit=1000&offset='
+  // Supabase returns at most 1000 rows a request.
+  for (let off = 0; off < 60_000; off += 1000) {
+    const rows = await rest<OrderRow[]>(base + off)
+    if (g !== gen) return
+    addOrders(
+      rows.map((r) => ({
+        a0: r.a0,
+        a1: r.a1,
+        t: Date.parse(r.t),
+        p: r.price,
+        usd: r.usd,
+        q: r.qty,
+        side: r.side > 0 ? 'buy' : 'sell',
+        n: r.fills,
+      })),
+    )
+    emit()
+    if (rows.length < 1000) break
+  }
+  serverMin = Math.min(serverMin, min)
+  if (!to) serverFrom = Math.min(serverFrom, from)
+}
+
+/** Settings, coverage and orders from the collector. False if it is not usable. */
+async function loadServer(g: number, s: string, from: number): Promise<boolean> {
+  const [set] = await rest<Array<{ floor: number; auto: number; updated: string }>>(
+    'whale_symbols?symbol=eq.' + s + '&select=floor,auto,updated',
+  )
+  if (g !== gen || !set) return false
+  // The server's floor wins: every row it holds was kept under it.
+  floor = set.floor
+  auto = set.auto
+  serverUpdated = Date.parse(set.updated)
+  const cov = await rest<Array<{ a0: number; a1: number; t0: string; t1: string }>>(
+    'whale_coverage?symbol=eq.' + s + '&select=a0,a1,t0,t1&order=a0',
+  )
+  if (g !== gen) return false
+  cov.forEach((c) =>
+    addCoverage({ a0: c.a0, a1: c.a1, t0: Date.parse(c.t0), t1: Date.parse(c.t1) }),
+  )
+  serverLoaded = true
+  await loadServerOrders(g, s, from)
+  return g === gen
+}
+
+/** A heartbeat in the last two minutes: the collector is running. */
+function serverLive(): boolean {
+  return serverLoaded && Date.now() - serverUpdated < 120_000
+}
+
 /** The aggTrade id just before `id` that is not already covered, or -1. */
 function nextUncovered(id: number): number {
   let x = id
@@ -321,6 +425,13 @@ async function backfill(g: number, s: string, earliest: number, budget: number):
   loading = true
   emit()
   try {
+    if (SERVER && !serverLoaded) {
+      await loadServer(g, s, earliest).catch((e) => console.warn('whale history server', e))
+      if (g !== gen) return
+      // A running collector already holds everything up to a few seconds ago:
+      // the live stream covers the rest. "Scan further back" still works.
+      if (serverLive() && budget === AUTO_PAGES) return
+    }
     if (!floor) {
       auto = autoThreshold(await quoteVolume(s))
       floor = auto / 2
@@ -337,7 +448,14 @@ async function backfill(g: number, s: string, earliest: number, budget: number):
       const batch: number[] = []
       let c = cursor
       while (batch.length < CONCURRENCY && pages + batch.length < budget) {
-        c = nextUncovered(c)
+        const skipTo = nextUncovered(c)
+        // Jumping over covered ground that already reaches the chart start: done.
+        const skipped = coverage.find((k) => k.a0 === skipTo + 1)
+        if (skipTo !== c && skipped && skipped.t0 <= earliest) {
+          c = -1
+          break
+        }
+        c = skipTo
         if (c < 0) break
         const from = Math.max(0, c - PAGE + 1)
         batch.push(from)
@@ -388,11 +506,20 @@ export function syncWhaleSymbol(s: string, earliest: number): void {
   if (s === sym) {
     // Older candles were loaded (or a timeframe change): the reachable range moved.
     earliestT = earliest
+    if (serverLoaded && earliest < serverFrom) {
+      const to = serverFrom
+      serverFrom = earliest
+      void loadServerOrders(gen, s, earliest, to).catch(() => {})
+    }
     return
   }
   if (sym) save()
   sym = s
   gen++
+  serverLoaded = false
+  serverFrom = Infinity
+  serverMin = Infinity
+  serverUpdated = 0
   pending = []
   held = -1
   load(s)

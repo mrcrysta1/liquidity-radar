@@ -193,7 +193,7 @@ function paintCoverage(
     if (w > 130) {
       ctx.fillStyle = 'rgba(143,163,191,.75)'
       ctx.textAlign = 'center'
-      ctx.fillText('no whale data scanned', l + w / 2, paneH - 18)
+      ctx.fillText('no whale data scanned', l + w / 2, paneH * 0.5)
     }
   }
   ctx.restore()

@@ -26,6 +26,12 @@ function since(t: number): string {
 
 export function WhaleLegend() {
   const [, force] = useState(0)
+  // Clock for the collector-heartbeat check, ticked rather than read in render.
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 15_000)
+    return () => clearInterval(id)
+  }, [])
   useEffect(() => {
     const a = onWhaleFlowChange(() => force((n) => n + 1))
     const b = onOverlayTogglesChange(() => force((n) => n + 1))
@@ -45,6 +51,8 @@ export function WhaleLegend() {
   let gaps = 0
   for (let i = 1; i < cov.length; i++) if (cov[i].t0 - cov[i - 1].t1 > 60_000) gaps++
   const shown = v.orders.filter((o) => o.usd >= v.min).length
+  // The collector writes a heartbeat every ~10s; two minutes of silence means it stopped.
+  const stale = v.server && Math.max(now, v.serverUpdated) - v.serverUpdated > 120_000
 
   return (
     <div className="whale-legend" role="group" aria-label="Whale orders legend">
@@ -78,6 +86,18 @@ export function WhaleLegend() {
       </div>
       <div className="wl-row wl-cov">
         {v.loading ? <i className="wl-spin" aria-hidden="true" /> : null}
+        {v.server && (
+          <i
+            className={'wl-srv' + (stale ? ' off' : '')}
+            title={
+              stale
+                ? 'History collector last seen ' + since(v.serverUpdated)
+                : 'History from the 24/7 collector'
+            }
+          >
+            {stale ? 'collector offline' : 'server'}
+          </i>
+        )}
         <span>
           {first ? 'Scanned from ' + since(first) : 'Scanning trades…'}
           {gaps ? ' · ' + gaps + (gaps === 1 ? ' gap' : ' gaps') : ''}
