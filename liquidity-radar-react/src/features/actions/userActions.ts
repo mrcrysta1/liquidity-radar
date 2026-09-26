@@ -10,7 +10,7 @@ import { state } from '../../services/store'
 import { placeChartForTab } from '../charts/chartHost'
 import type { StreamsCallbacks } from '../../services/streams'
 import { resetDelta } from '../delta/delta'
-import { resetLiveWhales } from '../delta/liveWhales'
+import { resetWhaleFlow } from '../whales/whaleFlow'
 import { resetConfluence } from '../analysis/confluence'
 import { checkDivergence } from '../analysis/oiDivergence'
 import { resetML } from '../ml/store'
@@ -89,7 +89,7 @@ export async function setSymbol(sym: string): Promise<void> {
   state._ai = null
   state.whales = []
   resetDelta(sym)
-  resetLiveWhales(sym)
+  resetWhaleFlow()
   resetConfluence(sym)
   checkDivergence()
   resetML()

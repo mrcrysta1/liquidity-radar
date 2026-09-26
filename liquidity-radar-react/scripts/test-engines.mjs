@@ -20,6 +20,9 @@ const { bucketIndex, bucketEnd, resample, tfDef, normalizeTf, TIMEFRAMES } =
 const { noteLimitResponse, cooldownLeft, isRateLimited } = await import(src('api/rateLimit.ts'))
 const { pfmt, nfmt, cfmt } = await import(src('utils/format.ts'))
 const { VENUES, isUsdQuoted } = await import(src('features/advanced/venues.ts'))
+const { groupAggTrades, autoThreshold, bubbleRadius } = await import(
+  src('features/whales/whaleMath.ts')
+)
 
 let pass = 0
 const fails = []
@@ -205,6 +208,37 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   ok('venues: Kraken calls bitcoin XBT', VENUES.find((v) => v.id === 'kraken').symbol('BTC').startsWith('XBT'))
   ok('venues: Deribit has no market for an altcoin', VENUES.find((v) => v.id === 'deribit').symbol('PEPE') === null)
   ok('venues: USD-quoted ones are flagged', isUsdQuoted('gemini') && !isUsdQuoted('binance'))
+}
+
+// ---------------------------------------------------------------- whale orders
+{
+  const ag = (a, p, q, T, m) => ({ a, p: String(p), q: String(q), T, m })
+  // One market buy sweeping three levels at the same instant, then an
+  // unrelated sell at the same millisecond, then a later buy.
+  const o = groupAggTrades([
+    ag(10, 100, 1, 5000, false),
+    ag(11, 101, 2, 5000, false),
+    ag(12, 102, 1, 5000, false),
+    ag(13, 101, 5, 5000, true),
+    ag(14, 100, 1, 5001, false),
+  ])
+  eq('whales: fills of one taker order become one order', o.length, 3)
+  eq('whales: order spans its aggTrade ids', [o[0].a0, o[0].a1, o[0].n], [10, 12, 3])
+  near('whales: order notional is the sum of its fills', o[0].usd, 100 + 202 + 102)
+  near('whales: order price is the volume-weighted average', o[0].p, 404 / 4)
+  eq('whales: side change splits the order', o[1].side, 'sell')
+  eq('whales: new timestamp starts a new order', o[2].a0, 14)
+  eq('whales: an id gap is never bridged', groupAggTrades([ag(1, 1, 1, 9, false), ag(3, 1, 1, 9, false)]).length, 2)
+  eq('whales: junk prints are skipped', groupAggTrades([ag(1, 0, 1, 9, false), ag(2, 5, 'x', 9, false)]).length, 0)
+
+  eq('whales: BTC-sized turnover gets a $100k floor', autoThreshold(2e9), 100_000)
+  eq('whales: threshold never drops under $10k', autoThreshold(1e6), 10_000)
+  eq('whales: threshold never exceeds $1M', autoThreshold(1e12), 1_000_000)
+  eq('whales: unknown volume falls back to $50k', autoThreshold(0), 50_000)
+
+  near('whales: threshold order draws at the minimum radius', bubbleRadius(1e5, 1e5), 3.5)
+  near('whales: 4x the dollars is 2x the radius (area ∝ notional)', bubbleRadius(4e5, 1e5), 7)
+  eq('whales: radius is capped', bubbleRadius(1e12, 1e5), 36)
 }
 
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')

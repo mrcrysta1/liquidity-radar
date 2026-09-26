@@ -19,7 +19,7 @@ import {
 import { bucketEnd, mainFolder, tfDef } from './timeframe'
 import { noteStream } from './dataSources'
 import { ingestTrade } from '../features/delta/delta'
-import { ingestForWhaleDetection } from '../features/delta/liveWhales'
+import { ingestWhaleAgg } from '../features/whales/whaleFlow'
 
 type Any = any
 
@@ -243,7 +243,7 @@ export function connectStreams(cb: StreamsCallbacks): void {
     const arr = state.candles
     const bucketStart = arr.length ? arr[arr.length - 1].t : +d.T
     ingestTrade(state.symbol, bucketStart, +d.q, !!d.m)
-    ingestForWhaleDetection(state.symbol, p, +d.q, !!d.m)
+    ingestWhaleAgg(state.symbol, +d.a, p, +d.q, +d.T, !!d.m)
     tradePending = { p: p, q: +d.q, T: +d.T }
     if (!tradeFrame) tradeFrame = raf(flushTrade)
   })
