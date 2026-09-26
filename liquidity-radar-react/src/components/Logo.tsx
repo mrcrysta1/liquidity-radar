@@ -1,7 +1,8 @@
-// The Liquidity Radar mark, as vector: a radar scope — two range rings and a
-// crosshair — with an ember sweep trailing its beam, and a green return where
-// the beam has just found liquidity. Colours come from the theme tokens, so
-// the mark follows the palette, and it stays crisp from favicon size up.
+// The Liquidity Radar mark, as vector: a round scope in radar green — a
+// segmented outer ring, a ticked inner ring, and a glowing core holding the
+// radar eye with its sweep arm and a blip where the beam found liquidity.
+// Fixed greens rather than theme tokens: the mark is the brand, and it reads
+// the same on every palette and in light mode. Crisp from favicon size up.
 import { useId } from 'react'
 
 export function LogoMark({ size = 32, animated = false }: { size?: number; animated?: boolean }) {
@@ -16,56 +17,38 @@ export function LogoMark({ size = 32, animated = false }: { size?: number; anima
       aria-label="Liquidity Radar"
     >
       <defs>
-        <linearGradient id={id + 'bg'} x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="var(--logo-bg-1, #1A1410)" />
-          <stop offset="1" stopColor="var(--logo-bg-2, #0B0D10)" />
-        </linearGradient>
-        <radialGradient id={id + 'sw'} cx="24" cy="24" r="17" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stopColor="var(--primary, #FF7A1A)" stopOpacity=".95" />
-          <stop offset="1" stopColor="var(--primary, #FF7A1A)" stopOpacity="0" />
+        <radialGradient id={id + 'bg'} cx="24" cy="24" r="24" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#0B2A33" />
+          <stop offset="1" stopColor="#061019" />
         </radialGradient>
-        <clipPath id={id + 'clip'}>
-          <circle cx="24" cy="24" r="17" />
-        </clipPath>
+        <linearGradient id={id + 'ring'} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#3DF5C8" />
+          <stop offset="1" stopColor="#12B886" />
+        </linearGradient>
+        <radialGradient id={id + 'core'} cx="21" cy="20" r="12" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#7DFFE0" />
+          <stop offset="1" stopColor="#19D3A2" />
+        </radialGradient>
       </defs>
-      <rect x="1" y="1" width="46" height="46" rx="13" fill={`url(#${id}bg)`} />
-      <rect
-        x="1.5"
-        y="1.5"
-        width="45"
-        height="45"
-        rx="12.5"
-        fill="none"
-        stroke="var(--primary, #FF7A1A)"
-        strokeOpacity=".45"
-      />
-      <g fill="none" stroke="var(--logo-ring, #FFB27A)" strokeOpacity=".5" strokeWidth="1.4">
-        <circle cx="24" cy="24" r="17" />
-        <circle cx="24" cy="24" r="10.5" />
-        <path d="M24 7v34M7 24h34" strokeOpacity=".22" strokeWidth="1" />
+      <circle cx="24" cy="24" r="23.5" fill={`url(#${id}bg)`} />
+      {/* Segmented outer ring. */}
+      <g fill="none" stroke={`url(#${id}ring)`} strokeWidth="3" strokeLinecap="round">
+        <path d="M24 3.5 A20.5 20.5 0 0 1 43.5 18" />
+        <path d="M44 24.5 A20.5 20.5 0 0 1 28 43.7" />
+        <path d="M22 44.4 A20.5 20.5 0 0 1 3.6 26" />
+        <path d="M3.8 21 A20.5 20.5 0 0 1 20 3.9" strokeOpacity=".55" />
       </g>
-      {/* The sweep: a 70° wedge fading back from the beam. */}
-      <g clipPath={`url(#${id}clip)`} className="logo-sweep">
-        <path d="M24 24 L24 7 A17 17 0 0 1 40 18.2 Z" fill={`url(#${id}sw)`} opacity=".85" />
-        <path
-          d="M24 24 L40 18.2"
-          stroke="var(--primary, #FF7A1A)"
-          strokeWidth="2"
-          strokeLinecap="round"
-        />
+      {/* Ticked inner ring. */}
+      <circle cx="24" cy="24" r="15" fill="none" stroke="#2EE6B8" strokeOpacity=".45" strokeWidth="1.2" />
+      <path d="M24 9v3M24 36v3M9 24h3M36 24h3" stroke="#2EE6B8" strokeOpacity=".7" strokeWidth="1.4" strokeLinecap="round" />
+      {/* Core with the radar eye. */}
+      <circle cx="24" cy="24" r="10.5" fill={`url(#${id}core)`} className="logo-core" />
+      <g className="logo-sweep">
+        <path d="M24 24 L31.5 16.5" stroke="#062019" strokeWidth="2.4" strokeLinecap="round" />
+        <circle cx="31.5" cy="16.5" r="2.2" fill="#062019" />
       </g>
-      {/* A return: liquidity found. */}
-      <circle cx="31.5" cy="15.5" r="2.6" fill="var(--green, #16C784)" className="logo-blip" />
-      <circle
-        cx="31.5"
-        cy="15.5"
-        r="5"
-        fill="none"
-        stroke="var(--green, #16C784)"
-        strokeOpacity=".45"
-        className="logo-blip-ring"
-      />
-      <circle cx="24" cy="24" r="2.2" fill="var(--primary, #FF7A1A)" />
+      <circle cx="24" cy="24" r="4.6" fill="#062019" />
+      <circle cx="24" cy="24" r="2" fill="#7DFFE0" className="logo-blip" />
     </svg>
   )
 }

@@ -17,14 +17,53 @@ import { state } from '../../services/store'
 import { instrumentOf } from '../../constants/instruments'
 import { baseOf } from '../../utils/coins'
 import { poll } from '../../services/pollScheduler'
+import {
+  getRange,
+  getTools,
+  getView,
+  publishHeat,
+  setRange,
+  setTools,
+  setView,
+  useHeatShared,
+} from '../../features/analysis/liqHeatmap/shared'
+import type { HeatView } from '../../features/analysis/liqHeatmap/shared'
+
+const VIEWS: Array<[HeatView, string, string]> = [
+  ['heat', 'Heatmap', 'Estimated liquidation density'],
+  ['liq', 'Liquidity', 'Mark the strongest live clusters'],
+  ['lev', 'Leverage', 'Choose the leverage mix the estimate assumes'],
+  ['fvg', 'FVG', 'Fair value gaps: three-bar imbalances not yet traded back through'],
+]
+
+type Gap = { from: number; lo: number; hi: number; up: boolean }
+/** Three-bar imbalances: bar i-1 and bar i+1 do not overlap. Kept while unfilled. */
+function fairValueGaps(cs: CandleFlat[]): Gap[] {
+  const out: Gap[] = []
+  for (let i = 1; i < cs.length - 1; i++) {
+    const a = cs[i - 1]
+    const c = cs[i + 1]
+    let g: Gap | null = null
+    if (c.l > a.h) g = { from: i - 1, lo: a.h, hi: c.l, up: true }
+    else if (c.h < a.l) g = { from: i - 1, lo: c.h, hi: a.l, up: false }
+    if (!g) continue
+    const gap = g
+    const filled = cs.slice(i + 2).some((k) => (gap.up ? k.l <= gap.lo : k.h >= gap.hi))
+    if (!filled) out.push(gap)
+  }
+  return out.slice(-12)
+}
 
 const PAD = { l: 46, r: 66, t: 8, b: 22 }
 
 export function LiqHeatmap() {
   const [symbol, setSymbol] = useState<string>(() => String(state.symbol || 'BTCUSDT'))
-  const [range, setRange] = useState('24h')
+  useHeatShared()
+  const range = getRange()
+  const view = getView()
+  const tools = getTools()
   const [modelId, setModelId] = useState('m1')
-  const [cmap, setCmap] = useState<ColormapId>('viridis')
+  const [cmap, setCmap] = useState<ColormapId>('plasma')
   const [threshold, setThreshold] = useState(0.85)
   const [showCandles, setShowCandles] = useState(true)
   const [full, setFull] = useState(false)
@@ -103,6 +142,11 @@ export function LiqHeatmap() {
     () => (candles.length ? buildHeatmap(candles, { bins: full ? 260 : 170, model, oi, funding }) : null),
     [candles, model, oi, full, funding],
   )
+
+  // The zone, level and profile cards read this exact map.
+  useEffect(() => {
+    publishHeat(heat, symbol)
+  }, [heat, symbol])
 
   // Escape leaves full screen, and the page behind must not scroll under it.
   useEffect(() => {
@@ -195,6 +239,39 @@ export function LiqHeatmap() {
         })
       }
 
+      if (view === 'fvg') {
+        fairValueGaps(heat.candles).forEach((g) => {
+          const x = PAD.l + g.from * colW
+          const y1 = yOf(g.hi)
+          const y2 = yOf(g.lo)
+          ctx.fillStyle = g.up ? 'rgba(34,224,138,.22)' : 'rgba(255,77,94,.22)'
+          ctx.fillRect(x, y1, PAD.l + gw - x, Math.max(2, y2 - y1))
+          ctx.strokeStyle = g.up ? 'rgba(34,224,138,.8)' : 'rgba(255,77,94,.8)'
+          ctx.lineWidth = 1
+          ctx.strokeRect(x, y1, PAD.l + gw - x, Math.max(2, y2 - y1))
+        })
+      }
+      if (view === 'liq') {
+        ctx.font = '600 10px JetBrains Mono, monospace'
+        ctx.textAlign = 'left'
+        heat.levels.slice(0, 5).forEach((l, i) => {
+          const y = yOf(l.price)
+          ctx.strokeStyle = i === 0 ? '#F8F450' : 'rgba(255,255,255,.75)'
+          ctx.lineWidth = i === 0 ? 2 : 1
+          ctx.setLineDash([6, 4])
+          ctx.beginPath()
+          ctx.moveTo(PAD.l, y)
+          ctx.lineTo(PAD.l + gw, y)
+          ctx.stroke()
+          ctx.setLineDash([])
+          const txt = '$' + fmtUsd(l.value)
+          ctx.fillStyle = 'rgba(8,6,48,.8)'
+          ctx.fillRect(PAD.l + 6, y - 14, ctx.measureText(txt).width + 10, 13)
+          ctx.fillStyle = '#fff'
+          ctx.fillText(txt, PAD.l + 11, y - 4)
+        })
+      }
+
       const last = heat.candles[heat.candles.length - 1].c
       const yl = yOf(last)
       ctx.strokeStyle = '#ffffff'
@@ -259,7 +336,7 @@ export function LiqHeatmap() {
     const ro = new ResizeObserver(draw)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [heat, cmap, threshold, showCandles, r.tf, full])
+  }, [heat, cmap, threshold, showCandles, r.tf, full, view])
 
   const onMove = (e: React.MouseEvent) => {
     const el = wrapRef.current
@@ -282,11 +359,52 @@ export function LiqHeatmap() {
   }
 
   return (
-    <div className={'card liqhm' + (full ? ' liqhm-full' : '')}>
-      <div className="sec-head">
-        <div className="sec-title">Liquidation Heatmap</div>
+    <div className={'card liqhm' + (full ? ' liqhm-full' : '')} id="anHeatmap">
+      <div className="liqhm-head">
+        <h3>
+          <span className="liqhm-fire" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2s5 5 5 10a5 5 0 0 1-10 0c0-2 1-3.5 1-3.5S9 11 11 11c0-4 1-9 1-9z" /></svg>
+          </span>
+          {instrumentOf(symbol) ? symbol : baseOf(symbol) + '/USDT'} Liquidity Heatmap
+        </h3>
+        <div className="liqhm-views" role="tablist" aria-label="Heatmap view">
+          {VIEWS.map(([v, l, t]) => (
+            <button key={v} type="button" role="tab" aria-selected={view === v} title={t}
+              className={view === v ? 'on' : ''} onClick={() => setView(v)}>
+              {l}
+            </button>
+          ))}
+        </div>
+        <button type="button" className={'liqhm-icon' + (tools ? ' on' : '')} title="Heatmap settings"
+          aria-label="Heatmap settings" aria-pressed={tools} onClick={() => setTools(!tools)}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12" /><circle cx="16" cy="6" r="2" /><circle cx="10" cy="12" r="2" /><circle cx="18" cy="18" r="2" /></svg>
+        </button>
+        <button
+          type="button"
+          className="liqhm-icon"
+          title={full ? 'Exit full screen [Esc]' : 'Full screen'}
+          aria-label={full ? 'Exit full screen' : 'Full screen'}
+          aria-pressed={full}
+          onClick={() => setFull((f) => !f)}
+        >
+          {full ? '✕' : (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg>
+          )}
+        </button>
+      </div>
+      {view === 'lev' && (
+        <div className="liqhm-lev">
+          <span>Leverage mix</span>
+          {MODELS.map((m) => (
+            <button key={m.id} type="button" className={modelId === m.id ? 'on' : ''} title={m.description}
+              onClick={() => setModelId(m.id)}>
+              {m.name} <i>{m.tiers.map((t) => t.lev + 'x').join(' · ')}</i>
+            </button>
+          ))}
+        </div>
+      )}
+      {tools && (
         <div className="liqhm-tools">
-          <span className="badge b-cyan">{instrumentOf(symbol) ? symbol : baseOf(symbol) + '/USDT'}</span>
           <div className="liqhm-seg">
             {MODELS.map((m) => (
               <button
@@ -351,18 +469,8 @@ export function LiqHeatmap() {
             />
             Price
           </label>
-          <button
-            type="button"
-            className="chart-tool-btn"
-            title={full ? 'Exit full screen [Esc]' : 'Full screen'}
-            aria-label={full ? 'Exit full screen' : 'Full screen'}
-            aria-pressed={full}
-            onClick={() => setFull((f) => !f)}
-          >
-            {full ? '✕' : '⛶'}
-          </button>
         </div>
-      </div>
+      )}
 
       <div
         className="liqhm-wrap"
@@ -388,25 +496,7 @@ export function LiqHeatmap() {
         )}
       </div>
 
-      {heat && heat.levels.length > 0 && (
-        <div className="liqhm-levels">
-          {heat.levels.slice(0, 6).map((l) => {
-            const last = heat.candles[heat.candles.length - 1].c
-            return (
-              <span
-                key={l.price}
-                className={l.price > last ? 'up' : 'down'}
-                title="Strongest current liquidity clusters"
-              >
-                {l.price.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                <small>${fmtUsd(l.value)}</small>
-              </span>
-            )
-          })}
-        </div>
-      )}
-
-      <div className="disclaimer">
+      {tools ? (<div className="disclaimer">
         Estimated from {r.tf} candles{oi.length ? ' + open-interest changes' : ''} using leverage
         tiers {model.tiers.map((t) => t.lev + 'x').join('/')} — {model.description}.{' '}
         {funding != null ? (
@@ -420,7 +510,11 @@ export function LiqHeatmap() {
         Positions are spread across each bar&rsquo;s range, not pinned to its close; bands persist
         until price trades through them, and what sat inside a bar&rsquo;s body is cleared harder
         than what a wick merely grazed. This is a model, not exchange position data.
-      </div>
+      </div>) : (
+        <p className="liqhm-note">
+          {r.label} of {r.tf} candles · modelled from price, volume{oi.length ? ', open interest' : ''} and funding: an estimate, not exchange position data.
+        </p>
+      )}
     </div>
   )
 }

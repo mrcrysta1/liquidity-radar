@@ -4,10 +4,5 @@
 // swaps), so React can own it safely. Markup is byte-identical to the original
 // vanilla index.html footer; no hooks, no imports, no engine coupling.
 export function Footer() {
-  return (
-    <footer>
-      LIQUIDITY RADAR v5.0 &middot; Created by <b>Zain</b> &middot; microstructure terminal &middot; data: Binance Spot &amp; Futures WS/REST &middot; sentiment: alternative.me &middot; news: CoinDesk, Cointelegraph, CryptoSlate, Decrypt, The Block, CoinGape, BeInCrypto, Bitcoin Magazine (via RSS2JSON)<br />
-      Everything on this page is informational tooling — not financial advice. Trade at your own risk.
-    </footer>
-  )
+  return <footer>&copy; 2027 Liquidity Radar. All rights reserved.</footer>
 }

@@ -337,7 +337,7 @@ export function Sidebar() {
       <aside className="sidenav" aria-label="Sections">
         <div className="sidenav-top">
           <span className="sidenav-mark" aria-hidden="true">
-            <LogoMark size={34} />
+            <LogoMark size={38} animated />
           </span>
           <span className="sidenav-brand">
             <b>LIQUIDITY</b>

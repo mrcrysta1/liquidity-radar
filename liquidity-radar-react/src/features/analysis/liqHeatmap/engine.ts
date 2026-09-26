@@ -230,6 +230,15 @@ export function buildHeatmap(candles: CandleFlat[], opts: HeatmapOptions): Heatm
 
 /** Colour ramps as [r,g,b] stops across t ∈ [0,1]. */
 export const COLORMAPS: Record<string, Array<[number, number, number]>> = {
+  // Deep indigo through magenta to yellow — the Analysis tab's default.
+  plasma: [
+    [8, 6, 48],
+    [72, 12, 140],
+    [168, 32, 170],
+    [236, 72, 140],
+    [250, 160, 60],
+    [248, 244, 80],
+  ],
   viridis: [
     [68, 1, 84],
     [59, 82, 139],
@@ -289,6 +298,7 @@ export const RANGES = [
   { id: '3d', label: '3 day', tf: '15m', bars: 288 },
   { id: '1w', label: '1 week', tf: '1h', bars: 168 },
   { id: '1m', label: '1 month', tf: '4h', bars: 180 },
+  { id: '4mo', label: '4 month', tf: '1d', bars: 120 },
 ]
 
 export const fmtUsd = (v: number): string =>
