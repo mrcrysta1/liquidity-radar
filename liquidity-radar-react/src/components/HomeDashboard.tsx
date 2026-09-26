@@ -12,6 +12,7 @@ import type { CrossExRow } from '../features/advanced/advancedData'
 import { latestNews } from '../features/news/newsFeed'
 import { baseOf, coinMeta } from '../utils/coins'
 import { cfmt, pfmt } from '../utils/format'
+import { useTick } from './useTick'
 
 const w = window as unknown as { switchTab?: (t: string) => void; setSymbol?: (s: string) => void }
 const go = (tab: string) => w.switchTab?.(tab)
@@ -34,7 +35,10 @@ function Tile({
   children: React.ReactNode
 }) {
   return (
-    <div className={'card hw' + (wide ? ' hw-wide' : '')} style={accent ? ({ ['--hw-accent' as string]: accent } as React.CSSProperties) : undefined}>
+    <div
+      className={'card hw' + (wide ? ' hw-wide' : '')}
+      style={accent ? ({ ['--hw-accent' as string]: accent } as React.CSSProperties) : undefined}
+    >
       <div className="hw-head">
         <span className="hw-title">{title}</span>
         <button type="button" className="hw-cta" onClick={() => go(tab)}>
@@ -63,8 +67,7 @@ function Empty({ children }: { children: React.ReactNode }) {
 /** Price, change and the day's range for whatever symbol is in focus. */
 function PriceTile() {
   const t = state.tickers[state.symbol] as
-    | { last?: number; pct?: number; high?: number; low?: number; qvol?: number }
-    | undefined
+    { last?: number; pct?: number; high?: number; low?: number; qvol?: number } | undefined
   const meta = coinMeta(state.symbol)
   if (!t || !t.last) return <Empty>Waiting for the first tick…</Empty>
   const up = (t.pct ?? 0) >= 0
@@ -118,20 +121,33 @@ function SignalsTile() {
       })
       .slice(0, 4)
   }, [rows])
-  if (!rows.length) return <Empty>Scanner is warming up — it sweeps ten majors every two minutes.</Empty>
-  if (!top.length) return <Empty>No actionable signal right now. {rows.length} coins all reading flat.</Empty>
+  if (!rows.length)
+    return <Empty>Scanner is warming up — it sweeps ten majors every two minutes.</Empty>
+  if (!top.length)
+    return <Empty>No actionable signal right now. {rows.length} coins all reading flat.</Empty>
   return (
     <ul className="hw-list">
       {top.map((s) => (
         <li key={s.sym}>
-          <button type="button" onClick={() => { w.setSymbol?.(s.sym); go('signals') }}>
+          <button
+            type="button"
+            onClick={() => {
+              w.setSymbol?.(s.sym)
+              go('signals')
+            }}
+          >
             <span className="hw-sym">{baseOf(s.sym)}</span>
-            <span className={'hw-tag ' + (s.master.type === 'BUY' ? 'up' : 'dn')}>{s.master.type}</span>
+            <span className={'hw-tag ' + (s.master.type === 'BUY' ? 'up' : 'dn')}>
+              {s.master.type}
+            </span>
             <span className="hw-meta">
               {s.conv ? s.conv.agree + '/' + s.conv.of + ' TF' : ''}
               {s.plan ? ' · ' + s.plan.rr.toFixed(1) + ':1' : ''}
             </span>
-            <b className={s.score > 0 ? 'up' : 'dn'}>{s.score > 0 ? '+' : ''}{s.score}</b>
+            <b className={s.score > 0 ? 'up' : 'dn'}>
+              {s.score > 0 ? '+' : ''}
+              {s.score}
+            </b>
           </button>
         </li>
       ))}
@@ -141,7 +157,10 @@ function SignalsTile() {
 
 /** Book quality for the focused symbol, from the deep REST book. */
 function LiquidityTile() {
-  const deep = state.deepOb as { bids: Array<{ price: number; size: number }>; asks: Array<{ price: number; size: number }> } | null
+  const deep = state.deepOb as {
+    bids: Array<{ price: number; size: number }>
+    asks: Array<{ price: number; size: number }>
+  } | null
   const tk = state.tickers[state.symbol] as { qvol?: number } | undefined
   const v = useMemo(() => {
     const m = deep && deep.bids.length ? bookMetrics(deep.bids, deep.asks) : null
@@ -197,7 +216,14 @@ function VenuesTile() {
 
 /** Forced liquidations in the last five minutes, both sides. */
 function LiquidationsTile({ now }: { now: number }) {
-  const liqs = (state.liqs as Array<{ side: string; price: number; qty: number; ts: number; symbol: string }> | null) ?? []
+  const liqs =
+    (state.liqs as Array<{
+      side: string
+      price: number
+      qty: number
+      ts: number
+      symbol: string
+    }> | null) ?? []
   const recent = liqs.filter((l) => now - l.ts < 5 * 60_000)
   if (!liqs.length) return <Empty>Listening for forced orders…</Empty>
   const longs = recent.filter((l) => l.side === 'SELL').reduce((s, l) => s + l.price * l.qty, 0)
@@ -241,7 +267,13 @@ function MoversTile() {
         const up = (r.pct as number) >= 0
         return (
           <li key={r.sym}>
-            <button type="button" onClick={() => { w.setSymbol?.(r.sym); go('radar') }}>
+            <button
+              type="button"
+              onClick={() => {
+                w.setSymbol?.(r.sym)
+                go('radar')
+              }}
+            >
               <span className="hw-sym">{baseOf(r.sym)}</span>
               <span className="hw-meta">{pfmt(r.last as number)}</span>
               <b className={up ? 'up' : 'dn'}>
@@ -295,11 +327,7 @@ function NewsTile() {
 export function HomeDashboard() {
   // One tick re-reads the state the engine mutates, and doubles as the clock
   // the liquidation window is measured against.
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 2000)
-    return () => clearInterval(id)
-  }, [])
+  const now = useTick(2000, ['home'])
 
   return (
     <div className="home-grid">

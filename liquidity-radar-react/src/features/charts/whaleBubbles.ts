@@ -81,6 +81,9 @@ function paint(): void {
   const candles = visibleCandles()
   if (!candles.length) return
   if (!getShowWhaleBubbles()) return
+  // Chart on a tab nobody has open (e.g. the Home screen at startup): fetch
+  // nothing yet. Opening it resizes the chart, which repaints through here.
+  if (!canvas.offsetParent) return
   // The book follows the chart's symbol; the backfill reaches back to its
   // first candle. Nothing is fetched while the bubbles are switched off.
   syncWhaleSymbol(state.symbol, candles[0].t)

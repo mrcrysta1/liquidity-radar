@@ -9,6 +9,7 @@ import { state } from '../../services/store'
 import { baseOf, coinMeta } from '../../utils/coins'
 import { pfmt } from '../../utils/format'
 import { setSymbol } from '../../features/actions/userActions'
+import { CHART_TABS, useTick } from '../useTick'
 
 type Row = { key: string; sym: string; name: string; icon: string; color: string }
 
@@ -41,17 +42,13 @@ export function CoinPicker() {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [hi, setHi] = useState(0)
-  const [, tick] = useState(0)
   const wrapRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
   // The engine mutates `state` imperatively (symbol, tickers), so poll it —
   // the same approach the chart side panel takes.
-  useEffect(() => {
-    const id = setInterval(() => tick((n) => n + 1), open ? 1000 : 1500)
-    return () => clearInterval(id)
-  }, [open])
+  useTick(open ? 1000 : 1500, CHART_TABS)
 
   useEffect(() => {
     if (!open) return

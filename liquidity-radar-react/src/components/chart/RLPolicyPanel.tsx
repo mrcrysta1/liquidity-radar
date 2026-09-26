@@ -13,22 +13,25 @@ import {
   trainRLPolicy,
 } from '../../features/ml/rlStore'
 import { pfmt } from '../../utils/format'
-import { getShowRLPolicy, onOverlayTogglesChange, setShowRLPolicy } from '../../features/charts/overlayToggles'
+import {
+  getShowRLPolicy,
+  onOverlayTogglesChange,
+  setShowRLPolicy,
+} from '../../features/charts/overlayToggles'
+import { useTick } from '../useTick'
 
 export function RLPolicyPanel() {
   const [rl, setRl] = useState(getRLState())
   const [show, setShow] = useState(getShowRLPolicy())
   const [auto, setAuto] = useState(getAutoTrade())
-  const [now, setNow] = useState(() => Date.now())
+  const now = useTick(2000, ['radar', 'neuralnet'])
 
   useEffect(() => {
     const off1 = onRLChange(() => setRl(getRLState()))
     const off2 = onOverlayTogglesChange(() => setShow(getShowRLPolicy()))
-    const id = setInterval(() => setNow(Date.now()), 2000)
     return () => {
       off1()
       off2()
-      clearInterval(id)
     }
   }, [])
   void now // re-render tick for the live unrealized P&L below
@@ -43,7 +46,16 @@ export function RLPolicyPanel() {
     rl.openTrade && livePrice ? (livePrice - rl.openTrade.entry) / rl.openTrade.entry : null
 
   return (
-    <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 12px', marginBottom: 10 }}>
+    <div
+      className="card"
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+        padding: '10px 12px',
+        marginBottom: 10,
+      }}
+    >
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <span className="sec-title" style={{ fontSize: 12 }}>
           RL Trading Policy (DQN)
@@ -59,7 +71,16 @@ export function RLPolicyPanel() {
                   ? 'not trained yet'
                   : ''}
         </span>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--muted)', marginLeft: 'auto' }}>
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            fontSize: 10,
+            color: 'var(--muted)',
+            marginLeft: 'auto',
+          }}
+        >
           <input
             type="checkbox"
             checked={auto}
@@ -79,7 +100,12 @@ export function RLPolicyPanel() {
         >
           {rl.status === 'idle' ? 'Train' : 'Retrain'}
         </button>
-        <button type="button" className="chart-tool-btn" title="Hide" onClick={() => setShowRLPolicy(false)}>
+        <button
+          type="button"
+          className="chart-tool-btn"
+          title="Hide"
+          onClick={() => setShowRLPolicy(false)}
+        >
           ✕
         </button>
       </div>
@@ -88,12 +114,20 @@ export function RLPolicyPanel() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <span style={{ fontSize: 10, color: 'var(--muted)' }}>Recommendation (from flat)</span>
-            <span style={{ fontSize: 14, fontWeight: 700, color: rl.action.action === 'long' ? 'var(--green)' : 'var(--muted)' }}>
+            <span
+              style={{
+                fontSize: 14,
+                fontWeight: 700,
+                color: rl.action.action === 'long' ? 'var(--green)' : 'var(--muted)',
+              }}
+            >
               {rl.action.action === 'long' ? '▲ GO LONG' : '● STAY FLAT'}
             </span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <span style={{ fontSize: 10, color: 'var(--muted)' }}>Backtest vs buy-and-hold ({p.backtestSteps} bars)</span>
+            <span style={{ fontSize: 10, color: 'var(--muted)' }}>
+              Backtest vs buy-and-hold ({p.backtestSteps} bars)
+            </span>
             <span style={{ fontSize: 13, fontWeight: 700 }}>
               <span style={{ color: p.backtestReturn >= 0 ? 'var(--green)' : 'var(--red)' }}>
                 {(p.backtestReturn * 100).toFixed(1)}%
@@ -124,12 +158,20 @@ export function RLPolicyPanel() {
             border: '1px solid rgba(0,230,118,.25)',
           }}
         >
-          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--green)' }}>PAPER POSITION OPEN</span>
+          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--green)' }}>
+            PAPER POSITION OPEN
+          </span>
           <span style={{ fontSize: 11 }}>Entry {pfmt(rl.openTrade.entry)}</span>
           <span style={{ fontSize: 11, color: 'var(--red)' }}>SL {pfmt(rl.openTrade.sl)}</span>
           <span style={{ fontSize: 11, color: 'var(--green)' }}>TP {pfmt(rl.openTrade.tp)}</span>
           {uPnl != null && (
-            <span style={{ fontSize: 11, fontWeight: 700, color: uPnl >= 0 ? 'var(--green)' : 'var(--red)' }}>
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                color: uPnl >= 0 ? 'var(--green)' : 'var(--red)',
+              }}
+            >
               {uPnl >= 0 ? '+' : ''}
               {(uPnl * 100).toFixed(2)}% unrealized
             </span>
@@ -138,9 +180,18 @@ export function RLPolicyPanel() {
       )}
 
       {rl.stats.count > 0 && (
-        <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 10, color: 'var(--muted)' }}>
+        <div
+          style={{
+            display: 'flex',
+            gap: 14,
+            flexWrap: 'wrap',
+            fontSize: 10,
+            color: 'var(--muted)',
+          }}
+        >
           <span>
-            {rl.stats.wins}/{rl.stats.count} paper trades hit TP ({(rl.stats.winRate * 100).toFixed(0)}%)
+            {rl.stats.wins}/{rl.stats.count} paper trades hit TP (
+            {(rl.stats.winRate * 100).toFixed(0)}%)
           </span>
           <span>
             Compounded paper return:{' '}
@@ -153,10 +204,10 @@ export function RLPolicyPanel() {
       )}
 
       <span style={{ fontSize: 10, color: 'var(--dim,var(--muted))' }}>
-        Auto paper-trade simulates a position against live prices with real TP/SL — no exchange order is ever
-        placed. Each simulated trade that closes (hit TP or SL) fine-tunes this policy on the real outcome. Not
-        financial advice, and a policy that traded well on its own recent paper history is not guaranteed to
-        keep doing so.
+        Auto paper-trade simulates a position against live prices with real TP/SL — no exchange
+        order is ever placed. Each simulated trade that closes (hit TP or SL) fine-tunes this policy
+        on the real outcome. Not financial advice, and a policy that traded well on its own recent
+        paper history is not guaranteed to keep doing so.
       </span>
     </div>
   )

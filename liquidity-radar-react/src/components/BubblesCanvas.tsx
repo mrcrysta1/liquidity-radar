@@ -11,13 +11,28 @@ import Matter from 'matter-js'
 import { COINS } from '../constants/market'
 import { state } from '../services/store'
 import { setSymbol, switchTab } from '../features/actions/userActions'
+import { useTick } from './useTick'
 
 type Any = any
 
 type Timeframe = '1h' | '24h' | '7d'
 type FilterKey = 'all' | 'major' | 'meme'
 
-const MAJORS = ['BTC', 'ETH', 'PAXG', 'SOL', 'BNB', 'XRP', 'ADA', 'DOGE', 'AVAX', 'DOT', 'LINK', 'UNI', 'SUI']
+const MAJORS = [
+  'BTC',
+  'ETH',
+  'PAXG',
+  'SOL',
+  'BNB',
+  'XRP',
+  'ADA',
+  'DOGE',
+  'AVAX',
+  'DOT',
+  'LINK',
+  'UNI',
+  'SUI',
+]
 const MEMES = ['DOGE', 'PEPE', 'WIF', 'FLOKI', 'SHIB', 'BONK', 'TRUMP']
 const WALL_THICKNESS = 60
 
@@ -50,7 +65,6 @@ export function BubblesCanvas() {
   const [filter, setFilter] = useState<FilterKey>('all')
   const [tf, setTf] = useState<Timeframe>('24h')
   const [query, setQuery] = useState('')
-  const [now, setNow] = useState(() => Date.now())
 
   const containerRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -65,10 +79,7 @@ export function BubblesCanvas() {
   const [stage, setStage] = useState({ w: 800, h: 560 })
   const dragRef = useRef<{ k: string; x: number; y: number; moved: boolean } | null>(null)
 
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 4000)
-    return () => clearInterval(id)
-  }, [])
+  const now = useTick(4000, ['bubbles'])
   void now
 
   const keys = useMemo(() => {
@@ -109,7 +120,12 @@ export function BubblesCanvas() {
     Matter.Events.on(mouseConstraint, 'startdrag', (e: Any) => {
       const body = e.body as Matter.Body | undefined
       if (!body) return
-      dragRef.current = { k: String(body.label), x: mouse.position.x, y: mouse.position.y, moved: false }
+      dragRef.current = {
+        k: String(body.label),
+        x: mouse.position.x,
+        y: mouse.position.y,
+        moved: false,
+      }
     })
     Matter.Events.on(mouseConstraint, 'mousemove', () => {
       const d = dragRef.current
@@ -288,7 +304,10 @@ export function BubblesCanvas() {
           friction: 0,
           label: k,
         })
-        Matter.Body.setVelocity(body, { x: (Math.random() - 0.5) * 2, y: (Math.random() - 0.5) * 2 })
+        Matter.Body.setVelocity(body, {
+          x: (Math.random() - 0.5) * 2,
+          y: (Math.random() - 0.5) * 2,
+        })
         bodiesRef.current.set(k, body)
         Matter.Composite.add(engine.world, body)
       }
@@ -306,13 +325,22 @@ export function BubblesCanvas() {
       </div>
       <div className="bub-ctrl">
         <div className="bub-filter">
-          <button className={'bub-f' + (filter === 'all' ? ' on' : '')} onClick={() => setFilter('all')}>
+          <button
+            className={'bub-f' + (filter === 'all' ? ' on' : '')}
+            onClick={() => setFilter('all')}
+          >
             All Coins
           </button>
-          <button className={'bub-f' + (filter === 'major' ? ' on' : '')} onClick={() => setFilter('major')}>
+          <button
+            className={'bub-f' + (filter === 'major' ? ' on' : '')}
+            onClick={() => setFilter('major')}
+          >
             Majors
           </button>
-          <button className={'bub-f' + (filter === 'meme' ? ' on' : '')} onClick={() => setFilter('meme')}>
+          <button
+            className={'bub-f' + (filter === 'meme' ? ' on' : '')}
+            onClick={() => setFilter('meme')}
+          >
             Memes
           </button>
         </div>
@@ -322,7 +350,11 @@ export function BubblesCanvas() {
               key={k}
               className={'bub-f' + (tf === k ? ' on' : '')}
               onClick={() => setTf(k)}
-              title={k === '1h' || k === '7d' ? 'From CoinGecko — only available for the tracked Top 16' : undefined}
+              title={
+                k === '1h' || k === '7d'
+                  ? 'From CoinGecko — only available for the tracked Top 16'
+                  : undefined
+              }
             >
               {k}
             </button>
@@ -338,11 +370,16 @@ export function BubblesCanvas() {
         />
       </div>
       <div className="bub-legend">
-        <span><i className="lg sog"></i>Gainers</span>
-        <span><i className="lg sor"></i>Losers</span>
+        <span>
+          <i className="lg sog"></i>Gainers
+        </span>
+        <span>
+          <i className="lg sor"></i>Losers
+        </span>
         <span className="bub-hint">
-          Size = {anyCapData ? 'market cap (24h volume where cap is unavailable)' : '24h traded volume'} · color =
-          {' ' + tf} change · drag to move, click to open chart
+          Size ={' '}
+          {anyCapData ? 'market cap (24h volume where cap is unavailable)' : '24h traded volume'} ·
+          color ={' ' + tf} change · drag to move, click to open chart
         </span>
       </div>
       <div ref={containerRef} style={{ position: 'relative', width: '100%', height: 560 }}>

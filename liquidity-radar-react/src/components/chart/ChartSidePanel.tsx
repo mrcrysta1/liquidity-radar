@@ -17,6 +17,7 @@ import {
 import type { Level } from '../../features/charts/sidePanels/metrics'
 import { storageGetRaw, storageSetRaw } from '../../services/storage'
 import { syncStageHeight } from '../../features/charts/companionCharts'
+import { CHART_TABS, useTick } from '../useTick'
 
 type TabId = 'book' | 'liquidity' | 'futures' | 'structure'
 
@@ -94,12 +95,7 @@ export function ChartSidePanel({ tools }: { tools?: ReactNode }) {
   })
   // The engine mutates `state` imperatively, so poll it while the panel is up.
   // The same tick doubles as the clock for the funding countdown.
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    if (!open) return
-    const id = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(id)
-  }, [open])
+  const now = useTick(1000, CHART_TABS, open)
 
   // The stage sizes itself differently with the panel out, and it is a plain
   // element in the shell rather than part of this component's tree.

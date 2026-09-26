@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { state } from '../../services/store'
 import { cfmt, pfmt } from '../../utils/format'
 import type { CrossExRow } from '../../features/advanced/advancedData'
+import { useTick } from '../useTick'
 
 type Col = 'name' | 'last' | 'vol' | 'spread' | 'funding'
 type Dir = 'asc' | 'desc'
@@ -34,14 +35,10 @@ function compare(a: CrossExRow, b: CrossExRow, key: Col, dir: Dir): number {
 }
 
 export function CrossExchangeTable() {
-  const [, setTick] = useState(0)
+  // Re-reads state.crossEx every 2s — only while the Radar tab is open.
+  useTick(2000, ['radar'])
   const [q, setQ] = useState('')
   const [sort, setSort] = useState<{ key: Col; dir: Dir }>({ key: 'vol', dir: 'desc' })
-
-  useEffect(() => {
-    const id = setInterval(() => setTick((n) => n + 1), 2000)
-    return () => clearInterval(id)
-  }, [])
 
   const src = state.crossEx as CrossExRow[] | null
   const rows = useMemo(() => src ?? [], [src])
@@ -97,11 +94,7 @@ export function CrossExchangeTable() {
                     (sort.key === c.key ? ' on ' + sort.dir : '')
                   }
                   aria-sort={
-                    sort.key === c.key
-                      ? sort.dir === 'asc'
-                        ? 'ascending'
-                        : 'descending'
-                      : 'none'
+                    sort.key === c.key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'
                   }
                 >
                   <button type="button" onClick={() => pick(c.key)}>
@@ -141,9 +134,7 @@ export function CrossExchangeTable() {
                 <td className="dt-num">{r.vol != null ? cfmt(r.vol) : '—'}</td>
                 <td className="dt-num">{r.spread != null ? r.spread.toFixed(2) + ' bps' : '—'}</td>
                 <td
-                  className={
-                    'dt-num ' + (r.funding == null ? '' : r.funding > 0 ? 'down' : 'up')
-                  }
+                  className={'dt-num ' + (r.funding == null ? '' : r.funding > 0 ? 'down' : 'up')}
                 >
                   {r.funding != null ? (r.funding * 100).toFixed(4) + '%' : '—'}
                 </td>
