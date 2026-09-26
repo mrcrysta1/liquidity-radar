@@ -1,5 +1,10 @@
 # radar-worker
 
+Always-on services for Liquidity Radar: the **whale collector** (`npm start`)
+and the **testnet trading bot** (`npm run bot`, see the section further down).
+
+## Whale collector
+
 Always-on collector for Liquidity Radar. It reads **every** Binance spot trade
 for the configured symbols (default `BTCUSDT`, `PAXGUSDT`), rebuilds whale
 orders from them, and stores them in Postgres, so the chart's whale bubbles
@@ -96,10 +101,67 @@ Then redeploy. The whale legend shows a green **SERVER** badge when history
 comes from the collector, or **COLLECTOR OFFLINE** if its heartbeat is more
 than two minutes old.
 
+## Trading bot (Binance Futures testnet)
+
+`npm run bot` trades BTCUSDT and PAXGUSDT (gold) on 4h bars, long and
+short, by itself, with no confirmation. It uses **fake testnet money** unless you
+deliberately change two settings.
+
+**How it decides**
+- **Features:** 18 per bar, computed from closed bars only (momentum,
+  trend, volatility, volume, and taker-buy share, which is real order flow).
+- **Model:** a small neural network per side. It estimates the probability
+  that the trade the bot would place ends in profit: entry at the next open,
+  stop at 1.5×ATR, target at 3×ATR, time exit after 12 bars.
+- **Rule:** it takes the side with the higher expected value after fees
+  and slippage, and only if that is at least 0.08R.
+
+**How it proves itself (the gate)**
+- Every day it retrains and re-runs a **walk-forward test** over about 2
+  years. Each test block is traded by a model trained only on earlier bars,
+  with a gap so no label leaks. Every score is therefore out-of-sample.
+- In the default `gated` mode, a model trades only if it clears **all** of:
+  at least 60 trades, ≥ 0.05R expectancy after costs, profit factor ≥ 1.15,
+  and profit over the last 3 test blocks. Otherwise the bot stays flat and
+  logs why.
+- `npm run train` prints the same report without keys or a database.
+- `BOT_MODE=explore` trades the model's best idea anyway (testnet only), to
+  gather real trade records.
+
+**How it trades**
+1. A market entry.
+2. An **exchange-side** STOP_MARKET for the whole position, so the stop works
+   even if the bot is offline.
+3. A post-only reduce-only limit target, which fills as maker.
+
+If the stop can't be placed, the position is closed immediately. Positions
+the database doesn't know about are closed.
+
+**Hard limits** (`.env`)
+- 0.5% of equity risked per trade.
+- Position size capped at 2× equity, with 3× isolated leverage.
+- A 3% daily loss halts entries until the next UTC day.
+- A 15% drawdown from peak halts entries until you reset it.
+- Kill switch: `update bot_state set value='{"enabled":false}' where key='control'`.
+
+**Records** (`sql/002_bot.sql`)
+- Every trade: entry, exit, stop, target, exit reason (tp/sl/time/error),
+  fees, P&L in USDT and in R, win probability, expected value, the model
+  version, and the exact inputs it saw.
+- Every model version with its out-of-sample metrics and gate verdict.
+- Hourly equity, and an event log explaining each decision.
+
+**Setup**
+1. Run `sql/002_bot.sql` in Supabase.
+2. Put your testnet keys in `.env`.
+3. `npm run bot`. On a VM, add a second systemd service like the collector's,
+   with `ExecStart=… src/bot.ts`.
+
 ## Development
 
 ```bash
-npm test                              # tape reader + real SQL on in-process Postgres
+npm test                              # tape reader, model, risk, trading loop, real SQL
+npm run train                         # walk-forward report (no keys needed)
 node test/mock-supabase.ts 4790 90    # local stand-in: real Binance data, Supabase-style API
 ```
 

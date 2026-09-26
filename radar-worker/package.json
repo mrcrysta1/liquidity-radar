@@ -2,13 +2,15 @@
   "name": "radar-worker",
   "private": true,
   "version": "0.1.0",
-  "description": "Always-on collector for Liquidity Radar: whale-order history into Postgres.",
+  "description": "Always-on services for Liquidity Radar: whale-order history collector and the testnet trading bot.",
   "type": "module",
   "engines": {
     "node": ">=22.18"
   },
   "scripts": {
     "start": "node src/index.ts",
+    "bot": "node src/bot.ts",
+    "train": "node src/train.ts",
     "test": "node --test \"test/**/*.test.ts\""
   },
   "dependencies": {
