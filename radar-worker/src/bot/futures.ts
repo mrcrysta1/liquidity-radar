@@ -72,27 +72,65 @@ export class Futures {
     return this.base !== MAINNET
   }
 
-  /** Align with the exchange clock, so signed requests are not rejected (-1021). */
-  async syncTime(): Promise<void> {
-    const t0 = Date.now()
-    const r = (await this.request('GET', '/fapi/v1/time', {}, false)) as { serverTime: number }
-    this.offset = r.serverTime - Math.round((t0 + Date.now()) / 2)
+  /**
+   * Align with the exchange clock, so signed requests are not rejected
+   * (-1021). On a slow or jittery link one sample can be off by half its
+   * round trip, so take several and trust the fastest.
+   */
+  async syncTime(samples = 5): Promise<void> {
+    let best = Infinity
+    for (let i = 0; i < samples; i++) {
+      const t0 = Date.now()
+      const r = (await this.request('GET', '/fapi/v1/time', {}, false)) as { serverTime: number }
+      const t1 = Date.now()
+      if (t1 - t0 < best) {
+        best = t1 - t0
+        this.offset = r.serverTime - Math.round((t0 + t1) / 2)
+      }
+    }
+    this.lastSync = Date.now()
   }
 
-  async request(method: string, path: string, p: Params = {}, signed = true): Promise<unknown> {
+  private lastSync = 0
+
+  async request(method: string, path: string, p: Params = {}, signed = true, retried = false): Promise<unknown> {
+    // Drift builds up over hours; re-measure every 10 minutes.
+    if (signed && Date.now() - this.lastSync > 600_000) await this.syncTime().catch(() => {})
     const qs = new URLSearchParams()
     for (const [k, v] of Object.entries(p)) if (v !== undefined) qs.set(k, String(v))
     if (signed) {
-      qs.set('recvWindow', '5000')
-      qs.set('timestamp', String(Date.now() + this.offset))
+      // Binance rejects a timestamp more than 1s ahead of its clock, but
+      // accepts one up to recvWindow behind. So stamp a second behind the
+      // best estimate and allow a wide window for slow links.
+      qs.set('recvWindow', '10000')
+      qs.set('timestamp', String(Date.now() + this.offset - 1000))
       qs.set('signature', sign(qs.toString(), this.secret))
     }
     const url = this.base + path + (qs.size ? '?' + qs.toString() : '')
-    const r = await fetch(url, {
-      method,
-      headers: signed ? { 'X-MBX-APIKEY': this.key } : {},
-      signal: AbortSignal.timeout(15_000),
-    })
+    const send = () =>
+      fetch(url, {
+        method,
+        headers: signed ? { 'X-MBX-APIKEY': this.key } : {},
+        signal: AbortSignal.timeout(20_000),
+      })
+    let r: Response
+    if (method === 'GET') {
+      // Reads are safe to repeat: retry network failures a few times.
+      let attempt = 0
+      for (;;) {
+        try {
+          r = await send()
+          break
+        } catch (e) {
+          if (++attempt >= 3) throw e
+          await new Promise((res) => setTimeout(res, 1500 * attempt))
+        }
+      }
+    } else {
+      // Never repeat a write blindly: a timed-out order may still have filled.
+      // The trader reconciles positions it has no record of on the next tick.
+      r = await send()
+    }
     const text = await r.text()
     let body: unknown
     try {
@@ -102,7 +140,11 @@ export class Futures {
     }
     if (!r.ok) {
       const e = body as { code?: number; msg?: string }
-      if (e?.code === -1021) await this.syncTime().catch(() => {})
+      if (e?.code === -1021 && signed && !retried) {
+        // Clock out of step: re-measure and send once more with a fresh stamp.
+        await this.syncTime().catch(() => {})
+        return this.request(method, path, p, signed, true)
+      }
       throw new BinanceError(r.status, e?.code ?? 0, e?.msg ?? String(text).slice(0, 200))
     }
     return body
