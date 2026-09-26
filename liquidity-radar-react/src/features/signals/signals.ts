@@ -732,8 +732,8 @@ export function analyzeSigCoin(input: string): void {
       whaleHtml = '<div style="margin-top:14px;padding:10px;background:var(--card2);border:1px solid var(--border);border-radius:9px">'
         + '<div style="font-size:11px;font-weight:700;margin-bottom:6px">Whale Flow (Last 500 Trades)</div>'
         + '<div style="display:flex;gap:14px;font-family:var(--mono);font-size:12px">'
-        + '<span style="color:var(--green)">Buy: $' + cfmt(whale.buyUsd) + '</span>'
-        + '<span style="color:var(--red)">Sell: $' + cfmt(whale.sellUsd) + '</span>'
+        + '<span style="color:var(--green)">Buy: ' + cfmt(whale.buyUsd) + '</span>'
+        + '<span style="color:var(--red)">Sell: ' + cfmt(whale.sellUsd) + '</span>'
         + '<span style="color:var(--dim)">Imbalance: ' + (whale.imbalance > 0 ? '+' : '') + (whale.imbalance * 100).toFixed(1) + '%</span>'
         + '</div></div>'
     }

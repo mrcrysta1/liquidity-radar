@@ -29,7 +29,7 @@ import { mdPill, mdToggleDebug } from '../services/market'
 import { storageGet, storageSet } from '../services/storage'
 import { onTimeframeChange, syncChartTitle } from '../features/charts/timeframes'
 import { applyLayout, watchStageHeight } from '../features/charts/companionCharts'
-import { connectStreams } from '../services/streams'
+import { connectStreams, disconnectStreams } from '../services/streams'
 import { fetchMarketCaps } from '../services/coingecko'
 import { fetchFuturesSnapshot } from '../services/futures'
 import { poll } from '../services/pollScheduler'
@@ -228,7 +228,10 @@ function init(){
   poll(fetchFR,30000);
   poll(fetchOI,30000);
   poll(fetchFG,300000);
-  poll(function(){renderMemeUniverse();mdPill()},20000);
+  poll(renderMemeUniverse,20000);
+  // The status pill follows the streams within seconds rather than on a 20s
+  // poll, so a brief stall neither lingers on "Try" nor recovers late.
+  poll(function(){try{mdPill()}catch(e){}},3000);
   poll(fetchNews,300000);
 }
 
@@ -258,6 +261,7 @@ export function initApp(){
     fetchOI,
     fetchWhales,
     connectStreams,
+    disconnectStreams,
     streamCb,
     renderHero,
     renderTicker,

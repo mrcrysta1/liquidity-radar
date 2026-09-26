@@ -244,10 +244,10 @@ export const SOURCE_GROUPS: SourceGroup[] = [
         transport: 'WebSocket',
         purpose: 'Top 15 book levels, refreshed continuously — the live ladder.',
         usedBy: 'Chart side panel (Order book)',
-        endpoint: 'wss://stream.binance.com:9443/ws/{symbol}@depth15@100ms',
-        cadence: 'Pushed every 100ms',
+        endpoint: 'wss://stream.binance.com:9443/ws/{symbol}@depth20@100ms',
+        cadence: 'Pushed every 100ms (20 levels, top 15 shown)',
         auth: 'none',
-        match: /@depth15/,
+        match: /@depth20/,
       },
       {
         id: 'forceOrder',

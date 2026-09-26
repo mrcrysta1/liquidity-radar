@@ -117,9 +117,9 @@ export function renderTopCoins(): void {
       + '<td class="cmc-price">$' + pfmt(t.last) + '</td>'
       + '<td>' + (mc && mc.chg1h != null ? chgPill(mc.chg1h) : '<span class="cmc-pill flat">—</span>') + '</td>'
       + '<td>' + chgPill(t.pct) + '</td>'
-      + '<td class="vol-dim">' + (mc ? '$' + cfmt(mc.marketCap) : '—') + '</td>'
+      + '<td class="vol-dim">' + (mc ? cfmt(mc.marketCap) : '—') + '</td>'
       + '<td class="vol-dim">' + (mc ? nfmt(mc.circulatingSupply) + ' ' + k : '—') + '</td>'
-      + '<td class="vol-dim">$' + cfmt(t.qvol) + '</td>'
+      + '<td class="vol-dim">' + cfmt(t.qvol) + '</td>'
       + '</tr>'
   }).join('')
 
@@ -179,8 +179,8 @@ export function renderFutures(): void {
       + '<td class="cmc-price">$' + pfmt(f.markPrice) + '</td>'
       + '<td>' + chgPill(f.pct) + '</td>'
       + '<td>' + fundingPill(f.fundingRate) + '</td>'
-      + '<td class="vol-dim">' + (f.openInterest != null ? '$' + cfmt(f.openInterest * f.markPrice) : '—') + '</td>'
-      + '<td class="vol-dim">$' + cfmt(f.qvol) + '</td>'
+      + '<td class="vol-dim">' + (f.openInterest != null ? cfmt(f.openInterest * f.markPrice) : '—') + '</td>'
+      + '<td class="vol-dim">' + cfmt(f.qvol) + '</td>'
       + '</tr>'
   }).join('')
 }
