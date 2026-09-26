@@ -9,6 +9,8 @@ import { LayoutPicker } from './chart/LayoutPicker'
 import { IndicatorPicker } from './chart/IndicatorPicker'
 import { ReplayBar, ReplayButton } from './chart/ReplayBar'
 import { CoinPicker } from './chart/CoinPicker'
+import { LogoMark } from './Logo'
+import { BellIcon, MoonIcon, PaletteIcon, SunIcon } from './icons'
 import { WhaleLegend } from './chart/WhaleLegend'
 import { ChartStylePicker } from './chart/ChartStylePicker'
 import { lazy, Suspense } from 'react'
@@ -73,11 +75,12 @@ export function Shell() {
       <Sidebar />
       <header className="top">
         <div className="top-inner">
-          <div className="logo"><span className="dish">📡</span><span className="logo-text"><b>LIQUIDITY</b>&nbsp;RADAR</span></div>
-          <div style={{ 'display': 'flex', 'alignItems': 'center', 'gap': '8px' }}>
-            <button className="theme-btn" id="alertBtn" title="Price alerts (desktop notifications)" style={{ 'fontSize': '13px', 'fontWeight': '800', 'fontFamily': 'var(--mono)' }} onClick={() => { renderAlerts(); openModal('alModal') }}>AL</button>
-            <button className="theme-btn" id="paletteBtn" title="Color themes / palettes" style={{ 'fontSize': '15px', 'fontWeight': '800' }}>🎨</button>
-            <button className="theme-btn" id="themeBtn" title="Toggle dark/light mode" style={{ 'fontSize': '12px', 'fontWeight': '800', 'fontFamily': 'var(--mono)' }}>D</button>
+          <div className="logo"><LogoMark size={36} animated /><span className="logo-text"><b>LIQUIDITY</b>&nbsp;RADAR</span></div>
+          <div className="top-actions">
+            <button className="theme-btn icon-btn" id="alertBtn" title="Price alerts" aria-label="Price alerts" onClick={() => { renderAlerts(); openModal('alModal') }}><BellIcon /></button>
+            <button className="theme-btn icon-btn" id="paletteBtn" title="Colour themes" aria-label="Colour themes"><PaletteIcon /></button>
+            {/* Both glyphs are always here; CSS shows the one for the mode you would switch to. */}
+            <button className="theme-btn icon-btn" id="themeBtn" title="Switch light / dark" aria-label="Switch light or dark mode"><SunIcon className="ico-sun" /><MoonIcon className="ico-moon" /></button>
             <div className="status-pill" id="statusPill"><span className="dot"></span><span id="statusTxt">Try</span></div>
           </div>
         </div>

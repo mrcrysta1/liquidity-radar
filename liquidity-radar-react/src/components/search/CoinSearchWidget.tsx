@@ -7,6 +7,7 @@
 // coin (COIN_ALIASES / HOT_LIST) highlight, no-match + pair-count footer, setSymbol
 // on select, outside-click close, and / focus shortcut via the preserved input id.
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { SearchIcon } from '../icons'
 import { COINS, COIN_ALIASES, HOT_LIST } from '../../constants/market'
 import { ASSET_CLASS_LABEL, INSTRUMENTS, registerInstrument } from '../../constants/instruments'
 import { allBinanceSymbols, loadExchangeInfo } from '../../services/symbolIndex'
@@ -197,7 +198,9 @@ export function CoinSearchWidget() {
 
   return (
     <div className="search-wrap">
-      <span className="search-icon">🔍</span>
+      <span className="search-icon">
+        <SearchIcon size={17} />
+      </span>
       <input
         className="search-box"
         id="coinSearch"
