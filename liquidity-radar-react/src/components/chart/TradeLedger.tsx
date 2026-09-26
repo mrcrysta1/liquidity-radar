@@ -87,7 +87,7 @@ export function TradeLedger() {
   const [auto, setAuto] = useState(getAutoTrade())
   // Open positions show distance-to-level against a live price, so this
   // re-renders on its own even when nothing in the store changes.
-  const now = useTick(2000, ['radar', 'neuralnet'])
+  const now = useTick(2000, ['radar', 'neuralnet', 'selflearn'])
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {

@@ -24,7 +24,7 @@ export function RLPolicyPanel() {
   const [rl, setRl] = useState(getRLState())
   const [show, setShow] = useState(getShowRLPolicy())
   const [auto, setAuto] = useState(getAutoTrade())
-  const now = useTick(2000, ['radar', 'neuralnet'])
+  const now = useTick(2000, ['radar', 'neuralnet', 'selflearn'])
 
   useEffect(() => {
     const off1 = onRLChange(() => setRl(getRLState()))

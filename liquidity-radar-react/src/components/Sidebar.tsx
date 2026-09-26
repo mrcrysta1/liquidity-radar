@@ -19,6 +19,7 @@ type TabId =
   | 'analysis'
   | 'news'
   | 'neuralnet'
+  | 'selflearn'
   | 'pro'
   | 'settings'
 
@@ -115,6 +116,14 @@ function NavIcon({ id }: { id: TabId }) {
           <path d="M6.6 8 10.6 11M6.6 16 10.6 13M13.4 11 17.4 8M13.4 13 17.4 16" {...S} opacity=".6" />
         </svg>
       )
+    case 'selflearn':
+      return (
+        <svg {...p}>
+          <path d="M9.2 4.4a3 3 0 0 0-3 2.9 3 3 0 0 0-1.9 4.9 3 3 0 0 0 1.9 4.9 3 3 0 0 0 3 2.9 2.8 2.8 0 0 0 2.8-2.8V7.2a2.8 2.8 0 0 0-2.8-2.8Z" {...S} />
+          <path d="M14.8 4.4a3 3 0 0 1 3 2.9 3 3 0 0 1 1.9 4.9 3 3 0 0 1-1.9 4.9 3 3 0 0 1-3 2.9A2.8 2.8 0 0 1 12 17.2" {...S} opacity=".6" />
+          <circle cx="16.4" cy="10.4" r="1.2" fill="currentColor" stroke="none" />
+        </svg>
+      )
     default:
       return (
         <svg {...p}>
@@ -131,7 +140,8 @@ const NAV: Array<{ id: TabId; label: string; key: string; group: string }> = [
   { id: 'multichart', label: 'Charts', key: 'C', group: 'main' },
   { id: 'signals', label: 'Signals', key: 'S', group: 'trade' },
   { id: 'analysis', label: 'Analysis', key: 'A', group: 'trade' },
-  { id: 'neuralnet', label: 'Neural net', key: '', group: 'trade' },
+  { id: 'neuralnet', label: 'Neural Net', key: '', group: 'trade' },
+  { id: 'selflearn', label: 'Self Learning', key: '', group: 'trade' },
   { id: 'market', label: 'Market', key: 'M', group: 'explore' },
   { id: 'bubbles', label: 'Bubbles', key: 'B', group: 'explore' },
   { id: 'news', label: 'News', key: 'N', group: 'explore' },
@@ -337,7 +347,7 @@ export function Sidebar() {
       <aside className="sidenav" aria-label="Sections">
         <div className="sidenav-top">
           <span className="sidenav-mark" aria-hidden="true">
-            <LogoMark size={34} />
+            <LogoMark size={38} animated />
           </span>
           <span className="sidenav-brand">
             <b>LIQUIDITY</b>
