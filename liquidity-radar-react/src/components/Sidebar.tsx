@@ -380,6 +380,24 @@ export function Sidebar() {
             </div>
           ))}
         </nav>
+
+        <div className="sidenav-promo" aria-hidden="true">
+          <b>
+            Trade Smarter
+            <br />
+            Not Harder
+          </b>
+          <svg className="sidenav-promo-bars" width="34" height="24" viewBox="0 0 34 24">
+            <rect x="1" y="16" width="5" height="8" rx="1" />
+            <rect x="9" y="11" width="5" height="13" rx="1" />
+            <rect x="17" y="6" width="5" height="18" rx="1" />
+            <rect x="25" y="1" width="5" height="23" rx="1" />
+          </svg>
+        </div>
+        <div className="sidenav-foot">
+          <span>Liquidity Radar v5.0</span>
+          <small>Powered by Zain</small>
+        </div>
       </aside>
     </>
   )
