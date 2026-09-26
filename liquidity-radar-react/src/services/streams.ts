@@ -50,9 +50,38 @@ const unraf: (h: number) => void =
     ? cancelAnimationFrame
     : (h) => clearTimeout(h as unknown as ReturnType<typeof setTimeout>)
 
+// Socket lifecycle. Every connectStreams() starts a new generation; a socket
+// from an older generation can no longer write data, touch the live count or
+// schedule a reconnect. That closes three holes the old counter-based version
+// had: closing sockets decrementing the *new* sockets' count (the status pill
+// flipping to "Try" while data flowed), untracked reconnect timers opening a
+// duplicate socket after a timeframe switch, and the previous coin's sockets
+// writing prices into the new coin while a symbol switch was still loading.
+let gen = 0
+/** Open sockets of the current generation — the live count is its size, never a running tally. */
+const openSockets = new Set<Any>()
+const reconnectTimers = new Set<ReturnType<typeof setTimeout>>()
+const lastMsgAt = new Map<Any, number>()
+let lastCb: StreamsCallbacks | null = null
+let expectedStreams = 0
+/**
+ * Silence after which a socket counts as stalled and is replaced. The ticker
+ * pushes every second and klines every ~2s; depth pushes only on change. The
+ * trade tape has no limit: a quiet pair can go minutes without a print.
+ */
+const STALL_MS: Record<string, number> = { tk: 20_000, kl: 45_000, dp: 45_000 }
+
+function syncCount(): void {
+  state.wsOpen = openSockets.size
+  md.conn.ws.streams = openSockets.size
+  md.conn.ws.up = openSockets.size > 0
+}
+
 function closeWS(ws: Any): void {
   if (ws) {
     ws._dead = true
+    openSockets.delete(ws)
+    lastMsgAt.delete(ws)
     try {
       ws.close()
     } catch (e) {
@@ -61,7 +90,11 @@ function closeWS(ws: Any): void {
   }
 }
 
-export function connectStreams(cb: StreamsCallbacks): void {
+/** Close every stream now, e.g. the moment the symbol changes. */
+export function disconnectStreams(cb?: StreamsCallbacks): void {
+  gen++
+  reconnectTimers.forEach((h) => clearTimeout(h))
+  reconnectTimers.clear()
   closeWS(wsTk)
   closeWS(wsKl)
   closeWS(wsDp)
@@ -70,9 +103,52 @@ export function connectStreams(cb: StreamsCallbacks): void {
   wsKl = null
   wsDp = null
   wsAg = null
+  openSockets.clear()
+  lastMsgAt.clear()
+  expectedStreams = 0
+  syncCount()
   if (tradeFrame) unraf(tradeFrame)
   tradeFrame = 0
   tradePending = null
+  cb?.onStatus()
+}
+
+let watching = false
+function watchStreams(): void {
+  if (watching || typeof window === 'undefined') return
+  watching = true
+  const check = () => {
+    const now = Date.now()
+    openSockets.forEach((ws) => {
+      const limit = STALL_MS[ws._key]
+      if (!limit) return
+      if (now - (lastMsgAt.get(ws) ?? ws._openedAt ?? now) > limit) {
+        mdDebug.log('ws', 'stalled ' + ws._key + ' — reconnecting')
+        // Not marked dead, so onclose takes the normal reconnect path.
+        try {
+          ws.close()
+        } catch (e) {
+          /* ignore */
+        }
+      }
+    })
+  }
+  setInterval(check, 5000)
+  // Back from sleep or a hidden tab: check at once instead of up to 5s later.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') check()
+  })
+  // The network returned: anything missing reconnects now, not on its backoff.
+  window.addEventListener('online', () => {
+    if (lastCb && openSockets.size < expectedStreams) connectStreams(lastCb)
+  })
+}
+
+export function connectStreams(cb: StreamsCallbacks): void {
+  disconnectStreams()
+  lastCb = cb
+  watchStreams()
+  const myGen = gen
   // A Yahoo-priced instrument has no Binance stream at all — every socket
   // below is symbol-scoped, so there is nothing here to subscribe to. Bail
   // out after the teardown above rather than opening four sockets against an
@@ -80,20 +156,19 @@ export function connectStreams(cb: StreamsCallbacks): void {
   // updating from the market-wide fetchTickers poll, and the instrument's own
   // price is polled by services/instrumentFeed.
   if (isInstrument(state.symbol)) {
-    state.wsOpen = 0
-    md.conn.ws.streams = 0
-    md.conn.ws.up = false
+    syncCount()
     cb.onStatus()
     return
   }
+  expectedStreams = 4
   const s = mdSym(state.symbol)?.toLowerCase() ?? ''
   const tf = mdTf(state.tf)
   const def = tfDef(tf)
   const bufKey = mdSym(state.symbol) + '|' + tf
   md.series = { symbol: state.symbol, tf: tf }
-  // exponential backoff per stream with jitter + attempt cap
-  const backoff: { n: number } = { n: 0 } // multiplier: (2^n) * 1200ms, capped 30s
+  // Reconnect backoff per stream: 1.2s x 2^attempt, capped at 30s, with jitter.
   const make = function (key: string, url: string, onMsg: (d: Any) => void) {
+    if (gen !== myGen) return null
     let ws: Any = null
     try {
       ws = new WebSocket(url)
@@ -107,16 +182,30 @@ export function connectStreams(cb: StreamsCallbacks): void {
     else wsDp = ws
     const attempts = (state[key + '_retry'] = Number(state[key + '_retry'] || 0) + 1)
     ws._attempts = attempts
+    ws._gen = myGen
+    ws._key = key
     ws.onopen = function () {
+      if (ws._gen !== gen || ws._dead) {
+        try {
+          ws.close()
+        } catch (e) {
+          /* ignore */
+        }
+        return
+      }
       noteStream(url, true)
-      state.wsOpen++
+      ws._openedAt = Date.now()
+      openSockets.add(ws)
       state[key + '_retry'] = 0
       mdHearbeat('ws')
-      md.conn.ws.streams = state.wsOpen
-      md.conn.ws.up = true
+      syncCount()
       cb.onStatus()
     }
     ws.onmessage = function (ev: MessageEvent) {
+      // A socket from an earlier generation (the previous coin or timeframe)
+      // must not write into the current one's state.
+      if (ws._gen !== gen) return
+      lastMsgAt.set(ws, Date.now())
       let d: Any
       try {
         d = JSON.parse(ev.data)
@@ -137,8 +226,10 @@ export function connectStreams(cb: StreamsCallbacks): void {
     }
     ws.onclose = function () {
       noteStream(url, false)
-      state.wsOpen = Math.max(0, state.wsOpen - 1)
-      md.conn.ws.streams = Math.max(0, md.conn.ws.streams - 1)
+      openSockets.delete(ws)
+      lastMsgAt.delete(ws)
+      if (ws._gen !== gen) return // superseded: it neither counts nor reconnects
+      syncCount()
       cb.onStatus()
       if (ws._dead) return
       md.conn.ws.reconnects++
@@ -146,14 +237,13 @@ export function connectStreams(cb: StreamsCallbacks): void {
       // subscription restoration: only revive if this stream is still wanted & symbol unchanged
       if (state[key + '_want'] !== url || state.symbol !== md.series.symbol) return
       const exp = Number(state[key + '_retry'] || 0)
-      const cap = 30
-      backoff.n = Math.min(backoff.n + 1, cap)
-      const delay =
-        Math.min(30000, 1200 * Math.pow(2, Math.min(exp, cap))) + Math.floor(Math.random() * 400)
-      setTimeout(function () {
-        if (!ws._dead && state[key + '_want'] === url && state.symbol === md.series.symbol)
+      const delay = Math.min(30000, 1200 * Math.pow(2, Math.min(exp, 5))) + Math.floor(Math.random() * 400)
+      const h = setTimeout(function () {
+        reconnectTimers.delete(h)
+        if (gen === myGen && state[key + '_want'] === url && state.symbol === md.series.symbol)
           make(key, url, onMsg)
       }, delay)
+      reconnectTimers.add(h)
     }
     ws.onerror = function () {
       /* recovery handled via onclose */
@@ -273,11 +363,16 @@ export function connectStreams(cb: StreamsCallbacks): void {
     state.klineTick++
     if (state.klineTick % 8 === 0 || k.x) cb.onAnalytics()
   })
-  make('dp', 'wss://stream.binance.com:9443/ws/' + s + '@depth15@100ms', function (d: Any) {
+  // Binance's partial-depth streams exist for 5, 10 and 20 levels only. The
+  // "@depth15" this used to request is accepted and then never sends a frame,
+  // so the live book was never live: it froze at the one REST snapshot and
+  // the status pill fell to "Try" (ob stale) seconds after every load. Ask
+  // for 20 and keep the 15 the ladder shows.
+  make('dp', 'wss://stream.binance.com:9443/ws/' + s + '@depth20@100ms', function (d: Any) {
     if (!d.bids || !d.bids.length) return
     const ob = {
-      bids: d.bids.map((b: Any) => [+b[0], +b[1]]),
-      asks: d.asks.map((a: Any) => [+a[0], +a[1]]),
+      bids: d.bids.slice(0, 15).map((b: Any) => [+b[0], +b[1]]),
+      asks: d.asks.slice(0, 15).map((a: Any) => [+a[0], +a[1]]),
     }
     if (!mdStoreOB(state.symbol, ob)) return
     state.ob = ob

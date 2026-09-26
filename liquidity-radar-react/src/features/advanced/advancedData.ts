@@ -92,6 +92,28 @@ async function safe<T>(p: Promise<T>): Promise<{ ok: true; v: T } | { ok: false 
   }
 }
 
+// A venue the network cannot reach (blocked region, firewall, outage) used
+// to be asked again every poll, forever: dozens of failed requests a minute.
+// Now each failure doubles the wait before the next try, up to ten minutes,
+// and one success resets it.
+const venueBackoff = new Map<string, { fails: number; until: number }>()
+const VENUE_BASE_MS = 30_000
+const VENUE_MAX_MS = 600_000
+
+export function venueRetryIn(id: string, now = Date.now()): number {
+  const b = venueBackoff.get(id)
+  return b && b.until > now ? b.until - now : 0
+}
+
+export function noteVenue(id: string, ok: boolean, now = Date.now()): void {
+  if (ok) {
+    venueBackoff.delete(id)
+    return
+  }
+  const fails = (venueBackoff.get(id)?.fails ?? 0) + 1
+  venueBackoff.set(id, { fails, until: now + Math.min(VENUE_MAX_MS, VENUE_BASE_MS * 2 ** (fails - 1)) })
+}
+
 export async function fetchCrossExchange(): Promise<void> {
   // None of these venues list metals, FX, indices or equities. "No market" is
   // already how this table says so, which beats firing a 400 at every venue.
@@ -108,13 +130,21 @@ export async function fetchCrossExchange(): Promise<void> {
       const row: CrossExRow = { id: v.id, name: v.name, kind: v.kind, usd: isUsdQuoted(v.id) }
       // No market here is an answer, not a failure — say which it is.
       if (!sym) return { ...row, err: 'no market' }
+      const wait = venueRetryIn(v.id)
+      if (wait) {
+        // Keep showing the last good quote while it waits, if there is one.
+        const prev = state.crossEx?.find((r: CrossExRow) => r.id === v.id && r.last != null)
+        return prev ? { ...prev } : { ...row, err: 'unreachable · retry in ' + Math.ceil(wait / 1000) + 's' }
+      }
       const res = await Promise.all(v.urls(sym).map((u) => safe(jget(u))))
       let q
       try {
         q = v.parse(res.map((r) => (r.ok ? r.v : undefined)))
       } catch {
+        noteVenue(v.id, false)
         return { ...row, err: 'bad response' }
       }
+      noteVenue(v.id, q.last != null)
       if (q.last == null) return { ...row, err: 'unreachable' }
       const spread =
         q.bid && q.ask && q.bid > 0 ? ((q.ask - q.bid) / ((q.ask + q.bid) / 2)) * 1e4 : undefined

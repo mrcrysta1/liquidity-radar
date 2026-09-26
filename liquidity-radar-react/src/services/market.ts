@@ -213,9 +213,11 @@ export function mdDataAge(kind: keyof MdLastUpdate): number | null {
 
 // staleness thresholds (ms)
 export const mdStale = {
-  tickers: 6000,
+  // The ticker stream pushes every second and depth only on change, so a
+  // quiet pair can pause for several seconds without anything being wrong.
+  tickers: 15000,
   candles: 90000,
-  ob: 6000,
+  ob: 20000,
   fr: 45000,
   oi: 45000,
   whales: 30000,
@@ -280,7 +282,7 @@ export function mdHearbeat(kind: 'ws' | 'rest'): void {
 export function mdRefreshHealth(): MdHealth {
   const now = Date.now()
   mdHealth.staleWarn.length = 0
-  if (md.conn.ws.streams > 0 && now - mdHealth.lastWsMsg > 8000)
+  if (md.conn.ws.streams > 0 && now - mdHealth.lastWsMsg > 12000)
     mdHealth.staleWarn.push('WS stalled')
   if (mdHealth.lastWsMsg === 0) mdHealth.staleWarn.push('no live stream')
   Object.keys(mdStale).forEach(function (k) {

@@ -25,6 +25,7 @@ export interface UserActionCallbacks {
   fetchOI(): Promise<Any>
   fetchWhales(): Promise<Any>
   connectStreams(cb: StreamsCallbacks): void
+  disconnectStreams(cb?: StreamsCallbacks): void
   streamCb: StreamsCallbacks
   renderHero(): void
   renderTicker(): void
@@ -109,7 +110,12 @@ export async function setSymbol(sym: string): Promise<void> {
   sel.value = sym
   cbs!.renderTicker()
   switchTab('radar')
-  await Promise.all([
+  // Stop the previous coin's streams now: left running through the fetches
+  // below, they kept writing its prices into this coin's state.
+  cbs!.disconnectStreams(cbs!.streamCb)
+  // allSettled: one failed fetch (funding, OI...) must not stop the streams
+  // from reconnecting below.
+  await Promise.allSettled([
     // A Yahoo instrument has no websocket to fill in its price, so fetch one
     // up front rather than leaving the hero on a dash until the next poll.
     primeInstrument(sym),
