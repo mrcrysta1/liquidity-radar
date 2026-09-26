@@ -6,6 +6,7 @@
 // every individual book delta.
 import { useEffect, useState } from 'react'
 import { state } from '../../services/store'
+import { getActiveTab } from '../../features/actions/userActions'
 import { bookMetrics } from '../../features/charts/sidePanels/metrics'
 import type { Level } from '../../features/charts/sidePanels/metrics'
 import { getShowOBGauge, onOverlayTogglesChange, setShowOBGauge } from '../../features/charts/overlayToggles'
@@ -30,6 +31,8 @@ export function OBImbalanceGauge() {
   useEffect(() => {
     if (!show) return
     const tick = () => {
+      // It lives on the Radar tab: nothing to draw while that is not on screen.
+      if (document.hidden || getActiveTab() !== 'radar') return
       const ob = state.ob as { bids: number[][]; asks: number[][] } | null
       if (!ob) return
       const m = bookMetrics(toLevels(ob.bids), toLevels(ob.asks), band)

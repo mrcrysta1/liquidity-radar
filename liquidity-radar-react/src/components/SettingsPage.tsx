@@ -5,15 +5,11 @@
 // and overlays live traffic recorded by the API client, so a feed that has gone
 // quiet is visible instead of silently missing from the UI.
 import { useEffect, useMemo, useState } from 'react'
-import {
-  ALL_SOURCES,
-  SOURCE_GROUPS,
-  sourceStats,
-  unmatchedHosts,
-} from '../services/dataSources'
+import { ALL_SOURCES, SOURCE_GROUPS, sourceStats, unmatchedHosts } from '../services/dataSources'
 import type { DataSource, Transport } from '../services/dataSources'
 import { cooldownLeft, isRateLimited } from '../api/rateLimit'
 import { PALETTES, applyPalette, activePalette } from '../features/theme/theme'
+import { useTick } from './useTick'
 
 const AGO = (ms: number): string => {
   if (!ms) return 'never'
@@ -62,14 +58,9 @@ function Row({ s, now }: { s: DataSource; now: number }) {
 }
 
 export function SettingsPage() {
-  const [now, setNow] = useState(() => Date.now())
+  const now = useTick(2000, ['settings'])
   const [q, setQ] = useState('')
   const [only, setOnly] = useState<'all' | Transport>('all')
-
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 2000)
-    return () => clearInterval(id)
-  }, [])
 
   const needle = q.trim().toLowerCase()
   const groups = useMemo(

@@ -27,6 +27,7 @@ import {
 import { state } from '../../services/store'
 import { pfmt } from '../../utils/format'
 import { coinMeta } from '../../utils/coins'
+import { useTick } from '../useTick'
 
 const pct = (v: number): string => (v > 0 ? '+' : '') + (v * 100).toFixed(2) + '%'
 
@@ -40,7 +41,7 @@ function ago(ts: number, now: number): string {
 /** Distance from live price to a level, as a percentage of the live price. */
 function away(price: number, level: number): string {
   if (!(price > 0)) return '—'
-  return ((level - price) / price * 100).toFixed(2) + '%'
+  return (((level - price) / price) * 100).toFixed(2) + '%'
 }
 
 function OpenRow({ t, now }: { t: PaperTrade; now: number }) {
@@ -84,7 +85,9 @@ function OpenRow({ t, now }: { t: PaperTrade; now: number }) {
 export function TradeLedger() {
   const [, bump] = useState(0)
   const [auto, setAuto] = useState(getAutoTrade())
-  const [now, setNow] = useState(() => Date.now())
+  // Open positions show distance-to-level against a live price, so this
+  // re-renders on its own even when nothing in the store changes.
+  const now = useTick(2000, ['radar', 'neuralnet'])
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
@@ -93,13 +96,9 @@ export function TradeLedger() {
       setAuto(getAutoTrade())
       bump((n) => n + 1)
     })
-    // Open positions show distance-to-level against a live price, so this
-    // has to re-render on its own even when nothing in the store changes.
-    const id = setInterval(() => setNow(Date.now()), 2000)
     return () => {
       off1()
       off2()
-      clearInterval(id)
     }
   }, [])
 

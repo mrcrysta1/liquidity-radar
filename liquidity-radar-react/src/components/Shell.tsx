@@ -14,27 +14,24 @@ import { BellIcon, MoonIcon, PaletteIcon, SunIcon } from './icons'
 import { WhaleLegend } from './chart/WhaleLegend'
 import { ChartStylePicker } from './chart/ChartStylePicker'
 import { lazy, Suspense } from 'react'
-const LiqHeatmap = lazy(() => import('./analysis/LiqHeatmap').then((m) => ({ default: m.LiqHeatmap })))
-const CrossExchangeTable = lazy(() =>
-  import('./analysis/CrossExchangeTable').then((m) => ({ default: m.CrossExchangeTable })),
-)
+const loadLiqHeatmap = () => import('./analysis/LiqHeatmap')
+const loadCrossExchange = () => import('./analysis/CrossExchangeTable')
+const LiqHeatmap = lazy(() => loadLiqHeatmap().then((m) => ({ default: m.LiqHeatmap })))
+const CrossExchangeTable = lazy(() => loadCrossExchange().then((m) => ({ default: m.CrossExchangeTable })))
 import { DrawToolPicker } from './chart/DrawToolPicker'
 import { OverlayTogglePicker } from './chart/OverlayTogglePicker'
 import { ConfluencePanel } from './chart/ConfluencePanel'
 import { OBImbalanceGauge } from './chart/OBImbalanceGauge'
 import { DivergenceBanner } from './chart/DivergenceBanner'
-const MLPredictionPanel = lazy(() =>
-  import('./chart/MLPredictionPanel').then((m) => ({ default: m.MLPredictionPanel })),
-)
-const RLPolicyPanel = lazy(() =>
-  import('./chart/RLPolicyPanel').then((m) => ({ default: m.RLPolicyPanel })),
-)
-const NeuralNetPage = lazy(() =>
-  import('./chart/NeuralNetViz').then((m) => ({ default: m.NeuralNetPage })),
-)
-const BubblesCanvas = lazy(() =>
-  import('./BubblesCanvas').then((m) => ({ default: m.BubblesCanvas })),
-)
+const loadMLPanel = () => import('./chart/MLPredictionPanel')
+const loadRLPanel = () => import('./chart/RLPolicyPanel')
+const loadNeuralNet = () => import('./chart/NeuralNetViz')
+const loadBubbles = () => import('./BubblesCanvas')
+const MLPredictionPanel = lazy(() => loadMLPanel().then((m) => ({ default: m.MLPredictionPanel })))
+const RLPolicyPanel = lazy(() => loadRLPanel().then((m) => ({ default: m.RLPolicyPanel })))
+const NeuralNetPage = lazy(() => loadNeuralNet().then((m) => ({ default: m.NeuralNetPage })))
+const BubblesCanvas = lazy(() => loadBubbles().then((m) => ({ default: m.BubblesCanvas })))
+const loadRadarPanels = () => Promise.all([loadMLPanel(), loadRLPanel(), loadCrossExchange()])
 import { renderAlerts } from '../features/alerts/alerts'
 import { openModal } from '../utils/dom'
 import { ChartSidePanel } from './chart/ChartSidePanel'
@@ -44,11 +41,12 @@ import { Sidebar } from './Sidebar'
 import { HOT_LIST } from '../constants/market'
 import { Guard } from './ErrorBoundary'
 import { HomeDashboard } from './HomeDashboard'
-const SettingsPage = lazy(() => import('./SettingsPage').then((m) => ({ default: m.SettingsPage })))
+import { WhenTab } from './WhenTab'
+const loadSettings = () => import('./SettingsPage')
+const loadCalendar = () => import('./news/EconomicCalendar')
+const SettingsPage = lazy(() => loadSettings().then((m) => ({ default: m.SettingsPage })))
 const AiAssistant = lazy(() => import('./chat/AiAssistant').then((m) => ({ default: m.AiAssistant })))
-const EconomicCalendar = lazy(() =>
-  import('./news/EconomicCalendar').then((m) => ({ default: m.EconomicCalendar })),
-)
+const EconomicCalendar = lazy(() => loadCalendar().then((m) => ({ default: m.EconomicCalendar })))
 import { useEffect, useRef } from 'react'
 const w = window as any
 
@@ -136,8 +134,10 @@ export function Shell() {
       
         <DashHead zone="chart" name="Price Action" sub="Chart, drawing tools and the order-book side panel" />
         <DivergenceBanner />
-        <Suspense fallback={null}><MLPredictionPanel /></Suspense>
-        <Suspense fallback={null}><RLPolicyPanel /></Suspense>
+        <WhenTab tab="radar" preload={loadRadarPanels}>
+          <Suspense fallback={null}><MLPredictionPanel /></Suspense>
+          <Suspense fallback={null}><RLPolicyPanel /></Suspense>
+        </WhenTab>
         <ConfluencePanel />
         <OBImbalanceGauge />
         <div className="chart-host" id="chartHostRadar">
@@ -221,7 +221,7 @@ export function Shell() {
         <div className="desktop-grid grid-2">
           <div className="card">
             <div className="sec-head"><div className="sec-title">Cross-Exchange Radar</div><span className="badge b-cyan" id="advXexBadge">—</span></div>
-            <Guard name="Cross-exchange radar"><Suspense fallback={null}><CrossExchangeTable /></Suspense></Guard>
+            <Guard name="Cross-exchange radar"><WhenTab tab="radar"><Suspense fallback={null}><CrossExchangeTable /></Suspense></WhenTab></Guard>
           </div>
 
           <div className="card">
@@ -318,7 +318,7 @@ export function Shell() {
       </section>
       
       <section className="tab-section" id="tab-bubbles">
-        <Suspense fallback={null}><BubblesCanvas /></Suspense>
+        <WhenTab tab="bubbles" preload={loadBubbles}><Suspense fallback={null}><BubblesCanvas /></Suspense></WhenTab>
       </section>
       
       <section className="tab-section" id="tab-analysis">
@@ -347,7 +347,7 @@ export function Shell() {
           <div className="disclaimer">Zones are heuristic estimates derived from swing structure + ATR offsets applied to open interest — Binance does not expose public liquidation heatmaps on REST. Treat magnitudes as directional intuition only.</div>
         </div>
       
-        <Guard name="Liquidation heatmap"><Suspense fallback={null}><LiqHeatmap /></Suspense></Guard>
+        <Guard name="Liquidation heatmap"><WhenTab tab="analysis" preload={loadLiqHeatmap}><Suspense fallback={null}><LiqHeatmap /></Suspense></WhenTab></Guard>
       
         <div className="card">
           <div className="sec-head"><div className="sec-title">Volume Profile</div><span className="badge b-cyan" id="vpSym">BTCUSDT · 96 BARS</span></div>
@@ -358,7 +358,7 @@ export function Shell() {
       
       <section className="tab-section" id="tab-neuralnet">
         <DashHead zone="analytics" name="Neural network" sub="Live weights and activations from whichever model you've trained" />
-        <Suspense fallback={null}><NeuralNetPage /></Suspense>
+        <WhenTab tab="neuralnet" preload={loadNeuralNet}><Suspense fallback={null}><NeuralNetPage /></Suspense></WhenTab>
       </section>
       
       <section className="tab-section" id="tab-news">
@@ -368,7 +368,7 @@ export function Shell() {
           <div id="breakingList"></div>
         </div>
 
-        <Guard name="Economic calendar"><Suspense fallback={null}><EconomicCalendar /></Suspense></Guard>
+        <Guard name="Economic calendar"><WhenTab tab="news" preload={loadCalendar}><Suspense fallback={null}><EconomicCalendar /></Suspense></WhenTab></Guard>
 
         <div className="news-grid">
           <div className="card">
@@ -399,7 +399,7 @@ export function Shell() {
 
       <section className="tab-section" id="tab-settings">
         <DashHead zone="analytics" name="Settings" sub="Every data source this app uses, what it is for, and whether it is answering" />
-        <Guard name="Settings"><Suspense fallback={null}><SettingsPage /></Suspense></Guard>
+        <Guard name="Settings"><WhenTab tab="settings" preload={loadSettings}><Suspense fallback={null}><SettingsPage /></Suspense></WhenTab></Guard>
       </section>
 
       <section className="tab-section" id="tab-pro">
