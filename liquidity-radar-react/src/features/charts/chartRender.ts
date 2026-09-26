@@ -305,8 +305,14 @@ export function initChart(): void {
   chart.timeScale().subscribeVisibleTimeRangeChange(function () {
     redrawDrawings()
   })
-  // The chart resizes itself; these only need to follow it.
+  // The chart resizes itself; these only need to follow it. One exception:
+  // the chart is built at startup while the Home screen is showing, so its
+  // first fit happens at zero width and leaves the candles crammed into the
+  // right half once a chart tab opens. Re-fit the first time it has a width.
+  let fitW = el.clientWidth
   new ResizeObserver(() => {
+    if (fitW < 60 && el.clientWidth >= 60 && state.candles.length) chart.timeScale().fitContent()
+    fitW = el.clientWidth
     redrawDrawings()
     updateCloseTimer()
   }).observe(el)
@@ -1163,4 +1169,13 @@ export function renderTicker(): void {
     )
   }).join('')
   $('tickerTrack')!.innerHTML = items + items
+}
+
+/** The main chart as an image (Charts tab → Quick Tools → Export). */
+export function chartScreenshot(): HTMLCanvasElement | null {
+  try {
+    return chart ? (chart.takeScreenshot() as HTMLCanvasElement) : null
+  } catch {
+    return null
+  }
 }
