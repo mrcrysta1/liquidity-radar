@@ -1,2 +1,2 @@
-{ "name": "Liquidity Radar", "short_name": "LiqRadar", "start_url": "/", "display": "standalone", "background_color": "#060B18", "theme_color": "#060B18", "description": "Real-time crypto microstructure terminal: order flow, liquidity heatmap, whale tracker, AI analysis and ML forecasts.",
+{ "name": "Liquidity Radar", "short_name": "LiqRadar", "start_url": "/", "display": "standalone", "background_color": "#0B0C0F", "theme_color": "#0B0C0F", "description": "Real-time crypto microstructure terminal: order flow, liquidity heatmap, whale tracker, AI analysis and ML forecasts.",
   "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }] }

@@ -6,6 +6,7 @@
 // behaviour change — nothing downstream needs to know.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { storageGetRaw, storageSetRaw } from '../services/storage'
+import { LogoMark } from './Logo'
 import { getActiveTab, subscribeActiveTab, switchTab } from '../features/actions/userActions'
 
 type TabId =
@@ -336,7 +337,7 @@ export function Sidebar() {
       <aside className="sidenav" aria-label="Sections">
         <div className="sidenav-top">
           <span className="sidenav-mark" aria-hidden="true">
-            📡
+            <LogoMark size={34} />
           </span>
           <span className="sidenav-brand">
             <b>LIQUIDITY</b>

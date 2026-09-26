@@ -31,6 +31,69 @@ export interface Palette {
 
 export const PALETTES: Palette[] = [
   {
+    // The house style: warm charcoal surfaces, one orange brand accent, and
+    // green / red kept for up / down only. Every text colour is checked
+    // against WCAG AA on its card: txt 15.9, muted 7.0, primary 6.9, green
+    // 8.2, red 4.8 (dark); txt 16.5, muted 6.6, primary 5.2, green 5.5,
+    // red 4.8 (light).
+    id: 'ember',
+    name: 'Ember',
+    desc: 'Warm charcoal, one orange accent — green and red kept for up and down',
+    sw: ['#FF7A1A', '#FF4D2E', '#FFB020', '#16C784', '#F0414D'],
+    rgb: {
+      p: '255,122,26',
+      c: '79,209,197',
+      g: '22,199,132',
+      r: '240,65,77',
+      a: '255,176,32',
+      u: '255,77,46',
+      k: '255,176,32',
+    },
+    rgbLight: {
+      p: '194,65,12',
+      c: '15,118,110',
+      g: '4,120,87',
+      r: '217,45,58',
+      a: '180,83,9',
+      u: '217,72,15',
+      k: '180,83,9',
+    },
+    dark: {
+      bg: '#0B0C0F',
+      card: '#14161B',
+      card2: '#1A1D23',
+      border: '#252932',
+      border2: '#333A45',
+      primary: '#FF7A1A',
+      green: '#16C784',
+      red: '#F0414D',
+      amber: '#FFB020',
+      cyan: '#4FD1C5',
+      purple: '#FF4D2E',
+      pink: '#FFB020',
+      txt: '#EEF0F3',
+      muted: '#9AA1AC',
+      dim: '#6E7683',
+    },
+    light: {
+      bg: '#F7F5F2',
+      card: '#FFFFFF',
+      card2: '#FBF9F6',
+      border: '#E7E2DB',
+      border2: '#D6CEC3',
+      primary: '#C2410C',
+      green: '#047857',
+      red: '#D92D3A',
+      amber: '#B45309',
+      cyan: '#0F766E',
+      purple: '#D9480F',
+      pink: '#B45309',
+      txt: '#1C1F24',
+      muted: '#555E69',
+      dim: '#7A828C',
+    },
+  },
+  {
     id: 'galaxy',
     name: 'Galaxy',
     desc: 'Deep space with a sunset nebula — amber on indigo, starfield behind',
@@ -394,12 +457,17 @@ export const PALETTES: Palette[] = [
 ]
 
 export function activePalette(): Palette {
-  return PALETTES.find((p) => p.id === storageGetRaw('lr-palette')) || PALETTES[0]
+  return PALETTES.find((p) => p.id === storageGetRaw(PALETTE_KEY)) || PALETTES[0]
 }
+
+/** v2: the Ember redesign — moving the key shows it to everyone once. */
+const PALETTE_KEY = 'lr-palette-v2'
 
 export function applyPalette(id: string): void {
   const p = PALETTES.find((x) => x.id === id) || PALETTES[0]
-  storageSetRaw('lr-palette', p.id)
+  storageSetRaw(PALETTE_KEY, p.id)
+  // Lets the stylesheet give a palette its own backdrop (see html[data-palette]).
+  document.documentElement.dataset.palette = p.id
   const light = isLightTheme()
   const s = light ? p.light : p.dark
   const root = document.documentElement
@@ -481,13 +549,12 @@ export function initTheme(): void {
   // The theme attribute has to land before the palette is applied: applyPalette
   // writes its variables inline on <html>, which outranks the [data-theme]
   // stylesheet, so choosing the wrong set here cannot be corrected afterwards.
-  // Light is the default face of the app now; dark is the opt-in.
+  // Dark is the default; light is the opt-in.
   const saved = storageGetRaw('lr-theme')
   if (saved === 'light') {
     document.documentElement.setAttribute('data-theme', 'light')
-    $('themeBtn')!.textContent = 'L'
   }
-  applyPalette(storageGetRaw('lr-palette') || 'galaxy')
+  applyPalette(storageGetRaw(PALETTE_KEY) || 'ember')
   $('paletteBtn')!.addEventListener('click', function () {
     renderPalettePicker()
     openModal('thModal')
@@ -497,11 +564,9 @@ export function initTheme(): void {
     if (cur === 'light') {
       document.documentElement.removeAttribute('data-theme')
       storageSetRaw('lr-theme', 'dark')
-      $('themeBtn')!.textContent = 'D'
     } else {
       document.documentElement.setAttribute('data-theme', 'light')
       storageSetRaw('lr-theme', 'light')
-      $('themeBtn')!.textContent = 'L'
     }
     applyPalette(activePalette().id)
   })
