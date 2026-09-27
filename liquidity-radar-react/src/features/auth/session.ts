@@ -9,6 +9,8 @@ import type { SupabaseClient, User } from '@supabase/supabase-js'
 import { AUTH_KEY, AUTH_ON, AUTH_URL, authPending } from './config'
 import { apply, collect, K, same, startSyncing, stopSyncing } from './sync'
 import type { Profile } from './sync'
+import { captureProfile, GOOGLE_SCOPES } from './profile'
+import type { Profile as UserProfile } from './profile'
 
 export interface Account {
   id: string
@@ -28,9 +30,12 @@ interface AuthState {
   notice: string
   /** The dialog opens itself for a password-reset link. */
   recovery: boolean
+  /** What is saved about the user (user_profiles), and why Google could not be read, if it could not. */
+  profile: UserProfile | null
+  profileError: string
 }
 
-let st: AuthState = { status: AUTH_ON ? 'loading' : 'off', user: null, syncedAt: null, saving: false, error: '', notice: '', recovery: false }
+let st: AuthState = { status: AUTH_ON ? 'loading' : 'off', user: null, syncedAt: null, saving: false, error: '', notice: '', recovery: false, profile: null, profileError: '' }
 let version = 0
 const listeners = new Set<() => void>()
 function set(p: Partial<AuthState>): void {
@@ -63,7 +68,7 @@ function getClient(): Promise<SupabaseClient> {
       })
       client.auth.onAuthStateChange((event, session) => {
         if (event === 'PASSWORD_RECOVERY') set({ recovery: true })
-        if (session?.user) void signedIn(session.user)
+        if (session?.user) void signedIn(session.user, session.provider_token ?? null)
         else if (event === 'SIGNED_OUT') void signedOut()
       })
       return client
@@ -111,11 +116,16 @@ async function push(): Promise<void> {
 export const saveNow = () => push()
 
 let handling = ''
-async function signedIn(u: User): Promise<void> {
+async function signedIn(u: User, googleToken: string | null): Promise<void> {
   if (handling === u.id) return
   handling = u.id
   const acct = toAccount(u)
   const prev = localStorage.getItem(K.uid)
+  // Google's token is only handed over right after sign-in: read the profile
+  // now, and let it finish before any reload below.
+  const prof = captureProfile(client!, u, googleToken)
+    .then((r) => set({ profile: r.profile, profileError: r.error }))
+    .catch((e) => set({ profileError: msg(e) }))
   try {
     const remote = await pull(u.id)
     if (prev !== u.id) {
@@ -130,6 +140,7 @@ async function signedIn(u: User): Promise<void> {
         await client!.from('user_settings').upsert({ user_id: u.id, data: collect(), updated_at: new Date().toISOString() })
       }
       localStorage.setItem(K.synced, String(remote?.at ?? Date.now()))
+      await prof
       reload()
       return
     }
@@ -138,6 +149,7 @@ async function signedIn(u: User): Promise<void> {
     if (remote && remote.at > localAt + 1000 && !same(remote.data, collect())) {
       apply(remote.data)
       localStorage.setItem(K.synced, String(remote.at))
+      await prof
       reload()
       return
     }
@@ -171,7 +183,7 @@ async function signedOut(): Promise<void> {
     reload()
     return
   }
-  set({ status: 'guest', user: null, syncedAt: null })
+  set({ status: 'guest', user: null, syncedAt: null, profile: null, profileError: '' })
 }
 
 function reload(): void {
@@ -207,7 +219,16 @@ export async function signInWithGoogle(): Promise<void> {
   set({ error: '', notice: '' })
   try {
     const c = await getClient()
-    const { error } = await c.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.origin } })
+    const { error } = await c.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: location.origin,
+        // Phone, birthday, gender, addresses and work, on top of name, email and photo.
+        // Google lists each one on its consent screen; the user chooses.
+        scopes: GOOGLE_SCOPES,
+        queryParams: { prompt: 'consent', include_granted_scopes: 'true' },
+      },
+    })
     if (error) set({ error: error.message })
   } catch (e) {
     set({ error: msg(e) })
