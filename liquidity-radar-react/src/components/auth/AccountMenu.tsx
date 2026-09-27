@@ -12,10 +12,13 @@ import {
   signInWithGoogle,
   signOut,
   signUp,
+  updateProfile,
   useAuth,
   warmAuth,
 } from '../../features/auth/session'
 import { useFavorites } from '../../features/favorites/favorites'
+import { toEdit } from '../../features/auth/profile'
+import type { ProfileEdit } from '../../features/auth/profile'
 import { getIndicators } from '../../features/charts/indicators/store'
 import { useTick } from '../useTick'
 
@@ -54,35 +57,91 @@ const ago = (t: number | null, now: number) => {
   return s < 10 ? 'just now' : s < 60 ? s + 's ago' : s < 3600 ? Math.round(s / 60) + 'm ago' : Math.round(s / 3600) + 'h ago'
 }
 
+const GENDERS = ['', 'Male', 'Female', 'Non-binary', 'Prefer not to say']
+
+function ProfileForm({ done }: { done: () => void }) {
+  const a = useAuth()
+  const [f, setF] = useState<ProfileEdit>(() => toEdit(a.profile))
+  const [busy, setBusy] = useState(false)
+  const field = (k: keyof ProfileEdit, label: string, props: Record<string, string> = {}) => (
+    <label>
+      {label}
+      <input value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })} {...props} />
+    </label>
+  )
+  return (
+    <form
+      className="acct-form acct-pform"
+      onSubmit={async (e) => {
+        e.preventDefault()
+        setBusy(true)
+        try {
+          await updateProfile(f)
+          done()
+        } catch {
+          /* the error is shown below */
+        } finally {
+          setBusy(false)
+        }
+      }}
+    >
+      {field('name', 'Full name', { autoComplete: 'name' })}
+      <div className="acct-2">
+        {field('phone', 'Phone', { type: 'tel', autoComplete: 'tel', placeholder: '+92 300 1234567' })}
+        {field('birthday', 'Birthday', { type: 'date', autoComplete: 'bday' })}
+      </div>
+      <label>
+        Gender
+        <select value={f.gender} onChange={(e) => setF({ ...f, gender: e.target.value })}>
+          {GENDERS.map((g) => <option key={g} value={g}>{g || 'Not set'}</option>)}
+        </select>
+      </label>
+      {field('address', 'Address', { autoComplete: 'street-address', placeholder: 'Street, area' })}
+      <div className="acct-2">
+        {field('city', 'City', { autoComplete: 'address-level2' })}
+        {field('country', 'Country', { autoComplete: 'country-name' })}
+      </div>
+      <div className="acct-2">
+        {field('title', 'Job title', { autoComplete: 'organization-title' })}
+        {field('organization', 'Company / organization', { autoComplete: 'organization' })}
+      </div>
+      {a.profileError && <p className="acct-err">{a.profileError}</p>}
+      <div className="acct-row">
+        <button type="button" className="acct-btn ghost" onClick={done}>Cancel</button>
+        <button type="submit" className="acct-btn primary" disabled={busy}>{busy ? 'Saving…' : 'Save profile'}</button>
+      </div>
+      <p className="acct-note">Every field is optional. Only you and the site owner can see your profile.</p>
+    </form>
+  )
+}
+
 function ProfileCard() {
   const a = useAuth()
+  const [edit, setEdit] = useState(false)
   const p = a.profile
-  if (!p) return a.profileError ? <p className="acct-err">{a.profileError}</p> : null
+  if (edit) return <ProfileForm done={() => setEdit(false)} />
   const rows: Array<[string, string | null]> = [
-    ['Name', p.name],
-    ['Email', p.email ? p.email + (p.email_verified ? ' ✓' : '') : null],
-    ['Phone', p.phones.map((x) => x.value + (x.type ? ' (' + x.type + ')' : '')).join(', ') || null],
-    ['Birthday', p.birthday ? p.birthday.replace(/^-/, '') : null],
-    ['Gender', p.gender],
-    ['Address', p.addresses.map((x) => x.formatted || [x.city, x.region, x.country].filter(Boolean).join(', ')).filter(Boolean).join(' · ') || null],
-    ['Work', p.organizations.map((o) => [o.title, o.name].filter(Boolean).join(' at ')).filter(Boolean).join(' · ') || null],
-    ['Language', p.locale],
+    ['Name', p?.name ?? null],
+    ['Email', p?.email ? p.email + (p.email_verified ? ' ✓' : '') : null],
+    ['Phone', p?.phones?.map((x) => x.value).join(', ') || null],
+    ['Birthday', p?.birthday ? p.birthday.replace(/^-/, '') : null],
+    ['Gender', p?.gender ?? null],
+    ['Address', p?.addresses?.map((x) => [x.formatted, x.city, x.country].filter(Boolean).join(', ')).filter(Boolean).join(' · ') || null],
+    ['Work', p?.organizations?.map((o) => [o.title, o.name].filter(Boolean).join(' at ')).filter(Boolean).join(' · ') || null],
   ]
   return (
-    <details className="acct-prof" open>
-      <summary>Your profile{p.provider === 'google' ? ' · from Google' : ''}</summary>
+    <div className="acct-prof">
+      <div className="acct-prof-h">
+        <b>Your profile</b>
+        <button type="button" className="acct-edit" onClick={() => setEdit(true)}>✎ Edit profile</button>
+      </div>
       <dl>
         {rows.map(([k, v]) => (
-          <div key={k}><dt>{k}</dt><dd className={v ? '' : 'none'}>{v || 'not shared'}</dd></div>
+          <div key={k}><dt>{k}</dt><dd className={v ? '' : 'none'}>{v || 'not set'}</dd></div>
         ))}
       </dl>
       {a.profileError && <p className="acct-err">{a.profileError}</p>}
-      <p className="acct-note">
-        {p.provider === 'google'
-          ? 'Read from your Google account with the permissions you granted. Sign in with Google again to refresh it; remove access any time at myaccount.google.com/permissions.'
-          : 'From your sign-up details.'}
-      </p>
-    </details>
+    </div>
   )
 }
 
@@ -96,9 +155,9 @@ function SignedIn({ close }: { close: () => void }) {
   return (
     <div className="acct-body">
       <div className="acct-who">
-        <Avatar src={u.avatar} name={u.name} size={52} />
+        <Avatar src={a.profile?.photo_url || u.avatar} name={a.profile?.name || u.name} size={52} />
         <span>
-          <b>{u.name}</b>
+          <b>{a.profile?.name || u.name}</b>
           <small>{u.email}</small>
           <em>{u.provider === 'google' ? 'Google account' : 'Email account'}</em>
         </span>
@@ -165,10 +224,7 @@ function SignInForm() {
           <button type="button" className="acct-google" onClick={() => void signInWithGoogle()}>
             <GoogleG /> Continue with Google
           </button>
-          <p className="acct-note acct-perm">
-            Google will ask to share your name, email and photo and, if you allow it, your phone, birthday, gender,
-            address and work details. They are saved to your profile, which only you and the site owner can see.
-          </p>
+          <p className="acct-note acct-perm">Google shares only your name, email and profile photo.</p>
           <div className="acct-or"><span>or with email</span></div>
         </>
       )}
