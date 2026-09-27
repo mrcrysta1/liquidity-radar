@@ -10,6 +10,7 @@ import { baseOf, coinMeta } from '../../utils/coins'
 import { pfmt } from '../../utils/format'
 import { setSymbol } from '../../features/actions/userActions'
 import { CHART_TABS, useTick } from '../useTick'
+import { toggleFavorite, useFavorites } from '../../features/favorites/favorites'
 
 type Row = { key: string; sym: string; name: string; icon: string; color: string }
 
@@ -75,10 +76,13 @@ export function CoinPicker() {
     .trim()
     .toUpperCase()
     .replace(/\/?USDT$/, '')
-  const rows = useMemo(
-    () => (!q ? ROWS : ROWS.filter((r) => r.key.includes(q) || r.name.toUpperCase().includes(q))),
-    [q],
-  )
+  const favs = useFavorites()
+  const rows = useMemo(() => {
+    const hit = !q ? ROWS : ROWS.filter((r) => r.key.includes(q) || r.name.toUpperCase().includes(q))
+    // Starred coins first, in the order they were starred.
+    const fav = favs.map((b) => hit.find((r) => r.key === b)).filter((r): r is Row => !!r)
+    return fav.concat(hit.filter((r) => !favs.includes(r.key)))
+  }, [q, favs])
   // A pair that is not in the tracked list can still be opened by ticker.
   const custom =
     q && /^[A-Z0-9]{2,12}$/.test(q) && !ROWS.some((r) => r.key === q) ? q + 'USDT' : null
@@ -191,9 +195,12 @@ export function CoinPicker() {
             {rows.map((r, i) => {
               const rt = state.tickers[r.sym]
               const sel = r.sym === cur
+              const fav = favs.includes(r.key)
               return (
+                <div key={r.sym} className="cp-rowwrap">
+                {i === 0 && fav && <div className="cp-group">★ Favorites</div>}
+                {i > 0 && !fav && favs.includes(rows[i - 1].key) && <div className="cp-group">All coins</div>}
                 <button
-                  key={r.sym}
                   type="button"
                   role="option"
                   aria-selected={sel}
@@ -214,6 +221,20 @@ export function CoinPicker() {
                     <Chg pct={rt?.pct} />
                   </span>
                 </button>
+                <button
+                  type="button"
+                  className={'cp-star' + (fav ? ' on' : '')}
+                  aria-pressed={fav}
+                  aria-label={(fav ? 'Remove ' : 'Add ') + r.key + (fav ? ' from' : ' to') + ' favorites'}
+                  title={fav ? 'Remove from favorites' : 'Add to favorites'}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    toggleFavorite(r.key)
+                  }}
+                >
+                  {fav ? '★' : '☆'}
+                </button>
+                </div>
               )
             })}
             {custom && (

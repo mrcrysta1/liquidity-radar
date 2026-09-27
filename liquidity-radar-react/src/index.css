@@ -5100,3 +5100,65 @@ html[data-palette="glass"] .sg-chips button.on{
 html[data-palette="glass"] #radarChartCard{-webkit-backdrop-filter:none;backdrop-filter:none;background:linear-gradient(145deg,rgba(255,255,255,.10),rgba(255,255,255,0) 50%),rgba(22,26,50,.86)}
 html[data-palette="glass"][data-theme="light"] #radarChartCard{background:linear-gradient(145deg,#fff,rgba(255,255,255,.8) 50%),rgba(255,255,255,.92)}
 html.radar-fs[data-palette="glass"] .card{-webkit-backdrop-filter:none;backdrop-filter:none}
+
+/* ============================================================
+   ACCOUNT — sign-in dialog and account button
+   ============================================================ */
+.acct-trigger{overflow:hidden}
+.acct-trigger.on{padding:0;border-color:rgb(var(--gRGB)/.55)}
+.acct-av{display:block;border-radius:50%;object-fit:cover;flex-shrink:0}
+.acct-av-t{display:grid;place-items:center;font-weight:800;color:#fff;background:linear-gradient(135deg,var(--primary),rgb(var(--uRGB)/1))}
+.acct-overlay{position:fixed;inset:0;z-index:1300;display:grid;place-items:center;padding:16px;background:rgba(2,6,16,.62);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);animation:acctFade .18s ease}
+.acct-card{width:min(420px,100%);max-height:calc(100vh - 32px);overflow-y:auto;border-radius:20px;background:var(--card);border:1px solid var(--border2);box-shadow:0 30px 80px rgba(0,0,0,.45);animation:acctPop .22s cubic-bezier(.2,.8,.2,1)}
+html[data-palette="glass"] .acct-card{background:linear-gradient(145deg,rgba(255,255,255,.16),rgba(255,255,255,.04) 40%),var(--glass-card);-webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur);border-color:var(--glass-edge)}
+.acct-card header{display:flex;align-items:center;justify-content:space-between;padding:18px 20px 4px}
+.acct-card h2{margin:0;font-size:18px;font-weight:800;color:var(--txt)}
+.acct-x{width:32px;height:32px;border-radius:9px;border:1px solid var(--hair-2);background:var(--sunk-2);color:var(--muted);cursor:pointer}
+.acct-body{display:flex;flex-direction:column;gap:12px;padding:12px 20px 20px}
+.acct-tabs{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:4px;border-radius:12px;background:var(--sunk-2);border:1px solid var(--hair-2)}
+.acct-tabs button{padding:9px;border-radius:9px;border:none;background:none;color:var(--muted);font-weight:700;font-size:13px;cursor:pointer}
+.acct-tabs button.on{background:var(--card);color:var(--txt);box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.acct-google{display:flex;align-items:center;justify-content:center;gap:10px;padding:11px;border-radius:12px;border:1px solid var(--border2);background:#fff;color:#1f2937;font-weight:700;font-size:14px;cursor:pointer;transition:box-shadow .15s}
+.acct-google:hover{box-shadow:0 4px 16px rgba(0,0,0,.18)}
+.acct-or{display:flex;align-items:center;gap:10px;color:var(--dim);font-size:11.5px}
+.acct-or::before,.acct-or::after{content:'';flex:1;height:1px;background:var(--hair-2)}
+.acct-form{display:flex;flex-direction:column;gap:10px}
+.acct-form label{display:flex;flex-direction:column;gap:5px;font-size:12px;font-weight:700;color:var(--muted)}
+.acct-form input{padding:11px 12px;border-radius:11px;border:1px solid var(--border2);background:var(--sunk-2);color:var(--txt);font-size:14px;outline:none}
+.acct-form input:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgb(var(--pRGB)/.18)}
+.acct-btn{padding:11px 16px;border-radius:12px;border:1px solid var(--border2);background:var(--sunk-2);color:var(--txt);font-weight:800;font-size:13.5px;cursor:pointer}
+.acct-btn.primary{border:none;color:#fff;background:linear-gradient(135deg,var(--primary),rgb(var(--uRGB)/1));box-shadow:0 8px 22px rgb(var(--pRGB)/.3)}
+.acct-btn.danger{color:var(--red);border-color:rgb(var(--rRGB)/.45)}
+.acct-btn:disabled{opacity:.6;cursor:progress}
+.acct-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.acct-err{margin:0;font-size:12.5px;color:var(--red)}
+.acct-ok{margin:0;font-size:12.5px;color:var(--green)}
+.acct-foot{display:flex;justify-content:center}
+.acct-foot button{background:none;border:none;color:var(--cyan);font-size:12.5px;font-weight:700;cursor:pointer}
+.acct-note{margin:0;font-size:11.5px;color:var(--dim);line-height:1.5}
+.acct-note code{font-family:var(--mono);font-size:11px;padding:1px 5px;border-radius:5px;background:var(--sunk-2)}
+.acct-who{display:flex;align-items:center;gap:14px}
+.acct-who>span{display:flex;flex-direction:column;min-width:0}
+.acct-who b{font-size:16px;color:var(--txt)}
+.acct-who small{font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis}
+.acct-who em{font-style:normal;font-size:11px;color:var(--dim)}
+.acct-sync{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:11px;font-size:12px;color:var(--green);background:rgb(var(--gRGB)/.08);border:1px solid rgb(var(--gRGB)/.35)}
+.acct-sync i{width:7px;height:7px;border-radius:50%;background:currentColor;box-shadow:0 0 8px currentColor;flex-shrink:0}
+.acct-sync.err{color:var(--red);background:rgb(var(--rRGB)/.08);border-color:rgb(var(--rRGB)/.35)}
+.acct-list{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.acct-list li{display:flex;align-items:center;gap:8px;padding:9px 11px;border-radius:11px;background:var(--sunk-2);border:1px solid var(--hair-2);font-size:12px;color:var(--muted)}
+.acct-list b{font-family:var(--mono);font-size:15px;color:var(--txt)}
+@keyframes acctFade{from{opacity:0}}
+@keyframes acctPop{from{opacity:0;transform:translateY(10px) scale(.97)}}
+
+/* favourites in the coin picker */
+.cp-rowwrap{position:relative}
+.cp-rowwrap .cp-row{padding-right:40px}
+.cp-star{position:absolute;right:8px;top:50%;transform:translateY(-50%);width:26px;height:26px;border-radius:7px;border:none;background:none;color:var(--dim);font-size:15px;line-height:1;cursor:pointer}
+.cp-group+.cp-row~.cp-star,.cp-rowwrap .cp-group~.cp-star{top:calc(50% + 12px)}
+.cp-star:hover{color:var(--amber);background:var(--sunk-2)}
+.cp-star.on{color:var(--amber);text-shadow:0 0 8px rgb(var(--aRGB)/.6)}
+.cp-group{padding:8px 12px 4px;font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+/* The coin menu opens over the cards beside the chart, not under them. */
+.chart-host:has(.coin-picker.open),#radarChartCard:has(.coin-picker.open){position:relative;z-index:120}
+@media(min-width:641px){#radarChartCard .cp-menu{left:auto;right:0}}

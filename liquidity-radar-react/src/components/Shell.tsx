@@ -42,6 +42,8 @@ import { HomeDashboard, HomeHero } from './HomeDashboard'
 import { RadarHero, RadarLower, RadarMetrics, RadarSide } from './radar/RadarViews'
 import { ChartIntel, QuickTools, WorkspaceHead } from './charts/ChartsViews'
 import { SignalsBoard, SignalsHead } from './signals/SignalsViews'
+import { AccountMenu } from './auth/AccountMenu'
+import { initAuth } from '../features/auth/session'
 import {
   AiAnalysis,
   AnalysisHead,
@@ -65,6 +67,11 @@ import { useEffect, useRef } from 'react'
 const w = window as any
 
 export function Shell() {
+  // Accounts: restores a stored session (or finishes a sign-in link) and
+  // loads that user's settings. A no-op until sign-in is configured.
+  useEffect(() => {
+    initAuth()
+  }, [])
   // The self-learning engine trades on its own, whichever tab is open. It is
   // started once the page has settled so it never competes with first paint.
   useEffect(() => {
@@ -97,6 +104,7 @@ export function Shell() {
         <div className="top-inner">
           <div className="logo"><LogoMark size={36} animated /><span className="logo-text"><b>LIQUIDITY</b>&nbsp;<span>RADAR</span></span></div>
           <div className="top-actions">
+            <AccountMenu />
             <button className="theme-btn icon-btn" id="alertBtn" title="Price alerts" aria-label="Price alerts" onClick={() => { renderAlerts(); openModal('alModal') }}><BellIcon /></button>
             <button className="theme-btn icon-btn" id="paletteBtn" title="Colour themes" aria-label="Colour themes"><PaletteIcon /></button>
             {/* Both glyphs are always here; CSS shows the one for the mode you would switch to. */}
