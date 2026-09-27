@@ -516,6 +516,69 @@ export const PALETTES: Palette[] = [
       dim: '#98A0B0',
     },
   },
+  {
+    // Frosted glass over a colourful aurora, after macOS / iOS: translucent
+    // cards that blur what is behind them, bright specular edges and slowly
+    // drifting glowing crystals. Accents are Apple's system colours. The
+    // translucent surfaces live in the html[data-palette="glass"] rules in
+    // index.css; these values are what text and charts read.
+    id: 'glass',
+    name: 'Mac Glassy',
+    desc: 'Frosted liquid glass over glowing crystals — the macOS / iPhone look',
+    sw: ['#0A84FF', '#64D2FF', '#BF5AF2', '#FF375F', '#30D158'],
+    rgb: {
+      p: '10,132,255',
+      c: '100,210,255',
+      g: '48,209,88',
+      r: '255,69,58',
+      a: '255,214,10',
+      u: '191,90,242',
+      k: '255,55,95',
+    },
+    rgbLight: {
+      p: '0,102,214',
+      c: '0,122,184',
+      g: '20,140,70',
+      r: '215,40,60',
+      a: '186,110,0',
+      u: '130,60,210',
+      k: '205,40,100',
+    },
+    dark: {
+      bg: '#0A0C18',
+      card: 'rgba(30,34,58,.52)',
+      card2: 'rgba(44,50,80,.44)',
+      border: 'rgba(255,255,255,.14)',
+      border2: 'rgba(255,255,255,.24)',
+      primary: '#0A84FF',
+      green: '#30D158',
+      red: '#FF453A',
+      amber: '#FFD60A',
+      cyan: '#64D2FF',
+      purple: '#BF5AF2',
+      pink: '#FF375F',
+      txt: '#F5F7FF',
+      muted: '#BCC4DD',
+      dim: '#8E97B4',
+    },
+    light: {
+      bg: '#E8EEFA',
+      card: 'rgba(255,255,255,.58)',
+      card2: 'rgba(255,255,255,.44)',
+      border: 'rgba(255,255,255,.75)',
+      border2: 'rgba(110,130,180,.30)',
+      primary: '#0066D6',
+      green: '#148C46',
+      red: '#D7283C',
+      amber: '#BA6E00',
+      cyan: '#007AB8',
+      purple: '#823CD2',
+      pink: '#CD2864',
+      txt: '#0E1526',
+      muted: '#3F4B63',
+      dim: '#66728A',
+    },
+  },
 ]
 
 export function activePalette(): Palette {
