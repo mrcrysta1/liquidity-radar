@@ -15,13 +15,9 @@ export interface IndicatorInstance {
 const KEY = 'lr-chartIndicators'
 const MAX = 12
 
-/** What the chart shows before anyone touches it — the previous chip defaults. */
-const SEED: Array<{ type: string; params?: Record<string, number> }> = [
-  { type: 'ema', params: { length: 20 } },
-  { type: 'sma', params: { length: 20 } },
-  { type: 'bb', params: { length: 20, mult: 2 } },
-  { type: 'volume' },
-]
+/** What the chart shows before anyone adds one: nothing. Every user, and
+ *  every new account, starts from a clean chart and picks their own. */
+const SEED: Array<{ type: string; params?: Record<string, number> }> = []
 
 let seq = 0
 const uid = () => 'i' + Date.now().toString(36) + (seq++).toString(36)

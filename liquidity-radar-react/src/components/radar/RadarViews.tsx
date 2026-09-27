@@ -17,6 +17,7 @@ import { baseOf, coinMeta, venueOf } from '../../utils/coins'
 import { cfmt, pfmt } from '../../utils/format'
 import { calcATR, calcBB, calcMACD, calcRSI, emaArr } from '../../utils/indicators'
 import { useTick } from '../useTick'
+import { useFavorites, watchList } from '../../features/favorites/favorites'
 import { AreaChart } from '../home/charts'
 import { HomeIcon } from '../home/icons'
 import type { HomeIconId } from '../home/icons'
@@ -40,7 +41,6 @@ const go = (tab: string) => w.switchTab?.(tab)
 const open = (sym: string) => w.setSymbol?.(sym)
 const pct = (v: number | undefined | null, d = 2) =>
   v == null || !isFinite(v) ? '—' : (v >= 0 ? '+' : '') + v.toFixed(d) + '%'
-const WATCH = ['BTC', 'ETH', 'SOL', 'DOGE', 'XRP']
 /** Compact number for indicator readouts: 2 decimals, or 3 significant figures when tiny. */
 const short = (v: number) =>
   Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 1 ? v.toFixed(2) : v.toPrecision(3)
@@ -422,9 +422,12 @@ function Spark({ sym }: { sym: string }) {
 }
 
 function MarketOverview({ now }: { now: number }) {
+  useFavorites()
+  const WATCH = watchList()
+  const key = WATCH.join()
   useEffect(() => {
-    WATCH.forEach((k) => COINS[k] && void refreshSeries(COINS[k].sym, '1D'))
-  }, [now])
+    key.split(',').forEach((k) => COINS[k] && void refreshSeries(COINS[k].sym, '1D'))
+  }, [now, key])
   return (
     <Card
       title="Market Overview"
@@ -736,6 +739,8 @@ function DirectionStrip() {
 }
 
 function MarketWatch() {
+  useFavorites()
+  const WATCH = watchList()
   return (
     <Card
       title="Market Watch"

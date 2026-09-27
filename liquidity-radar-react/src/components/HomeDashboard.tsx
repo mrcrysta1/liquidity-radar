@@ -16,6 +16,7 @@ import { latestNews } from '../features/news/newsFeed'
 import { COINS } from '../constants/market'
 import { baseOf, coinMeta } from '../utils/coins'
 import { cfmt, pfmt } from '../utils/format'
+import { useFavorites, watchList } from '../features/favorites/favorites'
 import { useTick } from './useTick'
 import { AreaChart, PairBars } from './home/charts'
 import { priceTicks } from './home/ticks'
@@ -397,9 +398,10 @@ function NewsTile({ now }: { now: number }) {
   )
 }
 
-const WATCH = ['BTC', 'ETH', 'SOL', 'DOGE', 'XRP']
 
 function WatchlistTile() {
+  useFavorites()
+  const WATCH = watchList()
   return (
     <table className="wl">
       <thead>
