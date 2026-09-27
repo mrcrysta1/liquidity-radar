@@ -9,8 +9,8 @@ import type { SupabaseClient, User } from '@supabase/supabase-js'
 import { AUTH_KEY, AUTH_ON, AUTH_URL, authPending } from './config'
 import { apply, collect, K, same, startSyncing, stopSyncing } from './sync'
 import type { Profile } from './sync'
-import { captureProfile, GOOGLE_SCOPES } from './profile'
-import type { Profile as UserProfile } from './profile'
+import { captureProfile, saveProfileEdit } from './profile'
+import type { Profile as UserProfile, ProfileEdit } from './profile'
 
 export interface Account {
   id: string
@@ -223,10 +223,10 @@ export async function signInWithGoogle(): Promise<void> {
       provider: 'google',
       options: {
         redirectTo: location.origin,
-        // Phone, birthday, gender, addresses and work, on top of name, email and photo.
-        // Google lists each one on its consent screen; the user chooses.
-        scopes: GOOGLE_SCOPES,
-        queryParams: { prompt: 'consent', include_granted_scopes: 'true' },
+        // Only Google's basic scopes (name, email, photo): nothing sensitive,
+        // so Google shows no "unverified app" screen. The rest of the profile
+        // is entered by the user in the account dialog.
+        queryParams: { prompt: 'select_account' },
       },
     })
     if (error) set({ error: error.message })
@@ -285,4 +285,18 @@ export function initAuth(): void {
     restoreGuest()
     reload()
   } else set({ status: 'guest' })
+}
+
+/** Save the profile details the user entered in the account dialog. */
+export async function updateProfile(e: ProfileEdit): Promise<void> {
+  const u = st.user
+  if (!u) return
+  const c = await getClient()
+  set({ profileError: '' })
+  try {
+    set({ profile: await saveProfileEdit(c, u.id, e) })
+  } catch (err) {
+    set({ profileError: 'Could not save profile: ' + msg(err) })
+    throw err
+  }
 }
