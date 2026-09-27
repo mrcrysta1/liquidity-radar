@@ -54,6 +54,38 @@ const ago = (t: number | null, now: number) => {
   return s < 10 ? 'just now' : s < 60 ? s + 's ago' : s < 3600 ? Math.round(s / 60) + 'm ago' : Math.round(s / 3600) + 'h ago'
 }
 
+function ProfileCard() {
+  const a = useAuth()
+  const p = a.profile
+  if (!p) return a.profileError ? <p className="acct-err">{a.profileError}</p> : null
+  const rows: Array<[string, string | null]> = [
+    ['Name', p.name],
+    ['Email', p.email ? p.email + (p.email_verified ? ' ✓' : '') : null],
+    ['Phone', p.phones.map((x) => x.value + (x.type ? ' (' + x.type + ')' : '')).join(', ') || null],
+    ['Birthday', p.birthday ? p.birthday.replace(/^-/, '') : null],
+    ['Gender', p.gender],
+    ['Address', p.addresses.map((x) => x.formatted || [x.city, x.region, x.country].filter(Boolean).join(', ')).filter(Boolean).join(' · ') || null],
+    ['Work', p.organizations.map((o) => [o.title, o.name].filter(Boolean).join(' at ')).filter(Boolean).join(' · ') || null],
+    ['Language', p.locale],
+  ]
+  return (
+    <details className="acct-prof" open>
+      <summary>Your profile{p.provider === 'google' ? ' · from Google' : ''}</summary>
+      <dl>
+        {rows.map(([k, v]) => (
+          <div key={k}><dt>{k}</dt><dd className={v ? '' : 'none'}>{v || 'not shared'}</dd></div>
+        ))}
+      </dl>
+      {a.profileError && <p className="acct-err">{a.profileError}</p>}
+      <p className="acct-note">
+        {p.provider === 'google'
+          ? 'Read from your Google account with the permissions you granted. Sign in with Google again to refresh it; remove access any time at myaccount.google.com/permissions.'
+          : 'From your sign-up details.'}
+      </p>
+    </details>
+  )
+}
+
 function SignedIn({ close }: { close: () => void }) {
   const a = useAuth()
   const now = useTick(5000)
@@ -75,6 +107,7 @@ function SignedIn({ close }: { close: () => void }) {
         <i />
         {a.error ? a.error : a.saving ? 'Saving your settings…' : `Settings saved to your account · ${ago(a.syncedAt, now)}`}
       </div>
+      <ProfileCard />
       <ul className="acct-list">
         <li><b>{ind}</b><span>chart indicator{ind === 1 ? '' : 's'}</span></li>
         <li><b>{favs.length}</b><span>favorite coin{favs.length === 1 ? '' : 's'}</span></li>
@@ -132,6 +165,10 @@ function SignInForm() {
           <button type="button" className="acct-google" onClick={() => void signInWithGoogle()}>
             <GoogleG /> Continue with Google
           </button>
+          <p className="acct-note acct-perm">
+            Google will ask to share your name, email and photo and, if you allow it, your phone, birthday, gender,
+            address and work details. They are saved to your profile, which only you and the site owner can see.
+          </p>
           <div className="acct-or"><span>or with email</span></div>
         </>
       )}
