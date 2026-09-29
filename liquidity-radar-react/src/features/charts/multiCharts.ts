@@ -9,7 +9,6 @@ import { baseOf, coinMeta } from '../../utils/coins'
 import { $ } from '../../utils/dom'
 import { state } from '../../services/store'
 import { storageGetRaw, storageSetRaw } from '../../services/storage'
-import { jget } from '../../api/client'
 import { chartTheme, mapCandle } from './chartRender'
 import {
   mdCacheGet,
@@ -21,7 +20,7 @@ import {
   mdTf,
   mdVal,
 } from '../../services/market'
-import { klineHub } from '../../services/failover'
+import { fetchKlineRows, klineHub } from '../../services/failover'
 
 type Any = any
 
@@ -336,7 +335,7 @@ function mcInitChart(p: McPanel): void {
 function mcLoadData(p: McPanel): void {
   const sym = mdSym(p.sym) as string,
     iv = mdTf(p.interval)
-  jget('https://api.binance.com/api/v3/klines?symbol=' + sym + '&interval=' + iv + '&limit=120')
+  fetchKlineRows(sym, iv, 120)
     .then(function (data: Any) {
       const candles = data.map(mdFromK).filter(Boolean)
       p.candles = candles
@@ -443,7 +442,7 @@ function mcRefreshAll(): void {
     if (p.candles.length > 0) {
       const sym = mdSym(p.sym) as string,
         iv = mdTf(p.interval)
-      jget('https://api.binance.com/api/v3/klines?symbol=' + sym + '&interval=' + iv + '&limit=5')
+      fetchKlineRows(sym, iv, 5)
         .then(function (data: Any) {
           if (data && data.length) {
             const c = mdFromK(data[data.length - 1])

@@ -14,6 +14,7 @@ import { aiComposite, calcATR, calcRSI, forecastFrom } from '../../utils/indicat
 import { baseOf } from '../../utils/coins'
 import { $ } from '../../utils/dom'
 import { jget } from '../../api/client'
+import { fetchKlineRows } from '../../services/failover'
 import { poll } from '../../services/pollScheduler'
 import { state } from '../../services/store'
 import { md, mdTf, mdVal } from '../../services/market'
@@ -345,7 +346,7 @@ function scanKlineFetch(sym: string, tfKey: string): Promise<Any[]> {
       return candles as Any[]
     })
   }
-  return jget('https://api.binance.com/api/v3/klines?symbol=' + sym + '&interval=' + tfKey + '&limit=60').then(function (data: Any) {
+  return fetchKlineRows(sym, tfKey, 60).then(function (data: Any) {
     const candles = data.map((k: Any) => ({ t: k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5] })).filter(mdVal.candle)
     if (candles.length) scanCache[key] = { ts: Date.now(), candles: candles }
     return candles
@@ -457,7 +458,7 @@ export function scanSignals(): void {
       // market is actually being trained this sweep.
       const loadDeep = function (sym: string): Promise<Any[]> {
         if (isInstrument(sym)) return yahooCandles(sym, '1h', 400) as Promise<Any[]>
-        return jget('https://api.binance.com/api/v3/klines?symbol=' + sym + '&interval=1h&limit=400')
+        return fetchKlineRows(sym, '1h', 400)
           .then(function (data: Any) {
             return data.map((k: Any) => ({ t: k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5] })).filter(mdVal.candle)
           })
@@ -675,7 +676,7 @@ export function analyzeSigCoin(input: string): void {
   const tfs = ['1h', '4h', '1d']
   const tfLabels = ['1H', '4H', '1D']
   const tfPromises: Promise<Any>[] = tfs.map(function (tf) {
-    return jget('https://api.binance.com/api/v3/klines?symbol=' + sym + '&interval=' + tf + '&limit=120').then(function (data: Any) {
+    return fetchKlineRows(sym, tf, 120).then(function (data: Any) {
       const candles = data.map((k: Any) => ({ t: k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5] }))
       const closes = candles.map((c: Any) => c.c)
       const vols = candles.map((c: Any) => c.v)
