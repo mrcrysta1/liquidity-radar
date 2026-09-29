@@ -725,7 +725,7 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
     placement: 'pane', sourced: true, compute: (s, _c, p) => ({ v: M.rsi(s, p.length) }),
   }
   const defs = { sma: smaDef, rsi: rsiDef }
-  const defOf = (t) => defs[t] || null
+  const defOf = (i) => defs[i.type] || null
   const base = (key, c) => c.map((x) => (key === 'volume' ? x.v : x.c))
   const inst = (uid, type, source, visible = true) => ({ uid, type, params: {}, source, visible })
   const candles = vee.map((c, i) => ({ t: i * 60000, o: c, h: c + 1, l: c - 1, c, v: i + 1 }))
@@ -770,6 +770,205 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   computeAll(many, long, defOf, base)
   const ms = Date.now() - t0
   ok('graph: a 50-deep chain over 5000 bars under 250ms', ms < 250, ms + 'ms')
+}
+
+// ---------------------------------------------------------------- pine
+{
+  const { runPine } = await import(src('features/charts/pine/runtime.ts'))
+  const { parse, PineError } = await import(src('features/charts/pine/parser.ts'))
+  const { PINE_EXAMPLES, PINE_TEMPLATE } = await import(src('features/charts/pine/examples.ts'))
+  const P = await import(src('features/charts/pine/indicator.ts'))
+  const M = await import(src('features/charts/indicators/math.ts'))
+  // The Pro terminal's fixture: a drifting sine, 15-minute bars.
+  const mk = (len) =>
+    Array.from({ length: len }, (_, i) => {
+      const o = 100 + Math.sin(i / 7) * 10 + i * 0.05
+      const cl = o + Math.cos(i / 3) * 2
+      return { t: 1_700_000_000_000 + i * 900_000, o, h: Math.max(o, cl) + 1, l: Math.min(o, cl) - 1, c: cl, v: 100 + (i % 9) }
+    })
+  const c = mk(300)
+  const close = c.map((k) => k.c)
+  const last = (a) => a[a.length - 1]
+  const throws = (fn) => {
+    try {
+      fn()
+      return null
+    } catch (e) {
+      return e
+    }
+  }
+
+  // Ported from pro-terminal/src/core/pine/runtime.test.ts
+  const r1 = runPine(`//@version=5
+indicator("RSI", overlay=false)
+len = input.int(14, "Length", minval=1)
+src = input.source(close, "Source")
+up = ta.rma(math.max(ta.change(src), 0), len)
+down = ta.rma(-math.min(ta.change(src), 0), len)
+rsi = down == 0 ? 100 : up == 0 ? 0 : 100 - (100 / (1 + up / down))
+plot(rsi, "RSI", color=color.purple)
+hline(70)
+hline(30)
+plot(ta.rsi(src, len), "RSI builtin")`, c)
+  eq('pine: overlay=false', r1.overlay, false)
+  eq('pine: inputs are listed in order', r1.inputs.map((i) => i.title), ['Length', 'Source'])
+  eq('pine: input.int keeps minval', r1.inputs[0].min, 1)
+  eq('pine: two hlines', r1.hlines.map((h) => h.price), [70, 30])
+  near('pine: hand-written RSI matches the app RSI', last(r1.plots[0].values), last(M.rsi(close, 14)), 1e-6)
+  near('pine: ta.rsi matches the hand-written one', last(r1.plots[1].values), last(r1.plots[0].values), 1e-9)
+
+  const r2 = runPine(`indicator("t", overlay=true)
+f = input(12, "Fast")
+myema(s, l) => ta.ema(s, l)
+var int count = 0
+count := count + 1
+[m, sg, h] = ta.macd(close, f, 26, 9)
+plot(myema(close, 20), "e20")
+plot(close[1], "prev")
+plot(count, "count")
+plot(h, "hist", style=plot.style_histogram)`, c, { Fast: 10 })
+  eq('pine: overlay=true', r2.overlay, true)
+  near('pine: user function wrapping ta.ema', last(r2.plots[0].values), last(M.ema(close, 20)), 1e-6)
+  near('pine: history operator', last(r2.plots[1].values), close[close.length - 2], 1e-9)
+  eq('pine: var persists across bars', last(r2.plots[2].values), 300)
+  near('pine: tuple from ta.macd with an input override', last(r2.plots[3].values), last(M.macd(close, 10, 26, 9).hist), 1e-6)
+  eq('pine: histogram style kept', r2.plots[3].style, 'histogram')
+
+  const r3 = runPine(`indicator("x")
+fast = ta.sma(close, 5)
+slow = ta.sma(close, 20)
+col = fast > slow ? color.green : color.red
+sum = 0.0
+for i = 0 to 4
+    sum := sum + close[i]
+avg5 = sum / 5
+sig = 0
+if ta.crossover(fast, slow)
+    sig := 1
+else if ta.crossunder(fast, slow)
+    sig := -1
+plot(fast, "fast", color=col)
+plot(avg5, "avg5")
+plotshape(sig == 1, style=shape.triangleup, location=location.belowbar, color=color.green)`, c)
+  near('pine: ta.sma matches the app SMA', last(r3.plots[0].values), last(M.sma(close, 5)), 1e-6)
+  near('pine: for loop over history', last(r3.plots[1].values), last(M.sma(close, 5)), 1e-6)
+  ok('pine: plotshape fires on crossovers', r3.shapes.length > 2, r3.shapes.length)
+  ok('pine: shapes sit below the bar as up arrows', r3.shapes.every((s) => s.position === 'below' && s.shape === 'arrowUp'))
+  ok('pine: per-bar colours recorded', !!r3.plots[0].colors && r3.plots[0].colors.some(Boolean))
+
+  const r4 = runPine(`indicator("st", overlay=true)
+[st, dir] = ta.supertrend(3, 10)
+[dp, dm, adx] = ta.dmi(14, 14)
+k = ta.stoch(close, high, low, 14)
+plot(st)
+plot(adx)
+plot(k)`, c)
+  eq('pine: supertrend/dmi/stoch tuples', r4.plots.length, 3)
+  ok('pine: tuple outputs finite', r4.plots.every((p) => Number.isFinite(last(p.values))))
+
+  const e1 = throws(() => runPine('indicator("e")\nplot(ta.sma(close, 14)', c))
+  ok('pine: syntax error names the line', e1 instanceof PineError && /Line 2/.test(e1.message), e1 && e1.message)
+  const e2 = throws(() => runPine('indicator("e")\nplot(foo)', c))
+  ok('pine: unknown identifier with line and column', e2 && /Line 2, col 6: Undeclared identifier 'foo'/.test(e2.message), e2 && e2.message)
+  const e3 = throws(() => parse('x = 1 @ 2'))
+  eq('pine: bad character located', e3 && [e3.line, e3.col], [1, 7])
+  const e4 = throws(() => runPine('plot(ta.nope(close))', c))
+  ok('pine: unsupported function reported', e4 && /Unsupported function 'ta.nope'/.test(e4.message), e4 && e4.message)
+  const e5 = throws(() => runPine('x := 1', c))
+  ok('pine: := on an undeclared name is an error', e5 && /undeclared/.test(e5.message), e5 && e5.message)
+  const e6 = throws(() => runPine('i = 0\nwhile true\n    i := i + 1', c, {}, { maxMs: 200 }))
+  ok('pine: runaway loop stops with an error', e6 && /Loop|too long/.test(e6.message), e6 && e6.message)
+
+  // Extensions over the Pro engine.
+  const r5 = runPine(`indicator("ext", overlay=true)
+s = 0.0
+s += close
+s *= 2
+long = ta.sma(close,
+  10)
+plot(s, "s", color=#ff000080)
+plot(long, "l", offset=2)
+plot(ta.tr, "tr")
+plot(ta.alma(close, 9, 0.85, 6), "alma")
+plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
+  near('pine: += and *=', last(r5.plots[0].values), 2 * last(close), 1e-9)
+  eq('pine: #RRGGBBAA colour literal', r5.plots[0].color, 'rgba(255,0,0,0.50)')
+  near('pine: wrapped line + offset shifts right', last(r5.plots[1].values), M.sma(close, 10)[close.length - 3], 1e-9)
+  eq('pine: offset leaves the first bars empty', r5.plots[1].values[10], null)
+  const tr = Math.max(c[299].h - c[299].l, Math.abs(c[299].h - c[298].c), Math.abs(c[299].l - c[298].c))
+  near('pine: ta.tr as a variable', last(r5.plots[2].values), tr, 1e-9)
+  ok('pine: ta.alma is finite', Number.isFinite(last(r5.plots[3].values)))
+  eq('pine: plotchar marks one bar with its char', r5.shapes.map((s) => [s.bar, s.text]), [[5, 'x']])
+  const r6 = runPine('indicator("w")\nplot(close)\nfill(1, 2)\nlabel.new(bar_index, high, "x")', c)
+  eq('pine: drawings are ignored with a warning', r6.warnings, ['fill', 'label.new'])
+  const r7 = runPine('indicator("wrap")\nx = close +\n     open\nplot(x)', c)
+  near('pine: continuation after a trailing operator', last(r7.plots[0].values), last(c).c + last(c).o, 1e-9)
+
+  // Every built-in example (ported library tests) compiles and plots.
+  const long = mk(400)
+  ;[...PINE_EXAMPLES, { name: 'template', script: PINE_TEMPLATE }].forEach((ex) => {
+    let r = null
+    const err = throws(() => (r = runPine(ex.script, long)))
+    ok('pine example runs: ' + ex.name, !err, err && err.message)
+    ok('pine example plots finite values: ' + ex.name, !!r && r.plots.some((p) => p.values.slice(-50).some((v) => v != null && Number.isFinite(v))))
+  })
+  const ichi = runPine(PINE_EXAMPLES.find((x) => x.id === 'ex_ichimoku').script, long)
+  const dc = M.donchian(long, 9)
+  near('pine: Ichimoku conversion line = Donchian mid', last(ichi.plots[0].values), last(dc.mid), 1e-9)
+
+  // As an indicator: plots -> outputs, hlines, shapes -> markers, overlay -> placement.
+  const inst = { uid: 'p1', type: 'pine', script: PINE_EXAMPLES.find((x) => x.id === 'ex_rsi_signals').script, pineInputs: {} }
+  const def = P.pineLive(inst, long)
+  eq('pine def: pane placement from overlay=false', def.placement, 'pane')
+  eq('pine def: one output per plot + a marker output', def.outputs.map((o) => o.kind), ['line', 'signal'])
+  eq('pine def: hlines carried', def.hlines.map((h) => [h.price, h.style]), [[70, 'dashed'], [50, 'dotted'], [30, 'dashed']])
+  const outs = def.compute([], long, {})
+  near('pine def: RSI output matches the app RSI', last(outs[def.outputs[0].key]), last(M.rsi(long.map((k) => k.c), 14)), 1e-6)
+  ok('pine def: markers sit on the RSI line in its pane', def.outputs[1].markers.length > 0 && def.outputs[1].markers.every((m) => outs.shapes[m.i] === outs[def.outputs[0].key][m.i]))
+  ok('pine def: per-bar colours pass through', def.outputs[0].colors.some(Boolean))
+  eq('pine def: same candles hit the cache', P.pineLive(inst, long) === def, true)
+  const tick = long.slice()
+  tick[tick.length - 1] = { ...tick[tick.length - 1], c: tick[tick.length - 1].c + 1 }
+  eq('pine def: a tick on the forming bar is throttled', P.pineLive(inst, tick) === def, true)
+  const next = long.concat([{ ...long[long.length - 1], t: long[long.length - 1].t + 900_000 }])
+  ok('pine def: a new bar recomputes at once', P.pineLive(inst, next) !== def)
+  const inst2 = { ...inst, pineInputs: { Length: 5 } }
+  const d2 = P.pineLive(inst2, next)
+  near('pine def: input override changes the run', last(d2.compute([], next, {})[d2.outputs[0].key]), last(M.rsi(next.map((k) => k.c), 5)), 1e-6)
+  const bad = { uid: 'p2', type: 'pine', script: 'indicator("b")\nplot(nope)' }
+  const bd = P.pineLive(bad, long)
+  eq('pine def: a failing script draws nothing', bd.outputs.length, 0)
+  ok('pine def: and reports its error', /Undeclared identifier 'nope'/.test(P.pineStatus(bad).error || ''), P.pineStatus(bad))
+  const ov = P.pineLive({ uid: 'p3', type: 'pine', script: PINE_EXAMPLES[0].script }, long)
+  eq('pine def: overlay placement', ov.placement, 'overlay')
+  const ovOut = ov.compute([], long, {})
+  ok('pine def: overlay markers sit on the bar high/low', ov.outputs.at(-1).markers.every((m) => ovOut.shapes[m.i] === (m.position === 'aboveBar' ? long[m.i].h : long[m.i].l)))
+  eq('pine meta: inputs without a chart', P.pineMeta(inst).status.inputs.map((i) => i.title), ['Length', 'Source', 'Overbought', 'Oversold'])
+  eq('pine: title read from the source', P.scriptTitle('indicator("A <b>" , overlay=true)'), 'A b')
+
+  // Pine plots feed the indicator graph like any other output.
+  const { computeAll } = await import(src('features/charts/indicators/graph.ts'))
+  const smaDef = {
+    id: 'sma', name: 'SMA', params: [{ key: 'length', default: 3 }], outputs: [{ key: 'v' }],
+    placement: 'overlay', sourced: true, compute: (s, _c, p) => ({ v: M.sma(s, p.length) }),
+  }
+  const k0 = def.outputs[0].key
+  const items = [
+    { uid: 'g1', type: 'pine', params: {}, source: 'close', visible: true, script: inst.script, pineInputs: {} },
+    { uid: 's1', type: 'sma', params: {}, source: 'g1.' + k0, visible: true },
+  ]
+  const res = computeAll(items, long, (i, cc) => (i.type === 'pine' ? P.pineLive(i, cc) : smaDef), (k, cc) => cc.map((x) => x.c))
+  const rs = res.find((x) => x.inst.uid === 'g1').outputs[k0]
+  const sm = res.find((x) => x.inst.uid === 's1')
+  near('pine graph: SMA of a Pine plot', last(sm.outputs.v), (rs.at(-1) + rs.at(-2) + rs.at(-3)) / 3, 1e-9)
+  eq('pine graph: an overlay on a Pine pane shares it', sm.host, 'g1')
+
+  // Performance: a typical script over 5000 bars.
+  const big = mk(5000)
+  const t0 = Date.now()
+  runPine(PINE_EXAMPLES.find((x) => x.id === 'ex_macd').script, big)
+  const ms = Date.now() - t0
+  ok('pine: MACD script over 5000 bars under 400ms', ms < 400, ms + 'ms')
 }
 
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')

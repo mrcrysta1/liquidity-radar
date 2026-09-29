@@ -1,5 +1,6 @@
 // Indicator dropdown for the price-action chart: everything active on the left
-// with its settings, the full catalogue on the right to add from.
+// with its settings, the full catalogue on the right to add from — and a Pine
+// tab with the script editor and "My scripts" (see PinePanel).
 import { useEffect, useRef, useState } from 'react'
 import {
   INDICATORS,
@@ -12,15 +13,85 @@ import {
   addIndicator,
   getIndicators,
   indicatorCount,
+  instanceDef,
   maxIndicators,
   removeIndicator,
   resetIndicators,
+  resetPineInputs,
   setParam,
+  setPineInput,
   setSource,
   sourceOptions,
   subscribeIndicators,
   toggleIndicator,
 } from '../../features/charts/indicators/store'
+import type { IndicatorInstance } from '../../features/charts/indicators/store'
+import { PINE_TYPE, pineStatus, subscribePine } from '../../features/charts/pine/indicator'
+import type { PineInput } from '../../features/charts/pine/runtime'
+import { editPineInstance } from '../../features/charts/pine/draft'
+import { PinePanel } from './PinePanel'
+
+/** One Pine input, in the same settings grid as a built-in's params. */
+function PineInputField({ inst, input }: { inst: IndicatorInstance; input: PineInput }) {
+  const cur = inst.pineInputs?.[input.key] ?? input.def
+  const set = (v: number | boolean | string) => setPineInput(inst.uid, input.key, v)
+  let field: React.ReactNode
+  if (input.type === 'bool')
+    field = <input type="checkbox" checked={!!cur} onChange={(e) => set(e.target.checked)} />
+  else if (input.type === 'source')
+    field = (
+      <select value={String(cur)} onChange={(e) => set(e.target.value)}>
+        {SOURCES.map((s) => (
+          <option key={s.key} value={s.key}>
+            {s.label}
+          </option>
+        ))}
+      </select>
+    )
+  else if (input.options)
+    field = (
+      <select value={String(cur)} onChange={(e) => set(e.target.value)}>
+        {input.options.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+      </select>
+    )
+  else if (input.type === 'string' || input.type === 'color')
+    field = (
+      <input
+        type={input.type === 'color' && /^#[0-9a-f]{6}$/i.test(String(cur)) ? 'color' : 'text'}
+        value={String(cur)}
+        maxLength={200}
+        onChange={(e) => set(e.target.value)}
+      />
+    )
+  else
+    field = (
+      <input
+        type="number"
+        min={input.min}
+        max={input.max}
+        step={input.step ?? (input.type === 'int' ? 1 : 'any')}
+        value={Number(cur)}
+        onChange={(e) => {
+          let v = Number(e.target.value)
+          if (e.target.value === '' || !isFinite(v)) return
+          if (input.type === 'int') v = Math.round(v)
+          if (input.min != null) v = Math.max(input.min, v)
+          if (input.max != null) v = Math.min(input.max, v)
+          set(v)
+        }}
+      />
+    )
+  return (
+    <label className={input.type === 'bool' ? 'pine-check' : undefined}>
+      <span title={input.title}>{input.title}</span>
+      {field}
+    </label>
+  )
+}
 
 function Eye({ on }: { on: boolean }) {
   return (
@@ -41,11 +112,13 @@ function Eye({ on }: { on: boolean }) {
 export function IndicatorPicker() {
   const [, force] = useState(0)
   const [open, setOpen] = useState(false)
+  const [tab, setTab] = useState<'catalog' | 'pine'>('catalog')
   const [query, setQuery] = useState('')
   const [editing, setEditing] = useState<string | null>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => subscribeIndicators(() => force((n) => n + 1)), [])
+  useEffect(() => subscribePine(() => force((n) => n + 1)), [])
 
   useEffect(() => {
     if (!open) return
@@ -107,160 +180,230 @@ export function IndicatorPicker() {
       </button>
 
       {open && (
-        <div className="ind-menu" onKeyDown={onKeyDown}>
+        <div className={'ind-menu' + (tab === 'pine' ? ' pine-on' : '')} onKeyDown={onKeyDown}>
           <div className="ind-menu-head">
-            <span>Indicators</span>
-            <button type="button" className="ind-reset" onClick={resetIndicators}>
-              Reset
-            </button>
+            <div className="ind-tabs" role="tablist">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === 'catalog'}
+                className={tab === 'catalog' ? 'on' : ''}
+                onClick={() => setTab('catalog')}
+              >
+                Indicators
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === 'pine'}
+                className={tab === 'pine' ? 'on' : ''}
+                onClick={() => setTab('pine')}
+              >
+                Pine scripts
+              </button>
+            </div>
+            {tab === 'catalog' && (
+              <button type="button" className="ind-reset" onClick={resetIndicators}>
+                Reset
+              </button>
+            )}
           </div>
 
-          <div className="ind-cols">
-            <div className="ind-active">
-              <div className="ind-col-lbl">
-                On chart <span>{items.length}</span>
-              </div>
-              {!items.length && <div className="ind-empty">Nothing added yet.</div>}
-              {items.map((inst) => {
-                const def = indicatorDef(inst.type)
-                if (!def) return null
-                const isEditing = editing === inst.uid
-                const canEdit = def.params.length > 0 || def.sourced
-                return (
-                  <div className={'ind-item' + (inst.visible ? '' : ' off')} key={inst.uid}>
-                    <div className="ind-item-row">
-                      <span className="ind-dot" style={{ background: def.outputs[0]?.color }} />
-                      <span className="ind-item-name">{instanceLabel(def, inst.params)}</span>
-                      <button
-                        type="button"
-                        className="ind-icon"
-                        aria-pressed={inst.visible}
-                        title={inst.visible ? 'Hide' : 'Show'}
-                        onClick={() => toggleIndicator(inst.uid)}
-                      >
-                        <Eye on={inst.visible} />
-                      </button>
-                      {canEdit && (
+          {tab === 'pine' && <PinePanel />}
+          {tab === 'catalog' && (
+            <div className="ind-cols">
+              <div className="ind-active">
+                <div className="ind-col-lbl">
+                  On chart <span>{items.length}</span>
+                </div>
+                {!items.length && <div className="ind-empty">Nothing added yet.</div>}
+                {items.map((inst) => {
+                  const def = instanceDef(inst)
+                  if (!def) return null
+                  const isEditing = editing === inst.uid
+                  const pine = inst.type === PINE_TYPE ? pineStatus(inst) : null
+                  const canEdit = def.params.length > 0 || def.sourced || !!pine
+                  return (
+                    <div className={'ind-item' + (inst.visible ? '' : ' off')} key={inst.uid}>
+                      <div className="ind-item-row">
+                        <span className="ind-dot" style={{ background: def.outputs[0]?.color }} />
+                        <span className="ind-item-name">{instanceLabel(def, inst.params)}</span>
+                        {pine && (
+                          <span
+                            className={'pine-tag' + (pine.error ? ' err' : '')}
+                            title={pine.error || 'Pine script'}
+                          >
+                            {pine.error ? 'error' : 'pine'}
+                          </span>
+                        )}
                         <button
                           type="button"
-                          className={'ind-icon' + (isEditing ? ' active' : '')}
-                          aria-expanded={isEditing}
-                          title="Settings"
-                          onClick={() => setEditing(isEditing ? null : inst.uid)}
+                          className="ind-icon"
+                          aria-pressed={inst.visible}
+                          title={inst.visible ? 'Hide' : 'Show'}
+                          onClick={() => toggleIndicator(inst.uid)}
+                        >
+                          <Eye on={inst.visible} />
+                        </button>
+                        {canEdit && (
+                          <button
+                            type="button"
+                            className={'ind-icon' + (isEditing ? ' active' : '')}
+                            aria-expanded={isEditing}
+                            title="Settings"
+                            onClick={() => setEditing(isEditing ? null : inst.uid)}
+                          >
+                            <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
+                              <circle
+                                cx="12"
+                                cy="12"
+                                r="3"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="1.8"
+                              />
+                              <path
+                                d="M12 2.6v3M12 18.4v3M2.6 12h3M18.4 12h3M5.4 5.4l2.1 2.1M16.5 16.5l2.1 2.1M18.6 5.4l-2.1 2.1M7.5 16.5l-2.1 2.1"
+                                stroke="currentColor"
+                                strokeWidth="1.6"
+                                strokeLinecap="round"
+                              />
+                            </svg>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="ind-icon danger"
+                          title="Remove"
+                          onClick={() => removeIndicator(inst.uid)}
                         >
                           <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
-                            <circle
-                              cx="12"
-                              cy="12"
-                              r="3"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="1.8"
-                            />
                             <path
-                              d="M12 2.6v3M12 18.4v3M2.6 12h3M18.4 12h3M5.4 5.4l2.1 2.1M16.5 16.5l2.1 2.1M18.6 5.4l-2.1 2.1M7.5 16.5l-2.1 2.1"
+                              d="M6 6 18 18M18 6 6 18"
                               stroke="currentColor"
-                              strokeWidth="1.6"
+                              strokeWidth="2"
                               strokeLinecap="round"
                             />
                           </svg>
                         </button>
-                      )}
-                      <button
-                        type="button"
-                        className="ind-icon danger"
-                        title="Remove"
-                        onClick={() => removeIndicator(inst.uid)}
-                      >
-                        <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
-                          <path
-                            d="M6 6 18 18M18 6 6 18"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                          />
-                        </svg>
-                      </button>
-                    </div>
-                    {isEditing && (
-                      <div className="ind-settings">
-                        {def.params.map((p) => (
-                          <label key={p.key}>
-                            <span>{p.label}</span>
-                            <input
-                              type="number"
-                              min={p.min}
-                              max={p.max}
-                              step={p.step}
-                              value={inst.params[p.key]}
-                              onChange={(e) => setParam(inst.uid, p.key, Number(e.target.value))}
-                            />
-                          </label>
-                        ))}
-                        {def.sourced && (
-                          <label>
-                            <span>Source</span>
-                            <select
-                              value={inst.source}
-                              onChange={(e) => setSource(inst.uid, e.target.value)}
+                      </div>
+                      {isEditing && pine && (
+                        <div className="ind-settings">
+                          {pine.error && <div className="pine-msg err pine-span">{pine.error}</div>}
+                          {pine.inputs.map((input) => (
+                            <PineInputField key={input.key} inst={inst} input={input} />
+                          ))}
+                          {!pine.inputs.length && !pine.error && (
+                            <div className="ind-empty pine-span">This script has no inputs.</div>
+                          )}
+                          {pine.warnings.length > 0 && (
+                            <div className="ind-empty pine-span">
+                              Ignored: {pine.warnings.join(', ')}
+                            </div>
+                          )}
+                          <div className="pine-span pine-row">
+                            <button
+                              type="button"
+                              className="pine-btn sm"
+                              onClick={() => {
+                                editPineInstance(inst.uid)
+                                setTab('pine')
+                              }}
                             >
-                              {/* Price fields, then other indicators' outputs
+                              Edit source
+                            </button>
+                            {pine.inputs.length > 0 && (
+                              <button
+                                type="button"
+                                className="pine-btn sm"
+                                onClick={() => resetPineInputs(inst.uid)}
+                              >
+                                Defaults
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      {isEditing && !pine && (
+                        <div className="ind-settings">
+                          {def.params.map((p) => (
+                            <label key={p.key}>
+                              <span>{p.label}</span>
+                              <input
+                                type="number"
+                                min={p.min}
+                                max={p.max}
+                                step={p.step}
+                                value={inst.params[p.key]}
+                                onChange={(e) => setParam(inst.uid, p.key, Number(e.target.value))}
+                              />
+                            </label>
+                          ))}
+                          {def.sourced && (
+                            <label>
+                              <span>Source</span>
+                              <select
+                                value={inst.source}
+                                onChange={(e) => setSource(inst.uid, e.target.value)}
+                              >
+                                {/* Price fields, then other indicators' outputs
                                   (indicator-on-indicator); options that would
                                   loop back to this one are left out. */}
-                              {sourceOptions(inst.uid).map((s, i) => (
-                                <option key={s.key} value={s.key}>
-                                  {i >= SOURCES.length ? '↳ ' + s.label : s.label}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-              {full && <div className="ind-empty">Limit of {maxIndicators()} reached.</div>}
-            </div>
-
-            <div className="ind-catalog">
-              <input
-                className="ind-search"
-                type="text"
-                placeholder="Search indicators…"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                aria-label="Search indicators"
-              />
-              <div className="ind-list">
-                {INDICATOR_GROUPS.map((group) => {
-                  const list = INDICATORS.filter((d) => d.group === group && matches(d.name))
-                  if (!list.length) return null
-                  return (
-                    <div key={group}>
-                      <div className="ind-group-lbl">{group}</div>
-                      {list.map((d) => (
-                        <button
-                          type="button"
-                          className="ind-add"
-                          key={d.id}
-                          disabled={full}
-                          title={full ? 'Limit reached' : 'Add ' + d.name}
-                          onClick={() => addIndicator(d.id)}
-                        >
-                          <span className="ind-dot" style={{ background: d.outputs[0]?.color }} />
-                          <span className="ind-add-name">{d.name}</span>
-                          <span className="ind-add-kind">
-                            {d.placement === 'pane' ? 'pane' : 'overlay'}
-                          </span>
-                        </button>
-                      ))}
+                                {sourceOptions(inst.uid).map((s, i) => (
+                                  <option key={s.key} value={s.key}>
+                                    {i >= SOURCES.length ? '↳ ' + s.label : s.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )
                 })}
+                {full && <div className="ind-empty">Limit of {maxIndicators()} reached.</div>}
+              </div>
+
+              <div className="ind-catalog">
+                <input
+                  className="ind-search"
+                  type="text"
+                  placeholder="Search indicators…"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  aria-label="Search indicators"
+                />
+                <div className="ind-list">
+                  {INDICATOR_GROUPS.map((group) => {
+                    const list = INDICATORS.filter((d) => d.group === group && matches(d.name))
+                    if (!list.length) return null
+                    return (
+                      <div key={group}>
+                        <div className="ind-group-lbl">{group}</div>
+                        {list.map((d) => (
+                          <button
+                            type="button"
+                            className="ind-add"
+                            key={d.id}
+                            disabled={full}
+                            title={full ? 'Limit reached' : 'Add ' + d.name}
+                            onClick={() => addIndicator(d.id)}
+                          >
+                            <span className="ind-dot" style={{ background: d.outputs[0]?.color }} />
+                            <span className="ind-add-name">{d.name}</span>
+                            <span className="ind-add-kind">
+                              {d.placement === 'pane' ? 'pane' : 'overlay'}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )
+                  })}
+                </div>
               </div>
             </div>
-          </div>
+          )}
         </div>
       )}
     </div>
