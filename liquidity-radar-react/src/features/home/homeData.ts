@@ -3,6 +3,7 @@
 // the Market Overview chart. Each is fetched on demand from the dashboard,
 // cached, and never refetched faster than its source actually changes.
 import { jget } from '../../api/client'
+import { fetchKlineRows } from '../../services/failover'
 
 export interface GlobalStats {
   totalMcapUsd: number
@@ -99,10 +100,8 @@ export function refreshSeries(sym: string, r: Range): Promise<void> {
   if (cached && Date.now() - cached.at < 60_000) return Promise.resolve()
   return once('series ' + key, async () => {
     const { interval, limit } = RANGE_SPEC[r]
-    const rows = (await jget(
-      `https://api.binance.com/api/v3/klines?symbol=${sym}&interval=${interval}&limit=${limit}`,
-      15000,
-    )) as unknown[][]
+    // Binance → Bybit → OKX (services/failover), same row shape.
+    const rows: unknown[][] = await fetchKlineRows(sym, interval, limit)
     if (!Array.isArray(rows) || !rows.length) return
     series.set(key, { at: Date.now(), pts: rows.map((k) => [Number(k[0]), Number(k[4])]) })
   })

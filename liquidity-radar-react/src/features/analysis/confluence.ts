@@ -2,7 +2,7 @@
 // timeframes and scores each with the same RSI/MACD/EMA-trend read already
 // used elsewhere (utils/indicators), so a trader can see whether timeframes
 // agree without switching between them one at a time.
-import { jget } from '../../api/client'
+import { fetchKlineRows } from '../../services/failover'
 import { isInstrument } from '../../constants/instruments'
 import { calcRSI, calcMACD, emaArr } from '../../utils/indicators'
 import { state } from '../../services/store'
@@ -25,7 +25,6 @@ export interface ConfluenceRow {
 // timeframes (5s, 45m, 3h…) don't exist server-side, so the confluence set
 // is picked from this list regardless of what the chart itself is showing.
 const NATIVE_TFS = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d']
-const KLINE_URL = 'https://api.binance.com/api/v3/klines'
 
 /**
  * Classic MTF confirmation looks at the active chart timeframe plus the
@@ -98,14 +97,13 @@ function score(closes: number[]): { verdict: Verdict; rsi: number; macdHist: num
 }
 
 async function loadOne(sym: string, tf: string): Promise<void> {
-  // This strip reads Binance klines directly rather than going through
-  // loadCandles, so it has nothing to say about a Yahoo-priced instrument.
+  // This strip reads native-interval klines (Binance, or a fallback venue via
+  // services/failover) rather than going through loadCandles, so it has
+  // nothing to say about a Yahoo-priced instrument.
   // Bail out rather than 400 once per timeframe on every symbol switch.
   if (isInstrument(sym)) return
   try {
-    const data = (await jget(
-      `${KLINE_URL}?symbol=${sym}&interval=${tf}&limit=120`,
-    )) as unknown[][]
+    const data: unknown[][] = await fetchKlineRows(sym, tf, 120)
     if (sym !== symbol) return // symbol changed mid-flight; drop the stale response
     const closes = data.map((k) => Number(k[4]))
     if (closes.length < 30) return

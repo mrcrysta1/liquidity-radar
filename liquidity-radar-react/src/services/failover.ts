@@ -18,7 +18,13 @@ import { state } from './store'
 import { $ } from '../utils/dom'
 import { DEFAULT_TF } from './timeframe'
 import { KlineHub } from './klineHub'
-import { ProviderChain, klineFreshness, memoryStore } from './providerChain'
+import {
+  ProviderChain,
+  createPacer,
+  klineFreshness,
+  memoryStore,
+  toKlineRows,
+} from './providerChain'
 import type { CacheEntry, ChainResult, ChainStore, Freshness } from './providerChain'
 
 // ---- Kline paging ----------------------------------------------------
@@ -91,6 +97,8 @@ const BYBIT_IV: Record<string, string> = {
   '1h': '60',
   '2h': '120',
   '4h': '240',
+  '6h': '360',
+  '12h': '720',
   '1d': 'D',
   '1w': 'W',
   '1M': 'M',
@@ -106,6 +114,8 @@ const OKX_BAR: Record<string, string> = {
   '1h': '1H',
   '2h': '2H',
   '4h': '4H',
+  '6h': '6Hutc',
+  '12h': '12Hutc',
   '1d': '1Dutc',
   '3d': '3Dutc',
   '1w': '1Wutc',
@@ -258,6 +268,67 @@ export function fetchKlinesChain(
   before = 0,
 ): Promise<ChainResult<CandleFlat[]>> {
   return klineChain.get(String(mdSym(sym)), base, need, before)
+}
+
+// ---- Feature kline rows ------------------------------------------------
+// The scanner, confluence strip, home cards, assistant and multi-chart grid
+// ask for small fixed windows of candles, many at once. They go through the
+// same Binance → Bybit → OKX order, but on a chain of their own so that:
+//  - a sweep of thirty coins does not evict the main chart's last good copy
+//    (memory only here; nothing is written to localStorage);
+//  - the fallback venues, whose limits are much tighter than Binance's, see
+//    one request at a time, paced, rather than a scanner-sized burst;
+//  - a provider the main chain has already tripped is skipped outright.
+// Binance itself is called through jget exactly as before, so its weight
+// budget and 429/418 cooldown still apply; during a cooldown the call fails
+// fast and the fallback answers instead.
+const FALLBACK_GAP_MS = 150
+const fallbackSlot = createPacer(FALLBACK_GAP_MS)
+
+type KlineFn = (sym: string, base: string, need: number, before: number) => Promise<CandleFlat[] | null>
+
+function bulk(id: string, fn: KlineFn, paced: boolean): KlineFn {
+  return async (sym, base, need, before) => {
+    // Open on the main chain: skipped, not a fresh failure to count.
+    if (klineChain.isOpen(id)) return null
+    if (paced) await fallbackSlot()
+    return fn(sym, base, need, before)
+  }
+}
+
+// Binance answering 400 means it does not list the pair (a typed-in coin, a
+// delisted one): an answer, not an outage. Returned as no candles, as the
+// callers saw it before, so it neither trips the breaker nor sends the request
+// on to the fallbacks.
+async function binanceListed(sym: string, base: string, need: number, before: number) {
+  try {
+    return await binanceKlines(sym, base, need, before)
+  } catch (e) {
+    if (e instanceof Error && e.message === 'HTTP 400') return []
+    throw e
+  }
+}
+
+const featureKlineChain = new ProviderChain<[string, string, number, number], CandleFlat[]>(
+  [
+    { id: 'binance', name: 'Binance', fn: bulk('binance', binanceListed, false) },
+    { id: 'bybit', name: 'Bybit', fn: bulk('bybit', bybitKlines, true) },
+    { id: 'okx', name: 'OKX', fn: bulk('okx', okxKlines, true) },
+  ],
+  { store: memoryStore<CandleFlat[]>(96) },
+)
+
+/**
+ * `limit` candles of a native interval for a crypto symbol, in Binance's REST
+ * row shape ([openTime, o, h, l, c, v], oldest first) so callers that used to
+ * read /api/v3/klines directly keep their parsing. Falls back to Bybit then
+ * OKX, then a last good copy from this session; throws when none exists.
+ */
+export async function fetchKlineRows(sym: string, interval: string, limit: number): Promise<number[][]> {
+  // Yahoo-priced instruments are not on any of these venues.
+  if (isInstrument(sym)) throw new Error(sym + ' is not an exchange pair')
+  const r = await featureKlineChain.get(String(mdSym(sym)), interval, limit, 0)
+  return toKlineRows(r.data)
 }
 
 // ---- Tickers -----------------------------------------------------------

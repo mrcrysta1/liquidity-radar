@@ -15,6 +15,7 @@ import { esc, pfmt, cfmt, nfmt, timeAgo } from '../../utils/format'
 import { baseOf, coinMeta } from '../../utils/coins'
 import { aiComposite, forecastFrom } from '../../utils/indicators'
 import { jget, jget2 } from '../../api/client'
+import { fetchKlineRows } from '../../services/failover'
 import { $ } from '../../utils/dom'
 import { state } from '../../services/store'
 import { signalData } from '../signals'
@@ -73,7 +74,7 @@ async function loadCtx(base: string): Promise<CtxData> {
     candles = await yahooCandles(market.sym, '15m', 120)
   } else {
     const sym = market ? market.sym : COINS[base] ? COINS[base].sym : base + 'USDT'
-    const data = (await jget('https://api.binance.com/api/v3/klines?symbol=' + sym + '&interval=15m&limit=120')) as Array<Array<number | string>>
+    const data: Array<Array<number | string>> = await fetchKlineRows(sym, '15m', 120)
     candles = data.map((k) => ({ t: +k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5] }))
   }
   if (candles.length < 30) throw new Error('not enough history for ' + base)

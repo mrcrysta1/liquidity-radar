@@ -1,5 +1,5 @@
 // Draws the volume-by-price histogram directly on the price chart as
-// horizontal bars hugging the right edge, plus POC/VAH/VAL price lines —
+// horizontal bars hugging the price axis, plus POC/VAH/VAL price lines —
 // the same data already shown as a side list (see analysis/analytics.ts
 // vpHtml), just placed where traders actually read support/resistance from.
 //
@@ -16,10 +16,24 @@ type Any = any
 let chart: Any = null
 let candleSeries: Any = null
 let canvas: HTMLCanvasElement | null = null
+let lastCandles: CandleFlat[] = []
+let sizedChart: Any = null
 
 export function attachVolumeProfile(c: Any, series: Any, wrap: HTMLElement): void {
   chart = c
   candleSeries = series
+  // The price axis widens and narrows with its labels (a new digit, a style
+  // switch) without the wrap resizing, and the bars end at its left edge, so
+  // follow the plot area's width too. Once per chart: a style change
+  // re-attaches with the same chart.
+  if (sizedChart !== c) {
+    sizedChart = c
+    try {
+      c.timeScale().subscribeSizeChange(() => renderVolumeProfile(lastCandles))
+    } catch (e) {
+      /* older chart API: the wrap's resize redraw still applies */
+    }
+  }
   if (!canvas) {
     canvas = document.createElement('canvas')
     canvas.id = 'vpCanvas'
@@ -27,6 +41,24 @@ export function attachVolumeProfile(c: Any, series: Any, wrap: HTMLElement): voi
       'position:absolute;inset:0;width:100%;height:100%;z-index:3;pointer-events:none;'
     wrap.style.position = 'relative'
     wrap.appendChild(canvas)
+  }
+}
+
+/**
+ * X of the right price scale's left edge in canvas pixels. The canvas covers
+ * the whole wrap, but the bars belong to the plot area: drawn to the wrap's
+ * edge they sat underneath the price labels.
+ */
+function plotRight(cw: number): number {
+  try {
+    const scaleW = Number(chart.priceScale('right').width()) || 0
+    const el: HTMLElement | undefined = chart.chartElement?.()
+    const chartRight = el
+      ? el.getBoundingClientRect().right - canvas!.getBoundingClientRect().left
+      : cw
+    return Math.max(0, Math.min(cw, chartRight) - scaleW)
+  } catch (e) {
+    return cw
   }
 }
 
@@ -63,21 +95,29 @@ function profileFor(candles: CandleFlat[], rows: number, valueArea: number): Vol
 }
 
 export function renderVolumeProfile(candles: CandleFlat[]): void {
+  lastCandles = candles
   if (!canvas || !chart || !candleSeries) return
   resizeCanvas()
   const ctx = canvas.getContext('2d')
   if (!ctx) return
   const dpr = window.devicePixelRatio || 1
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-  const cw = canvas.clientWidth
-  const ch = canvas.clientHeight
-  ctx.clearRect(0, 0, cw, ch)
+  ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight)
   if (!getShowVolumeProfile()) return
 
   const { rows, valueArea, split } = getVolumeProfileSettings()
   const vp = profileFor(candles, rows, valueArea)
   if (!vp) return
+  // Everything below is laid out against the plot area, not the canvas: `cw`
+  // is where the price axis starts, and nothing is painted past it.
+  const cw = plotRight(canvas.clientWidth)
+  const ch = canvas.clientHeight
+  if (cw < 1) return
   const maxBarPx = Math.max(40, cw * 0.16)
+  ctx.save()
+  ctx.beginPath()
+  ctx.rect(0, 0, cw, ch)
+  ctx.clip()
 
   vp.buckets.forEach((vol, i) => {
     const [p0, p1] = bucketPriceRange(vp, i)
@@ -136,6 +176,7 @@ export function renderVolumeProfile(candles: CandleFlat[]): void {
     ctx.fillStyle = color
     ctx.fillText(label, 4, y - 6)
   })
+  ctx.restore()
 }
 
 export function clearVolumeProfile(): void {
