@@ -8,8 +8,8 @@
 // "volume profile" series type, so pixel positions come from the candle
 // series' own priceToCoordinate() on every redraw.
 import type { CandleFlat } from '../../services/market'
-import { computeVolumeProfile, bucketPriceRange } from './volumeProfile'
-import { getShowVolumeProfile } from './overlayToggles'
+import { computeVolumeProfile, bucketPriceRange, type VolumeProfile } from './volumeProfile'
+import { getShowVolumeProfile, getVolumeProfileSettings } from './overlayToggles'
 
 type Any = any
 
@@ -23,7 +23,8 @@ export function attachVolumeProfile(c: Any, series: Any, wrap: HTMLElement): voi
   if (!canvas) {
     canvas = document.createElement('canvas')
     canvas.id = 'vpCanvas'
-    canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;z-index:3;pointer-events:none;'
+    canvas.style.cssText =
+      'position:absolute;inset:0;width:100%;height:100%;z-index:3;pointer-events:none;'
     wrap.style.position = 'relative'
     wrap.appendChild(canvas)
   }
@@ -32,12 +33,33 @@ export function attachVolumeProfile(c: Any, series: Any, wrap: HTMLElement): voi
 function resizeCanvas(): void {
   if (!canvas) return
   const dpr = window.devicePixelRatio || 1
-  const w = canvas.clientWidth
-  const h = canvas.clientHeight
-  if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
-    canvas.width = w * dpr
-    canvas.height = h * dpr
+  // Rounded: on a fractional DPR (125%, 150%) w*dpr is never an integer, so
+  // an unrounded compare reallocated the canvas on every single redraw.
+  const w = Math.round(canvas.clientWidth * dpr)
+  const h = Math.round(canvas.clientHeight * dpr)
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w
+    canvas.height = h
   }
+}
+
+// The chart redraws this layer on every tick and every mouse move, but the
+// profile only changes when the candles it covers or the settings do. The
+// window is anchored to the last candle, so these fields pin it exactly.
+let memoKey = ''
+let memoVp: VolumeProfile | null = null
+function profileFor(candles: CandleFlat[], rows: number, valueArea: number): VolumeProfile | null {
+  const n = candles.length
+  const first = candles[0]
+  const last = candles[n - 1]
+  const key = n
+    ? [n, first.t, last.t, last.o, last.h, last.l, last.c, last.v, rows, valueArea].join('|')
+    : ''
+  if (key !== memoKey) {
+    memoKey = key
+    memoVp = n ? computeVolumeProfile(candles, rows, valueArea / 100) : null
+  }
+  return memoVp
 }
 
 export function renderVolumeProfile(candles: CandleFlat[]): void {
@@ -52,7 +74,8 @@ export function renderVolumeProfile(candles: CandleFlat[]): void {
   ctx.clearRect(0, 0, cw, ch)
   if (!getShowVolumeProfile()) return
 
-  const vp = computeVolumeProfile(candles)
+  const { rows, valueArea, split } = getVolumeProfileSettings()
+  const vp = profileFor(candles, rows, valueArea)
   if (!vp) return
   const maxBarPx = Math.max(40, cw * 0.16)
 
@@ -66,6 +89,22 @@ export function renderVolumeProfile(candles: CandleFlat[]): void {
     const w = Math.max(2, (vol / vp.maxVol) * maxBarPx)
     const isPoc = i === vp.pocIdx
     const inValueArea = i >= vp.valIdx && i <= vp.vahIdx
+    if (split) {
+      // Buy (up-bar) volume on the left of the bar, sell on the right; the
+      // value area reads brighter than the tails, the POC gets a gold edge.
+      const a = isPoc || inValueArea ? 0.42 : 0.18
+      const buyW = vol > 0 ? w * (vp.buy[i] / vol) : 0
+      ctx.fillStyle = 'rgba(34,224,138,' + a + ')'
+      ctx.fillRect(cw - w, top, buyW, h)
+      ctx.fillStyle = 'rgba(255,77,94,' + a + ')'
+      ctx.fillRect(cw - w + buyW, top, w - buyW, h)
+      if (isPoc) {
+        ctx.strokeStyle = 'rgba(255,193,7,.9)'
+        ctx.lineWidth = 1
+        ctx.strokeRect(cw - w + 0.5, top + 0.5, w - 1, Math.max(0, h - 1))
+      }
+      return
+    }
     ctx.fillStyle = isPoc
       ? 'rgba(255,193,7,.55)'
       : inValueArea
