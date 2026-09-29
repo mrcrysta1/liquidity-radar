@@ -3,7 +3,12 @@
 // The engine still owns the hidden <select id="symSelect"> (it fills it at
 // boot and updates it on every symbol change); this reads the same state and
 // switches through the same setSymbol.
+//
+// The same dropdown is reused elsewhere (the Market tab's wishlist) by passing
+// `onPick` to do something else with the chosen coin and `trigger` for the
+// button's content.
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import { COINS } from '../../constants/market'
 import { state } from '../../services/store'
 import { baseOf, coinMeta } from '../../utils/coins'
@@ -39,7 +44,18 @@ function CoinIcon({ icon, color }: { icon: string; color: string }) {
   )
 }
 
-export function CoinPicker() {
+export function CoinPicker({
+  onPick,
+  trigger,
+  tabs = CHART_TABS,
+}: {
+  /** Called with the chosen pair instead of switching the chart to it. */
+  onPick?: (sym: string, base: string) => void
+  /** Button content; defaults to the chart's current pair and price. */
+  trigger?: ReactNode
+  /** Tabs the dropdown is shown on (it only re-renders while one is open). */
+  tabs?: readonly string[]
+} = {}) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [hi, setHi] = useState(0)
@@ -49,7 +65,7 @@ export function CoinPicker() {
 
   // The engine mutates `state` imperatively (symbol, tickers), so poll it —
   // the same approach the chart side panel takes.
-  useTick(open ? 1000 : 1500, CHART_TABS)
+  useTick(open ? 1000 : 1500, tabs)
 
   useEffect(() => {
     if (!open) return
@@ -78,21 +94,24 @@ export function CoinPicker() {
     .replace(/\/?USDT$/, '')
   const favs = useFavorites()
   const rows = useMemo(() => {
-    const hit = !q ? ROWS : ROWS.filter((r) => r.key.includes(q) || r.name.toUpperCase().includes(q))
+    const hit = !q
+      ? ROWS
+      : ROWS.filter((r) => r.key.includes(q) || r.name.toUpperCase().includes(q))
     // Starred coins first, in the order they were starred.
     const fav = favs.map((b) => hit.find((r) => r.key === b)).filter((r): r is Row => !!r)
     return fav.concat(hit.filter((r) => !favs.includes(r.key)))
   }, [q, favs])
   // A pair that is not in the tracked list can still be opened by ticker.
   const custom =
-    q && /^[A-Z0-9]{2,12}$/.test(q) && !ROWS.some((r) => r.key === q) ? q + 'USDT' : null
+    !onPick && q && /^[A-Z0-9]{2,12}$/.test(q) && !ROWS.some((r) => r.key === q) ? q + 'USDT' : null
   const total = rows.length + (custom ? 1 : 0)
 
   const pick = (sym: string) => {
     setOpen(false)
     setQuery('')
     setHi(0)
-    void setSymbol(sym)
+    if (onPick) onPick(sym, baseOf(sym))
+    else void setSymbol(sym)
   }
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -124,21 +143,25 @@ export function CoinPicker() {
         className="cp-trigger"
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label={'Symbol: ' + baseOf(cur) + ' — change'}
+        aria-label={trigger ? undefined : 'Symbol: ' + baseOf(cur) + ' — change'}
         onClick={() => setOpen((o) => !o)}
       >
-        <CoinIcon icon={meta.icon} color={meta.color} />
-        <span className="cp-id">
-          <b>
-            {baseOf(cur)}
-            <i>/USDT</i>
-          </b>
-          <small>{meta.name}</small>
-        </span>
-        <span className="cp-quote">
-          <b>{t ? pfmt(t.last) : '—'}</b>
-          <Chg pct={t?.pct} />
-        </span>
+        {trigger ?? (
+          <>
+            <CoinIcon icon={meta.icon} color={meta.color} />
+            <span className="cp-id">
+              <b>
+                {baseOf(cur)}
+                <i>/USDT</i>
+              </b>
+              <small>{meta.name}</small>
+            </span>
+            <span className="cp-quote">
+              <b>{t ? pfmt(t.last) : '—'}</b>
+              <Chg pct={t?.pct} />
+            </span>
+          </>
+        )}
         <svg viewBox="0 0 24 24" width="11" height="11" className="cp-caret" aria-hidden="true">
           <path
             d="m6 9 6 6 6-6"
@@ -194,46 +217,50 @@ export function CoinPicker() {
           <div className="cp-list" role="listbox" aria-label="Coins" ref={listRef}>
             {rows.map((r, i) => {
               const rt = state.tickers[r.sym]
-              const sel = r.sym === cur
+              const sel = !onPick && r.sym === cur
               const fav = favs.includes(r.key)
               return (
                 <div key={r.sym} className="cp-rowwrap">
-                {i === 0 && fav && <div className="cp-group">★ Favorites</div>}
-                {i > 0 && !fav && favs.includes(rows[i - 1].key) && <div className="cp-group">All coins</div>}
-                <button
-                  type="button"
-                  role="option"
-                  aria-selected={sel}
-                  className={'cp-row' + (sel ? ' sel' : '') + (i === hi ? ' hi' : '')}
-                  onMouseEnter={() => setHi(i)}
-                  onClick={() => pick(r.sym)}
-                >
-                  <CoinIcon icon={r.icon} color={r.color} />
-                  <span className="cp-id">
-                    <b>
-                      {r.key}
-                      <i>/USDT</i>
-                    </b>
-                    <small>{r.name}</small>
-                  </span>
-                  <span className="cp-quote">
-                    <b>{rt ? pfmt(rt.last) : '—'}</b>
-                    <Chg pct={rt?.pct} />
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  className={'cp-star' + (fav ? ' on' : '')}
-                  aria-pressed={fav}
-                  aria-label={(fav ? 'Remove ' : 'Add ') + r.key + (fav ? ' from' : ' to') + ' favorites'}
-                  title={fav ? 'Remove from favorites' : 'Add to favorites'}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    toggleFavorite(r.key)
-                  }}
-                >
-                  {fav ? '★' : '☆'}
-                </button>
+                  {i === 0 && fav && <div className="cp-group">★ Favorites</div>}
+                  {i > 0 && !fav && favs.includes(rows[i - 1].key) && (
+                    <div className="cp-group">All coins</div>
+                  )}
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={sel}
+                    className={'cp-row' + (sel ? ' sel' : '') + (i === hi ? ' hi' : '')}
+                    onMouseEnter={() => setHi(i)}
+                    onClick={() => pick(r.sym)}
+                  >
+                    <CoinIcon icon={r.icon} color={r.color} />
+                    <span className="cp-id">
+                      <b>
+                        {r.key}
+                        <i>/USDT</i>
+                      </b>
+                      <small>{r.name}</small>
+                    </span>
+                    <span className="cp-quote">
+                      <b>{rt ? pfmt(rt.last) : '—'}</b>
+                      <Chg pct={rt?.pct} />
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className={'cp-star' + (fav ? ' on' : '')}
+                    aria-pressed={fav}
+                    aria-label={
+                      (fav ? 'Remove ' : 'Add ') + r.key + (fav ? ' from' : ' to') + ' favorites'
+                    }
+                    title={fav ? 'Remove from favorites' : 'Add to favorites'}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      toggleFavorite(r.key)
+                    }}
+                  >
+                    {fav ? '★' : '☆'}
+                  </button>
                 </div>
               )
             })}

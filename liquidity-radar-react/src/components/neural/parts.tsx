@@ -36,19 +36,7 @@ export function NnCard({ title, icon, right, className, id, children }: {
   )
 }
 
-export function CoinBadge({ sym, size = 28 }: { sym: string; size?: number }) {
-  const meta = coinMeta(sym)
-  const inst = instrumentOf(sym)
-  const img = (state.marketCaps as Record<string, { image?: string }> | undefined)?.[baseOf(sym)]?.image
-  return (
-    <span className="coin-badge" style={{
-      width: size, height: size, color: meta.color, borderColor: meta.color + '66',
-      background: meta.color + '1f', fontSize: size * 0.5, flexShrink: 0,
-    }}>
-      {img && !inst ? <img src={img} alt="" width={size} height={size} loading="lazy" decoding="async" /> : meta.icon}
-    </span>
-  )
-}
+export { CoinBadge } from '../common/CoinBadge'
 
 /** Account growth, compounded; red below the start line. */
 export function EquityCurve({ equity, height = 120 }: { equity: number[]; height?: number }) {

@@ -32,6 +32,7 @@ import {
 } from '../../features/analysis/liqHeatmap/shared'
 import { confluenceSummary, getConfluenceRows, onConfluenceChange } from '../../features/analysis/confluence'
 import { useTick } from '../useTick'
+import { CoinBadge } from '../common/CoinBadge'
 
 type Candle = { t: number; o: number; h: number; l: number; c: number; v: number }
 const ANALYSIS = ['analysis']
@@ -108,19 +109,6 @@ function Card({ title, icon, right, className, id, children }: {
   )
 }
 
-function CoinBadge({ sym, size = 30 }: { sym: string; size?: number }) {
-  const meta = coinMeta(sym)
-  const inst = instrumentOf(sym)
-  const img = (state.marketCaps as Record<string, { image?: string }> | undefined)?.[baseOf(sym)]?.image
-  return (
-    <span className="coin-badge" style={{
-      width: size, height: size, color: meta.color, borderColor: meta.color + '66',
-      background: meta.color + '1f', fontSize: size * 0.5,
-    }}>
-      {img && !inst ? <img src={img} alt="" width={size} height={size} loading="lazy" decoding="async" /> : meta.icon}
-    </span>
-  )
-}
 
 // ---- zones from the heatmap -----------------------------------------------
 

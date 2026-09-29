@@ -32,6 +32,7 @@ import {
   refreshSeries,
 } from '../features/home/homeData'
 import type { Range } from '../features/home/homeData'
+import { CoinBadge } from './common/CoinBadge'
 
 const w = window as unknown as { switchTab?: (t: string) => void; setSymbol?: (s: string) => void }
 const go = (tab: string) => w.switchTab?.(tab)
@@ -93,32 +94,6 @@ function Tile({
 
 function Empty({ children }: { children: ReactNode }) {
   return <div className="dt-empty">{children}</div>
-}
-
-/** A coin's logo (CoinGecko) when known, else its glyph on its brand colour. */
-function CoinBadge({ sym, size = 22 }: { sym: string; size?: number }) {
-  const key = baseOf(sym)
-  const meta = coinMeta(sym)
-  const img = (state.marketCaps as Record<string, { image?: string }> | undefined)?.[key]?.image
-  return (
-    <span
-      className="coin-badge"
-      style={{
-        width: size,
-        height: size,
-        color: meta.color,
-        borderColor: meta.color + '66',
-        background: meta.color + '1f',
-        fontSize: size * 0.5,
-      }}
-    >
-      {img ? (
-        <img src={img} alt="" width={size} height={size} loading="lazy" decoding="async" />
-      ) : (
-        meta.icon
-      )}
-    </span>
-  )
 }
 
 const pct = (v: number | undefined) =>
@@ -194,7 +169,7 @@ function SignalsTile() {
       {top.map((s) => (
         <li key={s.sym}>
           <button type="button" onClick={() => open(s.sym, 'signals')}>
-            <CoinBadge sym={s.sym} />
+            <CoinBadge size={22} sym={s.sym} />
             <span className="dt-sym">{baseOf(s.sym)}</span>
             <span className={'dt-pill ' + (s.master.type === 'BUY' ? 'up' : 'dn')}>
               {s.master.type}
