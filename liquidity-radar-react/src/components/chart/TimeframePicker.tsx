@@ -4,11 +4,14 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   TF_GROUPS,
-  TIMEFRAMES,
+  addCustomTimeframe,
+  allTimeframes,
   getFavourites,
   getTimeframe,
   isExpanded,
+  isCustomTf,
   isFavourite,
+  removeCustomTimeframe,
   setTimeframe,
   subscribeTimeframe,
   tfLabel,
@@ -49,6 +52,8 @@ export function TimeframePicker() {
   // row leftward and slides the picker — and the menu under the cursor — with
   // it. Hearts therefore only redraw the row once the menu is dismissed.
   const [frozen, setFrozen] = useState<string[] | null>(null)
+  const [customText, setCustomText] = useState('')
+  const [customErr, setCustomErr] = useState('')
   const wrapRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
 
@@ -60,6 +65,17 @@ export function TimeframePicker() {
   const setMenu = (next: boolean) => {
     setFrozen(next ? pinnedIds() : null)
     setOpen(next)
+    setCustomErr('')
+  }
+
+  const submitCustom = (e: React.FormEvent) => {
+    e.preventDefault()
+    const err = addCustomTimeframe(customText)
+    setCustomErr(err || '')
+    if (!err) {
+      setCustomText('')
+      setMenu(false)
+    }
   }
 
   useEffect(() => {
@@ -109,7 +125,8 @@ export function TimeframePicker() {
 
   const current = getTimeframe()
   const pinned = frozen ?? pinnedIds()
-  const shown = TIMEFRAMES.filter((t) => pinned.indexOf(t.id) !== -1)
+  const every = allTimeframes()
+  const shown = every.filter((t) => pinned.indexOf(t.id) !== -1)
 
   // The engine's global key handler owns Escape and the single-letter tab
   // shortcuts; while the menu is up those keys belong to the menu.
@@ -118,6 +135,11 @@ export function TimeframePicker() {
       e.stopPropagation()
       setMenu(false)
       wrapRef.current?.querySelector<HTMLElement>('.tf-more')?.focus()
+      return
+    }
+    // Typing an interval must not jump the focus between rows.
+    if ((e.target as HTMLElement).tagName === 'INPUT') {
+      e.stopPropagation()
       return
     }
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -142,7 +164,7 @@ export function TimeframePicker() {
             className={'tf-btn' + (t.id === current ? ' active' : '')}
             data-tf={t.id}
             aria-pressed={t.id === current}
-            title={t.long}
+            title={t.long + (t.custom ? ' (custom)' : '')}
             onClick={() => setTimeframe(t.id)}
           >
             {t.label}
@@ -181,9 +203,28 @@ export function TimeframePicker() {
             <span>Timeframe</span>
             <span className="tf-menu-hint">♥ pins to the toolbar</span>
           </div>
+          <form className="tf-custom" onSubmit={submitCustom}>
+            <input
+              type="text"
+              value={customText}
+              onChange={(e) => {
+                setCustomText(e.target.value)
+                if (customErr) setCustomErr('')
+              }}
+              placeholder="Custom: 45m, 90s, 6h, 2d"
+              aria-label="Custom timeframe"
+              spellCheck={false}
+              autoComplete="off"
+              maxLength={8}
+            />
+            <button type="submit" className="tf-custom-add" disabled={!customText.trim()}>
+              Add
+            </button>
+          </form>
+          {customErr && <div className="tf-custom-err">{customErr}</div>}
           <div className="tf-menu-scroll">
             {TF_GROUPS.map((group) => {
-              const items = TIMEFRAMES.filter((t) => t.group === group)
+              const items = every.filter((t) => t.group === group)
               if (!items.length) return null
               const openGroup = isExpanded(group)
               const holdsCurrent = items.some((t) => t.id === current)
@@ -234,8 +275,22 @@ export function TimeframePicker() {
                               onClick={() => setTimeframe(t.id)}
                             >
                               <span className="tf-row-id">{t.label}</span>
-                              <span className="tf-row-long">{t.long}</span>
+                              <span className="tf-row-long">
+                                {t.long}
+                                {t.custom && <i className="tf-row-custom">custom</i>}
+                              </span>
                             </button>
+                            {isCustomTf(t.id) && (
+                              <button
+                                type="button"
+                                className="tf-del"
+                                aria-label={'Remove custom ' + t.long}
+                                title="Remove custom timeframe"
+                                onClick={() => removeCustomTimeframe(t.id)}
+                              >
+                                ×
+                              </button>
+                            )}
                             <button
                               type="button"
                               className={'tf-fav' + (fav ? ' on' : '')}
