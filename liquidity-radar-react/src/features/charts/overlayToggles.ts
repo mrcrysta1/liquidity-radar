@@ -4,10 +4,12 @@
 // from the indicator store on purpose — these aren't user-configurable
 // indicators, just layers to show or hide.
 import { storageGet, storageSet } from '../../services/storage'
+import { VP_ROWS_DEFAULT, VP_VA_DEFAULT, clampRows, clampValueArea } from './volumeProfile'
 
 const DELTA_KEY = 'lr-showDelta'
 const WHALE_KEY = 'lr-showWhaleBubbles'
 const VP_KEY = 'lr-showVolumeProfile'
+const VP_SETTINGS_KEY = 'lr-vpSettings'
 const MTF_KEY = 'lr-showConfluence'
 const OB_KEY = 'lr-showObGauge'
 const ML_KEY = 'lr-showMLPrediction'
@@ -16,6 +18,22 @@ const RL_KEY = 'lr-showRLPolicy'
 let showDelta = storageGet<boolean>(DELTA_KEY, true)
 let showWhales = storageGet<boolean>(WHALE_KEY, true)
 let showVP = storageGet<boolean>(VP_KEY, true)
+
+/** Volume profile look: rows (price buckets), value-area %, buy/sell colouring. */
+export interface VolumeProfileSettings {
+  rows: number
+  valueArea: number
+  split: boolean
+}
+function readVPSettings(): VolumeProfileSettings {
+  const raw = storageGet<Partial<VolumeProfileSettings> | null>(VP_SETTINGS_KEY, null) || {}
+  return {
+    rows: clampRows(Number(raw.rows ?? VP_ROWS_DEFAULT)),
+    valueArea: clampValueArea(Number(raw.valueArea ?? VP_VA_DEFAULT)),
+    split: raw.split === true,
+  }
+}
+let vpSettings = readVPSettings()
 let showConfluence = storageGet<boolean>(MTF_KEY, true)
 let showObGauge = storageGet<boolean>(OB_KEY, true)
 let showMLPrediction = storageGet<boolean>(ML_KEY, true)
@@ -58,6 +76,26 @@ export function getShowVolumeProfile(): boolean {
 export function setShowVolumeProfile(v: boolean): void {
   showVP = v
   storageSet(VP_KEY, v)
+  emit()
+}
+
+export function getVolumeProfileSettings(): VolumeProfileSettings {
+  return vpSettings
+}
+export function setVolumeProfileSettings(patch: Partial<VolumeProfileSettings>): void {
+  const next: VolumeProfileSettings = {
+    rows: clampRows(patch.rows ?? vpSettings.rows),
+    valueArea: clampValueArea(patch.valueArea ?? vpSettings.valueArea),
+    split: patch.split ?? vpSettings.split,
+  }
+  if (
+    next.rows === vpSettings.rows &&
+    next.valueArea === vpSettings.valueArea &&
+    next.split === vpSettings.split
+  )
+    return
+  vpSettings = next
+  storageSet(VP_SETTINGS_KEY, next)
   emit()
 }
 
