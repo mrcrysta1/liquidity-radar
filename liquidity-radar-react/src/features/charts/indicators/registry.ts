@@ -91,6 +91,18 @@ export interface OutputDef {
   colorDown?: string
   /** signal: marker placement relative to the series value. */
   marker?: { shape: 'arrowUp' | 'arrowDown' | 'circle'; position: 'aboveBar' | 'belowBar' }
+  /** line width in px (default 2, 1 when dashed). */
+  width?: number
+  /** Per-bar colour overriding `color` (Pine plots coloured by condition). */
+  colors?: Array<string | undefined>
+  /** signal: individual markers (Pine plotshape) instead of one per value. */
+  markers?: Array<{
+    i: number
+    shape: 'arrowUp' | 'arrowDown' | 'circle' | 'square'
+    position: 'aboveBar' | 'belowBar'
+    color: string
+    text?: string
+  }>
 }
 /** Outputs that hold a plain value per bar — legend rows and valid sources. */
 export const valueOutputs = (def: IndicatorDef): OutputDef[] =>
@@ -104,6 +116,13 @@ export interface IndicatorDef {
   placement: 'overlay' | 'pane'
   /** Horizontal guides drawn in the indicator's own pane. */
   guides?: number[]
+  /** Styled horizontal lines (Pine hline), drawn as price lines. */
+  hlines?: Array<{
+    price: number
+    color: string
+    title: string
+    style: 'solid' | 'dashed' | 'dotted'
+  }>
   /** true when the indicator reads a configurable price source. */
   sourced: boolean
   compute(src: number[], candles: CandleFlat[], p: Record<string, number>): Record<string, Series>

@@ -5206,3 +5206,65 @@ html[data-palette="glass"] .acct-card{background:linear-gradient(145deg,rgba(255
   border-radius:8px;color:var(--txt);padding:5px 9px;font-size:12px;font-family:'JetBrains Mono',monospace;outline:none;
   box-shadow:0 0 0 3px rgb(var(--pRGB)/.15);
 }
+
+/* ---- Pine scripts: indicator-menu tab, editor, My scripts ---- */
+.ind-tabs{display:flex;gap:4px}
+.ind-tabs button{
+  background:transparent;border:1px solid transparent;border-radius:6px;cursor:pointer;
+  padding:3px 9px;font:inherit;letter-spacing:inherit;text-transform:inherit;color:var(--dim);
+}
+.ind-tabs button:hover{color:var(--txt)}
+.ind-tabs button.on{color:var(--txt);border-color:var(--border2);background:rgb(var(--pRGB)/.12)}
+@media (min-width:901px){.ind-menu.pine-on{width:min(720px,calc(100vw - 90px))}}
+.pine-panel{padding:8px 10px 10px;display:flex;flex-direction:column;gap:7px}
+.pine-bar{display:flex;gap:6px;align-items:center}
+.pine-bar .pine-name{flex:1;margin:0;min-width:0}
+.pine-examples{
+  background:var(--bg);border:1px solid var(--border2);color:var(--txt);border-radius:7px;
+  padding:5px 6px;font-size:11px;max-width:44%;outline:none;
+}
+.pine-editor{
+  display:flex;height:260px;border:1px solid var(--border2);border-radius:8px;overflow:hidden;
+  background:var(--bg);font-family:var(--mono);font-size:12px;line-height:18px;
+}
+.pine-editor:focus-within{border-color:var(--primary)}
+.pine-gutter{
+  flex-shrink:0;min-width:34px;padding:6px 6px 6px 4px;text-align:right;overflow:hidden;
+  color:var(--dim);background:rgb(var(--pRGB)/.05);border-right:1px solid var(--border);user-select:none;
+}
+.pine-gutter div{height:18px}
+.pine-gutter .err{color:var(--red);font-weight:700;background:rgb(var(--rRGB)/.18);border-radius:3px}
+.pine-code{
+  flex:1;min-width:0;resize:none;border:none;outline:none;background:transparent;color:var(--txt);
+  padding:6px 8px;font:inherit;line-height:inherit;tab-size:4;white-space:pre;overflow:auto;
+}
+.pine-actions,.pine-row{display:flex;gap:6px;flex-wrap:wrap}
+.pine-btn{
+  background:transparent;border:1px solid var(--border2);color:var(--txt);border-radius:7px;
+  padding:5px 11px;font-size:11px;font-weight:600;cursor:pointer;
+}
+.pine-btn:hover:not(:disabled){border-color:var(--primary)}
+.pine-btn:disabled{opacity:.4;cursor:not-allowed}
+.pine-btn.primary{background:var(--primary);border-color:var(--primary);color:#fff}
+.pine-btn.sm{padding:2px 8px;font-size:10px}
+.pine-msg{font-size:11px;line-height:1.45;color:var(--dim);display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.pine-msg.ok{color:var(--green)}
+.pine-msg.err{color:var(--red);font-family:var(--mono)}
+.pine-jump{
+  background:none;border:none;color:inherit;text-decoration:underline;cursor:pointer;font:inherit;padding:0;
+}
+.pine-mine-lbl{padding:4px 2px 0}
+.pine-mine-lbl em{font-style:normal;color:var(--red);font-size:9px}
+.pine-mine{max-height:150px;overflow-y:auto;overscroll-behavior:contain}
+.pine-cur{background:rgb(var(--pRGB)/.1)}
+.pine-tag{
+  flex-shrink:0;font-family:var(--mono);font-size:8.5px;letter-spacing:.06em;text-transform:uppercase;
+  padding:1px 5px;border-radius:4px;color:var(--primary);background:rgb(var(--pRGB)/.14);
+}
+.pine-tag.err{color:var(--red);background:rgb(var(--rRGB)/.16)}
+.ind-settings .pine-span{grid-column:1/-1}
+.ind-settings .pine-check{flex-direction:row;align-items:center;gap:6px}
+.ind-settings .pine-check input{width:auto}
+.ind-settings .pine-msg{font-size:10.5px}
+[data-theme="light"] .pine-editor,[data-theme="light"] .pine-examples{background:var(--card);border-color:var(--border)}
+@media (max-width:640px){.pine-editor{height:200px}.pine-examples{max-width:50%}}

@@ -8,6 +8,9 @@
 // An indicator reading another indicator's output (see ./graph) draws where
 // its source lives when it is an overlay (an SMA of RSI sits in the RSI
 // pane), and in a pane of its own when it is a pane indicator.
+//
+// Pine scripts (../pine) draw through the same paths: their plots are
+// outputs, plotshape markers a signal output, hline()s price lines.
 import type { CandleFlat } from '../../../services/market'
 import type { IndicatorInstance } from './store'
 import { getIndicators } from './store'
@@ -16,6 +19,7 @@ import type { IndicatorDef, OutputDef } from './registry'
 import { computeAll } from './graph'
 import type { Computed } from './graph'
 import { cloudView } from './cloud'
+import { PINE_TYPE, pineLive, pineStatus } from '../pine/indicator'
 
 type Any = any
 
@@ -24,6 +28,9 @@ interface Held {
   outputKey: string
   scaleId: string
   kind: string
+  /** Price lines (Pine hline) on this series, and what they were built from. */
+  lines?: Any[]
+  linesSig?: string
 }
 
 let chart: Any = null
@@ -58,7 +65,40 @@ function active(): Array<{ inst: IndicatorInstance; def: IndicatorDef }> {
 
 /** Every visible instance computed, sources resolved in dependency order. */
 function computeActive(candles: CandleFlat[]): Array<Computed<IndicatorInstance>> {
-  return computeAll(getIndicators(), candles, indicatorDef, sourceSeries)
+  return computeAll(
+    getIndicators(),
+    candles,
+    (inst, c) => (inst.type === PINE_TYPE ? pineLive(inst, c) : indicatorDef(inst.type)),
+    sourceSeries,
+  )
+}
+
+const LINE_STYLE = { solid: 0, dotted: 1, dashed: 2 } as const
+/** Pine hline()s as price lines on the instance's first drawn series. */
+function syncPriceLines(h: Held, def: IndicatorDef): void {
+  const want = def.hlines || []
+  const sig = JSON.stringify(want)
+  if (h.linesSig === sig) return
+  ;(h.lines || []).forEach((l) => {
+    try {
+      h.series.removePriceLine(l)
+    } catch (e) {
+      /* series gone */
+    }
+  })
+  h.lines = want
+    .filter((x) => isFinite(x.price))
+    .map((x) =>
+      h.series.createPriceLine({
+        price: x.price,
+        color: x.color,
+        lineWidth: 1,
+        lineStyle: LINE_STYLE[x.style] ?? 2,
+        axisLabelVisible: false,
+        title: x.title,
+      }),
+    )
+  h.linesSig = sig
 }
 
 /**
@@ -132,7 +172,7 @@ function makeSeries(out: OutputDef, scaleId: string): Any {
   return chart.addLineSeries({
     ...common,
     color: out.color,
-    lineWidth: out.dashed ? 1 : 2,
+    lineWidth: out.width ?? (out.dashed ? 1 : 2),
     lineStyle: out.dashed ? 2 : 0,
     lineType: out.kind === 'step' ? 1 : 0,
   })
@@ -162,7 +202,9 @@ export function renderIndicators(candles: CandleFlat[]): void {
 
   computeActive(candles).forEach(({ inst, def, outputs: outs, host }) => {
     const scaleId = scaleOf(host)
-    if (scaleId !== 'right' && panes.indexOf(scaleId) === -1) panes.push(scaleId)
+    if (scaleId !== 'right' && def.outputs.length && panes.indexOf(scaleId) === -1)
+      panes.push(scaleId)
+    let lineHost: Held | null = null
     def.outputs.forEach((out) => {
       const key = keyOf(inst, out.key)
       wanted.add(key)
@@ -179,6 +221,7 @@ export function renderIndicators(candles: CandleFlat[]): void {
         h = { series: makeSeries(out, scaleId), outputKey: out.key, scaleId, kind }
         held.set(key, h)
       }
+      if (!lineHost && kind !== 'signal' && kind !== 'cloud') lineHost = h
       const data: Any[] = []
       if (out.kind === 'cloud') {
         const a = outs[out.between?.[0] || ''] || []
@@ -199,7 +242,11 @@ export function renderIndicators(candles: CandleFlat[]): void {
         if (v == null || !isFinite(v)) continue
         const time = Math.floor(candles[i].t / 1000)
         const point: Any = { time, value: v }
-        if (out.kind === 'histogram') point.color = histColor(def, out, values, i, candles[i])
+        const own = out.colors?.[i]
+        if (own) point.color = own
+        else if (out.kind === 'histogram')
+          point.color =
+            def.id === PINE_TYPE ? out.color : histColor(def, out, values, i, candles[i])
         data.push(point)
         if (out.kind === 'signal' && out.marker)
           markers.push({
@@ -210,9 +257,25 @@ export function renderIndicators(candles: CandleFlat[]): void {
             size: 1,
           })
       }
+      if (out.markers)
+        out.markers.forEach((m) => {
+          const c = candles[m.i]
+          if (!c) return
+          markers.push({
+            time: Math.floor(c.t / 1000),
+            position: m.position,
+            shape: m.shape,
+            color: m.color,
+            text: m.text,
+            size: 1,
+          })
+        })
       h.series.setData(data)
       if (out.kind === 'signal') h.series.setMarkers(markers)
     })
+    // hline()s ride on the first drawn series; when that series is swapped
+    // the new one starts without lines, so its signature starts empty.
+    if (def.hlines && lineHost) syncPriceLines(lineHost, def)
   })
 
   held.forEach((h, key) => {
@@ -251,6 +314,9 @@ export function indicatorLegend(candles: CandleFlat[]): LegendEntry[] {
       .map((o) => ({ label: o.label, value: outs[o.key]?.[i] as number, color: o.color, big }))
       .filter((p) => p.value != null && isFinite(p.value))
     if (parts.length) out.push({ label: instanceLabel(def, inst.params), parts })
+    // A Pine script that failed shows as a badge rather than disappearing.
+    else if (inst.type === PINE_TYPE && pineStatus(inst).error)
+      out.push({ label: def.name + ' ⚠ error', parts: [] })
   })
   return out
 }

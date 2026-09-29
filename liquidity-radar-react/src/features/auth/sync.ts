@@ -16,7 +16,7 @@ export const SYNC_KEYS = [
   'lr-chartIndicators', 'lr-chartPrefs', 'lr-chartLayout', 'lr-chartMagnet', 'lr-tf', 'lr-tfFavs', 'lr-tfGroups',
   'lr-chartSide', 'lr-chartSideTab', 'lr-showDelta', 'lr-showMLPrediction', 'lr-showConfluence', 'lr-showObGauge',
   'lr-showRLPolicy', 'lr-showVolumeProfile', 'lr-vpSettings', 'lr-showWhaleBubbles', 'lr-whaleMult', 'lr-mc-cols',
-  'lr-drawings-v1',
+  'lr-drawings-v1', 'lr-pineScripts',
   // lists and alerts
   'lr-favCoins', 'lr-pinCoin', 'lr_alerts_v1',
   // paper trading and the self-learning engine
