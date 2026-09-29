@@ -3,13 +3,17 @@
 // pinned. The pinned coin is what the Radar opens on (instead of BTC) and it
 // leads the Radar and Dashboard watchlists.
 //
-// The list is the same favourites store the chart's coin picker stars into,
-// so starring there and adding here are one and the same.
-import { useState } from 'react'
+// Built from the pieces the Market tab already uses: the chart's coin picker
+// to add coins (a star anywhere is the same list), the celebrity-coin cards
+// and the Top Coins table. Rows and cards carry `data-sym`, so the engine's
+// click handler opens their chart just like the other Market tables.
+import type { MouseEvent, ReactNode } from 'react'
 import { state } from '../../services/store'
 import { COINS } from '../../constants/market'
 import { cfmt, pfmt } from '../../utils/format'
 import { useTick } from '../useTick'
+import { CoinBadge } from '../common/CoinBadge'
+import { CoinPicker } from '../chart/CoinPicker'
 import {
   getPinned,
   moveFavorite,
@@ -19,60 +23,58 @@ import {
   useFavorites,
 } from '../../features/favorites/favorites'
 
-const w = window as unknown as { setSymbol?: (s: string) => void }
 const MARKET = ['market']
 
 type Tick = { last?: number; pct?: number; qvol?: number } | undefined
 const tick = (base: string) => state.tickers[symOf(base)] as Tick
-const pct = (v?: number) =>
-  v == null || !isFinite(v) ? '—' : (v >= 0 ? '+' : '') + v.toFixed(2) + '%'
 
-function Icon({ base, size = 26 }: { base: string; size?: number }) {
-  const c = COINS[base]
-  const color = c?.color ?? '#93A6C4'
-  const img = (state.marketCaps as Record<string, { image?: string }>)[base]?.image
-  return (
-    <span
-      className="coin-badge"
-      style={{
-        width: size,
-        height: size,
-        color,
-        borderColor: color + '66',
-        background: color + '1f',
-        fontSize: size * 0.5,
-      }}
-    >
-      {img ? (
-        <img src={img} alt="" width={size} height={size} loading="lazy" />
-      ) : (
-        (c?.icon ?? base[0])
-      )}
-    </span>
-  )
+function ChgPill({ pct }: { pct?: number }) {
+  if (pct == null || !isFinite(pct)) return <span className="cmc-pill flat">—</span>
+  const cls = pct > 0.005 ? 'up' : pct < -0.005 ? 'down' : 'flat'
+  return <span className={'cmc-pill ' + cls}>{(pct > 0 ? '+' : '') + pct.toFixed(2)}%</span>
 }
 
-function PinButton({ base, pinned }: { base: string; pinned: boolean }) {
+/** A button inside a clickable row/card: must not also open the chart. */
+function Btn({
+  label,
+  on,
+  disabled,
+  onClick,
+  children,
+}: {
+  label: string
+  on?: boolean
+  disabled?: boolean
+  onClick: () => void
+  children: ReactNode
+}) {
   return (
     <button
       type="button"
-      className={'cwl-pin' + (pinned ? ' on' : '')}
-      aria-pressed={pinned}
-      title={pinned ? 'Unpin — Radar goes back to BTC' : 'Pin — Radar always opens on ' + base}
+      className={'chart-tool-btn' + (on ? ' on' : '')}
+      aria-label={label}
+      aria-pressed={on}
+      title={label}
+      disabled={disabled}
+      onClick={(e: MouseEvent) => {
+        e.stopPropagation()
+        onClick()
+      }}
+    >
+      {children}
+    </button>
+  )
+}
+
+function PinBtn({ base, pinned }: { base: string; pinned: boolean }) {
+  return (
+    <Btn
+      label={pinned ? 'Unpin ' + base : 'Pin ' + base + ' to the Radar'}
+      on={pinned}
       onClick={() => setPinned(pinned ? null : base)}
     >
-      <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
-        <path
-          d="M9 3h6l-1 6 4 4H6l4-4-1-6ZM12 13v8"
-          fill={pinned ? 'currentColor' : 'none'}
-          stroke="currentColor"
-          strokeWidth="1.8"
-          strokeLinejoin="round"
-          strokeLinecap="round"
-        />
-      </svg>
-      {pinned ? 'Pinned' : 'Pin'}
-    </button>
+      📌
+    </Btn>
   )
 }
 
@@ -80,124 +82,118 @@ export function CoinWishlist() {
   useTick(1500, MARKET)
   const favs = useFavorites()
   const pinned = getPinned()
-  const [add, setAdd] = useState('')
-  const addable = Object.keys(COINS).filter((k) => !favs.includes(k))
-  const top = favs.slice(0, 3)
 
   return (
     <div className="card cwl">
       <div className="sec-head">
         <div className="sec-title">Coin Wishlist</div>
-        <span className="badge b-cyan">
-          {favs.length} {favs.length === 1 ? 'COIN' : 'COINS'}
-          {pinned ? ' · ' + pinned + ' PINNED' : ''}
-        </span>
+        <CoinPicker
+          tabs={MARKET}
+          onPick={(_, base) => {
+            if (!favs.includes(base)) toggleFavorite(base)
+          }}
+          trigger={
+            <>
+              <span className="cp-ico">＋</span>
+              <span className="cp-id">
+                <b>Add coin</b>
+                <small>Search or ★ any coin</small>
+              </span>
+            </>
+          }
+        />
       </div>
 
       {favs.length === 0 ? (
-        <p className="cwl-empty">
-          Add coins below (or star them in the chart's coin picker). Order them by priority, and pin
-          one to make it the coin the Radar always opens on.
-        </p>
+        <div className="disclaimer">
+          Your wishlist is empty. Add coins here, or star them (★) in any coin search. Order them by
+          priority and pin one (📌) to make it the coin the Radar always opens on.
+        </div>
       ) : (
         <>
-          <div className="cwl-top">
-            {top.map((b, i) => {
+          <div className="celeb-grid">
+            {favs.slice(0, 3).map((b, i) => {
               const t = tick(b)
               return (
-                <div key={b} className={'cwl-card' + (pinned === b ? ' pinned' : '')}>
-                  <div className="cwl-card-head">
-                    <span className="cwl-rank">#{i + 1}</span>
-                    <PinButton base={b} pinned={pinned === b} />
+                <div key={b} className="celeb-card" data-sym={symOf(b)}>
+                  <div className="celeb-top">
+                    <span className="badge b-cyan">#{i + 1}</span>
+                    <PinBtn base={b} pinned={pinned === b} />
                   </div>
-                  <button
-                    type="button"
-                    className="cwl-card-body"
-                    onClick={() => w.setSymbol?.(symOf(b))}
-                  >
-                    <Icon base={b} size={34} />
-                    <span className="cwl-card-nm">
-                      <b>{b}</b>
-                      <small>{COINS[b]?.name ?? b + '/USDT'}</small>
-                    </span>
-                  </button>
-                  <div className="cwl-card-px mono">{t?.last ? '$' + pfmt(t.last) : '—'}</div>
-                  <div className={'mono ' + ((t?.pct ?? 0) >= 0 ? 'up' : 'dn')}>{pct(t?.pct)}</div>
+                  <div className="celeb-nm coin-cell">
+                    <CoinBadge sym={symOf(b)} size={24} />
+                    {COINS[b]?.name ?? b}
+                  </div>
+                  <div className="celeb-pr">{t?.last ? '$' + pfmt(t.last) : '—'}</div>
+                  <div className="celeb-mt">
+                    <ChgPill pct={t?.pct} />
+                    <span>{t?.qvol ? cfmt(t.qvol) : '—'}</span>
+                  </div>
                 </div>
               )
             })}
           </div>
 
           <div className="table-scroll">
-            <table className="coins-table cwl-table">
+            <table className="coins-table cmc-table">
               <thead>
                 <tr>
-                  <th>Priority</th>
+                  <th className="cmc-rank">#</th>
                   <th>Coin</th>
                   <th>Price</th>
                   <th>24h %</th>
                   <th>Volume (24h)</th>
-                  <th aria-label="Actions" />
+                  <th>Priority</th>
+                  <th aria-label="Pin and remove" />
                 </tr>
               </thead>
               <tbody>
                 {favs.map((b, i) => {
                   const t = tick(b)
                   return (
-                    <tr key={b} className={pinned === b ? 'pinned' : ''}>
+                    <tr key={b} data-sym={symOf(b)}>
+                      <td className="cmc-rank">{i + 1}</td>
                       <td>
-                        <span className="cwl-order">
-                          <b>{i + 1}</b>
-                          <button
-                            type="button"
-                            aria-label={'Move ' + b + ' up'}
-                            disabled={i === 0}
-                            onClick={() => moveFavorite(b, -1)}
-                          >
-                            ▲
-                          </button>
-                          <button
-                            type="button"
-                            aria-label={'Move ' + b + ' down'}
-                            disabled={i === favs.length - 1}
-                            onClick={() => moveFavorite(b, 1)}
-                          >
-                            ▼
-                          </button>
-                        </span>
+                        <div className="coin-cell">
+                          <CoinBadge sym={symOf(b)} size={28} />
+                          <div className="coin-nm">
+                            <div className="cn">{COINS[b]?.name ?? b}</div>
+                            <div className="cs">
+                              {b}
+                              {pinned === b ? ' · PINNED' : ''}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="cmc-price">{t?.last ? '$' + pfmt(t.last) : '—'}</td>
+                      <td>
+                        <ChgPill pct={t?.pct} />
+                      </td>
+                      <td className="vol-dim">{t?.qvol ? cfmt(t.qvol) : '—'}</td>
+                      <td>
+                        <Btn
+                          label={'Move ' + b + ' up'}
+                          disabled={i === 0}
+                          onClick={() => moveFavorite(b, -1)}
+                        >
+                          ▲
+                        </Btn>{' '}
+                        <Btn
+                          label={'Move ' + b + ' down'}
+                          disabled={i === favs.length - 1}
+                          onClick={() => moveFavorite(b, 1)}
+                        >
+                          ▼
+                        </Btn>
                       </td>
                       <td>
-                        <span className="cwl-coin">
-                          <Icon base={b} size={22} />
-                          <b>{b}</b>
-                          <small>{COINS[b]?.name}</small>
-                        </span>
-                      </td>
-                      <td className="mono">{t?.last ? '$' + pfmt(t.last) : '—'}</td>
-                      <td className={'mono ' + ((t?.pct ?? 0) >= 0 ? 'up' : 'dn')}>
-                        {pct(t?.pct)}
-                      </td>
-                      <td className="mono vol-dim">{t?.qvol ? cfmt(t.qvol) : '—'}</td>
-                      <td>
-                        <span className="cwl-acts">
-                          <PinButton base={b} pinned={pinned === b} />
-                          <button
-                            type="button"
-                            className="cwl-btn"
-                            onClick={() => w.setSymbol?.(symOf(b))}
-                          >
-                            Chart
-                          </button>
-                          <button
-                            type="button"
-                            className="cwl-btn cwl-rm"
-                            aria-label={'Remove ' + b}
-                            title="Remove from wishlist"
-                            onClick={() => toggleFavorite(b)}
-                          >
-                            ✕
-                          </button>
-                        </span>
+                        <PinBtn base={b} pinned={pinned === b} />{' '}
+                        <Btn
+                          label={'Remove ' + b + ' from wishlist'}
+                          onClick={() => toggleFavorite(b)}
+                        >
+                          ✕
+                        </Btn>
                       </td>
                     </tr>
                   )
@@ -207,27 +203,6 @@ export function CoinWishlist() {
           </div>
         </>
       )}
-
-      <form
-        className="cwl-add"
-        onSubmit={(e) => {
-          e.preventDefault()
-          if (add && !favs.includes(add)) toggleFavorite(add)
-          setAdd('')
-        }}
-      >
-        <select value={add} onChange={(e) => setAdd(e.target.value)} aria-label="Coin to add">
-          <option value="">Add a coin…</option>
-          {addable.map((k) => (
-            <option key={k} value={k}>
-              {k} — {COINS[k].name}
-            </option>
-          ))}
-        </select>
-        <button type="submit" className="cwl-btn" disabled={!add}>
-          Add to wishlist
-        </button>
-      </form>
     </div>
   )
 }

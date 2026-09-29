@@ -16,6 +16,7 @@ import { pfmt } from '../../utils/format'
 import { instrumentOf, isInstrument } from '../../constants/instruments'
 import { signalData, signalHitRate } from '../../features/signals/signals'
 import { useTick } from '../useTick'
+import { CoinBadge } from '../common/CoinBadge'
 
 type Candle = { t: number; o: number; h: number; l: number; c: number; v: number }
 type Side = 'BUY' | 'SELL' | 'WAIT'
@@ -105,32 +106,6 @@ function matches(s: Sig, q: Quick, tf: string, venue: Venue, text: string): bool
   return true
 }
 
-function CoinBadge({ sym, size = 36 }: { sym: string; size?: number }) {
-  const meta = coinMeta(sym)
-  const inst = instrumentOf(sym)
-  const img = (state.marketCaps as Record<string, { image?: string }> | undefined)?.[baseOf(sym)]
-    ?.image
-  const color = inst?.color ?? meta.color
-  return (
-    <span
-      className="coin-badge"
-      style={{
-        width: size,
-        height: size,
-        color,
-        borderColor: color + '66',
-        background: color + '1f',
-        fontSize: size * 0.5,
-      }}
-    >
-      {img && !inst ? (
-        <img src={img} alt="" width={size} height={size} loading="lazy" decoding="async" />
-      ) : (
-        (inst?.icon ?? meta.icon)
-      )}
-    </span>
-  )
-}
 
 const Ico = ({ d, size = 18 }: { d: string; size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -273,7 +248,7 @@ function SignalCard({ s }: { s: Sig }) {
   return (
     <article className={'sg-card ' + cls}>
       <div className="sg-card-top">
-        <CoinBadge sym={s.sym} />
+        <CoinBadge size={36} sym={s.sym} />
         <span className="sg-id">
           <b>{label(s.sym)}</b>
           <small>{sub(s.sym)}</small>

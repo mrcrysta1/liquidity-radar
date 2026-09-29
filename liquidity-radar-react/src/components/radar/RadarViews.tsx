@@ -35,6 +35,7 @@ import {
   getShowMLPrediction,
   onOverlayTogglesChange,
 } from '../../features/charts/overlayToggles'
+import { CoinBadge } from '../common/CoinBadge'
 
 const w = window as unknown as { switchTab?: (t: string) => void; setSymbol?: (s: string) => void }
 const go = (tab: string) => w.switchTab?.(tab)
@@ -51,30 +52,6 @@ function useBump(sub: (fn: () => void) => () => void) {
   useEffect(() => sub(() => f((n) => n + 1)), [sub])
 }
 
-function CoinBadge({ sym, size = 22 }: { sym: string; size?: number }) {
-  const meta = coinMeta(sym)
-  const img = (state.marketCaps as Record<string, { image?: string }> | undefined)?.[baseOf(sym)]
-    ?.image
-  return (
-    <span
-      className="coin-badge"
-      style={{
-        width: size,
-        height: size,
-        color: meta.color,
-        borderColor: meta.color + '66',
-        background: meta.color + '1f',
-        fontSize: size * 0.5,
-      }}
-    >
-      {img ? (
-        <img src={img} alt="" width={size} height={size} loading="lazy" decoding="async" />
-      ) : (
-        meta.icon
-      )}
-    </span>
-  )
-}
 
 function Card({
   title,
