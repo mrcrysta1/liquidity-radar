@@ -5186,3 +5186,10 @@ html[data-palette="glass"] .acct-card{background:linear-gradient(145deg,rgba(255
 
 /* Volume profile settings, under its row in the Panes menu */
 .vp-settings{grid-template-columns:repeat(auto-fit,minmax(76px,1fr));padding:2px 8px 8px 48px}
+
+/* Price chart: inline caption field for the text drawing tools. */
+.draw-label-input{
+  position:absolute;z-index:7;width:160px;box-sizing:border-box;background:var(--bg);border:1px solid var(--primary);
+  border-radius:8px;color:var(--txt);padding:5px 9px;font-size:12px;font-family:'JetBrains Mono',monospace;outline:none;
+  box-shadow:0 0 0 3px rgb(var(--pRGB)/.15);
+}
