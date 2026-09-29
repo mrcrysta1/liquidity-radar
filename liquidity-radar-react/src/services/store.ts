@@ -3,6 +3,7 @@ import type { CrossExRow, DeepOb, LongShortRow, OiPoint } from '../features/adva
 import type { Liq } from '../features/advanced/liquidations'
 import type { MarketCapEntry } from './coingecko'
 import type { FuturesEntry } from './futures'
+import { defaultSymbol } from '../features/favorites/favorites'
 
 export interface AppState {
   symbol: string
@@ -33,7 +34,8 @@ export interface AppState {
 // Single shared application state object. The engine's imperative code
 // mutates it directly; typed modules only read the documented fields.
 export const state: AppState = {
-  symbol: 'BTCUSDT',
+  // The pinned coin from the Market tab's wishlist, else BTC.
+  symbol: defaultSymbol(),
   tab: 'radar',
   tf: '15m',
   tickers: {},

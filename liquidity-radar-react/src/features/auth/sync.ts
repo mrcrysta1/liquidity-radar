@@ -17,7 +17,7 @@ export const SYNC_KEYS = [
   'lr-chartSide', 'lr-chartSideTab', 'lr-showDelta', 'lr-showMLPrediction', 'lr-showConfluence', 'lr-showObGauge',
   'lr-showRLPolicy', 'lr-showVolumeProfile', 'lr-showWhaleBubbles', 'lr-whaleMult', 'lr-mc-cols',
   // lists and alerts
-  'lr-favCoins', 'lr_alerts_v1',
+  'lr-favCoins', 'lr-pinCoin', 'lr_alerts_v1',
   // paper trading and the self-learning engine
   'lr-paperTrades', 'lr-rlAutoTrade', 'lr-sl-config-v1', 'lr-sl-trades-v1', 'lr-sl-log-v1', 'lr-sl-models-v1',
 ] as const

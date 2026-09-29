@@ -37,6 +37,7 @@ import { Footer } from './footer/Footer'
 import { DashHead } from './DashHead'
 import { Sidebar } from './Sidebar'
 import { HOT_LIST } from '../constants/market'
+import { CoinWishlist } from './market/CoinWishlist'
 import { Guard } from './ErrorBoundary'
 import { HomeDashboard, HomeHero } from './HomeDashboard'
 import { RadarHero, RadarLower, RadarMetrics, RadarSide } from './radar/RadarViews'
@@ -317,6 +318,8 @@ export function Shell() {
       </section>
       
       <section className="tab-section" id="tab-market">
+        <Guard name="Coin wishlist"><CoinWishlist /></Guard>
+
         <div className="mo-strip">
           <div className="metric"><div className="ml"><span>Tracked Volume</span></div><div className="mv" id="moVol">—</div><div className="ms">sum of {HOT_LIST.length} majors (24h)</div></div>
           <div className="metric"><div className="ml"><span>Advancers</span></div><div className="mv" style={{ 'color': 'var(--green)' }} id="moAdv">—</div><div className="ms">of tracked set</div></div>
