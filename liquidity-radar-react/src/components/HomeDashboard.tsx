@@ -16,9 +16,9 @@ import { latestNews } from '../features/news/newsFeed'
 import { COINS } from '../constants/market'
 import { baseOf, coinMeta } from '../utils/coins'
 import { cfmt, pfmt } from '../utils/format'
-import { getPinned, symOf, useFavorites, watchList } from '../features/favorites/favorites'
+import { getPinned, useFavorites, watchList } from '../features/favorites/favorites'
 import { useTick } from './useTick'
-import { AreaChart } from './home/charts'
+import { AreaChart, PairBars } from './home/charts'
 import { priceTicks } from './home/ticks'
 import { HomeIcon } from './home/icons'
 import type { HomeIconId } from './home/icons'
@@ -271,30 +271,41 @@ function VenuesTile() {
   )
 }
 
-/** The user's wishlist in their priority order, laid out like Biggest Movers. */
-function WishlistTile() {
-  const favs = useFavorites()
-  const pinned = getPinned()
-  if (!favs.length) return <Empty>Star (★) coins in any coin search to build your wishlist.</Empty>
+function LiquidationsTile({ now }: { now: number }) {
+  const liqs =
+    (state.liqs as Array<{ side: string; price: number; qty: number; ts: number }> | null) ?? []
+  if (!liqs.length) return <Empty>Listening for forced orders…</Empty>
+  // Last hour in 12 five-minute buckets. A SELL forceOrder closes a long.
+  const B = 12
+  const step = 5 * 60_000
+  const buckets = Array.from({ length: B }, () => ({ long: 0, short: 0 }))
+  let longs = 0
+  let shorts = 0
+  for (const l of liqs) {
+    const age = now - l.ts
+    if (age < 0 || age >= B * step) continue
+    const usd = l.price * l.qty
+    const b = buckets[B - 1 - Math.floor(age / step)]
+    if (l.side === 'SELL') {
+      b.long += usd
+      longs += usd
+    } else {
+      b.short += usd
+      shorts += usd
+    }
+  }
   return (
-    <ul className="dt-list dense">
-      {favs.slice(0, 5).map((b) => {
-        const sym = symOf(b)
-        const t = state.tickers[sym] as { last?: number; pct?: number } | undefined
-        return (
-          <li key={b}>
-            <button type="button" onClick={() => open(sym)}>
-              <span className="dt-sym">
-                {b}
-                {pinned === b ? ' 📌' : ''}
-              </span>
-              <span className="dt-meta mono">{t?.last ? pfmt(t.last) : '—'}</span>
-              <b className={(t?.pct ?? 0) >= 0 ? 'up' : 'dn'}>{pct(t?.pct)}</b>
-            </button>
-          </li>
-        )
-      })}
-    </ul>
+    <div className="lq">
+      <PairBars buckets={buckets} />
+      <dl className="lq-tot">
+        <dt className="up">Shorts</dt>
+        <dd>{cfmt(shorts)}</dd>
+        <dt className="dn">Longs</dt>
+        <dd>{cfmt(longs)}</dd>
+        <dt className="dim">Window</dt>
+        <dd className="dim">1h</dd>
+      </dl>
+    </div>
   )
 }
 
@@ -363,9 +374,11 @@ function NewsTile({ now }: { now: number }) {
 }
 
 
+/** Wishlist coins in priority order (pinned coin first, marked 📌). */
 function WatchlistTile() {
   useFavorites()
   const WATCH = watchList()
+  const pinned = getPinned()
   return (
     <table className="wl">
       <thead>
@@ -388,6 +401,11 @@ function WatchlistTile() {
                 <span className="wl-coin">
                   <CoinBadge sym={sym} size={20} />
                   {k}
+                  {pinned === k && (
+                    <span title="Pinned — the Radar opens on this coin" aria-label="pinned">
+                      📌
+                    </span>
+                  )}
                 </span>
               </td>
               <td className="mono">{t?.last ? '$' + pfmt(t.last) : '—'}</td>
@@ -534,8 +552,8 @@ export function HomeDashboard() {
         <Tile area="venues" title="Cross-Exchange" icon="venues" tab="radar" cta="Venues">
           <VenuesTile />
         </Tile>
-        <Tile area="wish" title="Wishlist" icon="star" tab="market" cta="Manage">
-          <WishlistTile />
+        <Tile area="liqs" title="Liquidations" icon="liqs" tab="analysis" cta="Analysis">
+          <LiquidationsTile now={now} />
         </Tile>
         <Tile area="sentiment" title="Sentiment" icon="sentiment" tab="radar" cta="Index">
           <SentimentTile />

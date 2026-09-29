@@ -95,3 +95,24 @@ export function AreaChart({
     </div>
   )
 }
+
+/** Paired bars per bucket: longs liquidated (red) and shorts liquidated (green). */
+export function PairBars({
+  buckets,
+  height = 78,
+}: {
+  buckets: Array<{ long: number; short: number }>
+  height?: number
+}) {
+  const max = Math.max(1, ...buckets.map((b) => Math.max(b.long, b.short)))
+  return (
+    <div className="hc-bars" style={{ height }} aria-hidden="true">
+      {buckets.map((b, i) => (
+        <span key={i} className="hc-pair">
+          <i className="up" style={{ height: Math.max(2, (b.short / max) * 100) + '%' }} />
+          <i className="dn" style={{ height: Math.max(2, (b.long / max) * 100) + '%' }} />
+        </span>
+      ))}
+    </div>
+  )
+}
