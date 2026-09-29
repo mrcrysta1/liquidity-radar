@@ -42,6 +42,14 @@ type Any = any
 
 let chart: Any = null
 let candleSeries: Any = null
+// Alert price lines (features/alerts/alertLines) hang off the price series,
+// which is rebuilt on every style change — let them follow it.
+const priceSeriesSubs = new Set<(s: Any) => void>()
+export const getPriceSeries = (): Any => candleSeries
+export function onPriceSeriesChange(fn: (s: Any) => void): () => void {
+  priceSeriesSubs.add(fn)
+  return () => priceSeriesSubs.delete(fn)
+}
 // Chart style lives in ./chartStyle and indicators in indicators/store — both
 // persist. What is left here is the live series handles and the drawings,
 // which stay session-only.
@@ -254,6 +262,7 @@ function applyChartStyle(): void {
     })
   }
   chartState.styleSeries = candleSeries
+  priceSeriesSubs.forEach((f) => f(candleSeries))
 }
 export { renderWhaleBubbles } from './whaleBubbles'
 export function initChart(): void {

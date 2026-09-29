@@ -23,6 +23,7 @@ const { VENUES, isUsdQuoted } = await import(src('features/advanced/venues.ts'))
 const { groupAggTrades, autoThreshold, bubbleRadius } = await import(
   src('features/whales/whaleMath.ts')
 )
+const alerts = await import(src('features/alerts/rules.ts'))
 
 let pass = 0
 const fails = []
@@ -239,6 +240,85 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   near('whales: threshold order draws at the minimum radius', bubbleRadius(1e5, 1e5), 3.5)
   near('whales: 4x the dollars is 2x the radius (area ∝ notional)', bubbleRadius(4e5, 1e5), 7)
   eq('whales: radius is capped', bubbleRadius(1e12, 1e5), 36)
+}
+
+// ---------------------------------------------------------------- alerts
+{
+  const { evalPrice, evalTechnical, evalWatchlist, stepRule, normalizeRules, rearm, ALERT_LIMITS } = alerts
+  const r = (o) => ({ id: 'x', kind: 'price', sym: 'BTCUSDT', enabled: true, created: 0, condition: 'above', value: 0, once: false, triggerCount: 0, ...o })
+  const kl = (closes) => closes.map((c, i) => ({ t: i * 60000, o: c, h: c + 1, l: c - 1, c, v: 1 }))
+  const ramp = (n, f) => Array.from({ length: n }, (_, i) => f(i))
+
+  eq('alerts: limits', ALERT_LIMITS, { price: 1000, technical: 1000, watchlist: 15 })
+  // crosses need a previous value on the other side (ported from Pro's engine.test.ts)
+  ok('alerts: crosses above fires on the cross', evalPrice(r({ condition: 'crosses_above', value: 100 }), 101, 99, 0))
+  ok('alerts: crosses above needs a previous price', !evalPrice(r({ condition: 'crosses_above', value: 100 }), 101, undefined, 0))
+  ok('alerts: crosses above ignores a start above', !evalPrice(r({ condition: 'crosses_above', value: 100 }), 101, 100.5, 0))
+  ok('alerts: crosses below', evalPrice(r({ condition: 'crosses_below', value: 100 }), 99, 100, 0))
+  ok('alerts: above is a level (inclusive, as old alerts)', evalPrice(r({ condition: 'above', value: 100 }), 100, undefined, 0))
+  ok('alerts: below is a level', evalPrice(r({ condition: 'below', value: 100 }), 90, 80, 0) && !evalPrice(r({ condition: 'below', value: 100 }), 110, 80, 0))
+  ok('alerts: 24h % above', evalPrice(r({ condition: 'pct_change_24h_above', value: 5 }), 1, 1, 6.1))
+  ok('alerts: 24h % below', evalPrice(r({ condition: 'pct_change_24h_below', value: -5 }), 1, 1, -7) && !evalPrice(r({ condition: 'pct_change_24h_below', value: -5 }), 1, 1, undefined))
+
+  // technical (ported: a steady climb is overbought)
+  const up = kl(ramp(100, (i) => 100 + i))
+  ok('alerts: rsi above on a steady climb', evalTechnical(r({ kind: 'technical', condition: 'rsi_above', value: 70 }), up))
+  ok('alerts: rsi below false on a climb', !evalTechnical(r({ kind: 'technical', condition: 'rsi_below', value: 30 }), up))
+  ok('alerts: too few candles never fire', !evalTechnical(r({ kind: 'technical', condition: 'rsi_above', value: 70 }), up.slice(0, 30)))
+  ok('alerts: close above sma on a climb', evalTechnical(r({ kind: 'technical', condition: 'close_above_sma', value: 20 }), up))
+  ok('alerts: close below sma false on a climb', !evalTechnical(r({ kind: 'technical', condition: 'close_below_sma', value: 20 }), up))
+  // A long fall then a sharp final jump: the fast EMA crosses the slow one on the last bar.
+  const vee = kl([...ramp(99, (i) => 200 - i), 400])
+  ok('alerts: ema cross up on the last bar', evalTechnical(r({ kind: 'technical', condition: 'ema_cross_up', value: 3, value2: 10 }), vee))
+  ok('alerts: no ema cross down there', !evalTechnical(r({ kind: 'technical', condition: 'ema_cross_down', value: 3, value2: 10 }), vee))
+  ok('alerts: macd cross up on the reversal bar', evalTechnical(r({ kind: 'technical', condition: 'macd_cross_up' }), vee))
+  ok('alerts: no macd cross on a straight climb', !evalTechnical(r({ kind: 'technical', condition: 'macd_cross_up' }), up))
+  const peak = kl([...ramp(99, (i) => 100 + i), 0])
+  ok('alerts: macd cross down on a collapse', evalTechnical(r({ kind: 'technical', condition: 'macd_cross_down' }), peak))
+
+  // watchlist
+  eq(
+    'alerts: watchlist any above',
+    evalWatchlist(r({ kind: 'watchlist', condition: 'any_pct_24h_above', value: 5 }), [{ symbol: 'A', pct: 6 }, { symbol: 'B', pct: 1 }]),
+    { hit: true, matched: ['A'], detail: 'A 6.00%' },
+  )
+  eq('alerts: watchlist any below', evalWatchlist(r({ kind: 'watchlist', condition: 'any_pct_24h_below', value: -3 }), [{ symbol: 'A', pct: -4 }, { symbol: 'B', pct: 1 }]).matched, ['A'])
+  ok('alerts: watchlist count needs value2 symbols', !evalWatchlist(r({ kind: 'watchlist', condition: 'count_above_pct', value: 2, value2: 3 }), [{ symbol: 'A', pct: 3 }, { symbol: 'B', pct: 4 }]).hit)
+  ok('alerts: watchlist count hit', evalWatchlist(r({ kind: 'watchlist', condition: 'count_above_pct', value: 2, value2: 2 }), [{ symbol: 'A', pct: 3 }, { symbol: 'B', pct: 4 }]).hit)
+
+  // firing: edges, once, repeat + cooldown
+  const t0 = 1_000_000
+  const s1 = stepRule(r({ once: true }), true, t0)
+  ok('alerts: once fires on the first true', s1.fire && s1.next.enabled === false && s1.next.triggerCount === 1)
+  ok('alerts: a disabled rule never fires', !stepRule(s1.next, true, t0 + 1).fire)
+  const s2 = stepRule(r({ once: false, cooldownMin: 5 }), true, t0)
+  ok('alerts: repeat fires on the edge', s2.fire && s2.next.enabled)
+  ok('alerts: holding true is not a new edge', !stepRule(s2.next, true, t0 + 10 * 60000).fire)
+  const off = stepRule(s2.next, false, t0 + 60000).next
+  const held = stepRule(off, true, t0 + 2 * 60000)
+  ok('alerts: an edge inside the cooldown is held', !held.fire && held.next.lastState === false)
+  ok('alerts: the held edge fires once the cooldown ends', stepRule(held.next, true, t0 + 6 * 60000).fire)
+  const w1 = stepRule(r({ kind: 'watchlist', condition: 'any_pct_24h_above', value: 5, once: false, cooldownMin: 0 }), true, t0, ['A'])
+  ok('alerts: watchlist fires for a new symbol', w1.fire)
+  ok('alerts: same symbols do not refire', !stepRule(w1.next, true, t0 + 1, ['A']).fire)
+  ok('alerts: another symbol joining refires', stepRule(w1.next, true, t0 + 2, ['A', 'B']).fire)
+  ok('alerts: rearm clears the edge memory', rearm(s1.next).enabled && rearm(s1.next).lastState === undefined)
+
+  // migration of the old saved price alerts
+  const mig = normalizeRules([
+    { sym: 'BTCUSDT', dir: 'above', price: 70000, fired: false, created: 5 },
+    { sym: 'ethusdt', dir: 'below', price: '2500', fired: true, created: 6 },
+    { sym: '', dir: 'above', price: 1 },
+    null,
+    { kind: 'technical', sym: 'SOLUSDT', condition: 'rsi_above', value: 70, once: false, enabled: true, id: 'k' },
+    { kind: 'price', sym: 'X', condition: 'rsi_above', value: 1 },
+  ])
+  eq('alerts: migration keeps valid entries only', mig.length, 3)
+  eq('alerts: old above becomes a once level rule', [mig[0].kind, mig[0].condition, mig[0].value, mig[0].once, mig[0].enabled], ['price', 'above', 70000, true, true])
+  eq('alerts: old fired alert stays spent', [mig[1].sym, mig[1].condition, mig[1].enabled, mig[1].triggerCount], ['ETHUSDT', 'below', false, 1])
+  eq('alerts: migrated ids are stable', normalizeRules([{ sym: 'BTCUSDT', dir: 'above', price: 1, created: 5 }])[0].id, mig[0].id)
+  eq('alerts: new rules default their timeframe', mig[2].tf, '15m')
+  eq('alerts: junk storage is empty', normalizeRules({ a: 1 }), [])
 }
 
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')
