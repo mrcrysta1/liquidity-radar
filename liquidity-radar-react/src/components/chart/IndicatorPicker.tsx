@@ -8,7 +8,6 @@ import {
   indicatorDef,
   instanceLabel,
 } from '../../features/charts/indicators/registry'
-import type { SourceKey } from '../../features/charts/indicators/registry'
 import {
   addIndicator,
   getIndicators,
@@ -18,6 +17,7 @@ import {
   resetIndicators,
   setParam,
   setSource,
+  sourceOptions,
   subscribeIndicators,
   toggleIndicator,
 } from '../../features/charts/indicators/store'
@@ -202,11 +202,14 @@ export function IndicatorPicker() {
                             <span>Source</span>
                             <select
                               value={inst.source}
-                              onChange={(e) => setSource(inst.uid, e.target.value as SourceKey)}
+                              onChange={(e) => setSource(inst.uid, e.target.value)}
                             >
-                              {SOURCES.map((s) => (
+                              {/* Price fields, then other indicators' outputs
+                                  (indicator-on-indicator); options that would
+                                  loop back to this one are left out. */}
+                              {sourceOptions(inst.uid).map((s, i) => (
                                 <option key={s.key} value={s.key}>
-                                  {s.label}
+                                  {i >= SOURCES.length ? '↳ ' + s.label : s.label}
                                 </option>
                               ))}
                             </select>
