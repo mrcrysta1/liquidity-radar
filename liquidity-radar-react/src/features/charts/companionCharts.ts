@@ -7,6 +7,10 @@
 // loading goes through the shared resampling loader so companions support the
 // same intervals as the main chart. Live bars arrive over the shared kline hub
 // (services/failover), so any number of companions share one socket.
+//
+// Each companion carries its own indicator set (indicators/panelStore, slot
+// 'c<cell index>'), drawn by its own renderer over its own candles; the
+// header's indicators button is a React portal (PanelIndicatorButtons).
 import * as LightweightCharts from 'lightweight-charts'
 import { isInstrument } from '../../constants/instruments'
 import { COINS } from '../../constants/market'
@@ -23,6 +27,9 @@ import { TIMEFRAMES, tfDef } from '../../services/timeframe'
 import type { Folder } from '../../services/timeframe'
 import { storageGet, storageSet } from '../../services/storage'
 import { getTimeframe } from './timeframes'
+import { createIndicatorRenderer } from './indicators/render'
+import type { IndicatorRenderer } from './indicators/render'
+import { panelIndicatorStore } from './indicators/panelStore'
 
 type Any = any
 
@@ -39,7 +46,18 @@ interface Panel {
   off: (() => void) | null
   ro: ResizeObserver | null
   token: number
+  /** Indicator slot, 'c1'..: the panel's cell in the layout. */
+  slot: string
+  /** Candles on the chart, kept for the panel's indicators. */
+  candles: CandleFlat[]
+  ind: IndicatorRenderer | null
+  indOff: (() => void) | null
+  indTimer: ReturnType<typeof setTimeout> | null
+  indAt: number
 }
+
+/** Live ticks redraw a panel's indicators at most this often. */
+const IND_THROTTLE_MS = 1000
 
 const STORE_KEY = 'lr-chartLayout'
 const FALLBACK_SYMS = [
@@ -116,6 +134,12 @@ export function setLayout(n: number): void {
 
 /** Re-apply the current layout — also the entry point used on boot. */
 export function applyLayout(): void {
+  applyGrid()
+  // Panel headers changed: the indicator buttons re-mount into them.
+  emit()
+}
+
+function applyGrid(): void {
   const grid = $('chartLayout')
   const wrap = $('chartWrap')
   if (!grid || !wrap) return
@@ -161,6 +185,12 @@ function addPanel(i: number): void {
     off: null,
     ro: null,
     token: 0,
+    slot: 'c' + (i + 1),
+    candles: [],
+    ind: null,
+    indOff: null,
+    indTimer: null,
+    indAt: 0,
   }
   const cell = document.createElement('div')
   cell.className = 'rc-cell'
@@ -168,6 +198,9 @@ function addPanel(i: number): void {
     '<div class="rc-head">' +
     '<span class="rc-title"></span>' +
     '<div class="rc-controls">' +
+    '<span class="rc-ind" data-ind-slot="' +
+    p.slot +
+    '"></span>' +
     '<select class="rc-sym" aria-label="Chart symbol">' +
     Object.keys(COINS)
       .map((k) => '<option value="' + COINS[k].sym + '">' + k + '</option>')
@@ -194,6 +227,7 @@ function addPanel(i: number): void {
   })
   tfSel.addEventListener('change', () => {
     p.tf = tfSel.value
+    syncTitle(p)
     reload(p)
     persist()
   })
@@ -204,6 +238,8 @@ function addPanel(i: number): void {
 function syncTitle(p: Panel): void {
   const el = p.el?.querySelector('.rc-title')
   if (el) el.textContent = coinMeta(p.sym).icon + ' ' + baseOf(p.sym) + '/USDT'
+  const slot = p.el?.querySelector('.rc-ind') as HTMLElement | null
+  if (slot) slot.dataset.indLabel = baseOf(p.sym) + '/USDT ' + p.tf
 }
 
 function destroyPanel(i: number): void {
@@ -211,6 +247,11 @@ function destroyPanel(i: number): void {
   if (!p) return
   p.token = -1
   closeWs(p)
+  if (p.indOff) p.indOff()
+  p.indOff = null
+  if (p.indTimer) clearTimeout(p.indTimer)
+  p.indTimer = null
+  p.ind = null
   if (p.ro) p.ro.disconnect()
   if (p.chart) {
     try {
@@ -263,6 +304,21 @@ function initChart(p: Panel): void {
   })
   p.volSeries = chart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: 'vol' })
   p.volSeries.priceScale().applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } })
+  const store = panelIndicatorStore(p.slot)
+  p.ind = createIndicatorRenderer(store.getIndicators, {
+    // Candles and volume make room for the panes; with none, the panel looks
+    // exactly as it did before it had indicators.
+    priceLayout: (c: Any, bottom: number) => {
+      c.priceScale('right').applyOptions({
+        scaleMargins: bottom ? { top: 0.08, bottom: bottom + 0.1 } : { top: 0.2, bottom: 0.1 },
+      })
+      c.priceScale('vol').applyOptions({
+        scaleMargins: bottom ? { top: 1 - bottom - 0.1, bottom } : { top: 0.85, bottom: 0 },
+      })
+    },
+  })
+  p.ind.attach(chart)
+  p.indOff = store.subscribe(() => drawIndicators(p))
   const legend = p.el?.querySelector('.rc-legend') as HTMLElement | null
   chart.subscribeCrosshairMove((param: Any) => {
     if (!legend || !param.time || !param.seriesData) return
@@ -305,7 +361,28 @@ function reload(p: Panel): void {
     })
 }
 
+/** Redraw the panel's indicators over its candles, now. */
+function drawIndicators(p: Panel): void {
+  if (p.indTimer) clearTimeout(p.indTimer)
+  p.indTimer = null
+  p.indAt = Date.now()
+  if (!p.ind || !p.chart) return
+  try {
+    p.ind.render(p.candles)
+  } catch (e) {
+    console.warn('companion indicators', e)
+  }
+}
+
+/** Live ticks: at most one indicator redraw per IND_THROTTLE_MS, trailing. */
+function scheduleIndicators(p: Panel): void {
+  if (!p.ind || p.indTimer || !panelIndicatorStore(p.slot).indicatorCount()) return
+  const wait = Math.max(0, IND_THROTTLE_MS - (Date.now() - p.indAt))
+  p.indTimer = setTimeout(() => drawIndicators(p), wait)
+}
+
 function draw(p: Panel, candles: CandleFlat[]): void {
+  p.candles = candles.slice()
   p.candleSeries.setData(candles.map(mapCandle))
   p.volSeries.setData(
     candles.map((c) => ({
@@ -314,6 +391,7 @@ function draw(p: Panel, candles: CandleFlat[]): void {
       color: c.c >= c.o ? 'rgba(0,230,118,.35)' : 'rgba(255,23,68,.35)',
     })),
   )
+  drawIndicators(p)
   p.chart.timeScale().fitContent()
   const last = candles[candles.length - 1]
   const legend = p.el?.querySelector('.rc-legend') as HTMLElement | null
@@ -342,6 +420,14 @@ function connect(p: Panel, token: number): void {
       const raw: CandleFlat = { t: k.t, o: +k.o, h: +k.h, l: +k.l, c: +k.c, v: +k.v }
       if (!isFinite(raw.c) || raw.c <= 0) return
       const c = p.folder ? p.folder.push(raw) : raw
+      const arr = p.candles
+      const lastT = arr.length ? arr[arr.length - 1].t : -Infinity
+      if (c.t === lastT) arr[arr.length - 1] = c
+      else if (c.t > lastT) {
+        arr.push(c)
+        if (arr.length > 1500) arr.shift()
+      }
+      scheduleIndicators(p)
       p.candleSeries.update(mapCandle(c))
       p.volSeries.update({
         time: Math.floor(c.t / 1000),
@@ -424,5 +510,6 @@ export function applyCompanionTheme(): void {
       borderUpColor: th.up,
       borderDownColor: th.dn,
     })
+    p.ind?.refreshColors()
   })
 }

@@ -5268,3 +5268,25 @@ html[data-palette="glass"] .acct-card{background:linear-gradient(145deg,rgba(255
 .ind-settings .pine-msg{font-size:10.5px}
 [data-theme="light"] .pine-editor,[data-theme="light"] .pine-examples{background:var(--card);border-color:var(--border)}
 @media (max-width:640px){.pine-editor{height:200px}.pine-examples{max-width:50%}}
+
+/* ---- Per-panel indicators: the button in each multi-chart panel header and
+   its menu, which floats over the page because panel cells clip. */
+.rc-ind,.mc-ind{display:inline-flex;align-items:center}
+.ind-picker-panel{display:inline-flex}
+.rc-ind-btn{
+  position:relative;display:inline-flex;align-items:center;justify-content:center;
+  width:24px;height:20px;border-radius:6px;cursor:pointer;color:var(--txt);
+  background:var(--bg);border:1px solid var(--border2);padding:0;
+}
+.mc-ind .rc-ind-btn{height:22px;border-radius:8px;background:var(--sunk-2);border-color:var(--hair-2)}
+.rc-ind-btn:hover{border-color:var(--primary)}
+.rc-ind-btn.on{border-color:var(--primary);background:rgb(var(--pRGB)/.2)}
+.rc-ind-btn:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
+.rc-ind-count{
+  position:absolute;top:-5px;right:-5px;min-width:13px;height:13px;padding:0 3px;
+  display:flex;align-items:center;justify-content:center;pointer-events:none;
+  background:var(--primary);color:#fff;border-radius:999px;
+  font-family:var(--mono);font-size:8.5px;font-weight:800;line-height:1;
+}
+.ind-menu.ind-menu-float{position:fixed;z-index:1200;overflow-y:auto;overscroll-behavior:contain}
+[data-theme="light"] .rc-ind-btn{background:var(--card);border-color:var(--border)}

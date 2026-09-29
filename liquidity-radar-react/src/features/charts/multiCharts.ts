@@ -2,6 +2,10 @@
 // inline <script>; the classic-script globals (mcAdd/mcRemove/mcChange*) are
 // re-exposed on window by the engine. Chart creation/rendering lives here,
 // matching the chartRender module conventions.
+//
+// Each panel carries its own indicator set (indicators/panelStore, slot
+// 'mc<position>'), drawn by its own renderer over its own candles; the
+// header's indicators button is a React portal (PanelIndicatorButtons).
 import * as LightweightCharts from 'lightweight-charts'
 import { poll } from '../../services/pollScheduler'
 import { pfmt } from '../../utils/format'
@@ -21,6 +25,9 @@ import {
   mdVal,
 } from '../../services/market'
 import { fetchKlineRows, klineHub } from '../../services/failover'
+import { createIndicatorRenderer } from './indicators/render'
+import type { IndicatorRenderer } from './indicators/render'
+import { panelIndicatorStore, prunePanelSlots, shiftPanelSlots } from './indicators/panelStore'
 
 type Any = any
 
@@ -34,8 +41,16 @@ interface McPanel {
   rsiSeries?: Any
   ws: Any
   candles: Any[]
+  ind?: IndicatorRenderer | null
+  indOff?: (() => void) | null
+  indTimer?: ReturnType<typeof setTimeout> | null
+  indAt?: number
   [key: string]: Any
 }
+
+/** Live ticks redraw a panel's indicators at most this often. */
+const IND_THROTTLE_MS = 1000
+const slotOf = (p: McPanel) => 'mc' + mcPanels.indexOf(p)
 
 const MC_INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d']
 const MC_COINS = [
@@ -91,6 +106,9 @@ export function initMultiCharts(): void {
   ;['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'DOGEUSDT'].forEach((sym) => {
     mcPanels.push(blankPanel(sym, '1h'))
   })
+  // The workspace always reopens with these four, so indicator sets saved
+  // for panels beyond them belong to charts that are gone.
+  prunePanelSlots('mc', mcPanels.length)
   renderMCGrid()
   poll(mcRefreshAll, 15000)
 }
@@ -138,6 +156,36 @@ function mcPaintHead(p: McPanel): void {
   if (rsiEl && pts.length) rsiEl.textContent = pts[pts.length - 1].value.toFixed(1)
 }
 
+/** Stop following the panel's indicator set (its chart is going away). */
+function mcDropIndicators(p: McPanel): void {
+  if (p.indOff) p.indOff()
+  p.indOff = null
+  if (p.indTimer) clearTimeout(p.indTimer)
+  p.indTimer = null
+  p.ind = null
+}
+
+/** Redraw the panel's indicators over its candles, now. */
+function mcDrawIndicators(p: McPanel): void {
+  if (p.indTimer) clearTimeout(p.indTimer)
+  p.indTimer = null
+  p.indAt = Date.now()
+  if (!p.ind || !p.chart) return
+  try {
+    p.ind.render(p.candles)
+  } catch (e) {
+    console.warn('mc indicators', e)
+  }
+}
+
+/** Live ticks: at most one indicator redraw per IND_THROTTLE_MS, trailing. */
+function mcScheduleIndicators(p: McPanel): void {
+  if (!p.ind || p.indTimer || mcPanels.indexOf(p) === -1) return
+  if (!panelIndicatorStore(slotOf(p)).indicatorCount()) return
+  const wait = Math.max(0, IND_THROTTLE_MS - (Date.now() - (p.indAt || 0)))
+  p.indTimer = setTimeout(() => mcDrawIndicators(p), wait)
+}
+
 function mcSetAll(p: McPanel): void {
   if (!p.candleSeries) return
   p.candleSeries.setData(p.candles.map(mapCandle))
@@ -147,6 +195,7 @@ function mcSetAll(p: McPanel): void {
     }),
   )
   p.rsiSeries?.setData(rsiPoints(p.candles))
+  mcDrawIndicators(p)
   mcPaintHead(p)
 }
 
@@ -156,6 +205,7 @@ function mcUpdateLast(p: McPanel, c: Any): void {
   p.volSeries.update({ time: Math.floor(c.t / 1000), value: c.v, color: c.c >= c.o ? 'rgba(0,230,118,.3)' : 'rgba(255,23,68,.3)' })
   const pts = rsiPoints(p.candles.slice(-60))
   if (pts.length) p.rsiSeries?.update(pts[pts.length - 1])
+  mcScheduleIndicators(p)
   mcPaintHead(p)
 }
 
@@ -168,6 +218,9 @@ export function mcAdd(sym: string, interval: string): void {
 export function mcRemove(id: number): void {
   const idx = mcPanels.findIndex((p) => p.id === id)
   if (idx === -1) return
+  // The panels after it move up a place, and their indicators with them.
+  mcDropIndicators(mcPanels[idx])
+  shiftPanelSlots('mc', idx, mcPanels.length)
   if (mcPanels[idx].ws) {
     mcPanels[idx].ws._dead = true
     try {
@@ -195,6 +248,7 @@ function renderMCGrid(): void {
   // add/remove/symbol-change leaked one zombie chart instance per *other*
   // panel still on the grid — mcChangeSymbol calls this on every coin swap.
   mcPanels.forEach(function (p) {
+    mcDropIndicators(p)
     if (p.chart) {
       try {
         p.chart.remove()
@@ -220,6 +274,7 @@ function renderMCGrid(): void {
       MC_COINS.concat(MC_COINS.indexOf(p.sym) === -1 ? [p.sym] : []).map((s) => opt(s, p.sym, baseOf(s) + '/USDT')).join('') +
       '</select><small class="mc-px" id="mcPx' + p.id + '">…</small></span></span>' +
       '<div class="mc-controls">' +
+      '<span class="mc-ind" data-ind-slot="mc' + mcPanels.indexOf(p) + '" data-ind-label="' + baseOf(p.sym).replace(/"/g, '') + '/USDT ' + p.interval + '"></span>' +
       '<select aria-label="Interval" onchange="mcChangeInterval(' + p.id + ',this.value)">' +
       MC_INTERVALS.map((iv) => opt(iv, p.interval, iv)).join('') +
       '</select>' +
@@ -290,6 +345,26 @@ function mcInitChart(p: McPanel): void {
     crosshairMarkerVisible: false,
   })
   rs.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0.02 }, visible: false })
+  // The panel's own indicators. With panes open, candles and volume move up
+  // over them and the built-in RSI strip steps aside; with none, the panel
+  // looks exactly as it always has.
+  const store = panelIndicatorStore(slotOf(p))
+  const ind = createIndicatorRenderer(store.getIndicators, {
+    priceLayout: (_c: Any, bottom: number) => {
+      cs.priceScale().applyOptions({
+        scaleMargins: bottom ? { top: 0.06, bottom: bottom + 0.22 } : { top: 0.06, bottom: 0.36 },
+      })
+      vs.priceScale().applyOptions({
+        scaleMargins: bottom
+          ? { top: 1 - bottom - 0.2, bottom: bottom + 0.04 }
+          : { top: 0.66, bottom: 0.22 },
+      })
+      rs.applyOptions({ visible: !bottom })
+    },
+  })
+  ind.attach(c)
+  p.ind = ind
+  p.indOff = store.subscribe(() => mcDrawIndicators(p))
   c.subscribeCrosshairMove(function (param: Any) {
     if (!param.time || !param.seriesData || !legEl) return
     const d = param.seriesData.get(cs)
@@ -408,6 +483,8 @@ export function mcChangeInterval(id: number, iv: string): void {
   })
   if (!p) return
   p.interval = iv
+  const slot = document.querySelector('[data-mc-id="' + p.id + '"] .mc-ind') as HTMLElement | null
+  if (slot) slot.dataset.indLabel = baseOf(p.sym) + '/USDT ' + iv
   if (p.ws) {
     p.ws._dead = true
     try {
@@ -481,6 +558,7 @@ export function mcApplyTheme(): void {
           wickDownColor: th.dn,
         })
       if (p.volSeries) p.volSeries.applyOptions({})
+      p.ind?.refreshColors()
     }
   })
 }

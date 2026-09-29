@@ -1003,6 +1003,128 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   ok('pine: MACD script over 5000 bars under 400ms', ms < 400, ms + 'ms')
 }
 
+// ------------------------------------------------- per-panel indicator stores
+{
+  // A Map-backed localStorage, seeded with a main-chart set saved before
+  // panels had indicators: it must load, and stay byte-for-byte untouched.
+  const mem = new Map()
+  const prevLS = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    writable: true,
+    value: {
+      getItem: (k) => (mem.has(k) ? mem.get(k) : null),
+      setItem: (k, v) => mem.set(k, String(v)),
+      removeItem: (k) => mem.delete(k),
+    },
+  })
+  const mainSaved = JSON.stringify([
+    { uid: 'iabc1', type: 'ema', params: { length: 21 }, source: 'close', visible: true },
+    { uid: 'iabc2', type: 'rsi', params: { length: 14 }, source: 'close', visible: false },
+  ])
+  mem.set('lr-chartIndicators', mainSaved)
+
+  const S = await import(src('features/charts/indicators/store.ts'))
+  const P = await import(src('features/charts/indicators/panelStore.ts'))
+  const types = (st) => st.getIndicators().map((i) => i.type)
+
+  eq('panel ind: main chart loads its saved set', S.getIndicators().map((i) => [i.uid, i.type, i.visible]), [['iabc1', 'ema', true], ['iabc2', 'rsi', false]])
+  eq('panel ind: main keeps its cap', S.maxIndicators(), 50)
+
+  const c2 = P.panelIndicatorStore('c2')
+  const c3 = P.panelIndicatorStore('c3')
+  ok('panel ind: one store per slot', P.panelIndicatorStore('c2') === c2 && c2 !== c3)
+  eq('panel ind: a new panel starts empty', c2.indicatorCount(), 0)
+  c2.addIndicator('rsi')
+  c3.addIndicator('bb')
+  eq('panel ind: RSI only on panel 2', types(c2), ['rsi'])
+  eq('panel ind: Bollinger only on panel 3', types(c3), ['bb'])
+  eq('panel ind: other slots untouched', P.panelIndicatorStore('c1').indicatorCount(), 0)
+  eq('panel ind: main chart set unchanged', S.getIndicators().map((i) => i.type), ['ema', 'rsi'])
+  eq('panel ind: main storage untouched', mem.get('lr-chartIndicators'), mainSaved)
+  ok('panel ind: panel uids are not main-chart uids', c2.getIndicators().every((i) => i.uid[0] === 'p'))
+
+  // Changes on one panel stay there, and only its listeners hear them.
+  let heard2 = 0, heard3 = 0, heardMain = 0
+  const off2 = c2.subscribe(() => heard2++)
+  const off3 = c3.subscribe(() => heard3++)
+  const offM = S.subscribeIndicators(() => heardMain++)
+  const rsiUid = c2.getIndicators()[0].uid
+  c2.setParam(rsiUid, 'length', 7)
+  c2.toggleIndicator(rsiUid)
+  eq('panel ind: param change on panel 2', c2.getIndicators()[0].params.length, 7)
+  eq('panel ind: only panel 2 listeners fire', [heard2, heard3, heardMain], [2, 0, 0])
+  off2(); off3(); offM()
+
+  // Indicator-on-indicator works per panel, and cannot reach another chart.
+  c2.addIndicator('sma')
+  const sma = c2.getIndicators()[1]
+  const rsiSrc = c2.sourceOptions(sma.uid).find((o) => o.key.startsWith(rsiUid + '.'))
+  ok('panel ind: panel sources list its own outputs', !!rsiSrc)
+  ok('panel ind: panel sources skip other charts', !c2.sourceOptions(sma.uid).some((o) => o.key.startsWith('iabc')))
+  c2.setSource(sma.uid, rsiSrc.key)
+  eq('panel ind: SMA of RSI on panel 2', c2.getIndicators()[1].source, rsiSrc.key)
+  c2.setSource(sma.uid, 'iabc1.v')
+  eq('panel ind: a main-chart source is refused', c2.getIndicators()[1].source, rsiSrc.key)
+
+  // Persistence round-trip: one key, slots by name, same shape as the main chart.
+  const saved = JSON.parse(mem.get('lr-panelIndicators-v1'))
+  eq('panel ind: saved slots', Object.keys(saved).sort(), ['c2', 'c3'])
+  eq('panel ind: saved panel 2', saved.c2.map((i) => [i.type, i.visible]), [['rsi', false], ['sma', true]])
+  const before2 = JSON.stringify(c2.getIndicators())
+  const before3 = JSON.stringify(c3.getIndicators())
+  P.reloadPanelIndicators()
+  eq('panel ind: panel 2 survives a reload', JSON.stringify(c2.getIndicators()), before2)
+  eq('panel ind: panel 3 survives a reload', JSON.stringify(c3.getIndicators()), before3)
+  eq('panel ind: serialize/sanitize round-trip', JSON.stringify(S.sanitizeIndicators(S.serializeIndicators(c2.getIndicators()), 10)), before2)
+
+  // Pine scripts go onto a panel too.
+  const pineUid = c3.addPineIndicator('//@version=5\nindicator("Mid", overlay=true)\nplot(hl2)', 'Mid')
+  ok('panel ind: Pine script added to a panel', !!pineUid && types(c3).join() === 'bb,pine')
+  eq('panel ind: Pine not on the main chart', S.getIndicators().length, 2)
+  c3.removeIndicator(pineUid)
+
+  // Cap per panel.
+  const c5 = P.panelIndicatorStore('c5')
+  for (let i = 0; i < 14; i++) c5.addIndicator('ema')
+  eq('panel ind: capped at 10 per panel', c5.indicatorCount(), P.PANEL_MAX_INDICATORS)
+  eq('panel ind: cap reported', c5.maxIndicators(), 10)
+  c5.resetIndicators()
+  eq('panel ind: reset clears only that panel', [c5.indicatorCount(), c2.indicatorCount()], [0, 2])
+  ok('panel ind: empty slots are not stored', !('c5' in JSON.parse(mem.get('lr-panelIndicators-v1'))))
+
+  // Market workspace: removing a panel moves the later panels' sets up.
+  const mc = [0, 1, 2].map((i) => P.panelIndicatorStore('mc' + i))
+  mc[0].addIndicator('ema')
+  mc[1].addIndicator('rsi')
+  mc[2].addIndicator('macd')
+  P.shiftPanelSlots('mc', 1, 3)
+  eq('panel ind: shift keeps panels before the removed one', types(mc[0]), ['ema'])
+  eq('panel ind: shift moves the next panel up', types(mc[1]), ['macd'])
+  eq('panel ind: shift frees the last slot', mc[2].indicatorCount(), 0)
+  P.panelIndicatorStore('mc3').addIndicator('cci')
+  P.prunePanelSlots('mc', 2)
+  eq('panel ind: prune drops panels past the end', P.panelIndicatorStore('mc3').indicatorCount(), 0)
+  eq('panel ind: prune keeps panels before it', types(mc[1]), ['macd'])
+  eq('panel ind: companions unaffected by workspace changes', types(c3), ['bb'])
+
+  // Bad input.
+  let threw = false
+  try { P.panelIndicatorStore('main') } catch (e) { threw = true }
+  ok('panel ind: unknown slot name refused', threw)
+  mem.set('lr-panelIndicators-v1', JSON.stringify({ c2: [{ type: 'nope' }, { type: 'rsi', params: { length: 1e9 } }], x9: [{ type: 'ema' }], c4: 'junk' }))
+  P.reloadPanelIndicators()
+  eq('panel ind: junk in storage sanitized', types(c2), ['rsi'])
+  eq('panel ind: out-of-range param reset to default', c2.getIndicators()[0].params.length, 14)
+  mem.set('lr-panelIndicators-v1', '[1,2]')
+  P.reloadPanelIndicators()
+  eq('panel ind: a non-object store loads empty', c2.indicatorCount(), 0)
+  eq('panel ind: main storage still untouched', mem.get('lr-chartIndicators'), mainSaved)
+
+  if (prevLS) Object.defineProperty(globalThis, 'localStorage', prevLS)
+  else delete globalThis.localStorage
+}
+
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')
 if (fails.length) {
   fails.forEach((f) => console.log('  FAIL  ' + f))

@@ -1,6 +1,7 @@
 // What the Pine editor holds — kept across tab switches and menu close/open
 // (for the session; saved scripts are the persistent copy).
 import { getIndicators } from '../indicators/store'
+import type { IndicatorInstance } from '../indicators/store'
 import { PINE_TEMPLATE } from './examples'
 import { scriptTitle } from './indicator'
 
@@ -22,9 +23,10 @@ export function setDraft(next: Partial<PineDraft>, replace = false): void {
   draft = replace ? { code: '', name: '', ...next } : { ...draft, ...next }
 }
 
-/** Point the editor at an existing on-chart script. */
-export function editPineInstance(uid: string): void {
-  const inst = getIndicators().find((i) => i.uid === uid)
+/** Point the editor at an existing on-chart script (of the chart whose
+ *  instances are `items`; the main chart's by default). */
+export function editPineInstance(uid: string, items: IndicatorInstance[] = getIndicators()): void {
+  const inst = items.find((i) => i.uid === uid)
   if (!inst) return
   draft = { code: inst.script || '', name: inst.title || scriptTitle(inst.script || ''), uid }
 }

@@ -17,13 +17,8 @@ import {
   savedScriptsFull,
   subscribeSavedScripts,
 } from '../../features/charts/pine/scripts'
-import {
-  addPineIndicator,
-  getIndicators,
-  indicatorCount,
-  maxIndicators,
-  updatePineScript,
-} from '../../features/charts/indicators/store'
+import { mainIndicatorStore } from '../../features/charts/indicators/store'
+import type { IndicatorStore } from '../../features/charts/indicators/store'
 import { getDraft, setDraft } from '../../features/charts/pine/draft'
 
 const IND = '    '
@@ -34,7 +29,9 @@ interface Msg {
   line?: number
 }
 
-export function PinePanel() {
+/** `store` is the chart the scripts go onto (the main chart by default). */
+export function PinePanel({ store = mainIndicatorStore }: { store?: IndicatorStore } = {}) {
+  const { addPineIndicator, getIndicators, indicatorCount, maxIndicators, updatePineScript } = store
   const [code, setCodeState] = useState(() => getDraft().code)
   const [name, setNameState] = useState(() => getDraft().name)
   const [savedId, setSavedId] = useState(() => getDraft().savedId)
