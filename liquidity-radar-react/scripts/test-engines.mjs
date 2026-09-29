@@ -373,6 +373,150 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   near('vp: lookback capped at 1500 bars', computeVolumeProfile(many, 20, 0.7, Infinity).totalVol, 1500, 1e-6)
 }
 
+// -------------------------------------------------------------- indicators
+{
+  const M = await import(src('features/charts/indicators/math.ts'))
+  const { computeAll, createsCycle } = await import(src('features/charts/indicators/graph.ts'))
+  // A clean staircase: low = i, high = i + 2, close = i + 1.
+  const stair = (n) => Array.from({ length: n }, (_, i) => ({ t: i * 60000, o: i + 1, h: i + 2, l: i, c: i + 1, v: 1 }))
+  const k = (h, l, c, i = 0) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
+
+  // ADX / DMI. Every bar makes +DM 1 and -DM 0 against a true range of 2,
+  // so +DI = 50, -DI = 0, DX = ADX = 100.
+  const d = M.dmi(stair(60), 14, 14)
+  near('adx: +DI on a staircase', d.plus[59], 50)
+  near('adx: -DI on a staircase', d.minus[59], 0)
+  near('adx: ADX on a staircase', d.adx[59], 100)
+  eq('adx: +DI warms up after 14 moves', [d.plus[13], d.plus[14] != null], [null, true])
+  eq('adx: ADX warms up after 14 more', [d.adx[26], d.adx[27] != null], [null, true])
+  // By hand, length 1: bar 1 has +DM 2 over TR 3; bar 2 has -DM 2 over TR 6.
+  const d1 = M.dmi([k(10, 8, 9, 0), k(12, 9, 11, 1), k(13, 7, 8, 2)], 1, 2)
+  near('adx: hand-checked +DI', d1.plus[1], 200 / 3)
+  near('adx: hand-checked -DI', d1.minus[2], 100 / 3)
+  near('adx: hand-checked ADX (mean of two 100 DX)', d1.adx[2], 100)
+
+  // Ichimoku on the staircase: conversion(9) = i - 3, base(26) = i - 11.5,
+  // span A = (i - 7.25) and span B = (i - 24.5) shifted forward 25 bars,
+  // lagging = close 25 bars ahead.
+  const ich = M.ichimoku(stair(100), 9, 26, 52, 26)
+  near('ichimoku: conversion line', ich.conversion[90], 87)
+  near('ichimoku: base line', ich.base[90], 78.5)
+  near('ichimoku: span A is displaced', ich.spanA[90], 57.75)
+  near('ichimoku: span B is displaced', ich.spanB[90], 40.5)
+  near('ichimoku: lagging span looks back', ich.lagging[50], 76)
+  eq('ichimoku: span A waits for base + displacement', [ich.spanA[49], ich.spanA[50] != null], [null, true])
+  eq('ichimoku: span B waits for 52 + displacement', [ich.spanB[75], ich.spanB[76] != null], [null, true])
+  eq('ichimoku: no lagging span for the last bars', ich.lagging[80], null)
+  near('ichimoku: displacement 1 is the unshifted Pro plot', M.ichimoku(stair(100), 9, 26, 52, 1).spanA[90], 82.75)
+
+  // Stoch RSI. A one-way series pins RSI at 100: flat range, so 50.
+  const up = Array.from({ length: 60 }, (_, i) => 100 + i)
+  const s1 = M.stochRsi(up, 14, 14, 3, 3)
+  near('stochrsi: flat RSI reads 50', s1.k[59], 50)
+  near('stochrsi: D of a flat K', s1.d[59], 50)
+  // Falling then rising: RSI climbs every bar of the rise, so each bar is the
+  // top of its range and K = D = 100.
+  const vee = [...Array.from({ length: 30 }, (_, i) => 200 - i), ...Array.from({ length: 30 }, (_, i) => 171 + i * 2)]
+  const s2 = M.stochRsi(vee, 14, 14, 3, 3)
+  near('stochrsi: rising RSI tops out at 100', s2.k[59], 100)
+  near('stochrsi: D follows', s2.d[59], 100)
+  eq('stochrsi: warm-up is rsi + stoch + smoothing', [s1.k[28], s1.k[29] != null, s1.d[30], s1.d[31] != null], [null, true, null, true])
+
+  // Parabolic SAR, stepped by hand on the staircase (start/inc 0.02, max 0.2):
+  // bar 1 seeds at low[0] = 0 with EP 3. Bar 2: 0 + .02·3 = 0.06, but SAR may
+  // not sit above the last two lows, so it clamps to low[0] = 0; EP 4, AF .04.
+  // Bar 3: 0 + .04·4 = 0.16, under lows 1 and 2, so it stands.
+  const sar = M.psar(stair(12), 0.02, 0.02, 0.2)
+  eq('psar: nothing on the first bar', sar[0], null)
+  near('psar: seeds at the prior low', sar[1], 0)
+  near('psar: clamped to the two-bar low', sar[2], 0)
+  near('psar: accelerates', sar[3], 0.16)
+  ok('psar: stays under an uptrend', sar.slice(1).every((v, i) => v < i + 1), sar)
+  const flip = M.psar([...stair(10), k(5, 1, 2, 10)], 0.02, 0.02, 0.2)
+  near('psar: a break flips it to the extreme point', flip[10], 11)
+  const capped = M.psar(stair(80), 0.02, 0.02, 0.2)
+  ok('psar: acceleration is capped', capped[79] - capped[78] < 2, capped[79] - capped[78])
+
+  // Donchian by hand.
+  const dc = M.donchian(
+    [k(3, 1, 2), k(5, 2, 3), k(4, 0, 2), k(6, 3, 4), k(2, 1, 1)].map((x, i) => ({ ...x, t: i })),
+    3,
+  )
+  eq('donchian: warm-up', dc.upper[1], null)
+  eq('donchian: bar 2', [dc.upper[2], dc.lower[2], dc.mid[2]], [5, 0, 2.5])
+  eq('donchian: bar 4', [dc.upper[4], dc.lower[4], dc.mid[4]], [6, 0, 3])
+
+  // A few more against their definitions.
+  // On a line, WMA(n) lags (n − 1)/3 bars: 2·WMA(8) − WMA(16) leads by 1/3,
+  // then WMA(4) lags 1, so HMA 16 sits 2/3 of a bar behind.
+  near('hma: lag on a straight line is 2/3 bar', M.hma(up, 16)[59], 159 - 2 / 3)
+  near('linreg: fits a straight line exactly', M.linreg(up, 20)[59], 159)
+  near('zscore: last of 1..5 over 5', M.zscore([1, 2, 3, 4, 5], 5)[4], 2 / Math.sqrt(2))
+  near('cmo: all gains is +100', M.cmo(up, 9)[59], 100)
+  const ar = M.aroon(stair(30), 14)
+  eq('aroon: new highs every bar', [ar.up[29], ar.down[29]], [100, 0])
+  near('momentum: 10 bars of +1', M.momentum(up, 10)[59], 10)
+  const pv = M.pivots([1, 2, 3, 9, 3, 2, 1, 2].map((h, i) => ({ t: i, o: h, h, l: h - 1, c: h, v: 1 })), 2, 2)
+  eq('pivots: marks the pivot bar', pv.high[3], 9)
+  eq('pivots: last high steps in on confirmation', [pv.lastHigh[4], pv.lastHigh[5]], [null, 9])
+
+  // ---- indicator-on-indicator
+  const smaDef = {
+    id: 'sma', name: 'SMA', params: [{ key: 'length', default: 3 }], outputs: [{ key: 'v' }],
+    placement: 'overlay', sourced: true, compute: (s, _c, p) => ({ v: M.sma(s, p.length) }),
+  }
+  const rsiDef = {
+    id: 'rsi', name: 'RSI', params: [{ key: 'length', default: 5 }], outputs: [{ key: 'v' }],
+    placement: 'pane', sourced: true, compute: (s, _c, p) => ({ v: M.rsi(s, p.length) }),
+  }
+  const defs = { sma: smaDef, rsi: rsiDef }
+  const defOf = (t) => defs[t] || null
+  const base = (key, c) => c.map((x) => (key === 'volume' ? x.v : x.c))
+  const inst = (uid, type, source, visible = true) => ({ uid, type, params: {}, source, visible })
+  const candles = vee.map((c, i) => ({ t: i * 60000, o: c, h: c + 1, l: c - 1, c, v: i + 1 }))
+
+  const loop = [inst('a', 'sma', 'b.v'), inst('b', 'sma', 'a.v'), inst('c', 'sma', 'close')]
+  eq('graph: a two-instance loop is detected', createsCycle(loop, 'a', 'b.v'), true)
+  eq('graph: a self reference is a cycle', createsCycle(loop, 'c', 'c.v'), true)
+  eq('graph: a longer loop is detected', createsCycle([inst('x', 'sma', 'y.v'), inst('y', 'sma', 'z.v'), inst('z', 'sma', 'close')], 'z', 'x.v'), true)
+  eq('graph: a plain chain is not a cycle', createsCycle(loop, 'c', 'close'), false)
+  let res = null
+  try {
+    res = computeAll(loop, candles, defOf, base)
+  } catch (e) {
+    res = String(e)
+  }
+  ok('graph: a loop never throws or recurses forever', Array.isArray(res), res)
+  eq('graph: looped instances are skipped, the rest still draws', Array.isArray(res) && res.map((r) => r.inst.uid), ['c'])
+
+  // RSI (hidden) → SMA of it (overlay: draws in the RSI pane) → RSI of that (own pane).
+  const chain = [inst('r', 'rsi', 'close', false), inst('s', 'sma', 'r.v'), inst('t', 'rsi', 's.v'), inst('u', 'sma', 'volume')]
+  const out = computeAll(chain, candles, defOf, base)
+  const by = Object.fromEntries(out.map((r) => [r.inst.uid, r]))
+  eq('graph: hidden sources are computed but not drawn', Object.keys(by), ['s', 't', 'u'])
+  const rsiSeries = M.rsi(candles.map((c) => c.c), 5)
+  const expect = M.onDefined(rsiSeries, (v) => M.sma(v, 3))
+  near('graph: SMA of RSI matches by hand', by.s.outputs.v[59], expect[59])
+  eq('graph: SMA of RSI waits for both warm-ups', [by.s.outputs.v[6], by.s.outputs.v[7] != null], [null, true])
+  eq('graph: an overlay on a pane indicator shares its pane', by.s.host, 'r')
+  eq('graph: a pane indicator on an overlay gets its own pane', by.t.host, 't')
+  eq('graph: an overlay on volume gets its own pane', by.u.host, 'u')
+  near('graph: volume is a source', by.u.outputs.v[59], 59)
+  eq('graph: outputs keep candle alignment', by.t.outputs.v.length, candles.length)
+  eq('graph: a dangling reference is skipped', computeAll([inst('q', 'sma', 'gone.v')], candles, defOf, base).length, 0)
+
+  // Performance: 50 indicators over 5000 bars on one redraw.
+  const long = Array.from({ length: 5000 }, (_, i) => {
+    const p = 100 + Math.sin(i / 20) * 10
+    return { t: i * 60000, o: p, h: p + 1, l: p - 1, c: p, v: 1 + (i % 7) }
+  })
+  const many = Array.from({ length: 50 }, (_, i) => inst('m' + i, i % 2 ? 'rsi' : 'sma', i ? 'm' + (i - 1) + '.v' : 'close'))
+  const t0 = Date.now()
+  computeAll(many, long, defOf, base)
+  const ms = Date.now() - t0
+  ok('graph: a 50-deep chain over 5000 bars under 250ms', ms < 250, ms + 'ms')
+}
+
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')
 if (fails.length) {
   fails.forEach((f) => console.log('  FAIL  ' + f))
