@@ -5,7 +5,8 @@
 // symbol/interval selects, REST load and kline socket, and tears them down
 // again when the layout shrinks. Chart plumbing mirrors multiCharts.ts; candle
 // loading goes through the shared resampling loader so companions support the
-// same intervals as the main chart.
+// same intervals as the main chart. Live bars arrive over the shared kline hub
+// (services/failover), so any number of companions share one socket.
 import * as LightweightCharts from 'lightweight-charts'
 import { isInstrument } from '../../constants/instruments'
 import { COINS } from '../../constants/market'
@@ -16,6 +17,7 @@ import { chartTheme, mapCandle } from './chartRender'
 import { LAYOUTS, MAX_CHARTS, cells, layoutSpec, rowCount } from './layouts'
 import { loadCandles } from '../../services/marketData'
 import { mdSym, mdTf } from '../../services/market'
+import { klineHub } from '../../services/failover'
 import type { CandleFlat } from '../../services/market'
 import { TIMEFRAMES, tfDef } from '../../services/timeframe'
 import type { Folder } from '../../services/timeframe'
@@ -33,7 +35,8 @@ interface Panel {
   candleSeries: Any
   volSeries: Any
   folder: Folder | null
-  ws: Any
+  /** Unsubscribe from the kline hub. */
+  off: (() => void) | null
   ro: ResizeObserver | null
   token: number
 }
@@ -155,7 +158,7 @@ function addPanel(i: number): void {
     candleSeries: null,
     volSeries: null,
     folder: null,
-    ws: null,
+    off: null,
     ro: null,
     token: 0,
   }
@@ -221,14 +224,9 @@ function destroyPanel(i: number): void {
 }
 
 function closeWs(p: Panel): void {
-  if (!p.ws) return
-  p.ws._dead = true
-  try {
-    p.ws.close()
-  } catch (e) {
-    /* ignore */
-  }
-  p.ws = null
+  if (!p.off) return
+  p.off()
+  p.off = null
 }
 
 function initChart(p: Panel): void {
@@ -334,49 +332,33 @@ function connect(p: Panel, token: number): void {
   // instead of retrying a stream that can never open.
   if (isInstrument(p.sym)) return
   const def = tfDef(p.tf)
-  const url =
-    'wss://stream.binance.com:9443/ws/' + String(mdSym(p.sym)).toLowerCase() + '@kline_' + def.base
-  let ws: Any
+  closeWs(p)
   try {
-    ws = new WebSocket(url)
-  } catch (e) {
-    return
-  }
-  ws._dead = false
-  p.ws = ws
-  ws.onmessage = (ev: Any) => {
-    if (ws._dead || p.token !== token || !p.candleSeries) return
-    let k: Any
-    try {
-      k = JSON.parse(ev.data).k
-    } catch (e) {
-      return
-    }
-    if (!k) return
-    const raw: CandleFlat = { t: k.t, o: +k.o, h: +k.h, l: +k.l, c: +k.c, v: +k.v }
-    if (!isFinite(raw.c) || raw.c <= 0) return
-    const c = p.folder ? p.folder.push(raw) : raw
-    p.candleSeries.update(mapCandle(c))
-    p.volSeries.update({
-      time: Math.floor(c.t / 1000),
-      value: c.v,
-      color: c.c >= c.o ? 'rgba(0,230,118,.35)' : 'rgba(255,23,68,.35)',
+    // The hub reconnects and re-subscribes on its own.
+    p.off = klineHub.subscribe(String(mdSym(p.sym)), def.base, (d: Any) => {
+      if (p.token !== token || !p.candleSeries) return
+      const k = d.k
+      if (!k) return
+      const raw: CandleFlat = { t: k.t, o: +k.o, h: +k.h, l: +k.l, c: +k.c, v: +k.v }
+      if (!isFinite(raw.c) || raw.c <= 0) return
+      const c = p.folder ? p.folder.push(raw) : raw
+      p.candleSeries.update(mapCandle(c))
+      p.volSeries.update({
+        time: Math.floor(c.t / 1000),
+        value: c.v,
+        color: c.c >= c.o ? 'rgba(0,230,118,.35)' : 'rgba(255,23,68,.35)',
+      })
+      const legend = p.el?.querySelector('.rc-legend') as HTMLElement | null
+      if (legend)
+        legend.innerHTML =
+          '<span style="color:' +
+          (c.c >= c.o ? 'var(--green)' : 'var(--red)') +
+          '">' +
+          pfmt(c.c) +
+          '</span>'
     })
-    const legend = p.el?.querySelector('.rc-legend') as HTMLElement | null
-    if (legend)
-      legend.innerHTML =
-        '<span style="color:' +
-        (c.c >= c.o ? 'var(--green)' : 'var(--red)') +
-        '">' +
-        pfmt(c.c) +
-        '</span>'
-  }
-  ws.onclose = () => {
-    // Reconnect only while this panel still wants this stream.
-    if (ws._dead || p.token !== token) return
-    setTimeout(() => {
-      if (p.token === token) connect(p, token)
-    }, 4000)
+  } catch (e) {
+    /* stream cap reached: the panel keeps its REST snapshot */
   }
 }
 

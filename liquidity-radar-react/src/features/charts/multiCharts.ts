@@ -12,17 +12,16 @@ import { storageGetRaw, storageSetRaw } from '../../services/storage'
 import { jget } from '../../api/client'
 import { chartTheme, mapCandle } from './chartRender'
 import {
-  md,
   mdCacheGet,
   mdCachePut,
   mdDebug,
   mdFromK,
-  mdHealth,
   mdHearbeat,
   mdSym,
   mdTf,
   mdVal,
 } from '../../services/market'
+import { klineHub } from '../../services/failover'
 
 type Any = any
 
@@ -368,21 +367,22 @@ function mcConnectWS(p: McPanel): void {
       /* ignore */
     }
   }
-  const s = (mdSym(p.sym) as string).toLowerCase()
+  const s = mdSym(p.sym) as string
   const iv = mdTf(p.interval)
-  const url = 'wss://stream.binance.com:9443/ws/' + s + '@kline_' + iv
+  // Every workspace panel rides the one shared kline hub socket, which owns
+  // reconnects and re-subscription. `p.ws` stays a socket-shaped handle
+  // (`_dead`, `close()`) so the call sites that tear panels down are unchanged.
   try {
-    const ws = new WebSocket(url) as Any
-    ws._dead = false
-    p.ws = ws
-    ws._expectSym = p.sym
-    ws._expectIv = p.interval
-    ws.onopen = function () {
-      mdHearbeat('ws')
+    const handle: Any = { _dead: false, off: null as null | (() => void) }
+    handle.close = function () {
+      handle._dead = true
+      if (handle.off) handle.off()
+      handle.off = null
     }
-    ws.onmessage = function (ev: MessageEvent) {
+    p.ws = handle
+    handle.off = klineHub.subscribe(s, iv, function (d: Any) {
+      if (handle._dead) return
       try {
-        const d = JSON.parse(ev.data)
         const k = d.k
         const c = { t: k.t, o: +k.o, h: +k.h, l: +k.l, c: +k.c, v: +k.v }
         if (!mdVal.candle(c)) return
@@ -397,26 +397,7 @@ function mcConnectWS(p: McPanel): void {
       } catch (e) {
         mdDebug.log('ws', 'mc handler', e)
       }
-    }
-    ws.onclose = function () {
-      // only reconnect if the panel still exists and this socket is still current
-      if (ws._dead) return
-      if (
-        !mcPanels.some(function (x) {
-          return x === p && x.ws === ws
-        })
-      )
-        return
-      if (p.sym !== ws._expectSym || p.interval !== ws._expectIv) return
-      md.conn.ws.reconnects++
-      mdHealth.wsReconnects++
-      const exp = (p._retry = (p._retry || 0) + 1)
-      const delay =
-        Math.min(30000, 1200 * Math.pow(2, Math.min(exp, 6))) + Math.floor(Math.random() * 300)
-      setTimeout(function () {
-        if (!ws._dead && mcPanels.indexOf(p) !== -1 && p.ws === ws) mcConnectWS(p)
-      }, delay)
-    }
+    })
   } catch (e) {
     mdDebug.log('ws', 'mc create', e)
   }

@@ -24,6 +24,9 @@ const { groupAggTrades, autoThreshold, bubbleRadius } = await import(
   src('features/whales/whaleMath.ts')
 )
 
+const { ProviderChain, klineFreshness } = await import(src('services/providerChain.ts'))
+const { KlineHub, MAX_HUB_STREAMS } = await import(src('services/klineHub.ts'))
+
 let pass = 0
 const fails = []
 function ok(name, cond, detail) {
@@ -239,6 +242,258 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   near('whales: threshold order draws at the minimum radius', bubbleRadius(1e5, 1e5), 3.5)
   near('whales: 4x the dollars is 2x the radius (area ∝ notional)', bubbleRadius(4e5, 1e5), 7)
   eq('whales: radius is capped', bubbleRadius(1e12, 1e5), 36)
+}
+
+// ---------------------------------------------------------------- failover chain
+{
+  const up = (v) => async () => v
+  const down = async () => {
+    throw new Error('down')
+  }
+  let t = 0
+  const now = () => t
+
+  const c1 = new ProviderChain([
+    { id: 'a', name: 'A', fn: up(1) },
+    { id: 'b', name: 'B', fn: up(2) },
+  ])
+  const r1 = await c1.get('x')
+  eq('chain: healthy primary answers', [r1.data, r1.provider, r1.freshness, r1.primary], [1, 'a', 'LIVE', true])
+
+  const c2 = new ProviderChain([
+    { id: 'a', name: 'A', fn: down },
+    { id: 'b', name: 'B', fn: down },
+    { id: 'c', name: 'C', fn: up(3) },
+  ])
+  const r2 = await c2.get('x')
+  eq('chain: walks the order to the first healthy fallback', [r2.data, r2.name], [3, 'C'])
+  eq('chain: fallback data is labelled DELAYED, not LIVE', [r2.freshness, r2.primary], ['DELAYED', false])
+
+  const c3 = new ProviderChain(
+    [
+      { id: 'a', name: 'A', fn: async () => null },
+      { id: 'b', name: 'B', fn: up(2) },
+    ],
+    { breakerFailures: 1 },
+  )
+  await c3.get('x')
+  ok('chain: "not served here" (null) skips without opening the breaker', !c3.isOpen('a'))
+
+  let ok1 = true
+  const c4 = new ProviderChain(
+    [
+      {
+        id: 'a',
+        name: 'A',
+        fn: async () => {
+          if (!ok1) throw new Error('down')
+          return 1
+        },
+      },
+    ],
+    { staleTtlMs: 100, now },
+  )
+  await c4.get('x')
+  ok1 = false
+  t = 50
+  eq('chain: all down → last good copy is STALE', (await c4.get('x')).freshness, 'STALE')
+  t = 500
+  const r4 = await c4.get('x')
+  eq('chain: an old last good copy is OFFLINE but still returned', [r4.freshness, r4.data], ['OFFLINE', 1])
+  ok('chain: STALE result carries the failure reason', /down/.test(r4.error))
+  let threw = false
+  try {
+    await c4.get('never-cached')
+  } catch (e) {
+    threw = /All providers failed/.test(e.message)
+  }
+  ok('chain: nothing cached and all down → throws', threw)
+  ok('chain: cache is per argument list', !!c4.cached('x') && !c4.cached('y'))
+
+  // Circuit breaker: after N consecutive failures the provider is skipped for
+  // the cooldown, then tried again.
+  t = 0
+  let calls = 0
+  const c5 = new ProviderChain(
+    [
+      {
+        id: 'a',
+        name: 'A',
+        fn: async () => {
+          calls++
+          throw new Error('x')
+        },
+      },
+      { id: 'b', name: 'B', fn: up(2) },
+    ],
+    { breakerFailures: 2, breakerCooldownMs: 1000, now },
+  )
+  await c5.get()
+  await c5.get()
+  await c5.get()
+  eq('breaker: opens after consecutive failures', calls, 2)
+  ok('breaker: reports open', c5.isOpen('a'))
+  eq('breaker: fallback keeps answering while open', (await c5.get()).data, 2)
+  t = 1001
+  await c5.get()
+  eq('breaker: half-opens after the cooldown', calls, 3)
+
+  let flaky = 0
+  const c6 = new ProviderChain(
+    [
+      {
+        id: 'a',
+        name: 'A',
+        fn: async () => {
+          if (flaky++ % 2 === 0) throw new Error('x')
+          return 1
+        },
+      },
+      { id: 'b', name: 'B', fn: up(2) },
+    ],
+    { breakerFailures: 2, now },
+  )
+  for (let i = 0; i < 6; i++) await c6.get()
+  ok('breaker: a success resets the failure count', !c6.isOpen('a'))
+
+  // Badge freshness
+  eq('fresh: recent live tick is LIVE', klineFreshness({ freshness: 'DELAYED', ts: 0 }, 1000, 5000), 'LIVE')
+  eq('fresh: fresh primary snapshot before the first tick is LIVE', klineFreshness({ freshness: 'LIVE', ts: 0 }, 0, 10_000), 'LIVE')
+  eq('fresh: fallback snapshot with no live tick is DELAYED', klineFreshness({ freshness: 'DELAYED', ts: 0 }, 0, 10_000), 'DELAYED')
+  eq('fresh: stream gone quiet → DELAYED', klineFreshness({ freshness: 'LIVE', ts: 0 }, 1000, 40_000), 'DELAYED')
+  eq('fresh: old snapshot, no stream → STALE', klineFreshness({ freshness: 'LIVE', ts: 0 }, 0, 6 * 60_000), 'STALE')
+  eq('fresh: cached copy stays STALE', klineFreshness({ freshness: 'STALE', ts: 9000 }, 0, 10_000), 'STALE')
+  eq('fresh: nothing at all is OFFLINE', klineFreshness(null, 0, 10_000), 'OFFLINE')
+}
+
+// ---------------------------------------------------------------- kline hub
+{
+  const sockets = []
+  class FakeWS {
+    constructor(url) {
+      this.url = url
+      this.sent = []
+      this.onopen = this.onmessage = this.onclose = this.onerror = null
+      sockets.push(this)
+    }
+    send(m) {
+      this.sent.push(JSON.parse(m))
+    }
+    close() {
+      if (this.onclose) this.onclose()
+    }
+    accept() {
+      if (this.onopen) this.onopen()
+    }
+    push(stream, k) {
+      if (this.onmessage) this.onmessage({ data: JSON.stringify({ stream, data: { e: 'kline', k } }) })
+    }
+  }
+  const prevWS = globalThis.WebSocket
+  globalThis.WebSocket = FakeWS
+  const tick = (ms = 5) => new Promise((r) => setTimeout(r, ms))
+  const params = (ws, method) => ws.sent.filter((m) => m.method === method).flatMap((m) => m.params)
+  try {
+    const hub = new KlineHub({ url: 'wss://test/stream', flushMs: 0, idleCloseMs: 0 })
+    const got = []
+    const offA = hub.subscribe('BTCUSDT', '1m', (d) => got.push(['a', d.k.c]))
+    const offB = hub.subscribe('BTCUSDT', '1m', (d) => got.push(['b', d.k.c]))
+    const offC = hub.subscribe('ETHUSDT', '15m', () => {})
+    const offD = hub.subscribe('SOLUSDT', '1h', () => {})
+    eq('hub: four charts, one socket', sockets.length, 1)
+    eq('hub: ref-counts — two charts on one stream is one stream', hub.streamCount, 3)
+    const ws = sockets[0]
+    ws.accept()
+    eq('hub: subscribes every wanted stream on open, once each', params(ws, 'SUBSCRIBE').sort(), [
+      'btcusdt@kline_1m',
+      'ethusdt@kline_15m',
+      'solusdt@kline_1h',
+    ])
+    eq('hub: opening costs a single frame', ws.sent.length, 1)
+
+    ws.push('btcusdt@kline_1m', { t: 60000, c: '1.5' })
+    eq('hub: fans a kline out to every subscriber of its stream', got, [
+      ['a', '1.5'],
+      ['b', '1.5'],
+    ])
+    ws.push('dogeusdt@kline_1m', { t: 60000, c: '9' })
+    eq('hub: ignores streams nobody wants', got.length, 2)
+
+    offA()
+    offA() // idempotent
+    await tick()
+    eq('hub: dropping one of two subscribers keeps the stream', params(ws, 'UNSUBSCRIBE'), [])
+    ws.push('btcusdt@kline_1m', { t: 60000, c: '2' })
+    eq('hub: the remaining subscriber still receives', got[got.length - 1], ['b', '2'])
+    offB()
+    await tick()
+    eq('hub: last subscriber gone → UNSUBSCRIBE', params(ws, 'UNSUBSCRIBE'), ['btcusdt@kline_1m'])
+
+    const offE = hub.subscribe('XRPUSDT', '5m', () => {})
+    const offF = hub.subscribe('ADAUSDT', '5m', () => {})
+    await tick()
+    const lastSub = ws.sent.filter((m) => m.method === 'SUBSCRIBE').pop()
+    eq('hub: a burst of subscriptions coalesces into one frame', lastSub.params.sort(), [
+      'adausdt@kline_5m',
+      'xrpusdt@kline_5m',
+    ])
+    eq('hub: live changes stay on the same socket', sockets.length, 1)
+
+    // Reconnect: the hub opens a fresh socket and replays what is wanted.
+    const rnd = Math.random
+    Math.random = () => 0
+    ws.close()
+    eq('hub: reports disconnected', hub.connected, false)
+    await tick(600) // first backoff step is 500ms
+    Math.random = rnd
+    eq('hub: reconnects after a drop', sockets.length, 2)
+    const ws2 = sockets[1]
+    ws2.accept()
+    eq('hub: re-subscribes everything after reconnect', params(ws2, 'SUBSCRIBE').sort(), [
+      'adausdt@kline_5m',
+      'ethusdt@kline_15m',
+      'solusdt@kline_1h',
+      'xrpusdt@kline_5m',
+    ])
+    const before = got.length
+    hub.subscribe('ETHUSDT', '15m', (d) => got.push(['e', d.k.c]))
+    ws.push('ethusdt@kline_15m', { t: 1, c: '1' }) // the replaced socket must be inert
+    eq('hub: a replaced socket can no longer deliver', got.length, before)
+
+    offC()
+    offD()
+    offE()
+    offF()
+  } finally {
+    globalThis.WebSocket = prevWS
+  }
+
+  globalThis.WebSocket = FakeWS
+  try {
+    const idle = new KlineHub({ url: 'wss://test/stream', flushMs: 0, idleCloseMs: 0 })
+    const n0 = sockets.length
+    const off = idle.subscribe('BTCUSDT', '1m', () => {})
+    sockets[sockets.length - 1].accept()
+    eq('hub: connected once accepted', idle.connected, true)
+    off()
+    await tick(10)
+    eq('hub: idle hub closes its socket', idle.connected, false)
+    await tick(600)
+    eq('hub: and does not reconnect with nothing wanted', sockets.length, n0 + 1)
+
+    const capHub = new KlineHub({ url: 'wss://test/stream', flushMs: 0 })
+    for (let i = 0; i < MAX_HUB_STREAMS; i++) capHub.subscribe('S' + i + 'USDT', '1m', () => {})
+    let capped = false
+    try {
+      capHub.subscribe('XUSDT', '1m', () => {})
+    } catch (e) {
+      capped = /limit/.test(e.message)
+    }
+    ok('hub: enforces the stream cap', capped)
+    ok('hub: an existing stream can always gain a subscriber', !!capHub.subscribe('S0USDT', '1m', () => {}))
+  } finally {
+    globalThis.WebSocket = prevWS
+  }
 }
 
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')

@@ -4,7 +4,6 @@
 // cache/store updates live here. Every rendering/UI side effect is
 // delegated through the hooks wired by the engine via wireMarketHooks()
 // (the same pattern as userActions), so the engine stays pure orchestration.
-import { COINS } from '../constants/market'
 import { isInstrument } from '../constants/instruments'
 import { yahooCandles } from './yahoo'
 import { jget } from '../api/client'
@@ -15,7 +14,6 @@ import {
   mdCacheGet,
   mdCachePut,
   mdDebug,
-  mdFromK,
   mdStoreCandles,
   mdStoreOB,
   mdSym,
@@ -24,9 +22,19 @@ import {
 import type { CandleFlat } from './market'
 import { DEFAULT_TF, createFolder, mainFolder, resample, tfDef } from './timeframe'
 import type { Folder } from './timeframe'
+import {
+  fetchKlinesChain,
+  klineStreamLive,
+  setKlineFeed,
+  tickerChain,
+  tickerFeed,
+} from './failover'
+import type { ChainResult } from './providerChain'
 
 export interface MarketHooks {
   onTickers(): void
+  /** Every ticker source failed; the last good set is still on screen. */
+  onTickersStale?(): void
   onKlines(): void
   onKlineCache(): void
   onKlineFail(): void
@@ -45,40 +53,32 @@ export function wireMarketHooks(h: MarketHooks): void {
   hooks = h
 }
 
-interface TickerEntry {
-  last: number
-  pct: number
-  high: number
-  low: number
-  qvol: number
-  trades: number
-}
-
 export async function fetchTickers(): Promise<void> {
   try {
-    const syms = Object.values(COINS).map((c) => c.sym)
-    const url =
-      'https://api.binance.com/api/v3/ticker/24hr?symbols=' +
-      encodeURIComponent(JSON.stringify(syms))
-    const data = (await jget(url)) as Array<Record<string, unknown>>
-    data.forEach((d) => {
-      const entry: TickerEntry = {
-        last: Number(d.lastPrice),
-        pct: Number(d.priceChangePercent),
-        high: Number(d.highPrice),
-        low: Number(d.lowPrice),
-        qvol: Number(d.quoteVolume),
-        trades: Number(d.count),
-      }
-      state.tickers[d.symbol as string] = entry
+    // Binance first, as always; Bybit then OKX only if it fails.
+    const r = await tickerChain.get()
+    if (r.freshness === 'STALE' || r.freshness === 'OFFLINE') {
+      // Every venue failed. What is on screen is the last good set — keep it
+      // (the live stream may be updating the focused coin) and say so.
+      tickerFeed.freshness = r.freshness
+      tickerFeed.name = r.name
+      tickerFeed.ts = r.ts
+      hooks!.onTickersStale?.()
+      console.warn('tickers', r.error)
+      return
+    }
+    Object.keys(r.data).forEach((sym) => {
+      state.tickers[sym] = r.data[sym]
     })
+    tickerFeed.freshness = r.freshness
+    tickerFeed.name = r.name
+    tickerFeed.ts = r.ts
     hooks!.onTickers()
   } catch (e) {
     console.warn('tickers', e)
   }
 }
 
-const KLINE_URL = 'https://api.binance.com/api/v3/klines'
 // Enough on first load to fill a wide screen with room to pan, then more is
 // paged in as the user drags back (fetchOlderKlines).
 const TARGET_CANDLES = 500
@@ -86,17 +86,15 @@ const TARGET_CANDLES = 500
 const MAX_KEEP = 5000
 /** Aggregated candles per lazy page. */
 const PAGE_CANDLES = 500
-// Binance caps a kline request at 1000 rows. A resampled interval needs
-// `factor` base rows per candle, so deep ones page backwards — bounded, since
-// 45s off 1s candles would otherwise want 9000 rows.
-const MAX_PAGES = 5
+/** Where a load's candles came from; null for Yahoo-priced instruments. */
+export type KlineSource = Omit<ChainResult<unknown>, 'data'> | null
 
 async function fetchBase(
   sym: string,
   base: string,
   need: number,
   before = 0,
-): Promise<CandleFlat[]> {
+): Promise<{ rows: CandleFlat[]; source: KlineSource }> {
   // Metals, energy, FX, indices and equities are priced by Yahoo, not
   // Binance. Dispatching here — the one place candles enter the app — means
   // the chart, the indicators, the ML model and the scanner all work on a
@@ -104,39 +102,12 @@ async function fetchBase(
   // from. Yahoo has no endTime paging, so a history request past the first
   // page simply ends; the chart stops at the loaded range instead of looping.
   if (isInstrument(sym)) {
-    if (before) return []
-    return yahooCandles(sym, base, need)
+    if (before) return { rows: [], source: null }
+    return { rows: await yahooCandles(sym, base, need), source: null }
   }
-  const pages = Math.max(1, Math.min(MAX_PAGES, Math.ceil(need / 1000)))
-  let out: CandleFlat[] = []
-  let endTime = before
-  for (let i = 0; i < pages; i++) {
-    const limit = Math.min(1000, need - out.length)
-    if (limit <= 0) break
-    const url =
-      KLINE_URL +
-      '?symbol=' +
-      mdSym(sym) +
-      '&interval=' +
-      base +
-      '&limit=' +
-      limit +
-      (endTime ? '&endTime=' + endTime : '')
-    let page: CandleFlat[]
-    try {
-      const rows = (await jget(url)) as unknown[]
-      page = rows.map(mdFromK).filter((c): c is CandleFlat => !!c)
-    } catch (e) {
-      // Keep the pages already fetched — a short history beats a blank chart.
-      if (out.length) break
-      throw e
-    }
-    if (!page.length) break
-    out = page.concat(out)
-    endTime = page[0].t - 1
-    if (page.length < limit) break
-  }
-  return out
+  // Binance → Bybit → OKX → last good copy (see services/failover).
+  const { data, ...source } = await fetchKlinesChain(sym, base, need, before)
+  return { rows: data, source }
 }
 
 /**
@@ -155,19 +126,19 @@ export async function loadCandleWindow(
   bars: number,
 ): Promise<CandleFlat[]> {
   const def = tfDef(tf)
-  const base = await fetchBase(sym, def.base, Math.max(10, bars) * def.factor)
-  return resample(base, def).slice(-bars)
+  const { rows } = await fetchBase(sym, def.base, Math.max(10, bars) * def.factor)
+  return resample(rows, def).slice(-bars)
 }
 
 export async function loadCandles(
   sym: string,
   tf: string,
-): Promise<{ candles: CandleFlat[]; folder: Folder }> {
+): Promise<{ candles: CandleFlat[]; folder: Folder; source: KlineSource }> {
   const def = tfDef(tf)
-  const base = await fetchBase(sym, def.base, TARGET_CANDLES * def.factor)
+  const { rows, source } = await fetchBase(sym, def.base, TARGET_CANDLES * def.factor)
   const folder = createFolder(def)
-  folder.seed(base)
-  return { candles: resample(base, def).slice(-MAX_KEEP), folder }
+  folder.seed(rows)
+  return { candles: resample(rows, def).slice(-MAX_KEEP), folder, source }
 }
 
 // ---- Lazy history ----------------------------------------------------
@@ -211,9 +182,17 @@ export async function fetchOlderKlines(): Promise<number> {
     const def = tfDef(tf)
     // Strictly before the oldest bucket's open, so the older page resamples
     // into whole buckets of its own and cannot half-fill the one we hold.
-    const base = await fetchBase(state.symbol, def.base, PAGE_CANDLES * def.factor, oldest.t - 1)
+    const { rows, source } = await fetchBase(
+      state.symbol,
+      def.base,
+      PAGE_CANDLES * def.factor,
+      oldest.t - 1,
+    )
     if (ident !== historyIdent()) return 0 // symbol/interval changed mid-flight
-    const older = resample(base, def).filter((c) => c.t < oldest.t)
+    // Every provider failed and this is a cached copy: not proof the history
+    // has ended, so leave it retryable rather than marking it done.
+    if (source && (source.freshness === 'STALE' || source.freshness === 'OFFLINE')) return 0
+    const older = resample(rows, def).filter((c) => c.t < oldest.t)
     if (!older.length) {
       historyDone = true
       return 0
@@ -256,6 +235,22 @@ function scheduleKlineRetry(): void {
   }, delay)
 }
 
+/** While candles come from a fallback, look for Binance again this often. */
+const PRIMARY_PROBE_MS = 60_000
+
+function schedulePrimaryProbe(key: string): void {
+  if (klineRetry) clearTimeout(klineRetry)
+  klineRetry = setTimeout(() => {
+    klineRetry = null
+    // Only while the chart is otherwise frozen: with the live stream ticking
+    // the chart is current, and a reload would reset the user's viewport.
+    const tf = mdTf(state.tf || DEFAULT_TF)
+    if (mdSym(state.symbol) + '|' + tf !== key) return
+    if (klineStreamLive()) schedulePrimaryProbe(key)
+    else fetchKlines(state.symbol)
+  }, PRIMARY_PROBE_MS)
+}
+
 export async function fetchKlines(sym: string): Promise<void> {
   // A newer request supersedes any pending retry.
   if (klineRetry) {
@@ -263,17 +258,28 @@ export async function fetchKlines(sym: string): Promise<void> {
     klineRetry = null
   }
   const tf = mdTf(state.tf || DEFAULT_TF)
+  const key = mdSym(sym) + '|' + tf
   try {
-    const { candles, folder } = await loadCandles(sym, tf)
+    const { candles, folder, source } = await loadCandles(sym, tf)
     if (!candles.length) throw new Error('empty')
     state.candles = candles
-    mainFolder.key = mdSym(sym) + '|' + tf
+    mainFolder.key = key
     mainFolder.folder = folder
     mdStoreCandles(state.symbol, tf, candles)
+    resetHistory()
+    if (source) setKlineFeed(key, source)
+    if (source && (source.freshness === 'STALE' || source.freshness === 'OFFLINE')) {
+      // Every provider failed; this is the last good copy. Show it as such
+      // and keep retrying exactly as a failed load does.
+      mdDebug.log('klines', 'serving last good ' + key + ' from ' + source.name)
+      hooks!.onKlineCache()
+      scheduleKlineRetry()
+      return
+    }
     mdCachePut(state.symbol, tf, candles)
     klineAttempt = 0
-    resetHistory()
     hooks!.onKlines()
+    if (source && !source.primary) schedulePrimaryProbe(key)
   } catch (e) {
     console.warn('klines', e)
     // REST fallback: serve recent cached candles so the chart isn't left blank
@@ -282,8 +288,18 @@ export async function fetchKlines(sym: string): Promise<void> {
     if (cached && cached.length) {
       state.candles = cached
       mdDebug.log('klines', 'serving cached ' + state.symbol + ' ' + tf)
+      if (!isInstrument(sym))
+        setKlineFeed(key, { freshness: 'STALE', ts: Date.now(), name: 'cache', primary: false })
       hooks!.onKlineCache()
     } else {
+      if (!isInstrument(sym))
+        setKlineFeed(key, {
+          freshness: 'OFFLINE',
+          ts: 0,
+          name: 'none',
+          primary: false,
+          error: e instanceof Error ? e.message : String(e),
+        })
       hooks!.onKlineFail()
     }
     scheduleKlineRetry()

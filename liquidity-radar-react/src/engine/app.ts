@@ -45,6 +45,7 @@ import {
   fetchWhales,
   wireMarketHooks,
 } from '../services/marketData'
+import { noteKlineLive, renderKlineBadge, tickerFeed } from '../services/failover'
 import {
   initChart,
   chartTheme,
@@ -119,10 +120,8 @@ const streamCb={
     cEl.textContent=(t.pct>0?'+':'')+t.pct.toFixed(2)+'%';
     });
   },
-  onKlineLive:function(){
-    const ks=$('wsKlineState');
-    ks.textContent='WS LIVE';ks.className='badge b-green';
-  },
+  // The badge reports freshness + source (services/failover), not just the socket.
+  onKlineLive:noteKlineLive,
   onChartLast:updateChartLast,
   onAnalytics:runAnalytics,
 };
@@ -269,12 +268,15 @@ export function initApp(){
   wireMarketHooks({
     onTickers() {
       renderTicker();renderHero();renderTopCoins();checkAlerts();
-      $('topCoinsUpd').textContent='LIVE · '+new Date().toLocaleTimeString();
+      $('topCoinsUpd').textContent=(tickerFeed.freshness==='LIVE'?'LIVE':tickerFeed.freshness+' · '+tickerFeed.name.toUpperCase())+' · '+new Date().toLocaleTimeString();
+    },
+    onTickersStale(){
+      $('topCoinsUpd').textContent=tickerFeed.freshness+' · '+new Date(tickerFeed.ts).toLocaleTimeString();
     },
     onKlines(){ updateChartData(true);runAnalytics();mlOnCandles(state.symbol, state.tf, state.candles); },
     onKlineCache(){
       updateChartData(true);runAnalytics();
-      $('wsKlineState').textContent='CACHE';$('wsKlineState').className='badge b-amber';
+      renderKlineBadge();
       showToast('Klines live stream down — showing cached data');
     },
     onKlineFail(){
