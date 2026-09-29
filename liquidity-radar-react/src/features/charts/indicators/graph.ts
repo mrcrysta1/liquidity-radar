@@ -58,7 +58,9 @@ export function createsCycle(items: GraphInstance[], uid: string, source: string
 export function computeAll<I extends GraphInstance>(
   items: I[],
   candles: CandleFlat[],
-  defOf: (type: string) => IndicatorDef | null,
+  /** The def for an instance: a catalogue lookup by type, or — for a Pine
+   *  script — one built from the script's run over these candles. */
+  defOf: (inst: I, candles: CandleFlat[]) => IndicatorDef | null,
   baseSource: (key: SourceKey, c: CandleFlat[]) => number[],
 ): Array<Computed<I>> {
   const byUid = new Map<string, I>()
@@ -69,7 +71,7 @@ export function computeAll<I extends GraphInstance>(
   const get = (uid: string): Computed<I> | null => {
     if (done.has(uid)) return done.get(uid) as Computed<I> | null
     const inst = byUid.get(uid)
-    const def = inst ? defOf(inst.type) : null
+    const def = inst ? defOf(inst, candles) : null
     if (!inst || !def || visiting.has(uid)) return null
     visiting.add(uid)
     let result: Computed<I> | null

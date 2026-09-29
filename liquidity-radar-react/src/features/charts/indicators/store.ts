@@ -4,10 +4,22 @@
 // `source` is a price field ('close', 'volume', …) or another instance's
 // output as `uid.outputKey` (indicator-on-indicator, see ./graph). uids are
 // persisted so those references survive a reload.
+//
+// A Pine script is an instance of type 'pine' carrying its source, title and
+// input values (see ../pine/indicator); its def comes from the script itself.
 import { storageGet, storageSet } from '../../../services/storage'
-import type { SourceKey } from './registry'
+import type { IndicatorDef, SourceKey } from './registry'
 import { SOURCES, defaultParams, indicatorDef, instanceLabel, valueOutputs } from './registry'
 import { createsCycle, sourceRef } from './graph'
+import {
+  MAX_SCRIPT,
+  PINE_TYPE,
+  cleanTitle,
+  forgetPine,
+  pineMeta,
+  scriptTitle,
+} from '../pine/indicator'
+import type { InputValue } from '../pine/runtime'
 
 export interface IndicatorInstance {
   uid: string
@@ -16,6 +28,16 @@ export interface IndicatorInstance {
   /** A SourceKey, or `uid.outputKey` of another instance. */
   source: string
   visible: boolean
+  /** Pine only: the script, its display title and input overrides. */
+  script?: string
+  title?: string
+  pineInputs?: Record<string, InputValue>
+}
+
+/** The def an instance draws with — catalogue, or built from its Pine script. */
+export function instanceDef(inst: IndicatorInstance): IndicatorDef | null {
+  if (inst.type === PINE_TYPE) return pineMeta(inst).def
+  return indicatorDef(inst.type)
 }
 
 const KEY = 'lr-chartIndicators'
@@ -39,7 +61,7 @@ function validSource(list: IndicatorInstance[], inst: IndicatorInstance, source:
   const ref = sourceRef(source)
   if (!ref || ref.uid === inst.uid) return false
   const dep = list.find((i) => i.uid === ref.uid)
-  const def = dep ? indicatorDef(dep.type) : null
+  const def = dep ? instanceDef(dep) : null
   if (!def || !valueOutputs(def).some((o) => o.key === ref.key)) return false
   return !createsCycle(list, inst.uid, source)
 }
@@ -56,11 +78,40 @@ function make(type: string, params?: Record<string, number>, source: SourceKey =
   } as IndicatorInstance
 }
 
+function sanitizeInputs(raw: unknown): Record<string, InputValue> {
+  const out: Record<string, InputValue> = {}
+  if (!raw || typeof raw !== 'object') return out
+  Object.entries(raw as Record<string, unknown>).forEach(([k, v]) => {
+    if (typeof v === 'number' ? isFinite(v) : typeof v === 'boolean' || typeof v === 'string')
+      out[k.slice(0, 80)] = typeof v === 'string' ? v.slice(0, 200) : (v as InputValue)
+  })
+  return out
+}
+
 function sanitize(raw: unknown): IndicatorInstance[] {
   if (!Array.isArray(raw)) return []
   const out: IndicatorInstance[] = []
   const used = new Set<string>()
+  const takeUid = (r: Record<string, unknown>) => {
+    const savedUid = typeof r.uid === 'string' && /^[a-z0-9]{1,32}$/i.test(r.uid) ? r.uid : ''
+    const id = savedUid && !used.has(savedUid) ? savedUid : uid()
+    used.add(id)
+    return id
+  }
   for (const r of raw as Array<Record<string, unknown>>) {
+    if (r && r.type === PINE_TYPE && typeof r.script === 'string' && out.length < MAX) {
+      out.push({
+        uid: takeUid(r),
+        type: PINE_TYPE,
+        params: {},
+        source: 'close',
+        visible: r.visible !== false,
+        script: r.script.slice(0, MAX_SCRIPT),
+        title: cleanTitle(typeof r.title === 'string' ? r.title : scriptTitle(r.script)),
+        pineInputs: sanitizeInputs(r.pineInputs),
+      })
+      continue
+    }
     const def = r && typeof r.type === 'string' ? indicatorDef(r.type) : null
     if (!def || out.length >= MAX) continue
     const params = defaultParams(def)
@@ -69,11 +120,8 @@ function sanitize(raw: unknown): IndicatorInstance[] {
       const v = Number(saved?.[p.key])
       if (isFinite(v) && v >= p.min && v <= p.max) params[p.key] = v
     })
-    const savedUid = typeof r.uid === 'string' && /^[a-z0-9]{1,32}$/i.test(r.uid) ? r.uid : ''
-    const id = savedUid && !used.has(savedUid) ? savedUid : uid()
-    used.add(id)
     out.push({
-      uid: id,
+      uid: takeUid(r),
       type: def.id,
       params,
       source: def.sourced ? String(r.source ?? 'close') : 'close',
@@ -116,13 +164,26 @@ export function onIndicatorsChange(fn: () => void): void {
 function commit(): void {
   storageSet(
     KEY,
-    items.map((i) => ({
-      uid: i.uid,
-      type: i.type,
-      params: i.params,
-      source: i.source,
-      visible: i.visible,
-    })),
+    items.map((i) =>
+      i.type === PINE_TYPE
+        ? {
+            uid: i.uid,
+            type: i.type,
+            params: {},
+            source: 'close',
+            visible: i.visible,
+            script: i.script,
+            title: i.title,
+            pineInputs: i.pineInputs || {},
+          }
+        : {
+            uid: i.uid,
+            type: i.type,
+            params: i.params,
+            source: i.source,
+            visible: i.visible,
+          },
+    ),
   )
   listeners.slice().forEach((fn) => fn())
   if (onChange) onChange()
@@ -145,7 +206,52 @@ export function addIndicator(type: string): void {
   items = items.concat([inst])
   commit()
 }
+/** Add a Pine script to the chart; returns its uid (null at the cap). */
+export function addPineIndicator(script: string, title?: string): string | null {
+  if (items.length >= MAX) return null
+  const src = script.slice(0, MAX_SCRIPT)
+  const inst: IndicatorInstance = {
+    uid: uid(),
+    type: PINE_TYPE,
+    params: {},
+    source: 'close',
+    visible: true,
+    script: src,
+    title: cleanTitle(title || scriptTitle(src)),
+    pineInputs: {},
+  }
+  items = items.concat([inst])
+  commit()
+  return inst.uid
+}
+/** Replace an on-chart script's source, keeping inputs that still exist. */
+export function updatePineScript(uidToEdit: string, script: string, title?: string): void {
+  const src = script.slice(0, MAX_SCRIPT)
+  items = items.map((i) =>
+    i.uid === uidToEdit && i.type === PINE_TYPE
+      ? { ...i, script: src, title: cleanTitle(title || scriptTitle(src)) }
+      : i,
+  )
+  // Plot keys follow the source; anything reading a plot that is gone
+  // goes back to close.
+  items = items.map((i) => (validSource(items, i, i.source) ? i : { ...i, source: 'close' }))
+  commit()
+}
+export function setPineInput(uidToEdit: string, key: string, value: InputValue): void {
+  items = items.map((i) =>
+    i.uid === uidToEdit && i.type === PINE_TYPE
+      ? { ...i, pineInputs: { ...(i.pineInputs || {}), [key]: value } }
+      : i,
+  )
+  commit()
+}
+export function resetPineInputs(uidToEdit: string): void {
+  items = items.map((i) => (i.uid === uidToEdit ? { ...i, pineInputs: {} } : i))
+  commit()
+}
+
 export function removeIndicator(uidToDrop: string): void {
+  forgetPine(uidToDrop)
   // Anything built on the removed one goes back to reading price.
   items = items
     .filter((i) => i.uid !== uidToDrop)
@@ -175,7 +281,7 @@ export function sourceOptions(uidFor: string): Array<{ key: string; label: strin
   if (!inst) return out
   items.forEach((other) => {
     if (other.uid === uidFor) return
-    const def = indicatorDef(other.type)
+    const def = instanceDef(other)
     if (!def) return
     const name = instanceLabel(def, other.params)
     const outs = valueOutputs(def)
