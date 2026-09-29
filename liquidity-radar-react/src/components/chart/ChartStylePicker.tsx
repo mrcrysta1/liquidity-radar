@@ -5,11 +5,17 @@ import { useEffect, useRef, useState } from 'react'
 import {
   CHART_STYLES,
   getChartStyle,
+  getRangeSettings,
   setChartStyle,
+  setManualRange,
+  setRangeMode,
   styleDef,
   subscribeChartStyle,
 } from '../../features/charts/chartStyle'
 import type { ChartStyleId } from '../../features/charts/chartStyle'
+import { rangeSizeInfo } from '../../features/charts/series/rangeView'
+import { state } from '../../services/store'
+import { pfmt } from '../../utils/format'
 
 const UP = 'var(--green)'
 const DN = 'var(--red)'
@@ -135,6 +141,18 @@ function StyleIcon({ id, size = 16 }: { id: ChartStyleId; size?: number }) {
       </svg>
     )
   }
+  if (id === 'range') {
+    // Equal-height boxes stepping up and down: every bar spans one range.
+    return (
+      <svg {...p}>
+        <path d="M5 13v7M11 9v7M17 5v7" stroke={UP} strokeWidth="1.2" />
+        <rect x="3" y="13" width="4" height="7" fill={UP} />
+        <rect x="9" y="9" width="4" height="7" fill={UP} />
+        <rect x="15" y="5" width="4" height="7" fill={DN} />
+        <path d="M2 4.5h20" stroke="var(--dim)" strokeWidth="1" strokeDasharray="2 2" />
+      </svg>
+    )
+  }
   if (id === 'sessionvp') {
     return (
       <svg {...p}>
@@ -173,6 +191,77 @@ function StyleIcon({ id, size = 16 }: { id: ChartStyleId; size?: number }) {
         strokeLinejoin="round"
       />
     </svg>
+  )
+}
+
+/**
+ * Range bar size: automatic from ATR(14), or a manual size for the coin on
+ * screen. The manual value is applied on Enter or when the field loses focus,
+ * not per keystroke — every change rebuilds every bar.
+ */
+function RangeSettings() {
+  const sym = String(state.symbol || '')
+  const rs = getRangeSettings()
+  const info = rangeSizeInfo()
+  const saved = rs.size[sym]
+  const [text, setText] = useState(saved ? String(saved) : '')
+  const apply = () => {
+    const n = Number(text.replace(',', '.'))
+    if (text.trim() === '') setManualRange(sym, 0)
+    else if (n > 0 && isFinite(n)) setManualRange(sym, n)
+    else setText(saved ? String(saved) : '')
+  }
+  const auto = rs.mode === 'auto'
+  return (
+    <div className="range-set" onKeyDown={(e) => e.stopPropagation()}>
+      <div className="range-set-head">
+        <span>Range size</span>
+        <b>{info.size > 0 ? pfmt(info.size) : '—'}</b>
+      </div>
+      <div className="range-set-modes" role="radiogroup" aria-label="Range size">
+        <button
+          type="button"
+          role="radio"
+          aria-checked={auto}
+          className={'range-mode' + (auto ? ' on' : '')}
+          onClick={() => setRangeMode('auto')}
+        >
+          Auto · ATR 14
+        </button>
+        <button
+          type="button"
+          role="radio"
+          aria-checked={!auto}
+          className={'range-mode' + (!auto ? ' on' : '')}
+          onClick={() => setRangeMode('manual')}
+        >
+          Manual
+        </button>
+      </div>
+      {!auto && (
+        <form
+          className="range-set-input"
+          onSubmit={(e) => {
+            e.preventDefault()
+            apply()
+          }}
+        >
+          <input
+            type="text"
+            inputMode="decimal"
+            value={text}
+            placeholder={info.auto > 0 ? pfmt(info.auto) : 'price range'}
+            aria-label={'Manual range for ' + sym}
+            onChange={(e) => setText(e.target.value)}
+            onBlur={apply}
+          />
+          <small>{sym} price units</small>
+        </form>
+      )}
+      {info.manual && info.floor > 0 && info.size === info.floor && (
+        <small className="range-set-note">Raised to {pfmt(info.floor)} to keep the bar count sane</small>
+      )}
+    </div>
   )
 }
 
@@ -231,6 +320,8 @@ export function ChartStylePicker() {
 
       {open && (
         <div className="style-menu" role="menu" aria-label="Chart style">
+          {/* On top, so it is in view the moment range bars are picked. */}
+          {def.rangeBars && <RangeSettings key={String(state.symbol || '')} />}
           {CHART_STYLES.map((s) => (
             <button
               key={s.id}
@@ -240,7 +331,8 @@ export function ChartStylePicker() {
               className={'style-opt' + (s.id === current ? ' sel' : '')}
               onClick={() => {
                 setChartStyle(s.id)
-                setOpen(false)
+                // Range bars keep the menu up so their size is right there.
+                if (!s.rangeBars) setOpen(false)
               }}
             >
               <span className="style-opt-ico">
@@ -252,7 +344,11 @@ export function ChartStylePicker() {
                   {s.estimate && (
                     <i
                       className="style-est"
-                      title="Built from a model of where volume traded inside each bar"
+                      title={
+                        s.rangeBars
+                          ? 'Built from candles, walking each one open → low → high → close'
+                          : 'Built from a model of where volume traded inside each bar'
+                      }
                     >
                       est
                     </i>

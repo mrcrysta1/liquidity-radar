@@ -14,6 +14,7 @@ export const SYNC_KEYS = [
   'lr-theme', 'lr-palette-v3', 'lr-navCollapsed',
   // chart
   'lr-chartIndicators', 'lr-chartPrefs', 'lr-chartLayout', 'lr-chartMagnet', 'lr-tf', 'lr-tfFavs', 'lr-tfGroups',
+  'lr-tfCustom', 'lr-rangeBars',
   'lr-chartSide', 'lr-chartSideTab', 'lr-showDelta', 'lr-showMLPrediction', 'lr-showConfluence', 'lr-showObGauge',
   'lr-showRLPolicy', 'lr-showVolumeProfile', 'lr-vpSettings', 'lr-showWhaleBubbles', 'lr-whaleMult', 'lr-mc-cols',
   'lr-drawings-v1', 'lr-pineScripts', 'lr-panelIndicators-v1',

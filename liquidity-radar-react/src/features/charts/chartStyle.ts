@@ -15,6 +15,7 @@ export type ChartStyleId =
   | 'footprint'
   | 'tpo'
   | 'sessionvp'
+  | 'range'
 
 export interface ChartStyleDef {
   id: ChartStyleId
@@ -26,6 +27,8 @@ export interface ChartStyleDef {
   custom?: boolean
   /** Shown under the name where the data behind it is modelled, not measured. */
   estimate?: boolean
+  /** Bars are not time-based: built from price movement (see series/rangeBars). */
+  rangeBars?: boolean
 }
 
 export const CHART_STYLES: ChartStyleDef[] = [
@@ -63,6 +66,14 @@ export const CHART_STYLES: ChartStyleDef[] = [
     hint: 'Volume by price, per session',
     ohlc: true,
     custom: true,
+    estimate: true,
+  },
+  {
+    id: 'range',
+    name: 'Range bars',
+    hint: 'A new bar every fixed price range',
+    ohlc: true,
+    rangeBars: true,
     estimate: true,
   },
 ]
@@ -114,4 +125,63 @@ export function setChartStyle(id: ChartStyleId): void {
   storageSet(KEY, { style: current })
   listeners.slice().forEach((fn) => fn())
   if (onChange) onChange()
+}
+
+// ---- Range bar size ----
+// Auto sizes each coin's bars from ATR(14); manual holds a size per coin,
+// because a price range that suits BTC is meaningless on a sub-dollar coin.
+export type RangeMode = 'auto' | 'manual'
+export interface RangeSettings {
+  mode: RangeMode
+  /** Manual size per chart symbol, in price units. */
+  size: Record<string, number>
+}
+const RANGE_KEY = 'lr-rangeBars'
+let range: RangeSettings = (function () {
+  const raw = storageGet<Record<string, unknown>>(RANGE_KEY, {})
+  const r = raw && typeof raw === 'object' ? raw : {}
+  const size: Record<string, number> = {}
+  const saved = r.size && typeof r.size === 'object' ? (r.size as Record<string, unknown>) : {}
+  Object.keys(saved).forEach((k) => {
+    const n = Number(saved[k])
+    if (n > 0 && isFinite(n)) size[k] = n
+  })
+  return { mode: r.mode === 'manual' ? 'manual' : 'auto', size }
+})()
+
+export function isRangeStyle(): boolean {
+  return !!styleDef(current).rangeBars
+}
+export function getRangeSettings(): RangeSettings {
+  return { mode: range.mode, size: { ...range.size } }
+}
+/** The manual size for a symbol, or null to size automatically. */
+export function manualRangeFor(sym: string): number | null {
+  if (range.mode !== 'manual') return null
+  const n = range.size[sym]
+  return n > 0 ? n : null
+}
+
+let onRangeChange: (() => void) | null = null
+/** The chart registers its rebuild here — the bars change, the series does not. */
+export function onRangeSettingsChange(fn: () => void): void {
+  onRangeChange = fn
+}
+function saveRange(): void {
+  storageSet(RANGE_KEY, range)
+  listeners.slice().forEach((fn) => fn())
+  if (onRangeChange && isRangeStyle()) onRangeChange()
+}
+export function setRangeMode(mode: RangeMode): void {
+  if (mode === range.mode) return
+  range = { ...range, mode }
+  saveRange()
+}
+/** Set (or with a non-positive value, clear) the manual size for a symbol. */
+export function setManualRange(sym: string, size: number): void {
+  const next = { ...range.size }
+  if (size > 0 && isFinite(size)) next[sym] = size
+  else delete next[sym]
+  range = { mode: 'manual', size: next }
+  saveRange()
 }

@@ -15,8 +15,16 @@ import {
 } from './indicators/render'
 import { onIndicatorsChange } from './indicators/store'
 import { isReplayOn, onReplayChange, visibleCandles } from './replay'
-import { getChartStyle, isOhlcStyle, onChartStyleChange, styleDef } from './chartStyle'
+import {
+  getChartStyle,
+  isOhlcStyle,
+  onChartStyleChange,
+  onRangeSettingsChange,
+  styleDef,
+} from './chartStyle'
 import { CUSTOM_VIEWS, toCandleData } from './series/customSeries'
+import { displayCandles, isRangeMode, snapChartTime, timeOnlyCandles } from './series/rangeView'
+import { tfDef } from '../../services/timeframe'
 import { mountCloseTimer, updateCloseTimer } from './closeTimer'
 import {
   drawToolDef,
@@ -129,7 +137,7 @@ export function applyChartTheme(): void {
         gridColor: isLightTheme() ? 'rgba(75,85,99,.3)' : 'rgba(143,160,181,.25)',
         priceLineColor: th.pline,
       })
-    } else if (id === 'candle' || id === 'hollow') {
+    } else if (id === 'candle' || id === 'hollow' || id === 'range') {
       candleSeries.applyOptions({
         upColor: id === 'hollow' ? 'rgba(0,0,0,0)' : th.up,
         downColor: id === 'hollow' ? 'rgba(0,0,0,0)' : th.dn,
@@ -306,13 +314,14 @@ export function initChart(): void {
   attachVolumeProfile(chart, candleSeries, $('chartWrap')!)
   // The countdown reads the live series each time, so a style change that
   // replaces the series does not strand it.
-  mountCloseTimer(chart, () => candleSeries)
+  // Range bars do not close on the clock, so there is nothing to count down.
+  mountCloseTimer(chart, () => (isRangeMode() ? null : candleSeries))
   // While the cursor is over a bar the legend shows that bar; live ticks must
   // not overwrite it, and leaving the chart hands it back to the live candle.
   chart.subscribeCrosshairMove((param: Any) => {
     const cp =
       param.time && param.point
-        ? visibleCandles().find((c) => Math.floor(c.t / 1000) === param.time)
+        ? displayCandles().find((c) => Math.floor(c.t / 1000) === param.time)
         : null
     if (!cp) {
       if (hoverTime != null) {
@@ -345,24 +354,30 @@ export function initChart(): void {
   // a fresh data load, so there is one place where series are built.
   onIndicatorsChange(() => updateChartData(false))
   onReplayChange((modeChanged: boolean) => updateChartData(modeChanged))
+  let wasRange = isRangeMode()
   onChartStyleChange(() => {
     // Same bars, drawn differently — keep whatever the user has zoomed or
     // panned to instead of snapping back to the newest candle. The range is
     // read before the series is swapped, because removing the only price
-    // series can reset the time scale on its own.
+    // series can reset the time scale on its own. Into or out of range bars
+    // the bars themselves change, so that view is refitted instead.
     const ts = chart.timeScale()
     const keep = ts.getVisibleLogicalRange()
+    const refit = wasRange !== isRangeMode()
+    wasRange = isRangeMode()
     applyChartStyle()
     attachWhaleBubbles(chart, candleSeries, $('chartWrap')!)
     attachVolumeProfile(chart, candleSeries, $('chartWrap')!)
-    updateChartData(false)
-    if (!keep) return
+    updateChartData(refit)
+    if (!keep || refit) return
     ts.setVisibleLogicalRange(keep)
     requestAnimationFrame(() => {
       const now = ts.getVisibleLogicalRange()
       if (now && Math.abs(now.to - keep.to) > 0.5) ts.setVisibleLogicalRange(keep)
     })
   })
+  // A new range size rebuilds every bar: a new dataset, so refit.
+  onRangeSettingsChange(() => updateChartData(true))
   watchForOlderHistory()
   // Delta bars stream in far faster than the chart should repaint — coalesce
   // to the next frame, same reasoning as the live-tick indicator refresh
@@ -373,11 +388,11 @@ export function initChart(): void {
     deltaPending = true
     requestAnimationFrame(() => {
       deltaPending = false
-      renderDeltaPane(visibleCandles(), indicatorPaneCount())
+      renderDeltaPane(timeOnlyCandles(), indicatorPaneCount())
     })
   })
   onOverlayTogglesChange(() => {
-    renderDeltaPane(visibleCandles(), indicatorPaneCount())
+    renderDeltaPane(timeOnlyCandles(), indicatorPaneCount())
     renderWhaleBubbles()
     renderVolumeProfile(visibleCandles())
   })
@@ -387,7 +402,7 @@ export function initChart(): void {
 /** Bar time (seconds) under the crosshair, or null when the cursor is off the chart. */
 let hoverTime: number | null = null
 function renderLiveLegend(): void {
-  const candles = visibleCandles()
+  const candles = displayCandles()
   const lc = candles[candles.length - 1]
   if (lc) renderLegend(lc.o, lc.h, lc.l, lc.c, lc.v, false)
 }
@@ -429,7 +444,7 @@ function indicatorLegendHtml(): string {
   return indLegendHtml
 }
 function buildIndicatorLegend(): string {
-  const rows = indicatorLegend(visibleCandles())
+  const rows = indicatorLegend(displayCandles())
   if (!rows.length) return ''
   return rows
     .map(
@@ -462,9 +477,10 @@ function buildIndicatorLegend(): string {
  */
 export function updateChartData(fit = false): void {
   if (!chart) return
-  const candles = visibleCandles()
+  const candles = displayCandles()
   if (!candles.length) return
   const ts = chart.timeScale()
+  syncSecondsVisible()
   const keep = fit ? null : ts.getVisibleLogicalRange()
   const prevFirst = chartState.firstBarTime as number | undefined
   if (styleDef(getChartStyle()).custom) {
@@ -474,8 +490,9 @@ export function updateChartData(fit = false): void {
   } else {
     candleSeries.setData(candles.map((c) => ({ time: Math.floor(c.t / 1000), value: c.c })))
   }
+  rangeShown = isRangeMode() ? candles : []
   renderIndicators(candles)
-  renderDeltaPane(candles, indicatorPaneCount())
+  renderDeltaPane(timeOnlyCandles(), indicatorPaneCount())
   renderWhaleBubbles()
   if (fit) {
     ts.fitContent()
@@ -501,11 +518,59 @@ export function updateChartData(fit = false): void {
   updateCloseTimer()
 }
 
-/** How many bars were prepended since the last draw. */
+/**
+ * How many bars were prepended since the last draw. Range bars rebuilt from a
+ * longer history need not reproduce the old first bar exactly, so this counts
+ * up to the first bar at or after it.
+ */
 function countPrepended(prevFirst: number | undefined, candles: Any[]): number {
   if (prevFirst == null || !candles.length || candles[0].t >= prevFirst) return 0
-  const i = candles.findIndex((c) => c.t === prevFirst)
+  const i = candles.findIndex((c) => c.t >= prevFirst)
   return i > 0 ? i : 0
+}
+
+/** Seconds on the time axis for sub-minute intervals and for range bars. */
+let secondsShown = false
+function syncSecondsVisible(): void {
+  const want = isRangeMode() || tfDef(state.tf).base === '1s'
+  if (want === secondsShown) return
+  secondsShown = want
+  chart.applyOptions({ timeScale: { secondsVisible: want } })
+}
+
+/** The range bars last handed to the price series. */
+let rangeShown: Any[] = []
+const sameBar = (a: Any, b: Any): boolean =>
+  a.t === b.t && a.o === b.o && a.h === b.h && a.l === b.l && a.c === b.c
+
+/**
+ * A live tick on range bars. The tick can extend the last bar, close it and
+ * open new ones, or — when the live candle flips direction and its walk
+ * changes — rebuild bars it produced earlier. series.update() can only touch
+ * the last bar or append, so anything deeper is a setData with the viewport
+ * kept where it was.
+ */
+function pushRangeLive(): void {
+  const next = displayCandles()
+  if (!next.length) return
+  const prev = rangeShown
+  let k = Math.max(0, prev.length - 64)
+  while (k < prev.length && k < next.length && sameBar(prev[k], next[k])) k++
+  const tailOnly =
+    prev.length > 0 &&
+    next.length >= prev.length &&
+    k >= prev.length - 1 &&
+    (k === prev.length || next[k].t === prev[k].t)
+  if (tailOnly) {
+    for (let i = Math.max(k, prev.length - 1); i < next.length; i++)
+      candleSeries.update(mapCandle(next[i]))
+  } else {
+    const ts = chart.timeScale()
+    const keep = ts.getVisibleLogicalRange()
+    candleSeries.setData(next.map(mapCandle))
+    if (keep) ts.setVisibleLogicalRange(keep)
+  }
+  rangeShown = next
 }
 
 // ---- Lazy history on pan ----
@@ -552,7 +617,11 @@ export function updateChartLast(c: Any): void {
   if (!candleSeries) return
   // Replay owns the viewport while it is on — the tape must not jump ahead.
   if (isReplayOn()) return
-  if (styleDef(getChartStyle()).custom) {
+  if (isRangeMode()) {
+    pushRangeLive()
+    const lb = rangeShown[rangeShown.length - 1]
+    if (lb) c = lb
+  } else if (styleDef(getChartStyle()).custom) {
     candleSeries.update(toCandleData([c])[0])
   } else if (isOhlcStyle()) {
     candleSeries.update(mapCandle(c))
@@ -572,10 +641,11 @@ export function updateChartLast(c: Any): void {
       indPending = false
       indLast = Date.now()
       if (!isReplayOn()) {
-        renderIndicators(state.candles)
-        renderDeltaPane(state.candles, indicatorPaneCount())
+        const shown = displayCandles()
+        renderIndicators(shown)
+        renderDeltaPane(timeOnlyCandles(), indicatorPaneCount())
         refreshIndicatorLegend()
-        const lc = state.candles[state.candles.length - 1]
+        const lc = shown[shown.length - 1]
         if (lc && hoverTime == null) renderLegend(lc.o, lc.h, lc.l, lc.c, lc.v, false)
       }
       updateCloseTimer()
@@ -917,7 +987,7 @@ function snapToCandle(x: Any, y: Any): Any {
   }
   if (time == null || price == null) return null
   if (!isMagnet() || !candleSeries) return { time: time, price: price }
-  const candles = visibleCandles()
+  const candles = displayCandles()
   const c = candles.find((k) => Math.floor(k.t / 1000) === time)
   if (!c) return { time: time, price: price }
   let best = price
@@ -1048,7 +1118,7 @@ function resizeDrawCanvas(): void {
 function mapCtx(cw: number, ch: number): MapCtx {
   const ts = chart.timeScale()
   return {
-    x: (t: number) => ts.timeToCoordinate(t as Any),
+    x: (t: number) => ts.timeToCoordinate(snapChartTime(t) as Any),
     y: (pr: number) => (candleSeries ? candleSeries.priceToCoordinate(pr) : null),
     cw: cw,
     ch: ch,
@@ -1056,14 +1126,14 @@ function mapCtx(cw: number, ch: number): MapCtx {
     closesBetween(t1: number, t2: number) {
       const lo = Math.min(t1, t2) * 1000
       const hi = Math.max(t1, t2) * 1000
-      return visibleCandles()
+      return displayCandles()
         .filter((k) => k.t >= lo && k.t <= hi)
         .map((k) => k.c)
     },
     barsBetween(t1: number, t2: number) {
       const lo = Math.min(t1, t2) * 1000
       const hi = Math.max(t1, t2) * 1000
-      return visibleCandles().filter((k) => k.t >= lo && k.t <= hi).length
+      return displayCandles().filter((k) => k.t >= lo && k.t <= hi).length
     },
     timeLabel(t: number) {
       return new Date(t * 1000).toLocaleString(undefined, {

@@ -17,6 +17,8 @@ export interface TimeframeDef {
   base: string
   /** How many base candles make one bucket. 1 = native, no resampling. */
   factor: number
+  /** Typed in by the user rather than part of the catalogue. */
+  custom?: boolean
 }
 
 /** Duration of every native interval this app requests, in ms. */
@@ -30,6 +32,9 @@ export const BASE_MS: Record<string, number> = {
   '1h': 3600000,
   '2h': 7200000,
   '4h': 14400000,
+  '6h': 21600000,
+  '8h': 28800000,
+  '12h': 43200000,
   '1d': 86400000,
   '3d': 259200000,
   '1w': 604800000,
@@ -55,6 +60,9 @@ export const TIMEFRAMES: TimeframeDef[] = [
   { id: '2h', label: '2h', long: '2 Hours', group: 'Hours', base: '2h', factor: 1 },
   { id: '3h', label: '3h', long: '3 Hours', group: 'Hours', base: '1h', factor: 3 },
   { id: '4h', label: '4h', long: '4 Hours', group: 'Hours', base: '4h', factor: 1 },
+  { id: '6h', label: '6h', long: '6 Hours', group: 'Hours', base: '6h', factor: 1 },
+  { id: '8h', label: '8h', long: '8 Hours', group: 'Hours', base: '8h', factor: 1 },
+  { id: '12h', label: '12h', long: '12 Hours', group: 'Hours', base: '12h', factor: 1 },
 
   { id: '1d', label: '1D', long: '1 Day', group: 'Other', base: '1d', factor: 1 },
   { id: '3d', label: '3D', long: '3 Days', group: 'Other', base: '3d', factor: 1 },
@@ -75,16 +83,137 @@ export const TF_IDS = TIMEFRAMES.map((t) => t.id)
 
 export function tfDef(id: unknown): TimeframeDef {
   const s = String(id ?? '').trim()
-  return BY_ID[s] || BY_ID[DEFAULT_TF]
+  return BY_ID[s] || customTfDef(s) || BY_ID[DEFAULT_TF]
 }
+/** True for a catalogue id or a canonical custom id ("7m", not "420s"). */
 export function isTf(id: unknown): boolean {
-  return !!BY_ID[String(id ?? '').trim()]
+  const s = String(id ?? '').trim()
+  if (BY_ID[s]) return true
+  const c = customTfDef(s)
+  return !!c && c.id === s
 }
 export function normalizeTf(id: unknown): string {
   return tfDef(id).id
 }
 export function tfLong(id: unknown): string {
   return tfDef(id).long
+}
+
+// ---- Free-form custom timeframes ----------------------------------------
+// The user can type any interval ("7m", "90s", "2d"); it is built by
+// resampling the largest native interval that divides it evenly — the Pro
+// terminal's rule. Months are calendar months and only ever fold 1M.
+
+/** Seconds per unit. 'M' is nominal (30 days) — only used for parsing. */
+const UNIT_SEC: Record<string, number> = { s: 1, m: 60, h: 3600, d: 86400, w: 604800, M: 2592000 }
+const UNIT_NAME: Record<string, string> = {
+  s: 'Second',
+  m: 'Minute',
+  h: 'Hour',
+  d: 'Day',
+  w: 'Week',
+  M: 'Month',
+}
+const UNIT_GROUP: Record<string, TfGroup> = {
+  s: 'Seconds',
+  m: 'Minutes',
+  h: 'Hours',
+  d: 'Other',
+  w: 'Other',
+  M: 'Other',
+}
+/**
+ * More base rows per candle than this and the request budget (5 pages of
+ * 1000 rows) would leave too few candles to be worth drawing.
+ */
+export const MAX_CUSTOM_FACTOR = 200
+/** Longest custom interval: a year of weeks. */
+const MAX_CUSTOM_SEC = 52 * 604800
+
+/** Native intervals in seconds, month excluded (it is not a fixed length). */
+export const NATIVE_SECONDS: Record<string, number> = {}
+Object.keys(BASE_MS).forEach((k) => {
+  NATIVE_SECONDS[k] = BASE_MS[k] / 1000
+})
+
+function splitTf(tf: string): { n: number; unit: string } | null {
+  const m = /^(\d{1,4})\s*([smhdwMSHDW])$/.exec(String(tf).trim())
+  if (!m) return null
+  // 'M' is month and 'm' minute; the other units read the same in either case.
+  const unit = m[2] === 'M' ? 'M' : m[2].toLowerCase()
+  const n = Number(m[1])
+  return n > 0 ? { n, unit } : null
+}
+
+/** "45m" → 2700 seconds; null when it is not a timeframe. */
+export function parseTimeframe(tf: string): number | null {
+  const p = splitTf(tf)
+  return p ? p.n * UNIT_SEC[p.unit] : null
+}
+
+/** The largest native interval that evenly divides `sec`, and how many of it make one bar. */
+export function baseFor(sec: number): { base: string; factor: number } {
+  const c = Object.keys(NATIVE_SECONDS)
+    .filter((k) => NATIVE_SECONDS[k] <= sec && sec % NATIVE_SECONDS[k] === 0)
+    .sort((a, b) => NATIVE_SECONDS[b] - NATIVE_SECONDS[a])
+  const base = c[0] ?? '1s'
+  return { base, factor: sec / NATIVE_SECONDS[base] }
+}
+
+/** Seconds → the shortest id that says it ("2700" → "45m", "86400" → "1d"). */
+export function fmtTf(sec: number): string {
+  if (sec % 604800 === 0) return sec / 604800 + 'w'
+  if (sec % 86400 === 0) return sec / 86400 + 'd'
+  if (sec % 3600 === 0) return sec / 3600 + 'h'
+  if (sec % 60 === 0) return sec / 60 + 'm'
+  return sec + 's'
+}
+
+const CUSTOM: Record<string, TimeframeDef | null> = {}
+/**
+ * Resolve a typed interval. Returns the catalogue entry when it names one
+ * ("60m" → 1h), a resampled definition for anything else that can be built,
+ * or null when it cannot (not a timeframe, too long, or too many base rows).
+ */
+export function customTfDef(raw: unknown): TimeframeDef | null {
+  const s = String(raw ?? '').trim()
+  if (BY_ID[s]) return BY_ID[s]
+  if (s in CUSTOM) return CUSTOM[s]
+  const p = splitTf(s)
+  let def: TimeframeDef | null = null
+  if (p && p.unit === 'M') {
+    const id = p.n + 'M'
+    def = BY_ID[id] ||
+      (p.n <= 12
+        ? { id, label: id, long: p.n + ' Months', group: 'Other', base: '1M', factor: p.n, custom: true }
+        : null)
+  } else if (p) {
+    const sec = p.n * UNIT_SEC[p.unit]
+    const id = fmtTf(sec)
+    if (BY_ID[id]) def = BY_ID[id]
+    else if (sec <= MAX_CUSTOM_SEC) {
+      const { base, factor } = baseFor(sec)
+      const unit = id.slice(-1)
+      const n = Number(id.slice(0, -1))
+      if (factor <= MAX_CUSTOM_FACTOR)
+        def = {
+          id,
+          label: unit === 'd' || unit === 'w' ? n + unit.toUpperCase() : id,
+          long: n + ' ' + UNIT_NAME[unit] + (n > 1 ? 's' : ''),
+          group: UNIT_GROUP[unit],
+          base,
+          factor,
+          custom: true,
+        }
+    }
+  }
+  CUSTOM[s] = def
+  return def
+}
+
+/** Nominal length of an interval in ms (a month counts as 30 days). */
+export function tfMs(def: TimeframeDef): number {
+  return (BASE_MS[def.base] || 2592000000) * def.factor
 }
 
 /**

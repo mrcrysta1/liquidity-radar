@@ -13,7 +13,8 @@
 import { state } from '../../services/store'
 import { cfmt, pfmt } from '../../utils/format'
 import { getShowWhaleBubbles } from './overlayToggles'
-import { visibleCandles } from './replay'
+// Range bars share the chart's time axis, so bubbles place against what is drawn.
+import { displayCandles } from './series/rangeView'
 import { getWhaleView, onWhaleFlowChange, syncWhaleSymbol } from '../whales/whaleFlow'
 import type { WhaleOrder } from '../whales/whaleFlow'
 import { bubbleRadius } from '../whales/whaleMath'
@@ -78,7 +79,7 @@ function paint(): void {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   clear(ctx, cw, ch)
 
-  const candles = visibleCandles()
+  const candles = displayCandles()
   if (!candles.length) return
   if (!getShowWhaleBubbles()) return
   // Chart on a tab nobody has open (e.g. the Home screen at startup): fetch

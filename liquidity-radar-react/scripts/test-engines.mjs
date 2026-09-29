@@ -15,8 +15,22 @@ const src = (p) => pathToFileURL(resolve(__dirname, '..', 'src', p)).href
 
 const { swings, structureEvents, classifyPriceOI, bookMetrics, liquidityScore, fmtUsd } =
   await import(src('features/charts/sidePanels/metrics.ts'))
-const { bucketIndex, bucketEnd, resample, tfDef, normalizeTf, TIMEFRAMES } =
-  await import(src('services/timeframe.ts'))
+const {
+  bucketIndex,
+  bucketEnd,
+  resample,
+  tfDef,
+  normalizeTf,
+  TIMEFRAMES,
+  parseTimeframe,
+  baseFor,
+  fmtTf,
+  customTfDef,
+  isTf,
+  createFolder,
+} = await import(src('services/timeframe.ts'))
+const { buildRangeBars, atr, niceRange, autoRangeSize, minSafeRange, MAX_RANGE_BARS } =
+  await import(src('features/charts/series/rangeBars.ts'))
 const { noteLimitResponse, cooldownLeft, isRateLimited } = await import(src('api/rateLimit.ts'))
 const { pfmt, nfmt, cfmt } = await import(src('utils/format.ts'))
 const { VENUES, isUsdQuoted } = await import(src('features/advanced/venues.ts'))
@@ -163,6 +177,113 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   const jan = Date.UTC(2026, 0, 1)
   eq('bucketEnd: January rolls to February', bucketEnd(jan, tfDef('1M')), Date.UTC(2026, 1, 1))
   ok('bucketIndex: monotonic', bucketIndex(t0 + 1e6, d) > bucketIndex(t0, d))
+}
+
+// ------------------------------------------------------- custom timeframes
+// Ported from the Pro terminal's core/timeframes.test.ts, plus the main app's
+// resolution rules (canonical ids, catalogue hits, limits).
+{
+  eq('ctf: parses 45m', parseTimeframe('45m'), 2700)
+  eq('ctf: parses 7m', parseTimeframe('7m'), 420)
+  eq('ctf: parses 3d', parseTimeframe('3d'), 259200)
+  eq('ctf: parses 90s', parseTimeframe('90s'), 90)
+  eq('ctf: rejects junk', parseTimeframe('x'), null)
+  eq('ctf: rejects zero', parseTimeframe('0m'), null)
+  eq('ctf: base for 45m', baseFor(2700), { base: '15m', factor: 3 })
+  eq('ctf: base for 7m', baseFor(420), { base: '1m', factor: 7 })
+  eq('ctf: base for 15s', baseFor(15), { base: '1s', factor: 15 })
+  eq('ctf: base for 1h is native', baseFor(3600).base, '1h')
+  eq('ctf: base for 16h is 8h', baseFor(57600), { base: '8h', factor: 2 })
+  eq('ctf: formats 45m', fmtTf(2700), '45m')
+  eq('ctf: formats 30s', fmtTf(30), '30s')
+  eq('ctf: formats a day', fmtTf(86400), '1d')
+
+  for (const id of ['6h', '8h', '12h']) {
+    const d = tfDef(id)
+    eq('tf: ' + id + ' is in the catalogue and native', [d.id, d.base, d.factor, !!d.custom], [id, id, 1, false])
+  }
+  const d7 = customTfDef('7m')
+  eq('ctf: 7m folds seven 1m bars', [d7.id, d7.base, d7.factor, d7.custom, d7.group], ['7m', '1m', 7, true, 'Minutes'])
+  const d90 = customTfDef('90s')
+  eq('ctf: 90s folds 1s bars', [d90.base, d90.factor, d90.group, d90.long], ['1s', 90, 'Seconds', '90 Seconds'])
+  const d2 = customTfDef('2d')
+  eq('ctf: 2d folds 1d bars', [d2.id, d2.label, d2.base, d2.factor], ['2d', '2D', '1d', 2])
+  eq('ctf: 60m is the catalogue hour', customTfDef('60m').id, '1h')
+  eq('ctf: 45m is the catalogue entry', customTfDef('45m').custom, undefined)
+  eq('ctf: uppercase H reads as hours', customTfDef('6H').id, '6h')
+  eq('ctf: 2M is two calendar months', [customTfDef('2M').base, customTfDef('2M').factor], ['1M', 2])
+  eq('ctf: 1M stays the month', customTfDef('1M').id, '1M')
+  eq('ctf: too many base rows is refused', customTfDef('500s'), null)
+  eq('ctf: junk is refused', customTfDef('abc'), null)
+  eq('ctf: tfDef resolves a custom id', tfDef('7m').factor, 7)
+  eq('ctf: tfDef falls back for junk', tfDef('nope').id, '15m')
+  eq('ctf: normalizeTf canonicalises', normalizeTf('120m'), '2h')
+  ok('ctf: isTf accepts a canonical custom id', isTf('7m'))
+  ok('ctf: isTf refuses a non-canonical spelling', !isTf('420s'))
+  eq('ctf: 1m is still the minute', normalizeTf('1m'), '1m')
+
+  // Resampling a custom interval: 7m from 1m bars, bucketed on absolute time.
+  const t0 = Date.UTC(2026, 0, 1)
+  const start = Math.ceil(t0 / 420000) * 420000
+  const base = []
+  for (let i = 0; i < 70; i++) base.push({ t: start + i * 60000, o: i, h: i + 1, l: i - 1, c: i + 0.5, v: 1 })
+  const out = resample(base, d7)
+  eq('ctf: 70 × 1m make ten 7m bars', out.length, 10)
+  ok('ctf: 7m bars open on 7-minute boundaries', out.every((c) => c.t % 420000 === 0))
+  eq('ctf: 7m bar folds its members', [out[0].o, out[0].h, out[0].l, out[0].c, out[0].v], [0, 7, -1, 6.5, 7])
+  // The live folder keeps the forming 7m bar current.
+  const f = createFolder(d7)
+  f.seed(base.slice(0, 66))
+  const live = f.push({ t: start + 66 * 60000, o: 66, h: 99, l: 60, c: 70, v: 2 })
+  eq('ctf: live fold spans the bucket so far', [live.t, live.h, live.l, live.c, live.v], [start + 63 * 60000, 99, 60, 70, 5])
+  // 90s from 1s.
+  const s0 = Math.ceil(t0 / 90000) * 90000
+  const secs = []
+  for (let i = 0; i < 270; i++) secs.push({ t: s0 + i * 1000, o: 1, h: 2, l: 0.5, c: 1.5, v: 1 })
+  const o90 = resample(secs, d90)
+  eq('ctf: 270 × 1s make three 90s bars', o90.length, 3)
+  near('ctf: 90s volume sums', o90[1].v, 90)
+}
+
+// -------------------------------------------------------------- range bars
+// Ported from the Pro terminal's core/chart/rangeBars.test.ts, on the main
+// app's candle shape.
+{
+  const srcBars = Array.from({ length: 200 }, (_, i) => {
+    const o = 100 + Math.sin(i / 5) * 10
+    const c = o + ((i % 3) - 1) * 2
+    return { t: 1_000_000 + i * 60000, o, h: Math.max(o, c) + 1, l: Math.min(o, c) - 1, c, v: 4 }
+  })
+  const rb = buildRangeBars(srcBars, 3)
+  ok('range: builds plenty of bars', rb.length > 10, rb.length)
+  ok('range: no bar exceeds the range', rb.every((b) => b.h - b.l <= 3 + 1e-9))
+  ok('range: times strictly increase', rb.every((b, i) => i === 0 || b.t > rb[i - 1].t))
+  ok('range: times step in whole seconds', rb.every((b, i) => i === 0 || (b.t - rb[i - 1].t) % 1000 === 0))
+  ok('range: every closed bar spans exactly the range', rb.slice(0, -1).every((b) => Math.abs(b.h - b.l - 3) < 1e-9))
+  ok('range: each bar opens where the last closed', rb.every((b, i) => i === 0 || Math.abs(b.o - rb[i - 1].c) < 1e-9))
+  ok('range: bar times come from the source candles', rb[0].t === srcBars[0].t && rb[rb.length - 1].t >= srcBars[0].t)
+  near('range: volume is conserved', rb.reduce((a, b) => a + b.v, 0), 200 * 4, 1e-6)
+  eq('range: empty input', buildRangeBars([], 3).length, 0)
+  eq('range: non-positive range', buildRangeBars(srcBars, 0).length, 0)
+  // A single up candle 100 → 110 with range 2: walks O,L,H,C.
+  const one = buildRangeBars([{ t: 60000, o: 100, h: 110, l: 100, c: 110, v: 8 }], 2)
+  eq('range: one 10-point candle makes five 2-point bars', one.length, 5)
+  eq('range: the first bar is 100 → 102', [one[0].o, one[0].c], [100, 102])
+  eq('range: bars from one candle are a second apart', one.map((b) => b.t), [60000, 61000, 62000, 63000, 64000])
+  // Deterministic prefix: a live tick only touches the tail.
+  const a = buildRangeBars(srcBars.slice(0, 150), 3)
+  const b = buildRangeBars(srcBars.slice(0, 151), 3)
+  ok('range: adding a candle keeps the closed bars', a.slice(0, -1).every((x, i) => JSON.stringify(x) === JSON.stringify(b[i])))
+
+  const flat = Array.from({ length: 30 }, (_, i) => ({ t: i * 60000, o: 100, h: 102, l: 98, c: 100, v: 1 }))
+  near('atr: constant 4-point bars', atr(flat, 14), 4)
+  eq('atr: needs more than len bars', atr(flat.slice(0, 14), 14), null)
+  eq('nice: rounds up to two figures', niceRange(0.012345), 0.013)
+  eq('nice: whole numbers', niceRange(123.4), 130)
+  eq('auto: ATR of closed candles', autoRangeSize(flat), 4)
+  ok('auto: the live candle does not move it', autoRangeSize(flat.concat([{ t: 31 * 60000, o: 100, h: 200, l: 1, c: 150, v: 1 }])) === 4)
+  const floor = minSafeRange(srcBars)
+  ok('floor: a tiny range is raised', floor > 0 && buildRangeBars(srcBars, floor).length <= MAX_RANGE_BARS * 1.1, floor)
 }
 
 // -------------------------------------------------------------- rate limits
