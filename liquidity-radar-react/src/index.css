@@ -5207,6 +5207,37 @@ html[data-palette="glass"] .acct-card{background:linear-gradient(145deg,rgba(255
   box-shadow:0 0 0 3px rgb(var(--pRGB)/.15);
 }
 
+/* Custom timeframes (TimeframePicker) and range bar size (ChartStylePicker) */
+.tf-custom{display:flex;gap:6px;padding:8px 10px 6px;border-bottom:1px solid var(--border)}
+.tf-custom input,.range-set-input input{
+  flex:1;min-width:0;background:var(--bg);border:1px solid var(--border2);border-radius:7px;
+  color:var(--txt);padding:5px 8px;font-size:11.5px;font-family:var(--mono);outline:none;
+}
+.tf-custom input:focus,.range-set-input input:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgb(var(--pRGB)/.15)}
+.tf-custom-add{
+  background:var(--primary);border:none;border-radius:7px;color:#fff;cursor:pointer;
+  padding:0 11px;font-size:11px;font-weight:700;
+}
+.tf-custom-add:disabled{opacity:.45;cursor:default}
+.tf-custom-err{padding:5px 12px 0;font-size:10.5px;color:var(--red)}
+.tf-row-custom{
+  font-style:normal;font-family:var(--mono);font-size:8px;font-weight:800;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--cyan);margin-left:6px;
+}
+.tf-del{
+  display:flex;align-items:center;justify-content:center;width:22px;flex-shrink:0;
+  background:transparent;border:none;border-radius:8px;cursor:pointer;color:var(--dim);font-size:14px;
+}
+.tf-del:hover{color:var(--red)}
+.range-set{margin-bottom:5px;padding:6px 8px 8px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:7px}
+.range-set-head{display:flex;justify-content:space-between;align-items:baseline;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.range-set-head b{font-family:var(--mono);font-size:11.5px;color:var(--txt);letter-spacing:0;text-transform:none}
+.range-set-modes{display:flex;gap:4px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:2px}
+.range-mode{flex:1;background:transparent;border:none;border-radius:6px;color:var(--dim);cursor:pointer;padding:5px 6px;font-size:11px;font-weight:600}
+.range-mode.on{background:var(--primary);color:#fff}
+.range-set-input{display:flex;align-items:center;gap:7px}
+.range-set-input small,.range-set-note{font-size:9.5px;color:var(--dim)}
+
 /* ---- Pine scripts: indicator-menu tab, editor, My scripts ---- */
 .ind-tabs{display:flex;gap:4px}
 .ind-tabs button{

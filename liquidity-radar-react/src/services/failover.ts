@@ -16,7 +16,7 @@ import { mdFromK, mdSym, mdTf } from './market'
 import type { CandleFlat } from './market'
 import { state } from './store'
 import { $ } from '../utils/dom'
-import { DEFAULT_TF } from './timeframe'
+import { BASE_MS, DEFAULT_TF, resample } from './timeframe'
 import { KlineHub } from './klineHub'
 import {
   ProviderChain,
@@ -87,7 +87,8 @@ function binanceKlines(sym: string, base: string, need: number, before: number) 
 }
 
 // Native Binance interval → the fallback venue's name for it. Anything absent
-// (1s, and 3d on Bybit) is not served there and the chain moves on.
+// is built from a smaller interval the venue does serve (8h from 4h, 3d from
+// 1d — see viaSupported); 1s has nothing below it, so the chain moves on.
 const BYBIT_IV: Record<string, string> = {
   '1m': '1',
   '3m': '3',
@@ -122,6 +123,27 @@ const OKX_BAR: Record<string, string> = {
   '1M': '1Mutc',
 }
 
+/**
+ * A venue without `base` serves it by folding the largest interval it does
+ * have that divides it evenly. Null when there is none (1s, or the month).
+ */
+function viaSupported(
+  base: string,
+  served: Record<string, string>,
+  need: number,
+  fetch: (sub: string, need: number) => Promise<CandleFlat[] | null>,
+): Promise<CandleFlat[] | null> | null {
+  const ms = BASE_MS[base]
+  if (!ms) return null
+  const sub = Object.keys(served)
+    .filter((k) => BASE_MS[k] && BASE_MS[k] < ms && ms % BASE_MS[k] === 0)
+    .sort((a, b) => BASE_MS[b] - BASE_MS[a])[0]
+  if (!sub) return null
+  const factor = ms / BASE_MS[sub]
+  const def = { id: base, label: base, long: base, group: 'Other' as const, base: sub, factor }
+  return fetch(sub, need * factor).then((rows) => (rows ? resample(rows, def) : rows))
+}
+
 /** Rows as both venues send them: [openTimeMs, o, h, l, c, baseVolume, ...], newest first. */
 function fromRows(rows: unknown): CandleFlat[] {
   if (!Array.isArray(rows)) throw new Error('bad payload')
@@ -131,9 +153,18 @@ function fromRows(rows: unknown): CandleFlat[] {
     .reverse()
 }
 
-function bybitKlines(sym: string, base: string, need: number, before: number) {
+function bybitKlines(
+  sym: string,
+  base: string,
+  need: number,
+  before: number,
+): Promise<CandleFlat[] | null> {
   const iv = BYBIT_IV[base]
-  if (!iv) return Promise.resolve(null)
+  if (!iv)
+    return (
+      viaSupported(base, BYBIT_IV, need, (sub, n) => bybitKlines(sym, sub, n, before)) ||
+      Promise.resolve(null)
+    )
   return pageKlines(need, before, 1000, MAX_PAGES, async (limit, endTime) => {
     const r = (await jget(
       'https://api.bybit.com/v5/market/kline?category=spot&symbol=' +
@@ -153,9 +184,18 @@ function okxInst(sym: string): string {
   return String(mdSym(sym)).replace(/USDT$/, '') + '-USDT'
 }
 
-function okxKlines(sym: string, base: string, need: number, before: number) {
+function okxKlines(
+  sym: string,
+  base: string,
+  need: number,
+  before: number,
+): Promise<CandleFlat[] | null> {
   const bar = OKX_BAR[base]
-  if (!bar) return Promise.resolve(null)
+  if (!bar)
+    return (
+      viaSupported(base, OKX_BAR, need, (sub, n) => okxKlines(sym, sub, n, before)) ||
+      Promise.resolve(null)
+    )
   // /candles holds the latest 1440 bars at 300 a page; older history lives
   // behind /history-candles at 100 a page.
   const deep = before > 0
