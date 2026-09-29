@@ -31,6 +31,7 @@ const LearningLab = lazy(() => loadLab().then((m) => ({ default: m.LearningLab }
 const BubblesCanvas = lazy(() => loadBubbles().then((m) => ({ default: m.BubblesCanvas })))
 const loadRadarPanels = () => Promise.all([loadRLPanel(), loadCrossExchange()])
 import { renderAlerts } from '../features/alerts/alerts'
+import { AlertsModal } from './alerts/AlertsModal'
 import { openModal } from '../utils/dom'
 import { ChartSidePanel } from './chart/ChartSidePanel'
 import { Footer } from './footer/Footer'
@@ -485,28 +486,7 @@ export function Shell() {
 
       <Guard name="Radar AI"><Suspense fallback={null}><AiAssistant /></Suspense></Guard>
       
-      <div className="modal-overlay" id="alModal" role="dialog" aria-modal="true" aria-label="Price alerts" onClick={(e) => { if(e.target=== e.currentTarget)w.closeModal('alModal') }}>
-        <div className="modal-box" style={{ 'maxWidth': '480px' }}>
-          <div className="modal-head">
-            <div>Price Alerts</div>
-            <button className="modal-x" onClick={() => { w.closeModal('alModal') }}>X</button>
-          </div>
-          <div className="modal-body">
-            <div className="pf-field" style={{ 'display': 'flex', 'gap': '8px' }}>
-              <input id="alSym" className="pf-input" placeholder="Symbol (BTCUSDT)" style={{ 'flex': '1' }} autoComplete="off" />
-              <select id="alDir" className="pf-input" style={{ 'flex': '0 0 92px' }}>
-                <option value="above">Above</option>
-                <option value="below">Below</option>
-              </select>
-              <input id="alPrice" className="pf-input" type="number" step="any" min="0" placeholder="Price" style={{ 'flex': '1' }} />
-            </div>
-            <button className="tb-btn" style={{ 'width': '100%', 'marginTop': '2px' }} onClick={(e) => { w.addAlert(w.$('alSym').value,w.$('alDir').value,w.$('alPrice').value) }}>Set Alert</button>
-            <div className="al-perm" id="alPerm">Desktop notifications: <b id="alPermState">off</b> — <button className="al-enable-btn" onClick={() => { w.enableAlerts() }}>Enable</button></div>
-            <div style={{ 'marginTop': '8px', 'fontSize': '11px', 'color': 'var(--dim)' }}>Alerts are checked live and fire desktop notifications + toasts.</div>
-            <div className="al-list" id="alList"></div>
-          </div>
-        </div>
-      </div>
+      <AlertsModal />
       
       <div className="modal-overlay" id="thModal" role="dialog" aria-modal="true" aria-label="Color themes" onClick={(e) => { if(e.target=== e.currentTarget)w.closeModal('thModal') }}>
         <div className="modal-box" style={{ 'maxWidth': '560px' }}>

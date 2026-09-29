@@ -5184,6 +5184,19 @@ html[data-palette="glass"] .acct-card{background:linear-gradient(145deg,rgba(255
 .chart-tool-btn:disabled{opacity:.35;cursor:default;box-shadow:none}
 @media(min-width:641px){.cwl .cp-menu{left:auto;right:0}}
 
+/* Alerts modal: rule type tabs, form row, row actions, trigger log */
+.al-kinds{display:flex;gap:6px;margin-bottom:10px}
+.al-kind{flex:1;background:var(--sunk-1);border:1px solid var(--border);color:var(--dim);border-radius:8px;padding:6px 8px;font-size:12px;font-weight:700;cursor:pointer}
+.al-kind.on{border-color:var(--primary);color:var(--txt);background:rgb(var(--pRGB)/.14)}
+.al-form{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.al-wl{flex:1 1 110px;font-size:12px;color:var(--dim);font-weight:700}
+.al-opts{display:flex;align-items:center;gap:14px;font-size:12px;color:var(--dim);margin:0 0 10px}
+.al-opts label{display:flex;align-items:center;gap:5px;cursor:pointer}
+.al-cur{color:var(--dim);font-size:11.5px}
+.al-act{font-size:10px;padding:2px 7px;border:1px solid var(--border);border-radius:6px;cursor:pointer;font-family:var(--mono);background:var(--sunk-1);color:var(--txt)}
+.al-act.al-del{background:var(--red);border-color:var(--red);color:#fff}
+.al-log-head{display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:11px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.04em}
+
 /* Volume profile settings, under its row in the Panes menu */
 .vp-settings{grid-template-columns:repeat(auto-fit,minmax(76px,1fr));padding:2px 8px 8px 48px}
 
