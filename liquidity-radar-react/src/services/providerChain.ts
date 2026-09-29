@@ -190,3 +190,31 @@ export function klineFreshness(
   if (rest.freshness === 'LIVE' && age < REST_LIVE_MS && !lastLiveTs) return 'LIVE'
   return 'DELAYED'
 }
+
+/**
+ * Spaces calls `gapMs` apart, first come first served: each caller reserves
+ * the next free slot and waits for it. Used to keep bulk feature fetches (the
+ * signal scanner, the home cards) from bursting at a fallback venue, whose
+ * limits are far tighter than Binance's. `now` and `sleep` are injectable so
+ * the spacing can be tested without a clock.
+ */
+export function createPacer(
+  gapMs: number,
+  now: () => number = () => Date.now(),
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
+): () => Promise<void> {
+  let next = 0
+  return async () => {
+    const t = now()
+    const at = Math.max(t, next)
+    next = at + gapMs
+    if (at > t) await sleep(at - t)
+  }
+}
+
+/** Candles back into Binance's REST row shape, [openTime, o, h, l, c, v], oldest first. */
+export function toKlineRows(
+  candles: Array<{ t: number; o: number; h: number; l: number; c: number; v: number }>,
+): number[][] {
+  return candles.map((c) => [c.t, c.o, c.h, c.l, c.c, c.v])
+}

@@ -28,7 +28,9 @@ const { buildVolumeProfile, computeVolumeProfile, clampRows, clampValueArea } = 
   src('features/charts/volumeProfile.ts')
 )
 
-const { ProviderChain, klineFreshness } = await import(src('services/providerChain.ts'))
+const { ProviderChain, klineFreshness, createPacer, toKlineRows } = await import(
+  src('services/providerChain.ts')
+)
 const { KlineHub, MAX_HUB_STREAMS } = await import(src('services/klineHub.ts'))
 
 let pass = 0
@@ -368,6 +370,36 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   eq('fresh: old snapshot, no stream → STALE', klineFreshness({ freshness: 'LIVE', ts: 0 }, 0, 6 * 60_000), 'STALE')
   eq('fresh: cached copy stays STALE', klineFreshness({ freshness: 'STALE', ts: 9000 }, 0, 10_000), 'STALE')
   eq('fresh: nothing at all is OFFLINE', klineFreshness(null, 0, 10_000), 'OFFLINE')
+}
+
+// ---------------------------------------------------------------- pacer + kline rows
+{
+  let clock = 1000
+  const waits = []
+  const pace = createPacer(150, () => clock, async (ms) => {
+    waits.push(ms)
+  })
+  await pace()
+  await pace()
+  await pace()
+  eq('pacer: first call goes at once, the next wait one and two gaps', waits, [150, 300])
+  clock = 5000
+  waits.length = 0
+  await pace()
+  eq('pacer: after a quiet spell a call is not held back', waits, [])
+  await pace()
+  eq('pacer: and the one after it waits a single gap', waits, [150])
+
+  const rows = toKlineRows([
+    { t: 60000, o: 1, h: 3, l: 0.5, c: 2, v: 10 },
+    { t: 120000, o: 2, h: 4, l: 1.5, c: 3, v: 20 },
+  ])
+  eq('kline rows: Binance REST row shape, oldest first', rows, [
+    [60000, 1, 3, 0.5, 2, 10],
+    [120000, 2, 4, 1.5, 3, 20],
+  ])
+  eq('kline rows: close is index 4, as callers read it', rows.map((k) => Number(k[4])), [2, 3])
+  eq('kline rows: empty in, empty out', toKlineRows([]), [])
 }
 
 // ---------------------------------------------------------------- kline hub
