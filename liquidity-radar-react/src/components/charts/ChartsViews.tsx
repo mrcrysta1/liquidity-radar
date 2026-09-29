@@ -29,6 +29,7 @@ import {
   onMcChange,
 } from '../../features/charts/multiCharts'
 import { toggleReplay } from '../../features/charts/replay'
+import { PanelIndicatorButtons } from '../chart/PanelIndicatorButtons'
 import { chartScreenshot } from '../../features/charts/chartRender'
 import { renderAlerts } from '../../features/alerts/alerts'
 import { openModal, showToast } from '../../utils/dom'
@@ -340,6 +341,9 @@ export function WorkspaceHead() {
         <i />
         Live
       </span>
+      {/* Portals the indicators button into every multi-chart panel header
+          (this workspace's and the layouts around the main chart). */}
+      <PanelIndicatorButtons />
     </div>
   )
 }
