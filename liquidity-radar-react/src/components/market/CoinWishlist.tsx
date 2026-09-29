@@ -1,11 +1,11 @@
 // The Market tab's coin wishlist: the user's favourite coins in their own
-// priority order, the top three called out as cards, and one coin that can be
+// priority order, and one coin that can be
 // pinned. The pinned coin is what the Radar opens on (instead of BTC) and it
 // leads the Radar and Dashboard watchlists.
 //
 // Built from the pieces the Market tab already uses: the chart's coin picker
-// to add coins (a star anywhere is the same list), the celebrity-coin cards
-// and the Top Coins table. Rows and cards carry `data-sym`, so the engine's
+// to add coins (a star anywhere is the same list) and the Top Coins table.
+// Rows carry `data-sym`, so the engine's
 // click handler opens their chart just like the other Market tables.
 import type { MouseEvent, ReactNode } from 'react'
 import { state } from '../../services/store'
@@ -34,7 +34,7 @@ function ChgPill({ pct }: { pct?: number }) {
   return <span className={'cmc-pill ' + cls}>{(pct > 0 ? '+' : '') + pct.toFixed(2)}%</span>
 }
 
-/** A button inside a clickable row/card: must not also open the chart. */
+/** A button inside a clickable row: must not also open the chart. */
 function Btn({
   label,
   on,
@@ -110,98 +110,73 @@ export function CoinWishlist() {
           priority and pin one (📌) to make it the coin the Radar always opens on.
         </div>
       ) : (
-        <>
-          <div className="celeb-grid">
-            {favs.slice(0, 3).map((b, i) => {
-              const t = tick(b)
-              return (
-                <div key={b} className="celeb-card" data-sym={symOf(b)}>
-                  <div className="celeb-top">
-                    <span className="badge b-cyan">#{i + 1}</span>
-                    <PinBtn base={b} pinned={pinned === b} />
-                  </div>
-                  <div className="celeb-nm coin-cell">
-                    <CoinBadge sym={symOf(b)} size={24} />
-                    {COINS[b]?.name ?? b}
-                  </div>
-                  <div className="celeb-pr">{t?.last ? '$' + pfmt(t.last) : '—'}</div>
-                  <div className="celeb-mt">
-                    <ChgPill pct={t?.pct} />
-                    <span>{t?.qvol ? cfmt(t.qvol) : '—'}</span>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-
-          <div className="table-scroll">
-            <table className="coins-table cmc-table">
-              <thead>
-                <tr>
-                  <th className="cmc-rank">#</th>
-                  <th>Coin</th>
-                  <th>Price</th>
-                  <th>24h %</th>
-                  <th>Volume (24h)</th>
-                  <th>Priority</th>
-                  <th aria-label="Pin and remove" />
-                </tr>
-              </thead>
-              <tbody>
-                {favs.map((b, i) => {
-                  const t = tick(b)
-                  return (
-                    <tr key={b} data-sym={symOf(b)}>
-                      <td className="cmc-rank">{i + 1}</td>
-                      <td>
-                        <div className="coin-cell">
-                          <CoinBadge sym={symOf(b)} size={28} />
-                          <div className="coin-nm">
-                            <div className="cn">{COINS[b]?.name ?? b}</div>
-                            <div className="cs">
-                              {b}
-                              {pinned === b ? ' · PINNED' : ''}
-                            </div>
+        <div className="table-scroll">
+          <table className="coins-table cmc-table">
+            <thead>
+              <tr>
+                <th className="cmc-rank">#</th>
+                <th>Coin</th>
+                <th>Price</th>
+                <th>24h %</th>
+                <th>Volume (24h)</th>
+                <th>Priority</th>
+                <th aria-label="Pin and remove" />
+              </tr>
+            </thead>
+            <tbody>
+              {favs.map((b, i) => {
+                const t = tick(b)
+                return (
+                  <tr key={b} data-sym={symOf(b)}>
+                    <td className="cmc-rank">{i + 1}</td>
+                    <td>
+                      <div className="coin-cell">
+                        <CoinBadge sym={symOf(b)} size={28} />
+                        <div className="coin-nm">
+                          <div className="cn">{COINS[b]?.name ?? b}</div>
+                          <div className="cs">
+                            {b}
+                            {pinned === b ? ' · PINNED' : ''}
                           </div>
                         </div>
-                      </td>
-                      <td className="cmc-price">{t?.last ? '$' + pfmt(t.last) : '—'}</td>
-                      <td>
-                        <ChgPill pct={t?.pct} />
-                      </td>
-                      <td className="vol-dim">{t?.qvol ? cfmt(t.qvol) : '—'}</td>
-                      <td>
-                        <Btn
-                          label={'Move ' + b + ' up'}
-                          disabled={i === 0}
-                          onClick={() => moveFavorite(b, -1)}
-                        >
-                          ▲
-                        </Btn>{' '}
-                        <Btn
-                          label={'Move ' + b + ' down'}
-                          disabled={i === favs.length - 1}
-                          onClick={() => moveFavorite(b, 1)}
-                        >
-                          ▼
-                        </Btn>
-                      </td>
-                      <td>
-                        <PinBtn base={b} pinned={pinned === b} />{' '}
-                        <Btn
-                          label={'Remove ' + b + ' from wishlist'}
-                          onClick={() => toggleFavorite(b)}
-                        >
-                          ✕
-                        </Btn>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        </>
+                      </div>
+                    </td>
+                    <td className="cmc-price">{t?.last ? '$' + pfmt(t.last) : '—'}</td>
+                    <td>
+                      <ChgPill pct={t?.pct} />
+                    </td>
+                    <td className="vol-dim">{t?.qvol ? cfmt(t.qvol) : '—'}</td>
+                    <td>
+                      <Btn
+                        label={'Move ' + b + ' up'}
+                        disabled={i === 0}
+                        onClick={() => moveFavorite(b, -1)}
+                      >
+                        ▲
+                      </Btn>{' '}
+                      <Btn
+                        label={'Move ' + b + ' down'}
+                        disabled={i === favs.length - 1}
+                        onClick={() => moveFavorite(b, 1)}
+                      >
+                        ▼
+                      </Btn>
+                    </td>
+                    <td>
+                      <PinBtn base={b} pinned={pinned === b} />{' '}
+                      <Btn
+                        label={'Remove ' + b + ' from wishlist'}
+                        onClick={() => toggleFavorite(b)}
+                      >
+                        ✕
+                      </Btn>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   )
