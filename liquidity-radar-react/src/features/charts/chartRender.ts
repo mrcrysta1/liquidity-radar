@@ -5,6 +5,7 @@ import { pfmt, nfmt, cfmt, chgHtml } from '../../utils/format'
 import { baseOf, coinMeta } from '../../utils/coins'
 import { $, showToast } from '../../utils/dom'
 import { state } from '../../services/store'
+import { storageGet, storageSet } from '../../services/storage'
 import {
   attachIndicatorChart,
   indicatorLegend,
@@ -51,8 +52,8 @@ export function onPriceSeriesChange(fn: (s: Any) => void): () => void {
   return () => priceSeriesSubs.delete(fn)
 }
 // Chart style lives in ./chartStyle and indicators in indicators/store — both
-// persist. What is left here is the live series handles and the drawings,
-// which stay session-only.
+// persist. What is left here is the live series handles and the drawings of
+// the coin on screen (saved per coin, see currentDrawings).
 const chartState: {
   drawTool: string | null
   drawings: Any[]
@@ -306,10 +307,22 @@ export function initChart(): void {
   // The countdown reads the live series each time, so a style change that
   // replaces the series does not strand it.
   mountCloseTimer(chart, () => candleSeries)
+  // While the cursor is over a bar the legend shows that bar; live ticks must
+  // not overwrite it, and leaving the chart hands it back to the live candle.
   chart.subscribeCrosshairMove((param: Any) => {
-    if (!param.time || !param.seriesData) return
-    const cp = visibleCandles().find((c) => Math.floor(c.t / 1000) === param.time)
-    if (cp) renderLegend(cp.o, cp.h, cp.l, cp.c, null, true)
+    const cp =
+      param.time && param.point
+        ? visibleCandles().find((c) => Math.floor(c.t / 1000) === param.time)
+        : null
+    if (!cp) {
+      if (hoverTime != null) {
+        hoverTime = null
+        renderLiveLegend()
+      }
+      return
+    }
+    hoverTime = param.time as number
+    renderLegend(cp.o, cp.h, cp.l, cp.c, cp.v, true)
   })
   chart.timeScale().subscribeVisibleTimeRangeChange(function () {
     redrawDrawings()
@@ -370,6 +383,13 @@ export function initChart(): void {
   })
   watchLiveWhales()
   updateChartData(true)
+}
+/** Bar time (seconds) under the crosshair, or null when the cursor is off the chart. */
+let hoverTime: number | null = null
+function renderLiveLegend(): void {
+  const candles = visibleCandles()
+  const lc = candles[candles.length - 1]
+  if (lc) renderLegend(lc.o, lc.h, lc.l, lc.c, lc.v, false)
 }
 function renderLegend(o: Any, h: Any, l: Any, c: Any, v: Any, isCross: Any): void {
   if (!isFinite(o)) return
@@ -476,7 +496,7 @@ export function updateChartData(fit = false): void {
   chartState.firstBarTime = candles[0].t
   const lc = candles[candles.length - 1]
   refreshIndicatorLegend()
-  renderLegend(lc.o, lc.h, lc.l, lc.c, lc.v, false)
+  if (hoverTime == null) renderLegend(lc.o, lc.h, lc.l, lc.c, lc.v, false)
   redrawDrawings()
   updateCloseTimer()
 }
@@ -542,7 +562,9 @@ export function updateChartLast(c: Any): void {
   // The candle follows the tape frame by frame, but indicators and the legend
   // are recomputed over the whole series — far too much work to repeat on every
   // trade print, and nothing the eye could read that fast anyway.
-  renderLegend(c.o, c.h, c.l, c.c, c.v, false)
+  // Hovering an older bar keeps its values; hovering the live one follows it.
+  if (hoverTime == null || hoverTime === Math.floor(c.t / 1000))
+    renderLegend(c.o, c.h, c.l, c.c, c.v, hoverTime != null)
   const now = Date.now()
   if (!indPending && now - indLast >= IND_REFRESH_MS) {
     indPending = true
@@ -554,7 +576,7 @@ export function updateChartLast(c: Any): void {
         renderDeltaPane(state.candles, indicatorPaneCount())
         refreshIndicatorLegend()
         const lc = state.candles[state.candles.length - 1]
-        if (lc) renderLegend(lc.o, lc.h, lc.l, lc.c, lc.v, false)
+        if (lc && hoverTime == null) renderLegend(lc.o, lc.h, lc.l, lc.c, lc.v, false)
       }
       updateCloseTimer()
     })
@@ -575,21 +597,68 @@ function initChartToolbar(): void {
     redrawDrawings()
   })
   onClearAllDrawings(function () {
+    currentDrawings()
     chartState.drawings = []
     chartState.drawBuf = []
     chartState._eraseHit = -1
+    saveDrawings()
     publishDrawingCount()
     redrawDrawings()
     showToast('Drawings cleared')
   })
   onUndoDrawing(function () {
     if (chartState.drawBuf.length) chartState.drawBuf = []
-    else chartState.drawings.pop()
+    else if (currentDrawings().pop()) saveDrawings()
     chartState._eraseHit = -1
     publishDrawingCount()
     redrawDrawings()
   })
   syncDrawHint()
+}
+
+// ---- Saved drawings, one set per coin ----
+// Every drawing is anchored in time + price (see snapToCandle), so it stays
+// valid across timeframes of the same coin but means nothing on another one.
+// The set on screen follows state.symbol lazily: whatever touches the drawings
+// goes through currentDrawings(), which swaps sets the moment the coin changes.
+const DRAWINGS_KEY = 'lr-drawings-v1'
+const DRAWINGS_MAX_COINS = 50
+const DRAWINGS_MAX_PER_COIN = 200
+let drawingsSym: string | null = null
+
+function validDrawing(d: Any): boolean {
+  return !!d && typeof d.type === 'string' && Array.isArray(d.points)
+}
+
+function currentDrawings(): Any[] {
+  const sym = String(state.symbol || '')
+  if (sym !== drawingsSym) {
+    drawingsSym = sym
+    const all = storageGet<Record<string, Any[]>>(DRAWINGS_KEY, {})
+    const list = all && Array.isArray(all[sym]) ? all[sym] : []
+    chartState.drawings = list.filter(validDrawing)
+    chartState.drawBuf = []
+    chartState._preview = null
+    chartState._eraseHit = -1
+    chartState._freehand = null
+    chartState._freeXY = null
+    chartState._captionDraft = null
+    closeLabelInput()
+    publishDrawingCount()
+  }
+  return chartState.drawings
+}
+
+/** Write the current coin's set back; the most recently edited coins are kept. */
+function saveDrawings(): void {
+  if (drawingsSym == null) return
+  const stored = storageGet<Record<string, Any[]>>(DRAWINGS_KEY, {})
+  const all: Record<string, Any[]> = stored && typeof stored === 'object' ? stored : {}
+  delete all[drawingsSym]
+  if (chartState.drawings.length) all[drawingsSym] = chartState.drawings.slice(-DRAWINGS_MAX_PER_COIN)
+  const keys = Object.keys(all)
+  keys.slice(0, Math.max(0, keys.length - DRAWINGS_MAX_COINS)).forEach((k) => delete all[k])
+  storageSet(DRAWINGS_KEY, all)
 }
 
 function publishDrawingCount(): void {
@@ -714,7 +783,10 @@ function setupDrawLayer(): void {
   chartState.drawCanvas = cv
   const overlay = document.createElement('div')
   overlay.id = 'drawHit'
-  overlay.style.cssText = 'position:absolute;inset:0;z-index:6;cursor:crosshair;display:none;'
+  // touch-action:none: while a tool is armed (the only time this layer is
+  // shown) a finger draws instead of scrolling the page or panning the chart.
+  overlay.style.cssText =
+    'position:absolute;inset:0;z-index:6;cursor:crosshair;display:none;touch-action:none;'
   wrap.appendChild(overlay)
   overlay.addEventListener('click', function (e) {
     const tool = getDrawTool()
@@ -727,7 +799,8 @@ function setupDrawLayer(): void {
     if (tool === 'erase') {
       const i = drawingAt(x, y)
       if (i === -1) return
-      chartState.drawings.splice(i, 1)
+      currentDrawings().splice(i, 1)
+      saveDrawings()
       chartState._eraseHit = -1
       publishDrawingCount()
       redrawDrawings()
@@ -736,15 +809,22 @@ function setupDrawLayer(): void {
     placeDrawPointFromXY(x, y)
   })
   // Open-ended shapes (polyline, patterns you want to cut short) finish here.
-  overlay.addEventListener('dblclick', function () {
+  overlay.addEventListener('dblclick', function (e) {
     const def = drawToolDef(getDrawTool())
     if (!def) return
-    if (def.points === 0) commitPending()
+    const r = overlay.getBoundingClientRect()
+    if (def.points === 0) commitPending(e.clientX - r.left, e.clientY - r.top)
   })
-  // Freehand: press, drag, release.
-  overlay.addEventListener('mousedown', function (e) {
+  // Freehand: press, drag, release. Pointer events, so a finger or pen draws
+  // exactly like the mouse; capture keeps the stroke even past the edge.
+  overlay.addEventListener('pointerdown', function (e) {
     const def = drawToolDef(getDrawTool())
     if (!def || def.points !== -1) return
+    try {
+      overlay.setPointerCapture(e.pointerId)
+    } catch {
+      /* synthetic or already-released pointer */
+    }
     const r = overlay.getBoundingClientRect()
     chartState._freehand = []
     const fx = e.clientX - r.left
@@ -753,19 +833,26 @@ function setupDrawLayer(): void {
     const pt = snapToCandle(fx, fy)
     if (pt) chartState._freehand.push(pt)
   })
-  overlay.addEventListener('mouseup', function () {
+  overlay.addEventListener('pointerup', function () {
     const def = drawToolDef(getDrawTool())
     if (!def || def.points !== -1) return
     const pts = chartState._freehand || []
     chartState._freehand = null
     chartState._freeXY = null
     if (pts.length > 1) {
-      chartState.drawings.push({ type: 'brush', color: def.color || '#4FC3F7', points: pts })
+      currentDrawings().push({ type: 'brush', color: def.color || '#4FC3F7', points: pts })
+      saveDrawings()
       publishDrawingCount()
     }
     redrawDrawings()
   })
-  overlay.addEventListener('mousemove', function (e) {
+  // The browser took the touch back (a system gesture): drop the stroke.
+  overlay.addEventListener('pointercancel', function () {
+    chartState._freehand = null
+    chartState._freeXY = null
+    redrawDrawings()
+  })
+  overlay.addEventListener('pointermove', function (e) {
     const tool = getDrawTool()
     if (!tool) return
     const r = overlay.getBoundingClientRect()
@@ -799,7 +886,7 @@ function setupDrawLayer(): void {
       redrawDrawings(true)
     }
   })
-  overlay.addEventListener('mouseleave', function () {
+  overlay.addEventListener('pointerleave', function () {
     chartState._preview = null
     chartState._eraseHit = -1
     redrawDrawings()
@@ -855,40 +942,87 @@ function placeDrawPointFromXY(x: Any, y: Any): void {
   chartState.drawBuf.push(pt)
   setPendingPoints(chartState.drawBuf.length)
   // points === 0 means open-ended: keep collecting until a double-click.
-  if (def.points > 0 && chartState.drawBuf.length >= def.points) commitPending()
+  if (def.points > 0 && chartState.drawBuf.length >= def.points) commitPending(x, y)
   redrawDrawings()
 }
 
-/** Turn the points collected so far into a drawing. */
-function commitPending(): void {
+/** Turn the points collected so far into a drawing. (x, y) is the last click. */
+function commitPending(x: number, y: number): void {
   const def = drawToolDef(getDrawTool())
   if (!def) return
   const pts = chartState.drawBuf
   const min = def.points > 0 ? def.points : 2
   if (pts.length < min) return
   const drawing: Any = { type: def.id, color: def.color || '#4FC3F7', points: pts.slice() }
-  if (def.text) {
-    const caption = askCaption()
-    if (caption === null) {
-      chartState.drawBuf = []
-      publishDrawingCount()
-      redrawDrawings()
-      return
-    }
-    drawing.text = caption
-  }
-  chartState.drawings.push(drawing)
   chartState.drawBuf = []
   chartState._preview = null
+  if (def.text) {
+    // The caption is typed in place; the drawing lands once it is confirmed.
+    const sym = drawingsSym
+    chartState._captionDraft = { ...drawing, text: '…' }
+    askCaption(x, y, function (caption) {
+      chartState._captionDraft = null
+      if (caption != null && sym === drawingsSym) {
+        drawing.text = caption
+        currentDrawings().push(drawing)
+        saveDrawings()
+      }
+      publishDrawingCount()
+      redrawDrawings()
+    })
+    publishDrawingCount()
+    redrawDrawings()
+    return
+  }
+  currentDrawings().push(drawing)
+  saveDrawings()
   publishDrawingCount()
   redrawDrawings()
 }
 
-/** Minimal caption prompt for the text tools. */
-function askCaption(): string | null {
-  const v = window.prompt('Label')
-  if (v == null) return null
-  return v.trim() || 'Note'
+/**
+ * Caption input for the text tools, typed right where the label goes.
+ * Enter saves, Esc cancels, clicking away saves whatever was typed.
+ */
+let labelInput: HTMLInputElement | null = null
+function closeLabelInput(): void {
+  const el = labelInput
+  labelInput = null
+  el?.remove()
+}
+function askCaption(x: number, y: number, done: (caption: string | null) => void): void {
+  closeLabelInput()
+  const wrap = $('chartWrap')
+  if (!wrap) return done(null)
+  const el = document.createElement('input')
+  el.type = 'text'
+  el.className = 'draw-label-input'
+  el.placeholder = 'Label'
+  el.maxLength = 80
+  el.setAttribute('aria-label', 'Drawing label')
+  el.style.left = Math.max(4, Math.min(x, wrap.clientWidth - 170)) + 'px'
+  el.style.top = Math.max(4, Math.min(y - 14, wrap.clientHeight - 32)) + 'px'
+  labelInput = el
+  let settled = false
+  const finish = (caption: string | null) => {
+    if (settled) return
+    settled = true
+    if (labelInput === el) closeLabelInput()
+    done(caption)
+  }
+  el.addEventListener('keydown', function (e) {
+    e.stopPropagation()
+    if (e.key === 'Enter') finish(el.value.trim() || 'Note')
+    else if (e.key === 'Escape') finish(null)
+  })
+  el.addEventListener('blur', function () {
+    finish(el.value.trim() || null)
+  })
+  // Clicks on the field must not place points on the draw layer beneath.
+  el.addEventListener('pointerdown', (e) => e.stopPropagation())
+  el.addEventListener('click', (e) => e.stopPropagation())
+  wrap.appendChild(el)
+  el.focus()
 }
 
 function resizeDrawCanvas(): void {
@@ -959,8 +1093,9 @@ function drawingAt(x: Any, y: Any): number {
   const dpr = window.devicePixelRatio || 1
   const cw = cv.width / dpr
   const ch = cv.height / dpr
-  for (let i = chartState.drawings.length - 1; i >= 0; i--) {
-    const sh = shapeOf(chartState.drawings[i], cw, ch)
+  const drawings = currentDrawings()
+  for (let i = drawings.length - 1; i >= 0; i--) {
+    const sh = shapeOf(drawings[i], cw, ch)
     if (!sh) continue
     for (const g of sh.segs) {
       if (pointToSegment(x, y, g.x1, g.y1, g.x2, g.y2) <= HIT_PX) return i
@@ -1071,10 +1206,21 @@ function redrawDrawings(includePreview?: Any): void {
   const ch = cv.height / dpr
   if (!candleSeries) return
 
-  chartState.drawings.forEach(function (d: Any, i: number) {
+  currentDrawings().forEach(function (d: Any, i: number) {
     const sh = shapeOf(d, cw, ch)
     if (sh) paintShape(ctx, sh, d.color, i === chartState._eraseHit)
   })
+
+  // A text drawing waiting for its caption stays visible while it is typed.
+  if (chartState._captionDraft) {
+    const sh = shapeOf(chartState._captionDraft, cw, ch)
+    if (sh) {
+      ctx.save()
+      ctx.globalAlpha = 0.65
+      paintShape(ctx, sh, chartState._captionDraft.color, false)
+      ctx.restore()
+    }
+  }
 
   // The shape being placed, following the cursor.
   if (includePreview) {
@@ -1186,10 +1332,37 @@ export function renderTicker(): void {
   $('tickerTrack')!.innerHTML = items + items
 }
 
-/** The main chart as an image (Charts tab → Quick Tools → Export). */
+/**
+ * The main chart as an image (Charts tab → Quick Tools → Export).
+ *
+ * takeScreenshot() only paints the library's own canvases, so the overlays
+ * stacked on top of it inside #chartWrap (drawings, volume profile, whale
+ * bubbles) are composited in at the position they sit on screen.
+ */
 export function chartScreenshot(): HTMLCanvasElement | null {
   try {
-    return chart ? (chart.takeScreenshot() as HTMLCanvasElement) : null
+    if (!chart) return null
+    const shot = chart.takeScreenshot() as HTMLCanvasElement
+    const el = $('chart')
+    const wrap = $('chartWrap')
+    if (!el || !wrap || !el.clientWidth) return shot
+    const out = document.createElement('canvas')
+    out.width = shot.width
+    out.height = shot.height
+    const ctx = out.getContext('2d')
+    if (!ctx) return shot
+    ctx.drawImage(shot, 0, 0)
+    // The screenshot is in device pixels; overlays are measured in CSS pixels.
+    const cr = el.getBoundingClientRect()
+    const kx = shot.width / cr.width
+    const ky = shot.height / cr.height
+    wrap.querySelectorAll('canvas').forEach((c) => {
+      if (el.contains(c) || !c.width || !c.height) return
+      const r = c.getBoundingClientRect()
+      if (!r.width || !r.height || getComputedStyle(c).display === 'none') return
+      ctx.drawImage(c, (r.left - cr.left) * kx, (r.top - cr.top) * ky, r.width * kx, r.height * ky)
+    })
+    return out
   } catch {
     return null
   }

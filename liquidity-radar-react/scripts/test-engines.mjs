@@ -24,6 +24,9 @@ const { groupAggTrades, autoThreshold, bubbleRadius } = await import(
   src('features/whales/whaleMath.ts')
 )
 const alerts = await import(src('features/alerts/rules.ts'))
+const { buildVolumeProfile, computeVolumeProfile, clampRows, clampValueArea } = await import(
+  src('features/charts/volumeProfile.ts')
+)
 
 let pass = 0
 const fails = []
@@ -319,6 +322,55 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   eq('alerts: migrated ids are stable', normalizeRules([{ sym: 'BTCUSDT', dir: 'above', price: 1, created: 5 }])[0].id, mig[0].id)
   eq('alerts: new rules default their timeframe', mig[2].tf, '15m')
   eq('alerts: junk storage is empty', normalizeRules({ a: 1 }), [])
+}
+
+// ---------------------------------------------------------- volume profile
+{
+  const k = (i, o, h, l, c, v) => ({ t: i * 60000, o, h, l, c, v })
+  // One up bar spanning 100..110 in 10 rows: its volume lands evenly across
+  // the whole range, not in the single row holding its close.
+  const one = buildVolumeProfile([k(0, 100, 110, 100, 109, 100)], 10, 0.7)
+  eq('vp: rows honoured', one.buckets.length, 10)
+  near('vp: range low', one.lo, 100)
+  near('vp: row size', one.binSize, 1)
+  ok('vp: volume spread over high–low', one.buckets.every((x) => Math.abs(x - 10) < 1e-9), one.buckets)
+  near('vp: volume conserved', one.totalVol, 100)
+  near('vp: up bar is all buy', one.buy.reduce((a, b) => a + b, 0), 100)
+  near('vp: up bar has no sell', one.sell.reduce((a, b) => a + b, 0), 0)
+
+  // A heavy down bar parked in one middle row, light up bars covering the range.
+  const bars = [
+    k(0, 100, 110, 100, 101, 10),
+    k(1, 105.5, 105.9, 105.1, 105.2, 500),
+    k(2, 101, 110, 100, 109, 10),
+  ]
+  const vp = buildVolumeProfile(bars, 10, 0.7)
+  eq('vp: POC is the heavy row', vp.pocIdx, 5)
+  near('vp: heavy down bar counted as sell', vp.sell[5], 500)
+  near('vp: light up bars counted as buy', vp.buy[5], 2)
+  near('vp: buy + sell = total per row', vp.buy[5] + vp.sell[5], vp.buckets[5])
+  ok('vp: value area brackets POC', vp.valIdx <= vp.pocIdx && vp.vahIdx >= vp.pocIdx, [vp.valIdx, vp.vahIdx])
+  const inVa = vp.buckets.slice(vp.valIdx, vp.vahIdx + 1).reduce((a, b) => a + b, 0)
+  ok('vp: value area holds >= 70%', inVa >= vp.totalVol * 0.7 - 1e-9, inVa / vp.totalVol)
+  const wider = buildVolumeProfile(bars, 10, 0.99)
+  ok('vp: bigger VA% widens the area', wider.vahIdx - wider.valIdx > vp.vahIdx - vp.valIdx, [wider.valIdx, wider.vahIdx])
+
+  // Close-binning (the old behaviour) would put the POC in the close's row;
+  // high–low distribution keeps it where the volume actually traded.
+  const skew = buildVolumeProfile([k(0, 100, 110, 100, 110, 100), k(1, 102, 104, 102, 103, 20)], 10, 0.7)
+  ok('vp: POC not dragged to the close row', skew.pocIdx >= 2 && skew.pocIdx <= 3, skew.pocIdx)
+
+  eq('vp: empty input gives no profile', buildVolumeProfile([], 10, 0.7), null)
+  near('vp: flat range still profiles its volume', buildVolumeProfile([k(0, 5, 5, 5, 5, 3)], 12, 0.7).totalVol, 3)
+  eq('vp: rows clamp low', clampRows(2), 8)
+  eq('vp: rows clamp high', clampRows(999), 200)
+  eq('vp: rows fall back on junk', clampRows(NaN), 48)
+  eq('vp: VA% clamp', clampValueArea(150), 99)
+  eq('vp: default rows', buildVolumeProfile(bars).buckets.length, 48)
+  const many = []
+  for (let i = 0; i < 3000; i++) many.push(k(i, 100, 101, 99, 100.5, 1))
+  near('vp: default lookback is the last 24h', computeVolumeProfile(many, 20, 0.7).totalVol, 1441, 1e-6)
+  near('vp: lookback capped at 1500 bars', computeVolumeProfile(many, 20, 0.7, Infinity).totalVol, 1500, 1e-6)
 }
 
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')
