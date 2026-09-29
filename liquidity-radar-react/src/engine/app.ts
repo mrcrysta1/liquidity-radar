@@ -74,7 +74,7 @@ import { mlOnCandles, setMLWanted } from '../features/ml/store'
 import { refreshInstrumentQuotes } from '../services/instrumentFeed'
 import { getShowMLPrediction, onOverlayTogglesChange } from '../features/charts/overlayToggles'
 import { checkRLPriceTick } from '../features/ml/rlStore'
-import { addAlert, checkAlerts, enableAlerts, removeAlert, renderAlerts } from '../features/alerts'
+import { addAlert, checkAlerts, enableAlerts, removeAlert, renderAlerts, syncAlertLines } from '../features/alerts'
 import { initTheme, selectPalette } from '../features/theme'
 import { initKeyboard } from '../features/keyboard'
 
@@ -273,8 +273,8 @@ export function initApp(){
     onTickersStale(){
       $('topCoinsUpd').textContent=tickerFeed.freshness+' · '+new Date(tickerFeed.ts).toLocaleTimeString();
     },
-    onKlines(){ updateChartData(true);runAnalytics();mlOnCandles(state.symbol, state.tf, state.candles); },
-    onKlineCache(){
+    onKlines(){ updateChartData(true);runAnalytics();mlOnCandles(state.symbol, state.tf, state.candles);syncAlertLines(); },
+    onKlineCache(){ syncAlertLines();
       updateChartData(true);runAnalytics();
       renderKlineBadge();
       showToast('Klines live stream down — showing cached data');

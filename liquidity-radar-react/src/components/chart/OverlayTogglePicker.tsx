@@ -2,7 +2,7 @@
 // pane this session adds — Delta (CVD), whale bubbles, volume profile, MTF
 // confluence, book imbalance, ML and RL — grouped behind one rail button the
 // way chart style, drawing tools and indicators are.
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { CvdBadge } from './CvdBadge'
 import {
   getShowConfluence,
@@ -12,6 +12,7 @@ import {
   getShowRLPolicy,
   getShowVolumeProfile,
   getShowWhaleBubbles,
+  getVolumeProfileSettings,
   onOverlayTogglesChange,
   setShowConfluence,
   setShowDelta,
@@ -20,7 +21,9 @@ import {
   setShowRLPolicy,
   setShowVolumeProfile,
   setShowWhaleBubbles,
+  setVolumeProfileSettings,
 } from '../../features/charts/overlayToggles'
+import { VP_ROWS_MAX, VP_ROWS_MIN, VP_VA_MAX, VP_VA_MIN } from '../../features/charts/volumeProfile'
 
 type Pane = {
   id: string
@@ -98,6 +101,69 @@ const PANES: Pane[] = [
   },
 ]
 
+// A number box that lets you type freely (clearing it, typing "1" on the way
+// to "120") and only commits in-range values; leaving it snaps back.
+function NumField(props: {
+  label: string
+  value: number
+  min: number
+  max: number
+  onCommit: (n: number) => void
+}) {
+  const { label, value, min, max, onCommit } = props
+  const [draft, setDraft] = useState<string | null>(null)
+  return (
+    <label>
+      <span>{label}</span>
+      <input
+        type="number"
+        min={min}
+        max={max}
+        step={1}
+        value={draft ?? String(value)}
+        onChange={(e) => {
+          setDraft(e.target.value)
+          const n = Number(e.target.value)
+          if (e.target.value !== '' && n >= min && n <= max) onCommit(n)
+        }}
+        onBlur={() => setDraft(null)}
+      />
+    </label>
+  )
+}
+
+function VolumeProfileSettings() {
+  const s = getVolumeProfileSettings()
+  return (
+    <div className="ind-settings vp-settings">
+      <NumField
+        label="Rows"
+        value={s.rows}
+        min={VP_ROWS_MIN}
+        max={VP_ROWS_MAX}
+        onCommit={(rows) => setVolumeProfileSettings({ rows })}
+      />
+      <NumField
+        label="Value area %"
+        value={s.valueArea}
+        min={VP_VA_MIN}
+        max={VP_VA_MAX}
+        onCommit={(valueArea) => setVolumeProfileSettings({ valueArea })}
+      />
+      <label>
+        <span>Colour</span>
+        <select
+          value={s.split ? 'split' : 'total'}
+          onChange={(e) => setVolumeProfileSettings({ split: e.target.value === 'split' })}
+        >
+          <option value="total">Value area</option>
+          <option value="split">Buy / sell</option>
+        </select>
+      </label>
+    </div>
+  )
+}
+
 function PanesIcon() {
   return (
     <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
@@ -172,26 +238,28 @@ export function OverlayTogglePicker() {
               {PANES.filter((p) => p.group === g).map((p) => {
                 const on = p.get()
                 return (
-                  <button
-                    key={p.id}
-                    type="button"
-                    role="menuitemcheckbox"
-                    aria-checked={on}
-                    className={'pane-opt' + (on ? ' sel' : '')}
-                    onClick={() => p.set(!on)}
-                  >
-                    <span className="pane-glyph">{p.glyph}</span>
-                    <span className="pane-text">
-                      <b>
-                        {p.name}
-                        {p.id === 'delta' && on && <CvdBadge />}
-                      </b>
-                      <small>{p.hint}</small>
-                    </span>
-                    <span className={'draw-switch' + (on ? ' on' : '')} aria-hidden="true">
-                      <i />
-                    </span>
-                  </button>
+                  <Fragment key={p.id}>
+                    <button
+                      type="button"
+                      role="menuitemcheckbox"
+                      aria-checked={on}
+                      className={'pane-opt' + (on ? ' sel' : '')}
+                      onClick={() => p.set(!on)}
+                    >
+                      <span className="pane-glyph">{p.glyph}</span>
+                      <span className="pane-text">
+                        <b>
+                          {p.name}
+                          {p.id === 'delta' && on && <CvdBadge />}
+                        </b>
+                        <small>{p.hint}</small>
+                      </span>
+                      <span className={'draw-switch' + (on ? ' on' : '')} aria-hidden="true">
+                        <i />
+                      </span>
+                    </button>
+                    {p.id === 'vp' && on && <VolumeProfileSettings />}
+                  </Fragment>
                 )
               })}
             </div>

@@ -4,11 +4,18 @@
 // the scales are stacked so panes sit under the candles in the order they were
 // added. Series are keyed by instance uid + output key, so a param change
 // redraws in place rather than tearing every series down.
+//
+// An indicator reading another indicator's output (see ./graph) draws where
+// its source lives when it is an overlay (an SMA of RSI sits in the RSI
+// pane), and in a pane of its own when it is a pane indicator.
 import type { CandleFlat } from '../../../services/market'
 import type { IndicatorInstance } from './store'
 import { getIndicators } from './store'
-import { indicatorDef, instanceLabel, sourceSeries } from './registry'
-import type { IndicatorDef } from './registry'
+import { indicatorDef, instanceLabel, sourceSeries, valueOutputs } from './registry'
+import type { IndicatorDef, OutputDef } from './registry'
+import { computeAll } from './graph'
+import type { Computed } from './graph'
+import { cloudView } from './cloud'
 
 type Any = any
 
@@ -16,6 +23,7 @@ interface Held {
   series: Any
   outputKey: string
   scaleId: string
+  kind: string
 }
 
 let chart: Any = null
@@ -36,8 +44,7 @@ export function attachIndicatorChart(c: Any): void {
 }
 
 const keyOf = (inst: IndicatorInstance, out: string) => inst.uid + '.' + out
-const scaleOf = (inst: IndicatorInstance, def: IndicatorDef) =>
-  def.placement === 'overlay' ? 'right' : 'ind_' + inst.uid
+const scaleOf = (host: string | null) => (host ? 'ind_' + host : 'right')
 
 /** Live instances that should actually draw. */
 function active(): Array<{ inst: IndicatorInstance; def: IndicatorDef }> {
@@ -47,6 +54,11 @@ function active(): Array<{ inst: IndicatorInstance; def: IndicatorDef }> {
     if (def && inst.visible) out.push({ inst, def })
   })
   return out
+}
+
+/** Every visible instance computed, sources resolved in dependency order. */
+function computeActive(candles: CandleFlat[]): Array<Computed<IndicatorInstance>> {
+  return computeAll(getIndicators(), candles, indicatorDef, sourceSeries)
 }
 
 /**
@@ -76,14 +88,41 @@ function layoutScales(): void {
   })
 }
 
-function makeSeries(def: IndicatorDef, out: IndicatorDef['outputs'][0], scaleId: string): Any {
+function makeSeries(out: OutputDef, scaleId: string): Any {
+  const inPane = scaleId !== 'right'
   const common = {
     priceScaleId: scaleId,
-    lastValueVisible: def.placement === 'pane',
+    lastValueVisible: inPane,
     priceLineVisible: false,
     crosshairMarkerVisible: false,
-    title: def.placement === 'pane' ? out.label : '',
+    title: inPane ? out.label : '',
   }
+  if (out.kind === 'cloud')
+    return chart.addCustomSeries(cloudView(), {
+      ...common,
+      lastValueVisible: false,
+      title: '',
+      upColor: out.color,
+      downColor: out.colorDown || out.color,
+    })
+  if (out.kind === 'signal')
+    // Carries markers only: the points exist so markers have a time and a
+    // value to sit against; the line itself is never drawn.
+    return chart.addLineSeries({
+      ...common,
+      color: out.color,
+      lineVisible: false,
+      lastValueVisible: false,
+      title: '',
+    })
+  if (out.kind === 'dots')
+    return chart.addLineSeries({
+      ...common,
+      color: out.color,
+      lineVisible: false,
+      pointMarkersVisible: true,
+      pointMarkersRadius: 1.6,
+    })
   if (out.kind === 'histogram')
     return chart.addHistogramSeries({
       ...common,
@@ -95,32 +134,41 @@ function makeSeries(def: IndicatorDef, out: IndicatorDef['outputs'][0], scaleId:
     color: out.color,
     lineWidth: out.dashed ? 1 : 2,
     lineStyle: out.dashed ? 2 : 0,
+    lineType: out.kind === 'step' ? 1 : 0,
   })
+}
+
+function histColor(
+  def: IndicatorDef,
+  out: OutputDef,
+  values: (number | null)[],
+  i: number,
+  c: CandleFlat,
+): string {
+  if (def.id === 'volume') return c.c >= c.o ? 'rgba(0,230,118,.4)' : 'rgba(255,23,68,.4)'
+  const v = values[i] as number
+  if (out.colorBy === 'slope') {
+    const prev = values[i - 1]
+    return prev == null || v > prev ? 'rgba(0,230,118,.55)' : 'rgba(255,23,68,.55)'
+  }
+  return v >= 0 ? 'rgba(0,230,118,.55)' : 'rgba(255,23,68,.55)'
 }
 
 /** Full redraw for the given candles. Cheap enough to run on every data load. */
 export function renderIndicators(candles: CandleFlat[]): void {
   if (!chart) return
-  const live = active()
   const wanted = new Set<string>()
   const panes: string[] = []
 
-  live.forEach(({ inst, def }) => {
-    const scaleId = scaleOf(inst, def)
-    if (def.placement === 'pane' && panes.indexOf(scaleId) === -1) panes.push(scaleId)
-    const src = def.sourced ? sourceSeries(inst.source, candles) : []
-    let outs: Record<string, (number | null)[]> = {}
-    try {
-      outs = candles.length ? def.compute(src, candles, inst.params) : {}
-    } catch (e) {
-      console.warn('indicator', inst.type, e)
-      return
-    }
+  computeActive(candles).forEach(({ inst, def, outputs: outs, host }) => {
+    const scaleId = scaleOf(host)
+    if (scaleId !== 'right' && panes.indexOf(scaleId) === -1) panes.push(scaleId)
     def.outputs.forEach((out) => {
       const key = keyOf(inst, out.key)
       wanted.add(key)
+      const kind = out.kind || 'line'
       let h = held.get(key)
-      if (!h || h.scaleId !== scaleId) {
+      if (!h || h.scaleId !== scaleId || h.kind !== kind) {
         if (h) {
           try {
             chart.removeSeries(h.series)
@@ -128,27 +176,42 @@ export function renderIndicators(candles: CandleFlat[]): void {
             /* already gone */
           }
         }
-        h = { series: makeSeries(def, out, scaleId), outputKey: out.key, scaleId }
+        h = { series: makeSeries(out, scaleId), outputKey: out.key, scaleId, kind }
         held.set(key, h)
       }
-      const values = outs[out.key] || []
       const data: Any[] = []
+      if (out.kind === 'cloud') {
+        const a = outs[out.between?.[0] || ''] || []
+        const b = outs[out.between?.[1] || ''] || []
+        for (let i = 0; i < candles.length; i++) {
+          const va = a[i]
+          const vb = b[i]
+          if (va == null || vb == null || !isFinite(va) || !isFinite(vb)) continue
+          data.push({ time: Math.floor(candles[i].t / 1000), a: va, b: vb })
+        }
+        h.series.setData(data)
+        return
+      }
+      const values = outs[out.key] || []
+      const markers: Any[] = []
       for (let i = 0; i < candles.length; i++) {
         const v = values[i]
         if (v == null || !isFinite(v)) continue
-        const point: Any = { time: Math.floor(candles[i].t / 1000), value: v }
-        if (out.kind === 'histogram')
-          point.color =
-            def.id === 'volume'
-              ? candles[i].c >= candles[i].o
-                ? 'rgba(0,230,118,.4)'
-                : 'rgba(255,23,68,.4)'
-              : v >= 0
-                ? 'rgba(0,230,118,.55)'
-                : 'rgba(255,23,68,.55)'
+        const time = Math.floor(candles[i].t / 1000)
+        const point: Any = { time, value: v }
+        if (out.kind === 'histogram') point.color = histColor(def, out, values, i, candles[i])
         data.push(point)
+        if (out.kind === 'signal' && out.marker)
+          markers.push({
+            time,
+            position: out.marker.position,
+            shape: out.marker.shape,
+            color: out.color,
+            size: 1,
+          })
       }
       h.series.setData(data)
+      if (out.kind === 'signal') h.series.setMarkers(markers)
     })
   })
 
@@ -182,16 +245,9 @@ export function indicatorLegend(candles: CandleFlat[]): LegendEntry[] {
   if (!candles.length) return []
   const i = candles.length - 1
   const out: LegendEntry[] = []
-  active().forEach(({ inst, def }) => {
-    const src = def.sourced ? sourceSeries(inst.source, candles) : []
-    let outs: Record<string, (number | null)[]> = {}
-    try {
-      outs = def.compute(src, candles, inst.params)
-    } catch (e) {
-      return
-    }
+  computeActive(candles).forEach(({ inst, def, outputs: outs }) => {
     const big = BIG_SCALE.indexOf(def.id) !== -1
-    const parts = def.outputs
+    const parts = valueOutputs(def)
       .map((o) => ({ label: o.label, value: outs[o.key]?.[i] as number, color: o.color, big }))
       .filter((p) => p.value != null && isFinite(p.value))
     if (parts.length) out.push({ label: instanceLabel(def, inst.params), parts })
@@ -204,7 +260,10 @@ export function refreshIndicatorColors(): void {
   active().forEach(({ inst, def }) => {
     def.outputs.forEach((out) => {
       const h = held.get(keyOf(inst, out.key))
-      if (h) h.series.applyOptions({ color: out.color })
+      if (!h) return
+      if (out.kind === 'cloud')
+        h.series.applyOptions({ upColor: out.color, downColor: out.colorDown || out.color })
+      else h.series.applyOptions({ color: out.color })
     })
   })
 }
