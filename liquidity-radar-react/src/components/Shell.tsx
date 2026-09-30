@@ -106,6 +106,7 @@ export function Shell() {
         <div className="top-inner">
           <div className="logo"><LogoMark size={36} animated /><span className="logo-text"><b>LIQUIDITY</b>&nbsp;<span>RADAR</span></span></div>
           <div className="top-actions">
+            <ClockChip />
             <AccountMenu />
             <button className="theme-btn icon-btn" id="alertBtn" title="Price alerts" aria-label="Price alerts" onClick={() => { renderAlerts(); openModal('alModal') }}><BellIcon /></button>
             <button className="theme-btn icon-btn" id="paletteBtn" title="Colour themes" aria-label="Colour themes"><PaletteIcon /></button>
@@ -116,10 +117,6 @@ export function Shell() {
         </div>
         <div className="tickerbar"><div className="ticker-track" id="tickerTrack"></div></div>
       </header>
-      
-      <div className="search-row">
-        <ClockChip />
-      </div>
       
       <div className="container">
       <main>

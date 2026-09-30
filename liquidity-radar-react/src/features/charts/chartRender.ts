@@ -1373,7 +1373,7 @@ export function renderHero(): void {
 function tickIcon(key: string, glyph: string, color: string): string {
   const img = (state.marketCaps as Record<string, { image?: string }> | undefined)?.[key]?.image
   const inner = img && /^https:\/\//.test(img) ? '<img src="' + img.replace(/"/g, '') + '" alt="" loading="lazy">' : glyph
-  return '<i class="tk-ico" style="border-color:' + color + '66;background:' + color + '1f">' + inner + '</i>'
+  return '<i class="tk-ico" style="border-color:' + color + '66;background:' + color + '1f;color:' + color + '">' + inner + '</i>'
 }
 
 export function renderTicker(): void {
@@ -1387,9 +1387,7 @@ export function renderTicker(): void {
       (c.sym === state.symbol ? ' active' : '') +
       '" data-sym="' +
       c.sym +
-      '"><span class="ts" style="color:' +
-      c.color +
-      '">' +
+      '"><span class="ts">' +
       tickIcon(k, c.icon, c.color) +
       k +
       '</span><span class="tp">' +
