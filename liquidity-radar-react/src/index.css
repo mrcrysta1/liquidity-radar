@@ -3,6 +3,13 @@
 @import 'tailwindcss/theme.css' layer(theme);
 @import 'tailwindcss/utilities.css' layer(utilities);
 
+/* Self-hosted variable fonts (were Google Fonts): no third-party stylesheet on the
+   critical path, and vite.config.ts preloads the two latin files so text is laid
+   out once in the real font instead of re-laid-out when each font arrives. */
+@font-face{font-family:'Inter';font-style:normal;font-weight:400 800;font-display:swap;src:url('./assets/fonts/inter-latin.woff2') format('woff2');unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD}
+@font-face{font-family:'Inter';font-style:normal;font-weight:400 800;font-display:swap;src:url('./assets/fonts/inter-latin-ext.woff2') format('woff2');unicode-range:U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:400 700;font-display:swap;src:url('./assets/fonts/jetbrains-mono-latin.woff2') format('woff2');unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD}
+
 
 :root{
   /* Radar Navy (the default palette). theme.ts writes the chosen palette
@@ -2583,7 +2590,7 @@ body::after{
     radial-gradient(1px 1px   at 5% 48%,  var(--star) 50%, transparent 51%),
     radial-gradient(1.2px 1.2px at 95% 78%, var(--star) 50%, transparent 51%);
   background-size:38vw 38vw,46vw 46vw,52vw 52vw,41vw 41vw,58vw 58vw,33vw 33vw,44vw 44vw,49vw 49vw;
-  animation:starTwinkle 7s ease-in-out infinite alternate, starDrift 140s linear infinite;
+  animation:starTwinkle 7s ease-in-out infinite alternate, starDrift 140s linear infinite alternate;
   will-change:transform,opacity;
 }
 [data-theme="light"] body::after{opacity:.14}
@@ -2593,7 +2600,10 @@ body::after{
   100%{transform:translate3d(-2%,2.5%,0) scale(1.03)}
 }
 @keyframes starTwinkle{0%{opacity:.34}100%{opacity:.62}}
-@keyframes starDrift{0%{background-position:0 0}100%{background-position:38vw 38vw}}
+/* The drift moves the layer, not its background: a background-position animation
+   repaints this 150%-of-viewport layer every frame, which held back the first paint
+   by seconds on slower devices. A transform runs on the compositor. */
+@keyframes starDrift{to{transform:translate3d(-12%,-12%,0)}}
 
 /* ---- glass surfaces ----------------------------------------- */
 .card{
@@ -3560,14 +3570,21 @@ body.nav-collapsed .sidenav-promo,body.nav-collapsed .sidenav-foot{display:none}
 /* Loading skeletons (components/home/Skeleton.tsx). The shapes follow each
    tile's loaded layout so nothing jumps when the data lands. */
 .sk{
-  display:block;flex-shrink:0;max-width:100%;border-radius:6px;
-  background:linear-gradient(100deg,var(--sunk-2) 30%,var(--hair-2) 50%,var(--sunk-2) 70%);
-  background-size:200% 100%;animation:sgShimmer 1.4s linear infinite;
+  position:relative;display:block;flex-shrink:0;max-width:100%;border-radius:6px;overflow:hidden;background:var(--sunk-2);
 }
+/* The sweep is a transformed overlay rather than an animated background, so it
+   never repaints — it runs on the compositor while the page is still booting. */
+.sk::after{
+  content:'';position:absolute;inset:0;transform:translateX(-100%);
+  background:linear-gradient(100deg,transparent 20%,var(--hair-2) 50%,transparent 80%);
+  animation:skSweep 1.4s linear infinite;
+}
+@keyframes skSweep{to{transform:translateX(100%)}}
 .sk.round{border-radius:50%}
 td .sk,b .sk{display:inline-block;vertical-align:middle}
 .sk-tile{flex:1;display:flex;flex-direction:column;gap:12px;min-width:0}
-.sk-tile.still .sk{animation:none;opacity:.6}
+.sk-tile.still .sk{opacity:.6}
+.sk-tile.still .sk::after{display:none}
 .sk-line{display:flex;align-items:flex-end;gap:10px}
 .sk-split{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:end}
 .sk-kv{display:flex;flex-direction:column;gap:9px;margin-top:auto}
