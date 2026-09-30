@@ -3480,6 +3480,12 @@ body.nav-collapsed .sidenav-promo,body.nav-collapsed .sidenav-foot{display:none}
   border:1px solid var(--edge);border-radius:11px;background:var(--card);
 }
 .tickerbar .tick.active{border-color:rgb(var(--pRGB)/.6);box-shadow:0 0 14px rgb(var(--pRGB)/.18)}
+/* Before the first tickers arrive: placeholder chips instead of an empty bar. */
+.ticker-track:empty::before{
+  content:'';display:block;width:170px;height:32px;margin:0 5px;border-radius:11px;background:var(--card);opacity:.7;
+  box-shadow:180px 0 var(--card),360px 0 var(--card),540px 0 var(--card),720px 0 var(--card),900px 0 var(--card),
+    1080px 0 var(--card),1260px 0 var(--card),1440px 0 var(--card),1620px 0 var(--card),1800px 0 var(--card);
+}
 .tk-ico{
   display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;
   border:1px solid;font-style:normal;font-size:10.5px;margin-right:6px;overflow:hidden;vertical-align:middle;
@@ -3547,6 +3553,30 @@ body.nav-collapsed .sidenav-promo,body.nav-collapsed .sidenav-foot{display:none}
 .dt-cta:hover{border-color:var(--primary);color:var(--primary)}
 .dt-body{flex:1;display:flex;flex-direction:column;min-width:0}
 .dt-empty{margin:auto 0;color:var(--muted);font-size:12.5px;line-height:1.5}
+/* Loading skeletons (components/home/Skeleton.tsx). The shapes follow each
+   tile's loaded layout so nothing jumps when the data lands. */
+.sk{
+  display:block;flex-shrink:0;max-width:100%;border-radius:6px;
+  background:linear-gradient(100deg,var(--sunk-2) 30%,var(--hair-2) 50%,var(--sunk-2) 70%);
+  background-size:200% 100%;animation:sgShimmer 1.4s linear infinite;
+}
+.sk.round{border-radius:50%}
+td .sk,b .sk{display:inline-block;vertical-align:middle}
+.sk-tile{flex:1;display:flex;flex-direction:column;gap:12px;min-width:0}
+.sk-tile.still .sk{animation:none;opacity:.6}
+.sk-line{display:flex;align-items:flex-end;gap:10px}
+.sk-split{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:end}
+.sk-kv{display:flex;flex-direction:column;gap:9px;margin-top:auto}
+.sk-kv>span,.sk-rows>span{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.sk-rows{display:flex;flex-direction:column;gap:12px;padding:4px}
+.sk-rows>span>.sk:nth-child(3){flex:1}
+.sk-rows.news>span{justify-content:flex-start}
+.sk-stack{flex:1;display:flex;flex-direction:column;gap:7px;min-width:0}
+.sk-bars{display:flex;align-items:flex-end;gap:6px;height:64px;margin-top:auto;border-bottom:1px solid var(--hair-2)}
+.sk-bars .sk{flex:1;border-radius:3px 3px 0 0}
+.sk-cap{display:flex;align-items:center;gap:7px;margin:auto 0 0;font-size:11.5px;color:var(--dim);line-height:1.45}
+.sk-live{flex-shrink:0;width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);animation:skPulse 1.6s ease-in-out infinite}
+@keyframes skPulse{50%{opacity:.35}}
 .dt .up{color:var(--green)}
 .dt .dn{color:var(--red)}
 .dt .dim{color:var(--dim)}

@@ -33,6 +33,7 @@ import {
 } from '../features/home/homeData'
 import type { Range } from '../features/home/homeData'
 import { CoinBadge } from './common/CoinBadge'
+import { Sk, TileSkeleton } from './home/Skeleton'
 
 const w = window as unknown as { switchTab?: (t: string) => void; setSymbol?: (s: string) => void }
 const go = (tab: string) => w.switchTab?.(tab)
@@ -112,7 +113,7 @@ function PriceTile() {
   const t = state.tickers[state.symbol] as
     { last?: number; pct?: number; high?: number; low?: number; qvol?: number } | undefined
   const closes = (state.candles as Array<{ c: number }>).slice(-96).map((c) => c.c)
-  if (!t || !t.last) return <Empty>Waiting for the first tick…</Empty>
+  if (!t || !t.last) return <TileSkeleton shape="price">Waiting for the first tick…</TileSkeleton>
   const up = (t.pct ?? 0) >= 0
   return (
     <div className="pt">
@@ -161,7 +162,11 @@ function SignalsTile() {
       .slice(0, 4)
   }, [rows])
   if (!rows.length)
-    return <Empty>Scanner is warming up — it sweeps ten majors every two minutes.</Empty>
+    return (
+      <TileSkeleton shape="list" rows={4} stallMs={150_000}>
+        Scanner is warming up — it sweeps ten majors every two minutes.
+      </TileSkeleton>
+    )
   if (!top.length)
     return <Empty>No actionable signal right now. {rows.length} coins all reading flat.</Empty>
   return (
@@ -196,7 +201,7 @@ function LiquidityTile() {
   } | null
   const tk = state.tickers[state.symbol] as { qvol?: number } | undefined
   const m = deep && deep.bids.length ? bookMetrics(deep.bids, deep.asks) : null
-  if (!m) return <Empty>Waiting for the deep order book…</Empty>
+  if (!m) return <TileSkeleton shape="score">Waiting for the deep order book…</TileSkeleton>
   const sc = liquidityScore(m, tk?.qvol)
   return (
     <>
@@ -227,7 +232,12 @@ function MoversTile() {
     .filter((r) => typeof r.pct === 'number' && r.last)
     .sort((a, b) => Math.abs(b.pct as number) - Math.abs(a.pct as number))
     .slice(0, 5)
-  if (!rows.length) return <Empty>Loading the tracked set…</Empty>
+  if (!rows.length)
+    return (
+      <TileSkeleton shape="list" rows={5}>
+        Loading the tracked set…
+      </TileSkeleton>
+    )
   return (
     <ul className="dt-list dense">
       {rows.map((r) => (
@@ -245,7 +255,12 @@ function MoversTile() {
 
 function VenuesTile() {
   const live = ((state.crossEx as CrossExRow[] | null) ?? []).filter((r) => r.last != null)
-  if (!live.length) return <Empty>Polling public venues…</Empty>
+  if (!live.length)
+    return (
+      <TileSkeleton shape="big" rows={2}>
+        Polling public venues…
+      </TileSkeleton>
+    )
   const px = live.map((r) => r.last as number)
   const lo = Math.min(...px)
   const hi = Math.max(...px)
@@ -274,7 +289,12 @@ function VenuesTile() {
 function LiquidationsTile({ now }: { now: number }) {
   const liqs =
     (state.liqs as Array<{ side: string; price: number; qty: number; ts: number }> | null) ?? []
-  if (!liqs.length) return <Empty>Listening for forced orders…</Empty>
+  if (!liqs.length)
+    return (
+      <TileSkeleton shape="bars" still>
+        No forced orders yet — listening live
+      </TileSkeleton>
+    )
   // Last hour in 12 five-minute buckets. A SELL forceOrder closes a long.
   const B = 12
   const step = 5 * 60_000
@@ -312,7 +332,12 @@ function LiquidationsTile({ now }: { now: number }) {
 function SentimentTile() {
   const fg = state.fg as { value?: string | number; value_classification?: string } | null
   const hist = getFgHistory()
-  if (!fg || fg.value == null) return <Empty>Fetching the sentiment index…</Empty>
+  if (!fg || fg.value == null)
+    return (
+      <TileSkeleton shape="score" rows={1}>
+        Fetching the sentiment index…
+      </TileSkeleton>
+    )
   const v = Number(fg.value)
   return (
     <div className="st">
@@ -338,7 +363,12 @@ function SentimentTile() {
 
 function NewsTile({ now }: { now: number }) {
   const items = latestNews()
-  if (!items.length) return <Empty>Loading the wire…</Empty>
+  if (!items.length)
+    return (
+      <TileSkeleton shape="news" rows={4}>
+        Loading the wire…
+      </TileSkeleton>
+    )
   return (
     <ul className="nw">
       {items.slice(0, 4).map((n, i) => (
@@ -372,7 +402,6 @@ function NewsTile({ now }: { now: number }) {
     </ul>
   )
 }
-
 
 /** Wishlist coins in priority order (pinned coin first, marked 📌). */
 function WatchlistTile() {
@@ -408,8 +437,10 @@ function WatchlistTile() {
                   )}
                 </span>
               </td>
-              <td className="mono">{t?.last ? '$' + pfmt(t.last) : '—'}</td>
-              <td className={'mono ' + ((t?.pct ?? 0) >= 0 ? 'up' : 'dn')}>{pct(t?.pct)}</td>
+              <td className="mono">{t?.last ? '$' + pfmt(t.last) : <Sk w={64} />}</td>
+              <td className={'mono ' + ((t?.pct ?? 0) >= 0 ? 'up' : 'dn')}>
+                {t?.pct != null ? pct(t.pct) : <Sk w={44} />}
+              </td>
               <td>
                 <button type="button" className="wl-go" onClick={() => open(sym)}>
                   Chart
@@ -461,21 +492,21 @@ function MarketOverviewTile({ now }: { now: number }) {
       <div className="mo-stats">
         <div>
           <small>Total Market Cap</small>
-          <b>{g ? cfmt(g.totalMcapUsd) : '—'}</b>
+          <b>{g ? cfmt(g.totalMcapUsd) : <Sk w={56} h={14} />}</b>
           <i className={g && g.mcapChg24h < 0 ? 'dn' : 'up'}>{g ? pct(g.mcapChg24h) : ''}</i>
         </div>
         <div>
           <small>BTC Dominance</small>
-          <b>{g ? g.btcDominance.toFixed(1) + '%' : '—'}</b>
+          <b>{g ? g.btcDominance.toFixed(1) + '%' : <Sk w={44} h={14} />}</b>
         </div>
         <div>
           <small>Fear &amp; Greed</small>
-          <b>{fg?.value ?? '—'}</b>
+          <b>{fg?.value ?? <Sk w={28} h={14} />}</b>
           <i className={Number(fg?.value) >= 50 ? 'up' : 'dn'}>{fg?.value_classification ?? ''}</i>
         </div>
         <div>
           <small>Active Coins</small>
-          <b>{g ? g.activeCoins.toLocaleString() : '—'}</b>
+          <b>{g ? g.activeCoins.toLocaleString() : <Sk w={52} h={14} />}</b>
         </div>
       </div>
     </div>
