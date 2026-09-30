@@ -3700,12 +3700,40 @@ td .sk,b .sk{display:inline-block;vertical-align:middle}
 .nw-tag.neu{color:var(--muted);border-color:var(--hair-2);background:var(--sunk-2)}
 
 /* watchlist */
-.wl{width:100%;border-collapse:collapse;font-size:12.5px}
-.wl th{text-align:left;font-size:11px;font-weight:600;color:var(--muted);padding:0 6px 8px}
-.wl td{padding:7px 6px;border-top:1px solid var(--hair-1);white-space:nowrap}
-.wl-coin{display:inline-flex;align-items:center;gap:8px;font-weight:700}
+/* Fixed layout: the columns share the card's width and long prices truncate,
+   instead of the row growing past the card edge (it did at 1280-1600px). */
+.dt-watch{container-type:inline-size}
+.wl{width:100%;border-collapse:collapse;font-size:12.5px;table-layout:fixed}
+.wl th{text-align:left;font-size:11px;font-weight:600;color:var(--muted);padding:0 4px 8px}
+.wl td{padding:7px 4px;border-top:1px solid var(--hair-1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wl th:nth-child(1){width:18px}
+.wl th:nth-child(2){width:28%}
+.wl th:nth-child(4){width:20%}
+.wl th:nth-child(5){width:60px}
+/* The button cell never truncates: an ellipsis there showed as a stray dot. */
+.wl td:nth-child(5){overflow:visible;text-overflow:clip;padding-right:0}
+.wl th:nth-child(4),.wl td:nth-child(4),.wl th:nth-child(5),.wl td:nth-child(5){text-align:right}
+.wl-coin{display:flex;align-items:center;gap:6px;min-width:0;font-weight:700}
+.wl-sym{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.wl-pin{display:inline-grid;place-items:center;flex-shrink:0;color:var(--primary);opacity:.9}
+.wl-pin-ico{display:block}
+.wl-go-ico{display:none}
+/* A narrow card drops the row number and turns "Chart" into an arrow. */
+@container (max-width:300px){
+  .wl{font-size:11.5px}
+  .wl th,.wl td{padding-inline:3px}
+  .wl th:nth-child(1),.wl td:nth-child(1){display:none}
+  .wl th:nth-child(2){width:33%}
+  .wl th:nth-child(4){width:21%}
+  .wl th:nth-child(5){width:32px}
+  .wl-coin{gap:5px}
+  .wl-go{width:26px;height:22px;padding:0}
+  .wl-go-txt{display:none}
+  .wl-go-ico{display:grid}
+}
 .wl-go{
-  padding:3px 11px;border-radius:7px;cursor:pointer;font-size:11px;font-weight:800;
+  display:inline-grid;place-items:center;
+  padding:3px 10px;border-radius:7px;cursor:pointer;font-size:11px;font-weight:800;
   background:linear-gradient(180deg,#22E08A,#16B26E);color:#04210F;border:none;box-shadow:0 0 12px rgb(var(--gRGB)/.35);
 }
 [data-theme="light"] .wl-go{background:var(--green);color:#fff;box-shadow:none}

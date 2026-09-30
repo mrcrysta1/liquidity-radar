@@ -403,7 +403,19 @@ function NewsTile({ now }: { now: number }) {
   )
 }
 
-/** Wishlist coins in priority order (pinned coin first, marked 📌). */
+/** A small push-pin, drawn so it sits at text size (the emoji rendered larger). */
+function PinIcon() {
+  return (
+    <svg className="wl-pin-ico" width="11" height="11" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M15 3l6 6-3 1-4 4 1 5-2 2-4-4-5 5-1-1 5-5-4-4 2-2 5 1 4-4 1-3z"
+        fill="currentColor"
+      />
+    </svg>
+  )
+}
+
+/** Wishlist coins in priority order (pinned coin first, marked with a pin). */
 function WatchlistTile() {
   useFavorites()
   const WATCH = watchList()
@@ -429,10 +441,14 @@ function WatchlistTile() {
               <td>
                 <span className="wl-coin">
                   <CoinBadge sym={sym} size={20} />
-                  {k}
+                  <span className="wl-sym">{k}</span>
                   {pinned === k && (
-                    <span title="Pinned — the Radar opens on this coin" aria-label="pinned">
-                      📌
+                    <span
+                      className="wl-pin"
+                      title="Pinned — the Radar opens on this coin"
+                      aria-label="pinned"
+                    >
+                      <PinIcon />
                     </span>
                   )}
                 </span>
@@ -442,8 +458,16 @@ function WatchlistTile() {
                 {t?.pct != null ? pct(t.pct) : <Sk w={44} />}
               </td>
               <td>
-                <button type="button" className="wl-go" onClick={() => open(sym)}>
-                  Chart
+                <button
+                  type="button"
+                  className="wl-go"
+                  aria-label={'Open ' + k + ' chart'}
+                  onClick={() => open(sym)}
+                >
+                  <span className="wl-go-txt">Chart</span>
+                  <span className="wl-go-ico" aria-hidden="true">
+                    <Arrow />
+                  </span>
                 </button>
               </td>
             </tr>
