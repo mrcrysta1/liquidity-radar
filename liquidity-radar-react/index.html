@@ -15,15 +15,14 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <!--
-      The hosts the first paint actually waits on. Only the fonts were hinted
-      before, so every API connection began its DNS, TCP and TLS handshake
-      only once the bundle had parsed and the first fetch fired. On a link
-      that takes ~1s to open a connection that is a second of dead time per
-      host, serialised behind the JavaScript. Hinting them lets the handshakes
-      run while the bundle is still downloading.
+      The hosts the first paint actually waits on. Without a hint every API
+      connection begins its DNS, TCP and TLS handshake only once the bundle
+      has parsed and the first fetch fires. On a link that takes ~1s to open
+      a connection that is a second of dead time per host, serialised behind
+      the JavaScript. Hinting them lets the handshakes run while the bundle is
+      still downloading. (Fonts are self-hosted and preloaded, see
+      vite.config.ts.)
 
       Binance spot REST and its websocket carry the price, the chart and the
       order book; the futures host carries funding and open interest. The
@@ -34,13 +33,68 @@
     <link rel="preconnect" href="https://api.binance.com" crossorigin />
     <link rel="preconnect" href="https://stream.binance.com" crossorigin />
     <link rel="preconnect" href="https://fapi.binance.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
+    <!--
+      Theme before first paint. features/theme/theme.ts applies the saved light/dark
+      mode and palette, but only once the bundle has run; until then the page drew
+      without data-palette (white fallback edges, the wrong backdrop) and switched
+      a second later. Same storage keys as theme.ts: keep them in sync.
+    -->
+    <script>
+      try {
+        var d = document.documentElement
+        if (localStorage.getItem('lr-theme') === 'light') d.setAttribute('data-theme', 'light')
+        d.dataset.palette = localStorage.getItem('lr-palette-v3') || 'navy'
+      } catch (e) {
+        document.documentElement.dataset.palette = 'navy'
+      }
+    </script>
+    <!--
+      Boot shell: a static outline of the app (rail, header, dashboard cards)
+      that paints as soon as the stylesheet lands, before the ~300 KB of
+      JavaScript has downloaded and run. React's first render replaces
+      everything inside #root. Sizes mirror the real layout so nothing jumps.
+    -->
+    <style>
+      .boot{pointer-events:none}
+      .boot-side{position:fixed;left:0;top:0;bottom:0;width:232px;box-sizing:border-box;padding:20px 18px;border-right:1px solid var(--border);background:var(--sunk-3)}
+      .boot-brand{font:900 14px/1.1 'Inter',system-ui,sans-serif;letter-spacing:.04em;color:var(--txt)}
+      .boot-brand span{display:block;color:var(--primary)}
+      .boot-nav{margin-top:34px;display:flex;flex-direction:column;gap:18px}
+      .boot-nav i{display:block;height:14px;width:70%;border-radius:6px;background:var(--sunk-2)}
+      .boot-nav i:first-child{height:38px;width:100%;border-radius:10px;background:rgb(var(--pRGB)/.25)}
+      .boot-head{position:fixed;left:232px;right:0;top:0;height:113px;border-bottom:1px solid var(--border);background:var(--sunk-3)}
+      .boot-main{margin-left:232px;padding:26px 28px}
+      .boot-hero{height:74px;display:flex;flex-direction:column;justify-content:center;padding-left:66px}
+      .boot-hero b{font:900 22px/1.2 'Inter',system-ui,sans-serif;letter-spacing:.06em;color:var(--txt)}
+      .boot-hero small{font:500 12.5px/1.5 'Inter',system-ui,sans-serif;color:var(--muted)}
+      .boot-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-top:16px}
+      .boot-grid i{display:block;height:256px;border-radius:16px;border:1px solid var(--border);background:var(--card);opacity:.7}
+      .boot-tab{display:none}
+      @media(max-width:1400px){.boot-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+      @media(max-width:900px){
+        .boot-side{display:none}
+        .boot-head{left:0;height:95px}
+        .boot-main{margin-left:0;padding:18px 12px}
+        .boot-tab{display:block;position:fixed;left:0;right:0;bottom:0;height:63px;border-top:1px solid var(--border);background:var(--sunk-3)}
+      }
+      @media(max-width:760px){.boot-grid{grid-template-columns:1fr;gap:12px}.boot-grid i{height:198px}.boot-hero{height:84px}}
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div class="boot" aria-hidden="true">
+        <div class="boot-side">
+          <div class="boot-brand">LIQUIDITY<span>RADAR</span></div>
+          <div class="boot-nav"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        </div>
+        <div class="boot-head"></div>
+        <div class="boot-main">
+          <div class="boot-hero"><b>DASHBOARD</b><small>Every section at a glance — open one to go deeper</small></div>
+          <div class="boot-grid"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        </div>
+        <div class="boot-tab"></div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

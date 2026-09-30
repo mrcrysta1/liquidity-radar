@@ -37,7 +37,30 @@ function preloadEngine(): Plugin {
   }
 }
 
+/**
+ * Preloads the two latin font files (see the @font-face rules in index.css).
+ * Without it the browser only discovers them once the stylesheet is parsed and
+ * text is laid out, then lays every line out again when each font lands.
+ */
+function preloadFonts(): Plugin {
+  return {
+    name: 'preload-fonts',
+    apply: 'build',
+    transformIndexHtml: {
+      order: 'post',
+      handler(html, ctx) {
+        if (!ctx.bundle) return html
+        const tags = Object.keys(ctx.bundle)
+          .filter((f) => /(inter-latin|jetbrains-mono-latin)-[\w-]{8}\.woff2$/.test(f))
+          .map((f) => `    <link rel="preload" as="font" type="font/woff2" crossorigin href="/${f}">`)
+          .join('\n')
+        return tags ? html.replace('</head>', tags + '\n  </head>') : html
+      },
+    },
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), tailwindcss(), preloadEngine()],
+  plugins: [react(), tailwindcss(), preloadEngine(), preloadFonts()],
 })
