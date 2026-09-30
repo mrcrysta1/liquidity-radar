@@ -207,7 +207,7 @@ a{color:var(--cyan);text-decoration:none}
 button{font-family:inherit;cursor:pointer}
 input,select{font-family:inherit}
 
-.container{max-width:1400px;margin:0 auto;padding:0 14px 40px}
+.container{max-width:1400px;margin:0 auto;padding:0 14px 96px}
 
 header.top{
   position:sticky;top:0;z-index:60;
@@ -237,9 +237,9 @@ header.top{
 @keyframes pulse{0%{box-shadow:0 0 0 0 rgb(var(--gRGB)/.5)}70%{box-shadow:0 0 0 7px rgb(var(--gRGB)/0)}100%{box-shadow:0 0 0 0 rgb(var(--gRGB)/0)}}
 
 .tickerbar{border-bottom:1px solid var(--border);background:var(--sunk-2);overflow:hidden;position:relative}
-.tickerbar::before,.tickerbar::after{content:'';position:absolute;top:0;bottom:0;width:50px;z-index:2;pointer-events:none}
-.tickerbar::before{left:0;background:linear-gradient(90deg,#060B18,transparent)}
-.tickerbar::after{right:0;background:linear-gradient(-90deg,#060B18,transparent)}
+.tickerbar::before,.tickerbar::after{content:'';position:absolute;top:0;bottom:0;width:64px;z-index:2;pointer-events:none}
+.tickerbar::before{left:0;background:linear-gradient(90deg,var(--bg) 20%,transparent)}
+.tickerbar::after{right:0;background:linear-gradient(-90deg,var(--bg) 20%,transparent)}
 .ticker-track{display:inline-flex;white-space:nowrap;animation:scrollX 46s linear infinite;padding:8px 0}
 .tickerbar:hover .ticker-track{animation-play-state:paused}
 @keyframes scrollX{from{transform:translateX(0)}to{transform:translateX(-50%)}}
@@ -249,7 +249,7 @@ header.top{
 }
 .tick:hover{background:rgb(var(--pRGB)/.12)}
 .tick.active{background:rgb(var(--pRGB)/.16)}
-.tick .ts{color:var(--muted);font-weight:600}
+.tick .ts{color:var(--txt);font-weight:600}
 .tick .tp{color:var(--txt)}
 .chg{padding:1px 7px;border-radius:6px;font-size:11px;font-weight:600;font-family:var(--mono)}
 .chg.up{color:var(--green);background:rgb(var(--gRGB)/.1)}
@@ -1902,7 +1902,7 @@ html.radar-fs .cs-panel{height:100%;max-height:none}
   display:flex;flex-direction:column;align-items:flex-end;gap:12px;
 }
 .ai-fab{
-  position:relative;flex-shrink:0;width:56px;height:56px;border:none;border-radius:18px;
+  position:relative;flex-shrink:0;width:52px;height:52px;border:none;border-radius:17px;
   display:grid;place-items:center;color:#fff;cursor:pointer;
   background:linear-gradient(135deg,var(--primary),var(--amber));
   box-shadow:0 8px 26px rgb(var(--pRGB)/.45),0 0 0 1px rgb(255 255 255/.07) inset;
@@ -1962,7 +1962,7 @@ html.radar-fs .cs-panel{height:100%;max-height:none}
 @media(max-width:560px){
   .ai-dock-root{left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom,0px))}
   .ai-dock{width:auto;align-self:stretch;height:min(72vh,calc(100vh - 110px))}
-  .ai-fab{width:50px;height:50px;border-radius:16px}
+  .ai-fab{width:46px;height:46px;border-radius:15px}
   .ai-fab-tip{display:none}
 }
 [data-theme="light"] .ai-fab-dot{box-shadow:0 0 0 2px var(--card),0 0 9px var(--green)}
@@ -2742,7 +2742,7 @@ body.nav-collapsed{--nav-w:var(--nav-w-min)}
 }
 .sidenav-collapse:hover{color:var(--txt);border-color:var(--primary)}
 
-.sidenav-list{display:flex;flex-direction:column;gap:14px;padding:0;margin:0;max-width:none}
+.sidenav-list{display:flex;flex-direction:column;gap:14px;padding:0;margin:0;max-width:none;flex-shrink:0}
 .sidenav-group{display:flex;flex-direction:column;gap:2px}
 .sidenav-group-label{
   padding:0 8px 5px;font-size:9px;font-weight:800;letter-spacing:.16em;
@@ -2973,7 +2973,7 @@ header.top,.container,.search-wrap,.search-row{margin-left:var(--nav-w);transiti
   .tabbar-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 
   /* Nothing should hide behind the bar. */
-  .container{padding-bottom:calc(78px + env(safe-area-inset-bottom,0px))}
+  .container{padding-bottom:calc(140px + env(safe-area-inset-bottom,0px))}
   .ai-dock-root{bottom:calc(74px + env(safe-area-inset-bottom,0px))}
   .toast{bottom:calc(80px + env(safe-area-inset-bottom,0px))}
   footer{margin-bottom:6px}
@@ -3067,6 +3067,10 @@ header.top,.container,.search-wrap,.search-row{margin-left:var(--nav-w);transiti
 @media(max-width:560px){
   .container{padding-inline:12px}
   header.top .top-inner{padding-block:8px}
+  .top-actions{gap:6px}
+  /* A slimmer ticker gives the dashboard back some height. */
+  .ticker-track{padding:5px 0}
+  .tickerbar .tick{padding:3px 8px 3px 4px;gap:5px;font-size:11px}
   .dash-head{margin:16px 2px 10px}
   .dash-sub{display:none}
   .hw-price b{font-size:20px}
@@ -3472,7 +3476,7 @@ html[data-palette="navy"][data-theme="light"] .sidenav .tab-btn.active{color:#ff
 .sidenav-foot{display:flex;flex-direction:column;gap:2px;padding:4px 8px 0;font-family:var(--mono);font-size:10px;color:var(--dim)}
 .sidenav-foot small{font-size:9.5px;opacity:.8}
 body.nav-collapsed .sidenav-promo,body.nav-collapsed .sidenav-foot{display:none}
-@media(max-height:760px){.sidenav-promo{display:none}}
+@media(max-height:860px){.sidenav-promo{display:none}}
 
 /* ---- header: ticker chips, search row, clock --------------- */
 .tickerbar .tick{
@@ -3496,11 +3500,11 @@ body.nav-collapsed .sidenav-promo,body.nav-collapsed .sidenav-foot{display:none}
 .clock-chip{
   display:flex;align-items:center;gap:8px;padding:0 14px;border-radius:12px;white-space:nowrap;
   border:1px solid var(--edge);background:var(--card);color:var(--muted);font-family:var(--mono);font-size:12px;
-  margin:0 0 14px;
+  height:40px;margin:0;box-sizing:border-box;
 }
 .clock-chip b{color:var(--txt);font-weight:700}
 .clock-dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)}
-@media(max-width:640px){.clock-chip{display:none}}
+@media(max-width:900px){.clock-chip{display:none}}
 
 /* ---- home hero ---------------------------------------------- */
 .home-hero{
@@ -3525,7 +3529,7 @@ body.nav-collapsed .sidenav-promo,body.nav-collapsed .sidenav-foot{display:none}
 }
 .home-hero-ridge{position:absolute;inset:auto 0 0 0;opacity:.9}
 [data-theme="light"] .home-hero-art{opacity:.35}
-@media(max-width:1100px){.home-hero-tag{display:none}}
+@media(max-width:1360px){.home-hero-tag{display:none}}
 @media(max-width:640px){.home-hero-art{width:70%;opacity:.5}.home-hero-txt h2{font-size:18px}.home-hero-ico{width:42px;height:42px}}
 
 /* ---- dashboard grid ---------------------------------------- */
@@ -3597,7 +3601,7 @@ td .sk,b .sk{display:inline-block;vertical-align:middle}
 .pt-price b{font-family:var(--mono);font-size:clamp(24px,2.3vw,34px);font-weight:800;color:var(--txt);letter-spacing:-.01em}
 .pt-price span{font-family:var(--mono);font-size:13px;font-weight:700}
 .pt-price small{font-weight:500;opacity:.75}
-.pt-row{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:end}
+.pt-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;align-items:end}
 .pt-spark small{display:block;font-size:11px;color:var(--muted);margin-bottom:4px}
 
 /* lists (signals, movers) */
@@ -3724,9 +3728,9 @@ td .sk,b .sk{display:inline-block;vertical-align:middle}
 /* The search box now sits in .search-row, which carries the page padding. */
 .search-row .search-icon{left:16px}
 /* Tagline to the left of the ridge art, as in the reference. */
-.home-hero-tag{margin-right:min(34%,380px)}
+.home-hero-tag{margin-right:min(36%,420px)}
 .home-hero-art{width:min(36%,420px)}
-@media(max-width:1280px){.home-hero-tag{margin-right:0}.home-hero-art{opacity:.35}}
+@media(max-width:1280px){.home-hero-art{opacity:.35}}
 /* The mountain art has a night-sky backdrop; on a light page keep only the live ridge. */
 [data-theme="light"] .home-hero-art{background:none;opacity:1}
 @media(max-width:640px){.home-hero-art{display:none}}
