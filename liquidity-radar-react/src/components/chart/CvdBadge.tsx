@@ -44,7 +44,7 @@ export function CvdBadge() {
 
   return (
     <span
-      style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, marginLeft: 2 }}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 'var(--text-xs)', marginLeft: 2 }}
       title="Cumulative taker buy/sell delta over the loaded window"
     >
       <span style={{ color, fontWeight: 700 }}>

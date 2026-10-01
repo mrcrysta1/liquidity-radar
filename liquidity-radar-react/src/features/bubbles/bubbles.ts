@@ -18,7 +18,7 @@ export function renderMemeUniverse(): void {
       + '<td>' + chgHtml(t.pct) + '</td>'
       + '<td class="vol-dim">' + cfmt(t.qvol) + '</td>'
       + '<td><span class="badge ' + sg[1] + '">' + sg[0] + '</span></td>'
-      + '<td><button class="sc-action-btn" onclick="setSymbol(\'' + sym + '\');switchTab(\'radar\')" style="font-size:10px;padding:3px 8px">Chart</button></td>'
+      + '<td><button class="sc-action-btn" onclick="setSymbol(\'' + sym + '\');switchTab(\'radar\')" style="font-size:var(--text-xs);padding:3px 8px">Chart</button></td>'
       + '</tr>'
   }).filter(Boolean).join('')
   $('memeBody')!.innerHTML = rows
