@@ -5,9 +5,26 @@
 // the same on every palette and in light mode. Crisp from favicon size up.
 import { useId } from 'react'
 
+/**
+ * The radar eye: sweep arm, dark eye and blip. All three are centred on the
+ * mark, so the whole group can turn as one without changing the picture.
+ */
+function Eye() {
+  return (
+    <>
+      <g className="logo-sweep">
+        <path d="M24 24 L31.5 16.5" stroke="#062019" strokeWidth="2.4" strokeLinecap="round" />
+        <circle cx="31.5" cy="16.5" r="2.2" fill="#062019" />
+      </g>
+      <circle cx="24" cy="24" r="4.6" fill="#062019" />
+      <circle cx="24" cy="24" r="2" fill="#7DFFE0" className="logo-blip" />
+    </>
+  )
+}
+
 export function LogoMark({ size = 32, animated = false }: { size?: number; animated?: boolean }) {
   const id = useId().replace(/:/g, '')
-  return (
+  const mark = (
     <svg
       className={'logo-mark' + (animated ? ' is-live' : '')}
       width={size}
@@ -39,16 +56,38 @@ export function LogoMark({ size = 32, animated = false }: { size?: number; anima
         <path d="M3.8 21 A20.5 20.5 0 0 1 20 3.9" strokeOpacity=".55" />
       </g>
       {/* Ticked inner ring. */}
-      <circle cx="24" cy="24" r="15" fill="none" stroke="#2EE6B8" strokeOpacity=".45" strokeWidth="1.2" />
-      <path d="M24 9v3M24 36v3M9 24h3M36 24h3" stroke="#2EE6B8" strokeOpacity=".7" strokeWidth="1.4" strokeLinecap="round" />
+      <circle
+        cx="24"
+        cy="24"
+        r="15"
+        fill="none"
+        stroke="#2EE6B8"
+        strokeOpacity=".45"
+        strokeWidth="1.2"
+      />
+      <path
+        d="M24 9v3M24 36v3M9 24h3M36 24h3"
+        stroke="#2EE6B8"
+        strokeOpacity=".7"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+      />
       {/* Core with the radar eye. */}
       <circle cx="24" cy="24" r="10.5" fill={`url(#${id}core)`} className="logo-core" />
-      <g className="logo-sweep">
-        <path d="M24 24 L31.5 16.5" stroke="#062019" strokeWidth="2.4" strokeLinecap="round" />
-        <circle cx="31.5" cy="16.5" r="2.2" fill="#062019" />
-      </g>
-      <circle cx="24" cy="24" r="4.6" fill="#062019" />
-      <circle cx="24" cy="24" r="2" fill="#7DFFE0" className="logo-blip" />
+      {!animated && <Eye />}
     </svg>
+  )
+  if (!animated) return mark
+  // Animated: the eye is its own small <svg> laid over the mark and turned as a
+  // whole. Rotating a group inside an SVG repaints the mark (and its drop
+  // shadow, and the rail around it) every frame; turning a separate element
+  // is a compositor transform and repaints nothing.
+  return (
+    <span className="logo-live" style={{ width: size, height: size }}>
+      {mark}
+      <svg className="logo-eye" width={size} height={size} viewBox="0 0 48 48" aria-hidden="true">
+        <Eye />
+      </svg>
+    </span>
   )
 }
