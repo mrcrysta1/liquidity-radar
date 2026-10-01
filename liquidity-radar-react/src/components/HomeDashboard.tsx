@@ -515,12 +515,12 @@ function MarketOverviewTile({ now }: { now: number }) {
       <AreaChart values={values} height={120} yTicks={priceTicks(values)} xTicks={xTicks} dot />
       <div className="mo-stats">
         <div>
-          <small>Total Market Cap</small>
+          <small title="Total market capitalisation">Market Cap</small>
           <b>{g ? cfmt(g.totalMcapUsd) : <Sk w={56} h={14} />}</b>
           <i className={g && g.mcapChg24h < 0 ? 'dn' : 'up'}>{g ? pct(g.mcapChg24h) : ''}</i>
         </div>
         <div>
-          <small>BTC Dominance</small>
+          <small title="Bitcoin dominance">BTC Dom.</small>
           <b>{g ? g.btcDominance.toFixed(1) + '%' : <Sk w={44} h={14} />}</b>
         </div>
         <div>
@@ -529,7 +529,7 @@ function MarketOverviewTile({ now }: { now: number }) {
           <i className={Number(fg?.value) >= 50 ? 'up' : 'dn'}>{fg?.value_classification ?? ''}</i>
         </div>
         <div>
-          <small>Active Coins</small>
+          <small title="Active coins tracked by CoinGecko">Coins</small>
           <b>{g ? g.activeCoins.toLocaleString() : <Sk w={52} h={14} />}</b>
         </div>
       </div>

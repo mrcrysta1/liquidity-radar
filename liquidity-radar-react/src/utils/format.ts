@@ -19,6 +19,8 @@ export function pfmt(p: number): string {
 export function cfmt(n: number): string {
   if (!isFinite(n)) return '—'
   const a = Math.abs(n)
+  // Market-wide totals (crypto market cap) are trillions: "$2,882.24B" was too wide.
+  if (a >= 1e12) return '$' + fmt(n / 1e12, 2) + 'T'
   if (a >= 1e9) return '$' + fmt(n / 1e9, 2) + 'B'
   if (a >= 1e6) return '$' + fmt(n / 1e6, 2) + 'M'
   if (a >= 1e3) return '$' + fmt(n / 1e3, 1) + 'K'
