@@ -44,8 +44,8 @@ function Chip({ row }: { row: ConfluenceRow }) {
           : `RSI ${row.rsi.toFixed(0)} · MACD hist ${row.macdHist >= 0 ? '+' : ''}${row.macdHist.toFixed(4)} · ${row.trendPct >= 0 ? '+' : ''}${row.trendPct.toFixed(2)}% vs EMA20`
       }
     >
-      <span style={{ fontSize: 10, opacity: 0.7 }}>{row.tf}</span>
-      <span style={{ fontSize: 10, fontWeight: 700, color: row.loading ? 'var(--muted)' : color }}>
+      <span style={{ fontSize: 'var(--text-xs)', opacity: 0.7 }}>{row.tf}</span>
+      <span style={{ fontSize: 'var(--text-xs)', fontWeight: 700, color: row.loading ? 'var(--muted)' : color }}>
         {row.loading ? '···' : VERDICT_LABEL[row.verdict]}
       </span>
     </div>
@@ -77,7 +77,7 @@ export function ConfluencePanel() {
         <span className="sec-title" style={{ fontSize: 12 }}>
           Confluence
         </span>
-        <span style={{ fontSize: 10, color: VERDICT_COLOR[summary], fontWeight: 700 }}>
+        <span style={{ fontSize: 'var(--text-xs)', color: VERDICT_COLOR[summary], fontWeight: 700 }}>
           {VERDICT_LABEL[summary]}
         </span>
       </div>

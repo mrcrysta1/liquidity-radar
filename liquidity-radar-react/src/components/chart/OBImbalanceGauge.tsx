@@ -67,7 +67,7 @@ export function OBImbalanceGauge() {
         <span className="sec-title" style={{ fontSize: 12 }}>
           Book Imbalance
         </span>
-        <span style={{ fontSize: 10, color, fontWeight: 700 }}>
+        <span style={{ fontSize: 'var(--text-xs)', color, fontWeight: 700 }}>
           {label}
           {imbalance != null ? ' · ' + (imbalance * 100).toFixed(0) + '%' : ''}
         </span>
@@ -98,7 +98,7 @@ export function OBImbalanceGauge() {
         value={band}
         onChange={(e) => setBand(Number(e.target.value))}
         className="chart-tool-btn"
-        style={{ fontSize: 10, padding: '2px 4px' }}
+        style={{ fontSize: 'var(--text-xs)', padding: '2px 4px' }}
         title="Depth band used for the imbalance read"
       >
         {BANDS.map((b) => (
@@ -107,7 +107,7 @@ export function OBImbalanceGauge() {
           </option>
         ))}
       </select>
-      <span style={{ fontSize: 10, color: 'var(--muted)', minWidth: 70, textAlign: 'right' }}>
+      <span style={{ fontSize: 'var(--text-xs)', color: 'var(--muted)', minWidth: 70, textAlign: 'right' }}>
         {spreadBps != null ? spreadBps.toFixed(1) + ' bps spread' : ''}
       </span>
       <button

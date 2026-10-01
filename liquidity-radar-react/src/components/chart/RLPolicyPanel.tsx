@@ -60,7 +60,7 @@ export function RLPolicyPanel() {
         <span className="sec-title" style={{ fontSize: 12 }}>
           RL Trading Policy (DQN)
         </span>
-        <span style={{ fontSize: 10, color: 'var(--muted)' }}>
+        <span style={{ fontSize: 'var(--text-xs)', color: 'var(--muted)' }}>
           {rl.status === 'training'
             ? 'training…'
             : rl.status === 'insufficient-data'
@@ -76,7 +76,7 @@ export function RLPolicyPanel() {
             display: 'flex',
             alignItems: 'center',
             gap: 4,
-            fontSize: 10,
+            fontSize: 'var(--text-xs)',
             color: 'var(--muted)',
             marginLeft: 'auto',
           }}
@@ -113,7 +113,7 @@ export function RLPolicyPanel() {
       {rl.status === 'ready' && rl.action && p && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <span style={{ fontSize: 10, color: 'var(--muted)' }}>Recommendation (from flat)</span>
+            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--muted)' }}>Recommendation (from flat)</span>
             <span
               style={{
                 fontSize: 14,
@@ -125,7 +125,7 @@ export function RLPolicyPanel() {
             </span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <span style={{ fontSize: 10, color: 'var(--muted)' }}>
+            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--muted)' }}>
               Backtest vs buy-and-hold ({p.backtestSteps} bars)
             </span>
             <span style={{ fontSize: 13, fontWeight: 700 }}>
@@ -137,7 +137,7 @@ export function RLPolicyPanel() {
             </span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <span style={{ fontSize: 10, color: 'var(--muted)' }}>Edge over buy-and-hold</span>
+            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--muted)' }}>Edge over buy-and-hold</span>
             <span style={{ fontSize: 13, fontWeight: 700, color: edgeColor }}>
               {edge != null ? (edge >= 0 ? '+' : '') + (edge * 100).toFixed(1) + '%' : '—'}
             </span>
@@ -158,7 +158,7 @@ export function RLPolicyPanel() {
             border: '1px solid rgba(0,230,118,.25)',
           }}
         >
-          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--green)' }}>
+          <span style={{ fontSize: 'var(--text-xs)', fontWeight: 700, color: 'var(--green)' }}>
             PAPER POSITION OPEN
           </span>
           <span style={{ fontSize: 11 }}>Entry {pfmt(rl.openTrade.entry)}</span>
@@ -185,7 +185,7 @@ export function RLPolicyPanel() {
             display: 'flex',
             gap: 14,
             flexWrap: 'wrap',
-            fontSize: 10,
+            fontSize: 'var(--text-xs)',
             color: 'var(--muted)',
           }}
         >
@@ -203,7 +203,7 @@ export function RLPolicyPanel() {
         </div>
       )}
 
-      <span style={{ fontSize: 10, color: 'var(--dim,var(--muted))' }}>
+      <span style={{ fontSize: 'var(--text-xs)', color: 'var(--dim,var(--muted))' }}>
         Auto paper-trade simulates a position against live prices with real TP/SL — no exchange
         order is ever placed. Each simulated trade that closes (hit TP or SL) fine-tunes this policy
         on the real outcome. Not financial advice, and a policy that traded well on its own recent

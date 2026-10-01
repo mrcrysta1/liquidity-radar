@@ -44,7 +44,7 @@ export function MLPredictionPanel() {
         <span className="sec-title" style={{ fontSize: 12 }}>
           ML Direction Model
         </span>
-        <span style={{ fontSize: 10, color: 'var(--muted)' }}>
+        <span style={{ fontSize: 'var(--text-xs)', color: 'var(--muted)' }}>
           {ml.status === 'training'
             ? 'training…'
             : ml.status === 'insufficient-data'
@@ -71,7 +71,7 @@ export function MLPredictionPanel() {
       {ml.status === 'ready' && ml.prediction && ml.trained && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <span style={{ fontSize: 10, color: 'var(--muted)' }}>
+            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--muted)' }}>
               Next {ml.trained.horizon} candles ({ml.trained.tf})
             </span>
             <span
@@ -85,18 +85,18 @@ export function MLPredictionPanel() {
             </span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <span style={{ fontSize: 10, color: 'var(--muted)' }}>
+            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--muted)' }}>
               Backtest accuracy ({ml.trained.backtestN} holdout samples)
             </span>
             <span style={{ fontSize: 13, fontWeight: 700, color: accColor }}>
               {acc != null ? (acc * 100).toFixed(1) + '%' : '—'}
             </span>
           </div>
-          <span style={{ fontSize: 10, color: 'var(--muted)', maxWidth: 260 }}>{trustNote}</span>
+          <span style={{ fontSize: 'var(--text-xs)', color: 'var(--muted)', maxWidth: 260 }}>{trustNote}</span>
         </div>
       )}
 
-      <span style={{ fontSize: 10, color: 'var(--dim,var(--muted))' }}>
+      <span style={{ fontSize: 'var(--text-xs)', color: 'var(--dim,var(--muted))' }}>
         Trained live in your browser on this symbol's own recent candles — not financial advice, and not a
         guarantee it beats a coin flip. Check the backtest number before trusting the direction above.
       </span>
