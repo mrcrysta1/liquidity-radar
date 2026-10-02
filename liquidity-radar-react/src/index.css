@@ -3819,6 +3819,8 @@ td .sk,b .sk{display:inline-block;vertical-align:middle}
 
 /* The Home tab carries its own hero; the generic section header would repeat it. */
 #tab-home>.dash-head{display:none}
+/* Radar opens on its own hero card (coin, price, trend), as in the reference. */
+#tab-radar>.dash-head{display:none}
 /* The search box now sits in .search-row, which carries the page padding. */
 .search-row .search-icon{left:16px}
 /* Tagline to the left of the ridge art, as in the reference. */
@@ -3892,7 +3894,11 @@ td .sk,b .sk{display:inline-block;vertical-align:middle}
 @media(max-width:640px){.rd-hero{gap:14px;padding:14px}.rd-hero-stats{gap:14px;flex-wrap:wrap}.rd-hero-act{width:100%}.rd-trade{margin-left:auto}}
 
 /* metrics strip */
-.rd-metrics{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-bottom:14px}
+/* A wrapping row rather than a fixed grid: the five cards stay on one row down to
+   ~1000px (as in the reference), and a short last row stretches instead of
+   leaving a hole (a 3-column grid left one beside Volatility). */
+.rd-metrics{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:14px}
+.rd-metrics>.rd-m{flex:1 1 140px}
 .rd-m{padding:12px 14px;display:flex;flex-direction:column;gap:6px;min-width:0}
 .rd-m-h{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .rd-m b{font-family:var(--mono);font-size:20px;font-weight:800;color:var(--txt)}
@@ -3903,8 +3909,16 @@ td .sk,b .sk{display:inline-block;vertical-align:middle}
 .rd-ls i{display:block;height:100%;background:linear-gradient(90deg,var(--cyan),#16C79A)}
 .rd-m-g{align-items:stretch}
 .rd-m-gauge{display:grid;place-items:center;flex:1}
-@media(max-width:1280px){.rd-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}}
-@media(max-width:640px){.rd-metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.rd-m b{font-size:17px}}
+@media(max-width:640px){.rd-metrics{gap:10px}.rd-m b{font-size:17px}}
+/* A narrow card (five on a row at ~1000px) steps its numbers down so "50.5 / 49.5"
+   stays on one line, as in the reference, and the title can still truncate. */
+.rd-m{container-type:inline-size}
+@container (max-width:170px){
+  .rd-m{padding:11px 12px}
+  .rd-m b{font-size:17px;white-space:nowrap}
+  .rd-m small{font-size:var(--text-xs);gap:4px}
+  .rd-m-h{font-size:var(--text-xs);gap:5px}
+}
 
 /* gauge */
 .rd-gauge{display:block}
@@ -3992,8 +4006,9 @@ td .sk,b .sk{display:inline-block;vertical-align:middle}
 .rd-strat-grid b{display:block;font-size:12.5px}
 .rd-strat-grid small{display:block;font-size:var(--text-xs);color:var(--muted)}
 .rd-strat-ico{display:grid;place-items:center;width:40px;height:40px;border-radius:10px;background:var(--card);border:1px solid var(--hair-2);flex-shrink:0}
-@media(max-width:1100px){.rd-strat-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
-@media(max-width:640px){.rd-strat-grid{display:flex;overflow-x:auto;scrollbar-width:none}.rd-strat-grid button{flex:0 0 200px}}
+/* Narrower: wrap, and let a short last row stretch rather than leave a gap. */
+@media(max-width:1100px){.rd-strat-grid{display:flex;flex-wrap:wrap}.rd-strat-grid button{flex:1 1 180px}}
+@media(max-width:640px){.rd-strat-grid{display:flex;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}.rd-strat-grid button{flex:0 0 200px}}
 
 .rd-strip{display:grid;grid-template-columns:1fr 300px;gap:18px;align-items:center;padding:14px 16px}
 .rd-strip-h{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
