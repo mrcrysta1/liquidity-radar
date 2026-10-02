@@ -3391,6 +3391,17 @@ html[data-palette="ember"] .ai-fab{
 }
 /* Under 1100px the clock would leave the ticker room for barely one coin. */
 @media(min-width:901px) and (max-width:1099px){.clock-chip{display:none}}
+/* Header search: the coin search in a dropdown under its button. */
+.hsearch{position:relative;display:flex}
+.hsearch-pop{
+  position:absolute;top:calc(100% + 10px);right:0;z-index:90;width:min(440px,calc(100vw - 24px));
+  padding:10px;border-radius:14px;border:1px solid var(--border2);background:var(--card2);box-shadow:var(--shade-3);
+}
+.hsearch-pop .search-wrap{padding:0;margin:0;max-width:none}
+/* The results sit below the box here, so centre the icon on the input, not the widget. */
+.hsearch-pop .search-icon{left:14px;top:22px}
+.hsearch-pop .search-results{left:0;right:0;margin-top:8px;position:static;box-shadow:none;max-height:min(360px,60vh)}
+@media(max-width:900px){.hsearch-pop{position:fixed;top:58px;left:12px;right:12px;width:auto}}
 /* The hero sweep is a night-sky effect; on a light page keep it faint. */
 html[data-palette="ember"][data-theme="light"] .hero-card::after{opacity:.18}
 
