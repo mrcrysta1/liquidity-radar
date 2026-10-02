@@ -50,10 +50,12 @@ const QUICK: Array<[Quick, string]> = [
   ['high', 'High Confidence'],
 ]
 const TFS = ['1h', '4h', '1d']
-const CONF: Record<string, [string, string]> = {
-  STRONG: ['High Confidence', 'hi'],
-  MODERATE: ['Medium Confidence', 'md'],
-  WEAK: ['Low Confidence', 'lo'],
+// [chip text, css class, full name]. The chip is short so it fits on the
+// title row beside the side and timeframe, as in the reference design.
+const CONF: Record<string, [string, string, string]> = {
+  STRONG: ['High', 'hi', 'High confidence'],
+  MODERATE: ['Medium', 'md', 'Medium confidence'],
+  WEAK: ['Low', 'lo', 'Low confidence'],
 }
 const TIPS = [
   'Look for confluence: RSI + MACD + volume + key levels. Higher-timeframe trend gives better accuracy.',
@@ -185,10 +187,11 @@ function MiniCandles({ candles, side, last }: { candles: Candle[]; side: Side; l
   const bars = candles.slice(-42)
   const W = 300
   const H = 96
-  const AX = 52
   if (bars.length < 3) return <div className="sg-mini sg-mini-empty">No chart data</div>
   const hi = Math.max(...bars.map((b) => b.h))
   const lo = Math.min(...bars.map((b) => b.l))
+  // The axis column fits its longest label ("87,220.00" at 11px needs ~66 units).
+  const AX = Math.max(52, Math.ceil(Math.max(pfmt(hi).length, pfmt(lo).length, pfmt(last ?? hi).length) * 6.8) + 8)
   const span = hi - lo || hi * 0.01 || 1
   const y = (v: number) => 4 + ((hi - v) / span) * (H - 8)
   const step = (W - AX) / bars.length
@@ -225,11 +228,16 @@ function MiniCandles({ candles, side, last }: { candles: Candle[]; side: Side; l
           </g>
         )
       })}
-      {ticks.map((v, i) => (
-        <text key={i} x={W - 2} y={i === 0 ? 10 : i === 3 ? H - 2 : y(v) + 3} textAnchor="end" className="sg-ax">
-          {pfmt(v)}
-        </text>
-      ))}
+      {ticks.map((v, i) => {
+        const ty = i === 0 ? 10 : i === 3 ? H - 2 : y(v) + 3
+        // An axis label under the last-price tag would print over it.
+        if (Math.abs(ty - (tagY + 3.5)) < 18) return null
+        return (
+          <text key={i} x={W - 2} y={ty} textAnchor="end" className="sg-ax">
+            {pfmt(v)}
+          </text>
+        )
+      })}
       <rect x={W - AX + 2} y={tagY - 7} width={AX - 2} height={14} rx="3" fill={col} />
       <text x={W - 3} y={tagY + 3.5} textAnchor="end" className="sg-tag">{pfmt(px)}</text>
     </svg>
@@ -255,7 +263,11 @@ function SignalCard({ s }: { s: Sig }) {
         </span>
         <span className={'sg-side ' + cls}>★ {side === 'BUY' ? 'LONG' : side === 'SELL' ? 'SHORT' : 'WATCH'}</span>
         <span className="sg-tf">{tf}</span>
-        <span className={'sg-conf ' + conf[1]} title={s.conv ? `${s.conv.agree} of ${s.conv.of} timeframes agree` : ''}>
+        <span
+          className={'sg-conf ' + conf[1]}
+          title={conf[2] + (s.conv ? `: ${s.conv.agree} of ${s.conv.of} timeframes agree` : '')}
+          aria-label={conf[2]}
+        >
           ★ {conf[0]}
         </span>
       </div>
@@ -334,7 +346,7 @@ function TopSymbols({ list, onAll }: { list: Sig[]; onAll: () => void }) {
   return (
     <section className="card sg-box">
       <h3><Ico d={TARGET} size={16} /> Top Symbols</h3>
-      <div className="sg-top-h"><span>Symbol</span><span>Signal strength</span></div>
+      <div className="sg-top-h"><span>Symbol</span><span>Strength</span></div>
       <ul className="sg-top">
         {top.map((s) => (
           <li key={s.sym}>
