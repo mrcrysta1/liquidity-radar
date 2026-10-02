@@ -3381,6 +3381,16 @@ html[data-palette="ember"] .ai-fab{
 /* The sidebar already carries the brand wherever it is shown; the header
    keeps the logo only where the sidebar is hidden (phones). */
 @media(min-width:901px){.top .logo{display:none}}
+/* Desktop: the ticker shares the top row with the clock and icons, as in the
+   reference design, instead of taking a second row under them. The logo lives
+   in the rail at this width, so the row was mostly empty. */
+@media(min-width:901px){
+  header.top{display:flex;align-items:center}
+  header.top>.tickerbar{order:0;flex:1;min-width:0;border-bottom:none;background:none}
+  header.top>.top-inner{order:1;flex-shrink:0;margin:0;max-width:none;padding-left:6px}
+}
+/* Under 1100px the clock would leave the ticker room for barely one coin. */
+@media(min-width:901px) and (max-width:1099px){.clock-chip{display:none}}
 /* The hero sweep is a night-sky effect; on a light page keep it faint. */
 html[data-palette="ember"][data-theme="light"] .hero-card::after{opacity:.18}
 
