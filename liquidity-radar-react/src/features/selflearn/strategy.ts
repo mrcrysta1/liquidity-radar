@@ -11,9 +11,9 @@
 // over history: train on the past, trade the future bar by bar, and (when
 // asked) learn from each closed trade exactly as the live engine does.
 import type { CandleFlat } from '../../services/market'
-import { series, WARMUP } from './features'
+import { series, WARMUP } from './features.ts'
 import type { Series } from './features'
-import { fitLogit, learnLogit, pLogit } from './models'
+import { fitLogit, learnLogit, pLogit } from './models.ts'
 import type { Logit } from './models'
 
 export type StratId = 'scalp' | 'swing'

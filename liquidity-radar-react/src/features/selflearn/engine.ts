@@ -18,6 +18,7 @@ import { storageGet, storageSet } from '../../services/storage'
 import { series } from './features'
 import { learnLogit } from './models'
 import { setupOf } from './patterns'
+import { trainInBackground } from './trainClient'
 import {
   FEE,
   STRATS,
@@ -165,22 +166,18 @@ export async function trainModel(sym: string, strat: StratId, why = 'Initial tra
   try {
     const cs = await loadCandleWindow(sym, st.tf, st.bars)
     if (cs.length < 400) throw new Error('only ' + cs.length + ' bars')
-    const S = series(cs)
-    const rows = dataset(cs, S, st)
-    // Validate on the last 30% with a model that never saw it, learning as it goes.
-    const cut = Math.floor(cs.length * 0.7)
-    const early = rows.filter((r) => Math.max(r.long.exitIdx, r.short.exitIdx) < cut)
-    const test = simulate(cs, S, rows, cut, trainPair(early), st, { minEV: st.minEV, online: true })
-    const hs = stats(test)
+    // Features, labels, the unseen-30% check and both fits (train.ts), in a worker.
+    const { rows: nRows, pair, holdout } = await trainInBackground(cs, strat)
+    const hs = holdout
     const prev = models[key]
     models[key] = {
       key, sym, strat,
       version: (prev?.version ?? 0) + 1,
       trainedAt: Date.now(),
       bars: cs.length,
-      rows: rows.length,
-      pair: trainPair(rows),
-      holdout: { n: hs.n, winRate: hs.winRate, avgR: hs.avgR, pf: isFinite(hs.profitFactor) ? hs.profitFactor : 99 },
+      rows: nRows,
+      pair,
+      holdout,
       updates: 0,
       lastBarT: prev?.lastBarT ?? 0,
       last: prev?.last,
@@ -188,7 +185,7 @@ export async function trainModel(sym: string, strat: StratId, why = 'Initial tra
     log(
       'train',
       `${why} · ${short(sym)} ${st.label} v${models[key].version}`,
-      `Trained on ${rows.length.toLocaleString()} labelled ${st.tf} bars. Unseen test: ${hs.n} trades, ` +
+      `Trained on ${nRows.toLocaleString()} labelled ${st.tf} bars. Unseen test: ${hs.n} trades, ` +
         `${(hs.winRate * 100).toFixed(0)}% win, ${hs.avgR >= 0 ? '+' : ''}${hs.avgR.toFixed(2)}R avg.`,
       sym,
       strat,
