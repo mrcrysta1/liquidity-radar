@@ -42,6 +42,9 @@ export function initKeyboard(): void {
       if (cs) {
         cs.focus()
         cs.select()
+      } else {
+        // The search lives behind the header button (components/search/HeaderSearch).
+        window.dispatchEvent(new Event('lr:open-search'))
       }
       return
     }

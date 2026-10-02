@@ -59,6 +59,7 @@ import {
   VolumeProfile,
 } from './analysis/AnalysisViews'
 import { ClockChip } from './home/ClockChip'
+import { HeaderSearch } from './search/HeaderSearch'
 import { WhenTab } from './WhenTab'
 const loadSettings = () => import('./SettingsPage')
 const loadCalendar = () => import('./news/EconomicCalendar')
@@ -107,6 +108,7 @@ export function Shell() {
           <div className="logo"><LogoMark size={36} animated /><span className="logo-text"><b>LIQUIDITY</b>&nbsp;<span>RADAR</span></span></div>
           <div className="top-actions">
             <ClockChip />
+            <HeaderSearch />
             <AccountMenu />
             <button className="theme-btn icon-btn" id="alertBtn" title="Price alerts" aria-label="Price alerts" onClick={() => { renderAlerts(); openModal('alModal') }}><BellIcon /></button>
             <button className="theme-btn icon-btn" id="paletteBtn" title="Colour themes" aria-label="Colour themes"><PaletteIcon /></button>

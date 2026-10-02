@@ -39,7 +39,15 @@ const COIN_NAMES: Record<string, string> = Object.fromEntries(
   Object.entries(COINS).map(([k, meta]) => [k, meta.name.toLowerCase()]),
 )
 
-export function CoinSearchWidget() {
+export function CoinSearchWidget({
+  autoFocus = false,
+  onDone,
+}: {
+  /** Focus the box on mount (the header search opens with the cursor in it). */
+  autoFocus?: boolean
+  /** Called after a pick or on Escape, so a container can close itself. */
+  onDone?: () => void
+} = {}) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
   const [index, setIndex] = useState(-1)
@@ -167,6 +175,7 @@ export function CoinSearchWidget() {
     setQuery('')
     setOpen(false)
     setIndex(-1)
+    onDone?.()
   }
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -193,6 +202,7 @@ export function CoinSearchWidget() {
     } else if (e.key === 'Escape') {
       setOpen(false)
       setIndex(-1)
+      onDone?.()
     }
   }
 
@@ -208,6 +218,7 @@ export function CoinSearchWidget() {
         placeholder="Search any coin... (e.g. PEPE, SOL, DOGE, PEPEPE, TRUMP)"
         autoComplete="off"
         maxLength={50}
+        autoFocus={autoFocus}
         value={query}
         onChange={handleChange}
         onFocus={handleFocus}
