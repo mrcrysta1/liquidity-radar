@@ -1247,6 +1247,40 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   else delete globalThis.localStorage
 }
 
+// ---- self-learning: training core (runs in a Web Worker in the app) ----------------
+{
+  const { trainCore } = await import(src('features/selflearn/train.ts'))
+  // A seeded random walk with a slow swing, so both sides produce labelled trades.
+  let seed = 7
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647
+  const cs = []
+  let px = 100
+  for (let i = 0; i < 1200; i++) {
+    const o = px
+    px = Math.max(1, px * (1 + Math.sin(i / 90) * 0.0015 + (rnd() - 0.5) * 0.012))
+    const hi = Math.max(o, px) * (1 + rnd() * 0.004)
+    const lo = Math.min(o, px) * (1 - rnd() * 0.004)
+    cs.push({ t: 1_700_000_000_000 + i * 300_000, o, h: hi, l: lo, c: px, v: 100 + rnd() * 50 })
+  }
+  const a = trainCore(cs, 'scalp')
+  const b = trainCore(cs, 'scalp')
+  ok('selflearn: training produces labelled rows', a.rows > 500, a.rows)
+  ok(
+    'selflearn: both models carry weights',
+    a.pair.long.w.length > 0 && a.pair.long.w.length === a.pair.short.w.length,
+    a.pair.long.w.length,
+  )
+  ok(
+    'selflearn: holdout stats are finite',
+    [a.holdout.n, a.holdout.winRate, a.holdout.avgR, a.holdout.pf].every(Number.isFinite),
+    a.holdout,
+  )
+  // The worker and the main-thread fallback must agree, so training must be deterministic.
+  eq('selflearn: training is deterministic (worker = fallback)', JSON.stringify(a), JSON.stringify(b))
+  // What crosses to and from the worker must survive structured cloning unchanged.
+  eq('selflearn: result survives structured clone', JSON.stringify(structuredClone(a)), JSON.stringify(a))
+}
+
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')
 if (fails.length) {
   fails.forEach((f) => console.log('  FAIL  ' + f))
