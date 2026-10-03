@@ -10,6 +10,8 @@ import { existsSync } from 'node:fs'
 import { connect } from './db.ts'
 import { Futures, TESTNET } from './bot/futures.ts'
 import { checkLimits } from './bot/risk.ts'
+import { accountFromBinance, ordersFromBinance } from './bot/account.ts'
+import type { AccountFill } from './bot/account.ts'
 import { BotStore } from './bot/store.ts'
 import { DEFAULT_TRADER, SymbolTrader } from './bot/trader.ts'
 import type { TraderConfig } from './bot/trader.ts'
@@ -72,6 +74,28 @@ for (const s of SYMBOLS) {
 
 let stopping = false
 let lastEquityAt = 0
+
+// The account mirror the website shows (bot_state 'account'): the same wallet,
+// unrealized P&L, margin, available balance, positions, orders and fills as the
+// Binance panel. Fills are slower to change and cost more, so once a minute.
+let fills: AccountFill[] = []
+let lastFillsAt = 0
+async function mirrorAccount(now: number): Promise<void> {
+  const acc = accountFromBinance(await ex.account(), now, ex.base)
+  const syms = [...new Set([...SYMBOLS, ...acc.positions.map((p) => p.symbol)])]
+  const algo = (await Promise.all(syms.map((s) => ex.openAlgo(s).then((r) => r.map((o) => ({ ...o, symbol: s }))).catch(() => [])))).flat()
+  const orders = ordersFromBinance(await ex.openOrders(), algo)
+  if (now - lastFillsAt >= 60_000) {
+    lastFillsAt = now
+    const since = now - 7 * 86_400_000
+    const all = (await Promise.all(syms.map((s) => ex.fills(s, since).then((f) => f.map((x) => ({ ...x, symbol: s }))).catch(() => [])))).flat()
+    fills = all
+      .sort((a, b) => b.time - a.time)
+      .slice(0, 50)
+      .map((f) => ({ symbol: f.symbol, time: f.time, side: f.side, price: f.price, qty: f.qty, realizedPnl: f.realizedPnl, commission: f.commission }))
+  }
+  await store.setState('account', { ...acc, orders, fills })
+}
 async function tick(): Promise<void> {
   const now = Date.now()
   const control = await store.getState<{ enabled?: boolean }>('control', { enabled: true })
@@ -87,6 +111,7 @@ async function tick(): Promise<void> {
     await store.equity(now - (now % 3_600_000), equity)
   }
   await store.setState('heartbeat', { t: now, equity, mode: cfg.mode, venue: ex.base })
+  await mirrorAccount(now).catch((e) => console.error('account mirror', (e as Error).message))
   const canEnter = control.enabled !== false && lim.canEnter
   for (const t of traders) {
     try {

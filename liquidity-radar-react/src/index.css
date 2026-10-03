@@ -5340,3 +5340,23 @@ html[data-palette="glass"] .acct-card{background:linear-gradient(145deg,rgba(255
 .ai-clear:hover{color:var(--txt);border-color:var(--primary)}
 .ai-err{margin-top:8px;padding:6px 9px;border-radius:8px;font-size:var(--text-xs);color:var(--muted);background:rgb(var(--aRGB)/.1);border-left:3px solid var(--amber)}
 .ai-sep{align-self:center;font-size:var(--text-xs);color:var(--dim);padding:2px 10px;border-radius:999px;border:1px solid var(--hair-2)}
+
+/* ---- Binance account mirror (components/neural/BinanceAccount.tsx) ---- */
+.bx{display:flex;flex-direction:column;gap:10px}
+.bx-head{display:flex;align-items:center;gap:12px}
+.bx-head h3{margin:0;font-size:var(--text-md);font-weight:800;color:var(--txt)}
+.bx-head small{font-size:var(--text-xs);color:var(--muted)}
+.bx-logo{display:grid;place-items:center;width:36px;height:36px;border-radius:10px;background:#F0B90B;color:#1e2026;font-size:18px;flex-shrink:0}
+.bx-live{color:var(--green)}.bx-off{color:var(--amber)}
+.bx-open{margin-left:auto;padding:7px 12px;border-radius:9px;border:1px solid #F0B90B;color:#F0B90B;font-weight:700;font-size:var(--text-sm);text-decoration:none;white-space:nowrap}
+.bx-open:hover{background:rgba(240,185,11,.12)}
+.bx-warn{margin:0;padding:7px 10px;border-radius:8px;font-size:var(--text-xs);background:rgb(var(--aRGB)/.1);border-left:3px solid var(--amber);color:var(--muted)}
+.bx-tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.bx-tiles>div{padding:10px 12px;border-radius:11px;background:var(--sunk-2);border:1px solid var(--hair-2);display:flex;flex-direction:column;gap:3px;min-width:0}
+.bx-tiles small{font-size:var(--text-xs);color:var(--muted)}
+.bx-tiles b{font-family:var(--mono);font-size:var(--text-lg);color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bx .up{color:var(--green)}.bx .dn{color:var(--red)}
+.bx h4{margin:6px 0 0;font-size:var(--text-sm);font-weight:800;color:var(--txt)}
+.bx h4 i{font-style:normal;font-weight:600;color:var(--dim);margin-left:6px}
+.bx-table td small{display:block;font-size:var(--text-xs);color:var(--dim)}
+@media(max-width:760px){.bx-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}.bx-head{flex-wrap:wrap}.bx-open{margin-left:0}}

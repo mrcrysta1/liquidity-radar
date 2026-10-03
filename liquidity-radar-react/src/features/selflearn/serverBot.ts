@@ -53,3 +53,24 @@ export async function loadBot(): Promise<{ trades: BotTrade[]; events: BotEvent[
   ])
   return { trades, events }
 }
+
+/** The Binance futures account as the bot last read it (radar-worker/src/bot/account.ts). */
+export interface BinanceAccount {
+  t: number
+  venue: string
+  walletBalance: number
+  unrealizedPnl: number
+  marginBalance: number
+  availableBalance: number
+  positions: Array<{ symbol: string; side: 'LONG' | 'SHORT'; size: number; entry: number; mark: number; unrealized: number; leverage: number; liquidation: number; margin: number; notional: number }>
+  orders: Array<{ symbol: string; side: 'BUY' | 'SELL'; type: string; price: number; qty: number; reduceOnly: boolean }>
+  fills: Array<{ symbol: string; time: number; side: 'BUY' | 'SELL'; price: number; qty: number; realizedPnl: number; commission: number }>
+}
+
+/** Account snapshot and bot heartbeat. Null when the database is not configured. */
+export async function loadAccount(): Promise<{ account: BinanceAccount | null; heartbeat: { t: number; mode: string; venue: string } | null } | null> {
+  if (!SERVER_BOT) return null
+  const rows = await rest<Array<{ key: string; value: unknown }>>('bot_state?select=key,value&key=in.(account,heartbeat)')
+  const get = (k: string) => rows.find((r) => r.key === k)?.value ?? null
+  return { account: get('account') as BinanceAccount | null, heartbeat: get('heartbeat') as { t: number; mode: string; venue: string } | null }
+}
