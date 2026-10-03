@@ -25,6 +25,7 @@ import {
   mdVal,
 } from '../../services/market'
 import { fetchKlineRows, klineHub } from '../../services/failover'
+import { isInstrument } from '../../constants/instruments'
 import { createIndicatorRenderer } from './indicators/render'
 import type { IndicatorRenderer } from './indicators/render'
 import { panelIndicatorStore, prunePanelSlots, shiftPanelSlots } from './indicators/panelStore'
@@ -443,6 +444,9 @@ function mcConnectWS(p: McPanel): void {
   }
   const s = mdSym(p.sym) as string
   const iv = mdTf(p.interval)
+  // Instruments (gold, FX...) have no spot kline stream; one bad stream name
+  // would break the shared socket for every other panel.
+  if (isInstrument(s)) return
   // Every workspace panel rides the one shared kline hub socket, which owns
   // reconnects and re-subscription. `p.ws` stays a socket-shaped handle
   // (`_dead`, `close()`) so the call sites that tear panels down are unchanged.

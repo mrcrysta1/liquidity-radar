@@ -384,7 +384,10 @@ export interface TickerEntry {
 type TickerMap = Record<string, TickerEntry>
 
 function wanted(): string[] {
-  return Object.values(COINS).map((c) => c.sym)
+  // Instruments (gold) are not spot pairs; one unknown symbol fails the whole batch.
+  return Object.values(COINS)
+    .map((c) => c.sym)
+    .filter((s) => !isInstrument(s))
 }
 
 async function binanceTickers(): Promise<TickerMap> {

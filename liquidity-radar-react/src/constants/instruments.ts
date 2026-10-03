@@ -19,6 +19,12 @@ export interface Instrument {
   sym: string
   /** What Yahoo calls it, e.g. 'GC=F'. */
   yahoo: string
+  /**
+   * Binance USD-M perpetual that tracks it (gold: XAUUSDT, priced off spot
+   * gold). When set, candles, quotes and live streams come from Binance
+   * futures, and Yahoo is only the fallback.
+   */
+  binance?: string
   name: string
   cls: AssetClass
   icon: string
@@ -32,9 +38,9 @@ export interface Instrument {
 export const INSTRUMENTS: Record<string, Instrument> = {
   // --- metals -------------------------------------------------------
   XAUUSD: {
-    sym: 'XAUUSD', yahoo: 'GC=F', name: 'Gold (Spot)', cls: 'metal',
+    sym: 'XAUUSD', yahoo: 'GC=F', binance: 'XAUUSDT', name: 'Gold (Spot)', cls: 'metal',
     icon: '🥇', color: '#D4AF37', dp: 2,
-    aliases: ['gold', 'xau', 'xauusd', 'spot gold', 'bullion', 'gold futures', 'comex gold'],
+    aliases: ['gold', 'xau', 'xauusd', 'xauusdt', 'spot gold', 'bullion', 'gold forex', 'gold futures', 'comex gold'],
   },
   XAGUSD: {
     sym: 'XAGUSD', yahoo: 'SI=F', name: 'Silver (Spot)', cls: 'metal',
@@ -173,6 +179,11 @@ export function isInstrument(sym: string): boolean {
 
 export function instrumentOf(sym: string): Instrument | null {
   return INSTRUMENTS[sym] ?? null
+}
+
+/** The Binance perpetual behind an instrument (gold → XAUUSDT), or null. */
+export function binancePerpOf(sym: string): string | null {
+  return INSTRUMENTS[sym]?.binance ?? null
 }
 
 /**

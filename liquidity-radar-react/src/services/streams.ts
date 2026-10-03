@@ -2,7 +2,8 @@
 // block previously living in the engine; DOM updates are delegated to an
 // injected callback set so this module stays free of UI concerns.
 import { state } from './store'
-import { isInstrument } from '../constants/instruments'
+import { binancePerpOf, isInstrument } from '../constants/instruments'
+import { PERP_WS } from './perpData'
 import {
   md,
   mdDebug,
@@ -155,13 +156,17 @@ export function connectStreams(cb: StreamsCallbacks): void {
   // empty symbol and letting them reconnect forever. The ticker bar keeps
   // updating from the market-wide fetchTickers poll, and the instrument's own
   // price is polled by services/instrumentFeed.
-  if (isInstrument(state.symbol)) {
+  // Gold is the exception: its Binance perpetual (XAUUSDT) streams exactly like
+  // a spot pair, so it gets the full live set from the futures socket host.
+  const perp = binancePerpOf(state.symbol)
+  if (isInstrument(state.symbol) && !perp) {
     syncCount()
     cb.onStatus()
     return
   }
   expectedStreams = 4
-  const s = mdSym(state.symbol)?.toLowerCase() ?? ''
+  const s = (perp ?? mdSym(state.symbol) ?? '').toLowerCase()
+  const WS = perp ? PERP_WS : 'wss://stream.binance.com:9443/ws/'
   const tf = mdTf(state.tf)
   const def = tfDef(tf)
   const bufKey = mdSym(state.symbol) + '|' + tf
@@ -276,7 +281,7 @@ export function connectStreams(cb: StreamsCallbacks): void {
     cb.onHero()
     cb.onTickerLive(t)
   }
-  make('tk', 'wss://stream.binance.com:9443/ws/' + s + '@ticker', function (d: Any) {
+  make('tk', WS + s + '@ticker', function (d: Any) {
     if (!mdVal.price(+d.c)) return
     const t = ticker()
     // 24h open, kept so a trade print can recompute the change without
@@ -325,7 +330,7 @@ export function connectStreams(cb: StreamsCallbacks): void {
     mdPatchLastCandle(state.symbol, tf, c)
     cb.onChartLast(c)
   }
-  make('ag', 'wss://stream.binance.com:9443/ws/' + s + '@aggTrade', function (d: Any) {
+  make('ag', WS + s + '@aggTrade', function (d: Any) {
     const p = +d.p
     if (!mdVal.price(p)) return
     // Delta/whale tracking runs on every print (not coalesced to rAF like the
@@ -340,7 +345,7 @@ export function connectStreams(cb: StreamsCallbacks): void {
   // Resampled intervals stream their base interval and fold each tick into the
   // bucket still forming, so the last candle stays live rather than appearing
   // only once the bucket closes. Native intervals (factor 1) are unchanged.
-  make('kl', 'wss://stream.binance.com:9443/ws/' + s + '@kline_' + def.base, function (d: Any) {
+  make('kl', WS + s + '@kline_' + def.base, function (d: Any) {
     const k = d.k
     const base = { t: k.t, o: +k.o, h: +k.h, l: +k.l, c: +k.c, v: +k.v }
     if (!mdVal.candle(base)) return
@@ -368,11 +373,14 @@ export function connectStreams(cb: StreamsCallbacks): void {
   // so the live book was never live: it froze at the one REST snapshot and
   // the status pill fell to "Try" (ob stale) seconds after every load. Ask
   // for 20 and keep the 15 the ladder shows.
-  make('dp', 'wss://stream.binance.com:9443/ws/' + s + '@depth20@100ms', function (d: Any) {
-    if (!d.bids || !d.bids.length) return
+  make('dp', WS + s + '@depth20@100ms', function (d: Any) {
+    // Spot sends bids/asks; the futures socket (gold) sends b/a.
+    const bids = d.bids || d.b
+    const asks = d.asks || d.a
+    if (!bids || !bids.length || !asks) return
     const ob = {
-      bids: d.bids.slice(0, 15).map((b: Any) => [+b[0], +b[1]]),
-      asks: d.asks.slice(0, 15).map((a: Any) => [+a[0], +a[1]]),
+      bids: bids.slice(0, 15).map((b: Any) => [+b[0], +b[1]]),
+      asks: asks.slice(0, 15).map((a: Any) => [+a[0], +a[1]]),
     }
     if (!mdStoreOB(state.symbol, ob)) return
     state.ob = ob

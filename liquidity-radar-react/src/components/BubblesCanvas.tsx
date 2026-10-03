@@ -21,7 +21,7 @@ type FilterKey = 'all' | 'major' | 'meme'
 const MAJORS = [
   'BTC',
   'ETH',
-  'PAXG',
+  'XAUUSD',
   'SOL',
   'BNB',
   'XRP',
