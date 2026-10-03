@@ -8,7 +8,7 @@ import { MODELS } from './models'
 import { PATTERNS } from './patterns'
 import type { LearnSection } from './types'
 
-export const LEARN_UPDATED = '2026-10-03'
+export const LEARN_UPDATED = '2026-10-04'
 
 export const LEARN_SECTIONS: LearnSection[] = [START, MODELS, INDICATORS, CONCEPTS, PATTERNS, RISK, TECH]
 

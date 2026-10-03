@@ -12,11 +12,10 @@
 // Paper only: no order is ever sent to an exchange from the browser. The
 // 24/7 testnet bot lives in radar-worker; its records are read separately.
 // Everything here persists in localStorage, so the record survives reloads.
-import { loadCandleWindow } from '../../services/marketData'
-import { state as app } from '../../services/store'
 import { storageGet, storageSet } from '../../services/storage'
 import { series } from './features'
 import { learnLogit } from './models'
+import { SL_MARKETS, loadPerpCandles as loadCandleWindow, marketLabel, perpPrice, pollPerpPrices } from './perp'
 import { setupOf } from './patterns'
 import { trainInBackground } from './trainClient'
 import {
@@ -100,21 +99,25 @@ export interface SLConfig {
 export type SLStatus = 'idle' | 'warming' | 'running'
 
 const K = { cfg: 'lr-sl-config-v1', models: 'lr-sl-models-v1', trades: 'lr-sl-trades-v1', log: 'lr-sl-log-v1' }
-export const DEFAULT_SYMBOLS = ['BTCUSDT', 'PAXGUSDT', 'ETHUSDT', 'SOLUSDT']
+export const DEFAULT_SYMBOLS = SL_MARKETS
 const MAX_TRADES = 600
 const MAX_LOG = 250
 
 let config: SLConfig = {
   auto: true,
-  symbols: DEFAULT_SYMBOLS,
   strats: ['scalp', 'swing'],
   leverage: 10,
   riskPct: 1,
   provenOnly: false,
   ...storageGet<Partial<SLConfig>>(K.cfg, {}),
+  // Fixed to BTC + Gold perpetuals; older saved configs listed other markets.
+  symbols: SL_MARKETS,
 }
 const models: Record<string, SLModel> = storageGet(K.models, {})
-let trades: SLTrade[] = storageGet(K.trades, [])
+// Markets dropped from the list: forget their models and their still-open paper
+// trades (nothing prices them any more); closed trades stay in the records.
+for (const k of Object.keys(models)) if (!SL_MARKETS.includes(k.split('|')[0]!)) delete models[k]
+let trades: SLTrade[] = storageGet<SLTrade[]>(K.trades, []).filter((t) => t.closedAt != null || SL_MARKETS.includes(t.sym))
 let events: SLEvent[] = storageGet(K.log, [])
 let status: SLStatus = 'idle'
 let busy: string | null = null
@@ -142,7 +145,7 @@ export function getSL() {
 
 const keyOf = (sym: string, strat: StratId) => sym + '|' + strat
 const uid = (p: string) => p + Date.now().toString(36) + (seq++).toString(36)
-const short = (sym: string) => sym.replace(/USDT$/, '')
+const short = marketLabel
 const fmt = (v: number) => (v >= 1000 ? Math.round(v).toLocaleString('en-US') : v >= 1 ? v.toFixed(2) : v.toPrecision(4))
 
 function save(): void {
@@ -279,7 +282,7 @@ function close(t: SLTrade, exit: number, reason: NonNullable<SLTrade['reason']>,
 
 export function closeTrade(id: string): void {
   const t = trades.find((x) => x.id === id && x.closedAt == null)
-  const px = t ? app.tickers[t.sym]?.last : undefined
+  const px = t ? perpPrice(t.sym) : undefined
   if (!t || !px) return
   close(t, px, 'manual')
   save()
@@ -289,7 +292,7 @@ export function closeTrade(id: string): void {
 function tickPrices(): void {
   let changed = false
   openTrades().forEach((t) => {
-    const px = app.tickers[t.sym]?.last
+    const px = perpPrice(t.sym)
     if (!px) return
     if (t.side === 1 ? px <= t.sl : px >= t.sl) close(t, t.sl, 'sl')
     else if (t.side === 1 ? px >= t.tp : px <= t.tp) close(t, t.tp, 'tp')
@@ -340,7 +343,7 @@ async function scanKey(sym: string, strat: StratId): Promise<void> {
   // reached long after its bar closed is not acted on at all.
   const sinceClose = now - (closedT + st.tfMs)
   const tooLate = sinceClose > Math.min(st.tfMs * 0.25, 30 * 60_000)
-  const live = app.tickers[sym]?.last
+  const live = perpPrice(sym)
   const entry = live && live > 0 ? live : cs[i].c
   const atr = S.atr[i]
   const minEV = minEVFor(key)
@@ -393,7 +396,10 @@ export function startSelfLearning(): void {
   emit()
   void scan()
   setInterval(() => void scan(), 20_000)
-  setInterval(tickPrices, 2_000)
+  void pollPerpPrices(SL_MARKETS)
+  setInterval(() => {
+    if (!document.hidden) void pollPerpPrices(SL_MARKETS).then(tickPrices)
+  }, 3_000)
 }
 
 // ---- controls -------------------------------------------------------------------

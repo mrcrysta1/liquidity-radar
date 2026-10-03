@@ -3,6 +3,7 @@
 // fills that the Binance panel shows. The bot (radar-worker) reads them with
 // the exchange keys every 15 seconds and saves a snapshot; this only reads it.
 import { useEffect, useState } from 'react'
+import type { ReactNode } from 'react'
 import { SERVER_BOT, loadAccount } from '../../features/selflearn/serverBot'
 import type { BinanceAccount as Account } from '../../features/selflearn/serverBot'
 import { pfmt } from '../../utils/format'
@@ -16,7 +17,8 @@ const ago = (t: number, now: number) => {
 const panelUrl = (venue: string, sym = 'BTCUSDT') =>
   venue.includes('demo') || venue.includes('testnet') ? 'https://demo.binance.com/en/futures/' + sym : 'https://www.binance.com/en/futures/' + sym
 
-export function BinanceAccount() {
+/** `children`: extra sections (the bot's own trades and activity) shown under the fills. */
+export function BinanceAccount({ children }: { children?: ReactNode }) {
   const [d, setD] = useState<{ account: Account | null; heartbeat: { t: number; mode: string; venue: string } | null } | null>(null)
   const [err, setErr] = useState('')
   const [now, setNow] = useState(() => Date.now())
@@ -147,6 +149,7 @@ export function BinanceAccount() {
               </table>
             </div>
           ) : <p className="nn-empty">No fills in the last 7 days. The bot decides at each 4-hour candle close.</p>}
+          {children}
           <p className="nn-note">Read from Binance by the bot with your API keys, which never reach this website. Practice money on the Demo account.</p>
         </>
       )}

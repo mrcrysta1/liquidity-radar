@@ -79,7 +79,7 @@ export const MODELS: LearnSection = {
       inApp: 'Self Learning tab; Neural Net tab',
       tags: ['self learning', 'paper trading', 'logistic regression', 'expected value', 'auto trade'],
       body: [
-        { p: '**Markets and styles**: BTC, PAXG, ETH, SOL; **Scalp** on 15-minute candles (target 2.25 ATR, stop 1.5 ATR) and **Swing** on 4-hour candles (target 3 ATR, stop 1.5 ATR). Only trades in the direction of the EMA 20/50 trend.' },
+        { p: '**Markets and styles**: BTC (BTCUSDT.P) and Gold (XAUUSDT.P, the Binance perpetual that follows spot XAUUSD), priced from Binance futures; **Scalp** on 15-minute candles (target 2.25 ATR, stop 1.5 ATR) and **Swing** on 4-hour candles (target 3 ATR, stop 1.5 ATR). Only trades in the direction of the EMA 20/50 trend.' },
         { p: '**Models**: two logistic-regression models per market and style, one for "would a long hit its target before its stop", one for shorts, trained on 3,000 candles with 15 scale-free features (returns over 1/3/6/12 bars, RSI, MACD, distance from EMA 20 and 50, ATR %, volume, Bollinger position, candle body, stochastic, distance to recent high and low). Training runs in a background thread (Web Worker) so the page never freezes.' },
         { formula: 'expected value (R) = p × (target ÷ stop) − (1 − p) − costs\nopen a trade when EV > the strategy\'s bar (Scalp 0.25R, Swing 0.10R)' },
         { p: 'The bar rises after a run of losses and falls back after a win. Trades enter at the live price; a decision reached long after its candle closed is not acted on.' },
@@ -132,7 +132,7 @@ export const MODELS: LearnSection = {
       inApp: 'Self Learning tab → Binance account panel and Server bot card',
       tags: ['bot', 'binance', 'testnet', 'auto trade', 'walk-forward'],
       body: [
-        { p: 'It decides once per closed 4-hour candle for BTC and PAXG, places a market entry with an exchange-side stop and a take-profit, sizes each trade to risk 0.5% of the account, and has daily-loss and drawdown limits plus a kill switch.' },
+        { p: 'It decides once per closed 4-hour candle for BTC and Gold (XAUUSDT perpetual), places a market entry with an exchange-side stop and a take-profit, sizes each trade to risk 0.5% of the account, and has daily-loss and drawdown limits plus a kill switch.' },
         { p: '**Walk-forward test**: its model is trained on about two years of 4-hour candles in rolling blocks and tested on the block after each. In **gated** mode it trades only if that test shows an edge (60+ test trades, positive expectancy and profit factor, and recent blocks profitable). In **explore** mode it trades its best signal even without proof, to gather real fills.' },
         { p: '**Where it runs**: on GitHub Actions, free, every 15 minutes, with no server or PC needed. Each run manages any open trade, decides once on a newly closed 4-hour candle (a candle that closed more than an hour earlier is skipped), and refreshes the account mirror. Exchange-side stop and take-profit orders protect a position between runs.' },
         { p: '**Account mirror**: on every run the bot reads your Binance futures account (wallet balance, unrealized PNL, margin balance, available balance, open positions, open orders and recent fills) and saves it, so the Self Learning tab shows the same figures as the Binance panel.' },

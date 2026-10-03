@@ -1,18 +1,15 @@
 // The Self Learning tab: everything behind the Neural Net dashboard, in full.
-// Engine controls and markets, every model with its unseen-data record and
-// live read, performance across all trades, the complete trade records with
-// export, the backtest lab, the full learning log, the 24/7 server bot's
-// records (when Supabase is configured) and the deep network's internals.
-import { lazy, Suspense, useEffect, useState } from 'react'
-import { state } from '../../services/store'
-import { baseOf } from '../../utils/coins'
+// Two markets only (BTC and Gold perpetuals). Engine controls, the Binance Demo
+// account with the server bot's trades and activity, every model with its
+// unseen-data record and live read, performance across all trades, the trade
+// records with export, the full learning log and (folded) the backtest lab.
+import { useEffect, useState } from 'react'
 import { pfmt } from '../../utils/format'
 import { STRATS, stats } from '../../features/selflearn/strategy'
 import type { StratId } from '../../features/selflearn/strategy'
 import {
   clearRecords,
   closeTrade,
-  DEFAULT_SYMBOLS,
   minEVFor,
   proven,
   retrainAll,
@@ -22,6 +19,7 @@ import {
 } from '../../features/selflearn/engine'
 import type { SLEventKind, SLModel, SLTrade } from '../../features/selflearn/engine'
 import { useSL } from '../../features/selflearn/useSL'
+import { SL_MARKETS, badgeSym, marketLabel, perpPrice } from '../../features/selflearn/perp'
 import { SERVER_BOT, loadBot } from '../../features/selflearn/serverBot'
 import { BinanceAccount } from './BinanceAccount'
 import type { BotEvent, BotTrade } from '../../features/selflearn/serverBot'
@@ -31,10 +29,8 @@ import { CoinBadge, EquityCurve, Ico, NnCard } from './parts'
 import { NI } from './icons'
 import { Brain } from './Brain'
 
-const NeuralNetPage = lazy(() => import('../chart/NeuralNetViz').then((m) => ({ default: m.NeuralNetPage })))
 const LAB = ['selflearn']
-const MARKETS = ['BTCUSDT', 'PAXGUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'LINKUSDT']
-const short = (s: string) => s.replace(/USDT$/, '')
+const short = marketLabel
 const dt = (t: number) => new Date(t).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 const ago = (t: number, now: number) => {
   const m = Math.max(0, Math.round((now - t) / 60_000))
@@ -46,13 +42,6 @@ const sgn = (v: number, d = 2, u = '') => (v >= 0 ? '+' : '') + v.toFixed(d) + u
 
 function LabHead() {
   const sl = useSL()
-  const cur = String(state.symbol || '')
-  const markets = Array.from(new Set([...MARKETS, ...sl.config.symbols, ...(cur.endsWith('USDT') ? [cur] : [])]))
-  const toggleSym = (s: string) => {
-    const on = sl.config.symbols.includes(s)
-    const next = on ? sl.config.symbols.filter((x) => x !== s) : [...sl.config.symbols, s]
-    if (next.length) setConfig({ symbols: next })
-  }
   const toggleStrat = (s: StratId) => {
     const on = sl.config.strats.includes(s)
     const next = on ? sl.config.strats.filter((x) => x !== s) : [...sl.config.strats, s]
@@ -66,7 +55,7 @@ function LabHead() {
           <h2>Self-Learning Lab</h2>
           <p>
             {sl.status === 'running' ? 'Engine running' : sl.status === 'warming' ? 'Engine warming up' : 'Engine idle'}
-            {sl.busy ? ` · training ${sl.busy}` : ''} · paper trading on live Binance prices, no exchange orders
+            {sl.busy ? ` · training ${sl.busy}` : ''} · paper trading on live Binance futures prices, no exchange orders
           </p>
         </span>
       </div>
@@ -87,11 +76,7 @@ function LabHead() {
       </div>
       <div className="lab-chips">
         <small>Markets</small>
-        {markets.map((s) => (
-          <button key={s} type="button" className={sl.config.symbols.includes(s) ? 'on' : ''} onClick={() => toggleSym(s)}>
-            {short(s)}{DEFAULT_SYMBOLS.includes(s) && s === 'PAXGUSDT' ? ' · gold' : ''}
-          </button>
-        ))}
+        <span className="lab-fixed" title="BTCUSDT and XAUUSDT perpetuals on Binance futures; XAUUSDT follows spot gold (XAUUSD)">BTCUSDT.P · Gold XAUUSD (XAUUSDT.P)</span>
         <small>Styles</small>
         {(Object.keys(STRATS) as StratId[]).map((k) => (
           <button key={k} type="button" className={sl.config.strats.includes(k) ? 'on' : ''} onClick={() => toggleStrat(k)} title={STRATS[k].blurb}>
@@ -112,7 +97,7 @@ function ModelCard({ m, open, now }: { m: SLModel; open?: SLTrade; now: number }
   return (
     <div className={'lab-model' + (ok ? ' proven' : '')}>
       <div className="lab-mh">
-        <CoinBadge sym={m.sym} size={26} />
+        <CoinBadge sym={badgeSym(m.sym)} size={26} />
         <b>{short(m.sym)} · {st.label}</b>
         <span className={'lab-badge ' + (ok ? 'g' : 'a')}>{ok ? 'Edge proven' : 'Learning'}</span>
       </div>
@@ -261,7 +246,7 @@ function Records() {
           <tbody>
             {view.map((t) => {
               const open = t.closedAt == null
-              const px = state.tickers[t.sym]?.last
+              const px = perpPrice(t.sym)
               const live = open && px ? t.side * (px / t.entry - 1) * 100 : null
               const p = open ? live : t.pnlPct
               return (
@@ -302,7 +287,7 @@ function Records() {
 function BacktestLab() {
   const sl = useSL()
   const [o, setO] = useState({
-    sym: String(state.symbol || 'BTCUSDT').endsWith('USDT') ? String(state.symbol) : 'BTCUSDT',
+    sym: 'BTCUSDT',
     strat: 'swing' as StratId,
     bars: 3000,
     minEV: STRATS.swing.minEV,
@@ -326,7 +311,7 @@ function BacktestLab() {
   return (
     <NnCard title="Backtest Lab" icon={NI.flask} className="lab-bt" id="labBacktest">
       <div className="lab-btf">
-        <label>Market<select value={o.sym} onChange={(e) => setO({ ...o, sym: e.target.value })}>{MARKETS.map((s) => <option key={s} value={s}>{short(s)}</option>)}</select></label>
+        <label>Market<select value={o.sym} onChange={(e) => setO({ ...o, sym: e.target.value })}>{SL_MARKETS.map((s) => <option key={s} value={s}>{short(s)}</option>)}</select></label>
         <label>Style<select value={o.strat} onChange={(e) => setStrat(e.target.value as StratId)}>{(Object.keys(STRATS) as StratId[]).map((k) => <option key={k} value={k}>{STRATS[k].label} · {STRATS[k].tf}</option>)}</select></label>
         {num('bars', 'Bars', 500, 600, 6000)}
         {num('trainFrac', 'Train share', 0.05, 0.3, 0.8)}
@@ -424,7 +409,8 @@ function FullLog() {
 
 // ---- server bot -------------------------------------------------------------------------
 
-function ServerBot() {
+/** The server bot's own trades and activity, shown inside the Binance account panel. */
+function BotActivity() {
   const [d, setD] = useState<{ trades: BotTrade[]; events: BotEvent[] } | null>(null)
   const [err, setErr] = useState('')
   useEffect(() => {
@@ -438,17 +424,15 @@ function ServerBot() {
       clearInterval(id)
     }
   }, [])
+  if (err) return <p className="nn-err">{err}</p>
+  if (!d) return null
   return (
-    <NnCard title="Server bot · Binance testnet (24/7)" icon={NI.cpu} className="lab-bot">
-      {!SERVER_BOT ? (
-        <p className="nn-note">
-          The browser engine only runs while this page is open. For round-the-clock trading, radar-worker runs the testnet bot on a server and records to Supabase.
-          Add <code>VITE_WHALE_DB_URL</code> and <code>VITE_WHALE_DB_KEY</code> (Supabase URL and anon key) in Vercel to show its trades here.
-        </p>
-      ) : err ? <p className="nn-err">{err}</p> : !d ? <p className="nn-empty">Loading…</p> : (
-        <div className="lab-botg">
+    <>
+      {d.trades.length > 0 && (
+        <>
+          <h4>Bot trades <i>{d.trades.length}</i></h4>
           <div className="nn-tbl">
-            <table className="lab-table">
+            <table className="lab-table bx-table">
               <thead><tr><th>Opened</th><th>Market</th><th>Side</th><th>Entry</th><th>Exit</th><th>R</th><th>P/L</th></tr></thead>
               <tbody>
                 {d.trades.slice(0, 15).map((t) => (
@@ -464,20 +448,21 @@ function ServerBot() {
                 ))}
               </tbody>
             </table>
-            {!d.trades.length && <p className="nn-empty">No server trades yet.</p>}
           </div>
-          <ul className="nn-logl">
-            {d.events.slice(0, 8).map((e) => (
-              <li key={e.id} className={'k-' + (e.level === 'error' ? 'error' : 'info')}>
-                <span className="nn-logi"><Ico d={NI.bolt} size={12} /></span>
-                <span><b>{e.symbol ? short(e.symbol) : 'bot'}</b><small>{e.msg}</small></span>
-                <em>{dt(Date.parse(e.t))}</em>
-              </li>
-            ))}
-          </ul>
-        </div>
+        </>
       )}
-    </NnCard>
+      <h4>Bot activity <i>latest</i></h4>
+      <ul className="nn-logl bx-log">
+        {d.events.slice(0, 6).map((e) => (
+          <li key={e.id} className={'k-' + (e.level === 'error' ? 'error' : 'info')}>
+            <span className="nn-logi"><Ico d={NI.bolt} size={12} /></span>
+            <span><b>{e.symbol ? short(e.symbol) : 'bot'}</b><small>{e.msg}</small></span>
+            <em>{dt(Date.parse(e.t))}</em>
+          </li>
+        ))}
+        {!d.events.length && <li className="nn-empty">No bot activity yet.</li>}
+      </ul>
+    </>
   )
 }
 
@@ -485,20 +470,17 @@ export function LearningLab() {
   return (
     <div className="nn-page lab-page">
       <Guard name="Lab header"><LabHead /></Guard>
-      <Guard name="Binance account"><BinanceAccount /></Guard>
+      <Guard name="Binance account"><BinanceAccount><BotActivity /></BinanceAccount></Guard>
       <Guard name="Models"><Models /></Guard>
       <div className="lab-row">
         <Guard name="Performance"><Performance /></Guard>
         <Guard name="Learning log"><FullLog /></Guard>
       </div>
       <Guard name="Trade records"><Records /></Guard>
-      <Guard name="Backtest lab"><BacktestLab /></Guard>
-      <Guard name="Server bot"><ServerBot /></Guard>
-      <section className="card nn-card lab-deep">
-        <header className="nn-head"><span className="nn-ico"><Ico d={NI.layers} size={16} /></span><h3>Deep network internals · TensorFlow direction model &amp; RL policy</h3></header>
-        <p className="nn-note">The app’s original neural networks for the focused chart ({baseOf(String(state.symbol))}): real layer weights and activations, the RL policy and its paper ledger.</p>
-        <Suspense fallback={<p className="nn-empty">Loading…</p>}><NeuralNetPage /></Suspense>
-      </section>
+      <details className="lab-adv">
+        <summary><Ico d={NI.flask} size={14} /> Advanced · Backtest lab <small>replay BTC or Gold history through the engine</small></summary>
+        <Guard name="Backtest lab"><BacktestLab /></Guard>
+      </details>
     </div>
   )
 }
