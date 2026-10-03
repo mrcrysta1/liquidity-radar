@@ -4,12 +4,18 @@
 // The register is the source of truth (services/dataSources); this renders it
 // and overlays live traffic recorded by the API client, so a feed that has gone
 // quiet is visible instead of silently missing from the UI.
-import { useEffect, useMemo, useState } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
 import { ALL_SOURCES, SOURCE_GROUPS, sourceStats, unmatchedHosts } from '../services/dataSources'
 import type { DataSource, Transport } from '../services/dataSources'
 import { cooldownLeft, isRateLimited } from '../api/rateLimit'
 import { PALETTES, applyPalette, activePalette } from '../features/theme/theme'
 import { useTick } from './useTick'
+import { storageGet, storageSet } from '../services/storage'
+
+// The Learning library is a large read; it loads only when its tab is opened.
+const LearningLibrary = lazy(() =>
+  import('./learn/LearningLibrary').then((m) => ({ default: m.LearningLibrary })),
+)
 
 const AGO = (ms: number): string => {
   if (!ms) return 'never'
@@ -57,7 +63,7 @@ function Row({ s, now }: { s: DataSource; now: number }) {
   )
 }
 
-export function SettingsPage() {
+function SystemSettings() {
   const now = useTick(2000, ['settings'])
   const [q, setQ] = useState('')
   const [only, setOnly] = useState<'all' | Transport>('all')
@@ -251,6 +257,39 @@ export function SettingsPage() {
           carries both faces.
         </div>
       </div>
+    </>
+  )
+}
+
+type SettingsTab = 'learning' | 'system'
+const TAB_KEY = 'lr-settingsTab'
+
+/** Settings: the Learning library, and the app's data sources and appearance. */
+export function SettingsPage() {
+  const [tab, setTab] = useState<SettingsTab>(() =>
+    storageGet<string>(TAB_KEY, 'learning') === 'system' ? 'system' : 'learning',
+  )
+  const pick = (t: SettingsTab) => {
+    setTab(t)
+    storageSet(TAB_KEY, t)
+  }
+  return (
+    <>
+      <div className="set-tabs" role="tablist" aria-label="Settings sections">
+        <button type="button" role="tab" aria-selected={tab === 'learning'} className={tab === 'learning' ? 'on' : ''} onClick={() => pick('learning')}>
+          Learning
+        </button>
+        <button type="button" role="tab" aria-selected={tab === 'system'} className={tab === 'system' ? 'on' : ''} onClick={() => pick('system')}>
+          Data sources &amp; appearance
+        </button>
+      </div>
+      {tab === 'learning' ? (
+        <Suspense fallback={<div className="card lg-empty">Loading the Learning library…</div>}>
+          <LearningLibrary />
+        </Suspense>
+      ) : (
+        <SystemSettings />
+      )}
     </>
   )
 }
