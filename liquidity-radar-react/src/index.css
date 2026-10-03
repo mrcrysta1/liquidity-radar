@@ -1,7 +1,6 @@
-/* Liquidity Radar original stylesheet, migrated verbatim. */
-@layer theme, components, utilities;
-@import 'tailwindcss/theme.css' layer(theme);
-@import 'tailwindcss/utilities.css' layer(utilities);
+/* Liquidity Radar stylesheet. (Tailwind was imported here but nothing used its
+   classes except .sr-only's clip-path, now in the rule below; it is no longer
+   part of the build.) */
 
 /* Self-hosted variable fonts (were Google Fonts): no third-party stylesheet on the
    critical path, and vite.config.ts preloads the two latin files so text is laid
@@ -950,7 +949,7 @@ html.radar-fs .cs-panel{height:100%;max-height:none}
 .chart-draw-hint:empty{display:none}
 
 /* ---- Whale bubbles: legend and tooltip -------------------------------- */
-.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);clip-path:inset(50%);white-space:nowrap;border:0}
 .whale-legend{
   position:absolute;left:6px;bottom:30px;z-index:5;display:flex;flex-direction:column;gap:4px;
   padding:6px 9px;border-radius:9px;max-width:calc(100% - 90px);
@@ -2689,9 +2688,8 @@ body.nav-collapsed .sidenav .tab-btn:hover .sidenav-label{opacity:1;transform:tr
 
 /* Everything else shifts over. */
 header.top,.container,.search-wrap,.search-row{margin-left:var(--nav-w);transition:margin-left .22s cubic-bezier(.2,.8,.2,1)}
-/* Tailwind's own `.container` utility sets width:100%, so the shell's
-   max-width alone left the box 1400px wide *after* the rail's offset and it
-   ran off the screen. Cap it against the space the rail actually leaves. */
+/* Cap the shell against the space the rail actually leaves: a plain 1400px
+   max-width, measured after the rail's offset, could run off the screen. */
 .container{max-width:min(1400px,calc(100% - var(--nav-w)))}
 @media(max-width:900px){
   /* A phone gets no rail at all: navigation is the bottom bar plus the
