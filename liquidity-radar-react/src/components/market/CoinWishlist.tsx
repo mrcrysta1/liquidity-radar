@@ -7,6 +7,8 @@
 // to add coins (a star anywhere is the same list) and the Top Coins table.
 // Rows carry `data-sym`, so the engine's
 // click handler opens their chart just like the other Market tables.
+import { MkIco } from './MarketHead'
+import { MK_ICONS } from './mkIcons'
 import type { MouseEvent, ReactNode } from 'react'
 import { state } from '../../services/store'
 import { COINS } from '../../constants/market'
@@ -84,24 +86,30 @@ export function CoinWishlist() {
   const pinned = getPinned()
 
   return (
-    <div className="card cwl">
-      <div className="sec-head">
-        <div className="sec-title">Coin Wishlist</div>
-        <CoinPicker
-          tabs={MARKET}
-          onPick={(_, base) => {
-            if (!favs.includes(base)) toggleFavorite(base)
-          }}
-          trigger={
-            <>
-              <span className="cp-ico">＋</span>
-              <span className="cp-id">
-                <b>Add coin</b>
-                <small>Search or ★ any coin</small>
-              </span>
-            </>
-          }
-        />
+    <div className="card cwl mk-card" id="mkWatch">
+      <div className="mk-head">
+        <span className="mk-ico t-amber"><MkIco d={MK_ICONS.star} /></span>
+        <span className="mk-ttl">
+          <h3>Coin Wishlist</h3>
+          <p>Your coins, in your order; the pinned one opens first on the Radar</p>
+        </span>
+        <span className="mk-right">
+          <CoinPicker
+            tabs={MARKET}
+            onPick={(_, base) => {
+              if (!favs.includes(base)) toggleFavorite(base)
+            }}
+            trigger={
+              <>
+                <span className="cp-ico">＋</span>
+                <span className="cp-id">
+                  <b>Add coin</b>
+                  <small>Search or ★ any coin</small>
+                </span>
+              </>
+            }
+          />
+        </span>
       </div>
 
       {favs.length === 0 ? (

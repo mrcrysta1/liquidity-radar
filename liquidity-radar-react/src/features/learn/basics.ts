@@ -170,6 +170,7 @@ export const WHATS_NEW: Array<{ date: string; items: string[] }> = [
       'Trading self-test: one click on GitHub opens and closes a small random Demo trade and checks it end to end.',
       'Gold is now real spot gold (XAUUSD) everywhere: ticker, Top Coins, futures table, bubbles, signals and charts. It replaces the PAXG token and streams live from Binance’s gold perpetual (funding and open interest included).',
       'The site asks search engines not to index it (noindex, nofollow) and blocks other crawlers.',
+      'Market and Bubbles tabs redesigned to match the rest of the app: page header with live stats, quick-jump chips, clearer section headers, and glass-style bubbles with coin logos.',
     ],
   },
   {

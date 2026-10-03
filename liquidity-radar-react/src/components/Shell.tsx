@@ -37,7 +37,8 @@ import { ChartSidePanel } from './chart/ChartSidePanel'
 import { Footer } from './footer/Footer'
 import { DashHead } from './DashHead'
 import { Sidebar } from './Sidebar'
-import { HOT_LIST } from '../constants/market'
+import { MarketHead, SecHead } from './market/MarketHead'
+import { MK_ICONS } from './market/mkIcons'
 import { CoinWishlist } from './market/CoinWishlist'
 import { Guard } from './ErrorBoundary'
 import { HomeDashboard, HomeHero } from './HomeDashboard'
@@ -317,18 +318,12 @@ export function Shell() {
         </div>
       </section>
       
-      <section className="tab-section" id="tab-market">
+      <section className="tab-section mk-tab" id="tab-market">
+        <MarketHead />
         <Guard name="Coin wishlist"><CoinWishlist /></Guard>
 
-        <div className="mo-strip">
-          <div className="metric"><div className="ml"><span>Tracked Volume</span></div><div className="mv" id="moVol">—</div><div className="ms">sum of {HOT_LIST.length} majors (24h)</div></div>
-          <div className="metric"><div className="ml"><span>Advancers</span></div><div className="mv" style={{ 'color': 'var(--green)' }} id="moAdv">—</div><div className="ms">of tracked set</div></div>
-          <div className="metric"><div className="ml"><span>Decliners</span></div><div className="mv" style={{ 'color': 'var(--red)' }} id="moDec">—</div><div className="ms">of tracked set</div></div>
-          <div className="metric"><div className="ml"><span>Fear &amp; Greed</span></div><div className="mv" id="moFG">—</div><div className="ms" id="moFGc">market sentiment</div></div>
-        </div>
-      
-        <div className="card">
-          <div className="sec-head"><div className="sec-title">Top Coins</div><span className="badge b-cyan" id="topCoinsUpd">LIVE · BINANCE</span></div>
+        <div className="card mk-card" id="mkTop">
+          <SecHead icon={MK_ICONS.coins} title="Top Coins" sub="Biggest markets by size, with gold (XAUUSD) for comparison" right={<span className="badge b-cyan" id="topCoinsUpd">LIVE · BINANCE</span>} />
           <div className="table-scroll">
             <table className="coins-table cmc-table">
               <thead><tr><th className="cmc-rank">#</th><th>Coin</th><th>Price</th><th>1h %</th><th>24h %</th><th>Market Cap</th><th>Circulating Supply</th><th>Volume (24h)</th></tr></thead>
@@ -337,8 +332,8 @@ export function Shell() {
           </div>
         </div>
       
-        <div className="card">
-          <div className="sec-head"><div className="sec-title">Perpetual Futures</div><span className="badge b-purple">USDT-M · BINANCE</span></div>
+        <div className="card mk-card" id="mkFut">
+          <SecHead icon={MK_ICONS.perp} tone="purple" title="Perpetual Futures" sub="Mark price, funding and open interest on Binance USDⓈ-M" right={<span className="badge b-purple">USDT-M · BINANCE</span>} />
           <div className="table-scroll">
             <table className="coins-table cmc-table">
               <thead><tr><th className="cmc-rank">#</th><th>Contract</th><th>Mark Price</th><th>24h %</th><th>Funding (8h)</th><th>Open Interest</th><th>Volume (24h)</th></tr></thead>
@@ -348,14 +343,14 @@ export function Shell() {
           <div className="disclaimer">Funding is charged/paid every 8h between longs and shorts — positive means longs pay shorts. Open interest is notional (contracts × mark price).</div>
         </div>
       
-        <div className="card">
-          <div className="sec-head"><div className="sec-title">Celebrity &amp; Meme Coins</div><span className="badge b-pink">HIGH VOLATILITY</span></div>
+        <div className="card mk-card" id="mkCeleb">
+          <SecHead icon={MK_ICONS.star} tone="pink" title="Celebrity & Meme Coins" sub="Narrative-driven coins with a live scanner call" right={<span className="badge b-pink">HIGH VOLATILITY</span>} />
           <div className="celeb-grid" id="celebGrid"></div>
           <div className="disclaimer">Meme assets routinely draw down 30–80%. Position sizes should reflect that these trade on narrative flow, not cash flows.</div>
         </div>
       
-        <div className="card">
-          <div className="sec-head"><div className="sec-title">Meme Coin Universe</div><span className="badge b-pink" id="memeCount">SCANNING</span></div>
+        <div className="card mk-card" id="mkMeme">
+          <SecHead icon={MK_ICONS.flame} tone="amber" title="Meme Coin Universe" sub="Wider meme coverage; click a row to open its chart" right={<span className="badge b-pink" id="memeCount">SCANNING</span>} />
           <div className="table-scroll">
             <table className="coins-table">
               <thead><tr><th>Coin</th><th>Last Price</th><th>24h Change</th><th>24h Volume</th><th>Signal</th><th></th></tr></thead>
