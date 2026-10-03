@@ -1247,6 +1247,58 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   else delete globalThis.localStorage
 }
 
+// ---- signal scanner: per-timeframe scoring ------------------------------------------
+{
+  const { scoreTimeframe, closedOnly } = await import(src('features/signals/scoring.ts'))
+  const { macdSeries, calcRSI, forecastFrom } = await import(src('utils/indicators.ts'))
+  const W = { rsi: 25, macdCross: 30, macdTrend: 10, ema: 12, bb: 18, vol: 5, diverge: 20 }
+  let seed = 11
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647
+  const bars = []
+  let px = 100
+  for (let i = 0; i < 520; i++) {
+    const o = px
+    px = Math.max(1, px * (1 + Math.sin(i / 37) * 0.004 + (rnd() - 0.5) * 0.02))
+    bars.push({ t: i * 3_600_000, o, h: Math.max(o, px) * 1.002, l: Math.min(o, px) * 0.998, c: px, v: 50 + rnd() * 100 })
+  }
+  let rsiOk = true, crossOk = true, sumOk = true, divOk = true, divFired = 0, crossFired = 0
+  for (let end = 120; end <= bars.length; end++) {
+    const win = bars.slice(end - 100, end)
+    const closes = win.map((b) => b.c)
+    const r = scoreTimeframe(win, '1h', W)
+    const rsi = r.ai.rsi
+    if (rsi > 55 && rsi <= 70 && !(r.parts.rsi > 0)) rsiOk = false
+    if (rsi >= 30 && rsi < 45 && !(r.parts.rsi < 0)) rsiOk = false
+    const h = macdSeries(closes).hist
+    const crossed = (h.at(-1) > 0 && h.at(-2) <= 0) || (h.at(-1) < 0 && h.at(-2) >= 0)
+    if (crossed !== (r.parts.macdCross !== undefined)) crossOk = false
+    if (crossed) crossFired++
+    const sum = Object.values(r.parts).reduce((a, b) => a + b, 0)
+    if (r.score !== Math.max(-100, Math.min(100, sum))) sumOk = false
+    if (r.parts.diverge !== undefined) {
+      divFired++
+      const last = closes.at(-1), before = closes.slice(-11, -1)
+      const rT = calcRSI(closes.slice(0, -10)), rN = calcRSI(closes)
+      const bear = last > Math.max(...before) && rN < rT - 5
+      const bull = last < Math.min(...before) && rN > rT + 5
+      if (!(bear && r.parts.diverge < 0) && !(bull && r.parts.diverge > 0)) divOk = false
+    }
+  }
+  ok('scoring: RSI 55-70 adds to BUY, 30-45 to SELL (signs match the labels)', rsiOk)
+  ok('scoring: "MACD cross" fires exactly when the histogram changes sign', crossOk && crossFired > 0, crossFired)
+  ok('scoring: RSI divergence fires (it never could before) and only under its rule', divOk && divFired > 0, divFired)
+  ok('scoring: score is the clamped sum of its parts', sumOk)
+  // Forming candle is dropped; closed ones kept.
+  const hourly = [{ t: 0 }, { t: 3_600_000 }]
+  eq('scoring: forming candle dropped', closedOnly(hourly, '1h', 3_600_000 + 60_000).length, 1)
+  eq('scoring: closed candle kept', closedOnly(hourly, '1h', 7_200_000).length, 2)
+  // Forecast horizons follow the candle size.
+  const cl = bars.slice(0, 60).map((b) => b.c)
+  const f15 = forecastFrom(cl), f60 = forecastFrom(cl, 60)
+  ok('forecast: 1H on 1h candles is one bar ahead (a quarter of the 15m step count)',
+    Math.abs((f60.rows[0].pred - cl.at(-1)) * 4 - (f15.rows[0].pred - cl.at(-1))) < 1e-9)
+}
+
 // ---- self-learning: training core (runs in a Web Worker in the app) ----------------
 {
   const { trainCore } = await import(src('features/selflearn/train.ts'))
