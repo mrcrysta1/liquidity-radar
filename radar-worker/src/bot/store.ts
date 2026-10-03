@@ -131,7 +131,14 @@ export class BotStore {
     const r = await this.db.query('select value from bot_state where key = $1', [key])
     if (!r.rows[0]) return fallback
     const v = r.rows[0].value
-    return (typeof v === 'string' ? JSON.parse(v) : v) as T
+    // jsonb comes back already decoded, so a stored string ("error") arrives as a
+    // plain JS string. Only a driver that returns raw JSON text needs parsing.
+    if (typeof v !== 'string') return v as T
+    try {
+      return JSON.parse(v) as T
+    } catch {
+      return v as T
+    }
   }
 
   async setState(key: string, value: unknown): Promise<void> {

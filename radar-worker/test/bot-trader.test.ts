@@ -123,6 +123,8 @@ function setup(mode: 'gated' | 'explore') {
     ...DEFAULT_TRADER,
     mode,
     historyBars: 1400,
+    // These replays treat old simulated bars as "now".
+    maxLateMs: Infinity,
     wf: { ...DEFAULT_WF, trainBars: 600, testBars: 200, minEvR: mode === 'explore' ? -99 : DEFAULT_WF.minEvR, mlp: { ...DEFAULT_WF.mlp, epochs: 6 } },
     bars: async (_s, _i, n) => hist.slice(0, state.idx).slice(-n),
   }
@@ -213,4 +215,31 @@ test('gated mode: a model without a proven edge never trades', async () => {
   assert.equal(ex.pos.amt, 0)
   const ev = (await pg.query<{ msg: string }>("select msg from bot_events where msg like '%no proven edge%'")).rows
   assert.equal(ev.length, 1)
+})
+
+test('scheduled runs (BOT_ONCE): each bar decided once across restarts; late bars skipped', async () => {
+  const { db } = await freshDb()
+  const store = new BotStore(db)
+  const ex = new FakeExchange()
+  const { hist, state, cfg } = setup('explore')
+  ex.price = hist[state.idx - 1].c
+  // Run 1 enters on the latest bar.
+  const a = new SymbolTrader(ex, store, 'BTCUSDT', cfg)
+  await a.init()
+  await a.tick(true, Date.now())
+  const first = await store.openTrade('BTCUSDT')
+  assert.ok(first, 'run 1 entered')
+  // The trade closes; run 2 is a brand-new process on the same bar: it must not re-enter.
+  ex.move(first!.tp + first!.side * 0.05)
+  const b = new SymbolTrader(ex, store, 'BTCUSDT', cfg)
+  await b.init()
+  await b.tick(true, Date.now())
+  assert.equal(await store.openTrade('BTCUSDT'), null, 'same bar not traded twice after a restart')
+  // A bar that closed long ago is skipped by a strict trader.
+  state.idx++
+  ex.price = hist[state.idx - 1].c
+  const strict = new SymbolTrader(ex, store, 'BTCUSDT', { ...cfg, maxLateMs: 60 * 60_000 })
+  await strict.init()
+  await strict.tick(true, Date.now())
+  assert.equal(await store.openTrade('BTCUSDT'), null, 'stale bar skipped')
 })
