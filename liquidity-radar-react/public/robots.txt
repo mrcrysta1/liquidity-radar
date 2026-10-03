@@ -1,0 +1,12 @@
+# Liquidity Radar is private: it must not appear in search engines or AI datasets.
+#
+# Google and Bing may fetch pages ONLY so they can read the "noindex, nofollow"
+# rule (X-Robots-Tag header + robots meta tag) and drop the site. If they were
+# blocked here they could never see that rule and might still list bare URLs.
+User-agent: Googlebot
+User-agent: Bingbot
+Allow: /
+
+# Everyone else (other search engines, SEO and AI crawlers): stay out.
+User-agent: *
+Disallow: /
