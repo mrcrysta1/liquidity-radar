@@ -112,6 +112,42 @@ export function LearningLibrary() {
   const [sec, setSec] = useState<string>('all')
   const [printing, setPrinting] = useState(false)
   const found = useMemo(() => searchLearn(q), [q])
+  const [focus, setFocus] = useState<string | null>(null)
+
+  // The assistant can open a topic ("teach me RSI" → [[learn:rsi]]); the event
+  // may arrive before this lazy component mounted, so the last one is kept.
+  useEffect(() => {
+    const go = (d: { id?: string; q?: string } | undefined) => {
+      if (!d) return
+      setSec('all')
+      if (d.id) {
+        setQ('')
+        setFocus(d.id)
+      } else if (d.q) setQ(d.q)
+    }
+    // A request made before this lazily loaded page existed (chat.ts runAction).
+    const w = window as unknown as { __lrLearnOpen?: { id?: string; q?: string } }
+    go(w.__lrLearnOpen)
+    w.__lrLearnOpen = undefined
+    const on = (e: Event) => {
+      w.__lrLearnOpen = undefined
+      go((e as CustomEvent).detail)
+    }
+    window.addEventListener('lr:learn-open', on)
+    return () => window.removeEventListener('lr:learn-open', on)
+  }, [])
+  useEffect(() => {
+    if (!focus) return
+    const t = window.setTimeout(() => {
+      const el = document.getElementById('learn-' + focus) as HTMLDetailsElement | null
+      if (el) {
+        el.open = true
+        el.scrollIntoView({ block: 'start', behavior: 'smooth' })
+      }
+      setFocus(null)
+    }, 60)
+    return () => window.clearTimeout(t)
+  }, [focus])
   const shown: LearnSection[] = sec === 'all' || q ? found : found.filter((s) => s.id === sec)
 
   useEffect(() => {

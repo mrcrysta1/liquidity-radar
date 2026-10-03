@@ -6,15 +6,65 @@
 // news headlines, exchange names, anything scraped — a potential injection
 // path. Escaping first and formatting second closes that off entirely.
 import { buildMarketContext } from './aiContext'
+import { appGuide } from './actions'
+import { storageGet, storageSet } from '../../services/storage'
 
 export interface ChatTurn {
   role: 'user' | 'assistant'
   content: string
 }
 
-/** Remembered across messages so follow-ups actually follow up. */
-const history: ChatTurn[] = []
+/** Remembered across messages, and across reloads, so follow-ups follow up. */
+const HISTORY_KEY = 'lr-chatHistory-v1'
 const MAX_HISTORY = 10
+const history: ChatTurn[] = (() => {
+  const saved = storageGet<ChatTurn[]>(HISTORY_KEY, [])
+  return Array.isArray(saved)
+    ? saved.filter((t) => t && (t.role === 'user' || t.role === 'assistant') && typeof t.content === 'string').slice(-MAX_HISTORY)
+    : []
+})()
+
+/** The saved conversation, oldest first (for redrawing the log after a reload). */
+export function chatHistory(): ChatTurn[] {
+  return history.slice()
+}
+
+/** Remember an exchange that did not go through the model (local commands, fallback answers). */
+export function rememberTurn(question: string, answer: string): void {
+  history.push({ role: 'user', content: question }, { role: 'assistant', content: answer })
+  while (history.length > MAX_HISTORY) history.shift()
+  storageSet(HISTORY_KEY, history)
+}
+
+/** Learning topic ids and titles, loaded with the library on the first question. */
+let learnIndex: Map<string, string> | null = null
+/** Search words (id, tags, title) per topic, for matching "fvg" to fair-value-gap. */
+let learnWords: Array<[string, string[]]> = []
+export async function loadLearnIndex(): Promise<Map<string, string>> {
+  if (learnIndex) return learnIndex
+  try {
+    const { LEARN_SECTIONS } = await import('../learn/content')
+    const entries = LEARN_SECTIONS.flatMap((s) => s.entries)
+    learnIndex = new Map(entries.map((e) => [e.id, e.title] as [string, string]))
+    learnWords = entries.map((e) => [e.id, [e.id, e.id.replace(/-/g, ' '), e.title.toLowerCase(), ...(e.tags ?? []).map((t) => t.toLowerCase())]])
+  } catch {
+    learnIndex = new Map()
+  }
+  return learnIndex
+}
+/** The topic a phrase names: exact id, then an exact tag or title, then a title containing it. */
+export async function findLearnTopic(phrase: string): Promise<string | null> {
+  const idx = await loadLearnIndex()
+  const q = phrase.trim().toLowerCase()
+  if (idx.has(q)) return q
+  const exact = learnWords.find(([, w]) => w.includes(q))
+  if (exact) return exact[0]
+  const part = learnWords.find(([, w]) => w[2].includes(q) || w.some((x) => x.startsWith(q + ' ')))
+  return part ? part[0] : null
+}
+export function learnTitle(id: string): string | undefined {
+  return learnIndex?.get(id)
+}
 
 /**
  * Whether the deployment has an LLM behind it.
@@ -29,6 +79,7 @@ export function llmAvailable(): boolean | null {
 
 export function resetChatHistory(): void {
   history.length = 0
+  storageSet(HISTORY_KEY, history)
 }
 
 function esc(s: string): string {
@@ -92,13 +143,15 @@ export async function askLlm(
   signal?: AbortSignal,
 ): Promise<string> {
   const messages: ChatTurn[] = [...history, { role: 'user', content: question }]
+  const learn = await loadLearnIndex()
+  const context = buildMarketContext() + '\n\n' + appGuide([...learn.keys()])
 
   let res: Response
   try {
     res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ messages, context: buildMarketContext() }),
+      body: JSON.stringify({ messages, context }),
       signal,
     })
   } catch {
@@ -155,10 +208,6 @@ export async function askLlm(
     }
   }
 
-  if (full.trim()) {
-    history.push({ role: 'user', content: question })
-    history.push({ role: 'assistant', content: full })
-    while (history.length > MAX_HISTORY) history.shift()
-  }
+  if (full.trim()) rememberTurn(question, full)
   return full
 }

@@ -273,6 +273,12 @@ export function SettingsPage() {
     setTab(t)
     storageSet(TAB_KEY, t)
   }
+  // The assistant opening a Learning topic switches to that tab.
+  useEffect(() => {
+    const on = () => setTab('learning')
+    window.addEventListener('lr:learn-open', on)
+    return () => window.removeEventListener('lr:learn-open', on)
+  }, [])
   return (
     <>
       <div className="set-tabs" role="tablist" aria-label="Settings sections">

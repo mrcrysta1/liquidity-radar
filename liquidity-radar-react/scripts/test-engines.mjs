@@ -1299,6 +1299,28 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
     Math.abs((f60.rows[0].pred - cl.at(-1)) * 4 - (f15.rows[0].pred - cl.at(-1))) < 1e-9)
 }
 
+// ---- assistant: actions it can take in the app --------------------------------------
+{
+  const { parseActions, localCommand, isCommand, hideTagsWhileStreaming, appGuide } = await import(src('features/chat/actions.ts'))
+  const markets = new Set(['sol', 'btc', 'eth', 'gold', 'pepe', 'xauusd'])
+  const isMarket = (s) => markets.has(s.toLowerCase())
+  const p = parseActions('SOL looks strong.\n\n[[open:SOL]]\n[[learn:rsi]]\n[[tab:signals]]\n[[tab:nowhere]]\n[[open:SOL]]')
+  eq('assistant: tags stripped from the text', p.text, 'SOL looks strong.')
+  eq('assistant: actions parsed in order, duplicates and unknown tabs dropped',
+    JSON.stringify(p.actions), JSON.stringify([{ kind: 'open', arg: 'SOL' }, { kind: 'learn', arg: 'rsi' }, { kind: 'tab', arg: 'signals' }]))
+  eq('assistant: a half-written tag is hidden while streaming', hideTagsWhileStreaming('Opening SOL.\n[[op'), 'Opening SOL.\n')
+  eq('assistant: "open SOL" opens the market', JSON.stringify(localCommand('open SOL', isMarket)), JSON.stringify({ kind: 'open', arg: 'sol' }))
+  eq('assistant: "take me to the signals" opens the tab', JSON.stringify(localCommand('take me to the signals', isMarket)), JSON.stringify({ kind: 'tab', arg: 'signals' }))
+  eq('assistant: "show me the BTC chart" opens BTC', JSON.stringify(localCommand('show me the BTC chart', isMarket)), JSON.stringify({ kind: 'open', arg: 'btc' }))
+  eq('assistant: "open the learning guide for fvg" opens that guide', JSON.stringify(localCommand('open the learning guide for fvg', isMarket)), JSON.stringify({ kind: 'learn', arg: 'fvg' }))
+  eq('assistant: "go to settings" opens Settings', localCommand('please go to settings', isMarket)?.arg, 'settings')
+  eq('assistant: a question is not a command ("show me why BTC dropped")', localCommand('show me why BTC dropped', isMarket), null)
+  eq('assistant: an unknown thing is not a command', localCommand('open the pod bay doors', isMarket), null)
+  ok('assistant: isCommand recognises commands only', isCommand('take me to signals') && !isCommand('what is RSI?'))
+  const g = appGuide(['rsi', 'fvg'])
+  ok('assistant: the guide lists every tab and the topic ids', ['home', 'radar', 'signals', 'settings'].every((t) => g.includes('- ' + t + ' (')) && g.includes('rsi, fvg'))
+}
+
 // ---- self-learning: "edge proven" needs more than luck ------------------------------
 {
   const { edgeProven, STRATS } = await import(src('features/selflearn/strategy.ts'))

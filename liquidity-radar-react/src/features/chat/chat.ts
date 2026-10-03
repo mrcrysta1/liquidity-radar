@@ -10,7 +10,9 @@ import { latestNews } from '../news/newsFeed'
 import { marketBySymbol, resolveMarket } from '../../services/symbolIndex'
 import { yahooCandles } from '../../services/yahoo'
 import type { CandleFlat } from '../../services/market'
-import { LlmUnavailable, askLlm, renderMarkdown } from './llm'
+import { LlmUnavailable, askLlm, chatHistory, findLearnTopic, learnTitle, loadLearnIndex, rememberTurn, renderMarkdown, resetChatHistory } from './llm'
+import { actionLabel, hideTagsWhileStreaming, isCommand, localCommand, parseActions } from './actions'
+import type { ChatAction } from './actions'
 import { esc, pfmt, cfmt, nfmt, timeAgo } from '../../utils/format'
 import { baseOf, coinMeta } from '../../utils/coins'
 import { aiComposite, forecastFrom } from '../../utils/indicators'
@@ -858,6 +860,90 @@ export function pushMsg(html: string, who: string): HTMLElement {
 }
 
 let chatBusy = false
+/** The no-model note is shown once per session, not under every answer. */
+let toldNoModel = false
+
+const nav = window as unknown as { switchTab?: (t: string) => void; setSymbol?: (s: string) => Promise<void> | void }
+
+/**
+ * Do what an action says. Returns a short line describing what happened, or
+ * null when it could not be done (an unknown market or topic).
+ */
+export async function runAction(a: ChatAction): Promise<string | null> {
+  if (a.kind === 'tab') {
+    nav.switchTab?.(a.arg)
+    return 'Opened ' + actionLabel(a).replace(/^Open /, '') + '.'
+  }
+  if (a.kind === 'open') {
+    const m = resolveMarket(a.arg) || resolveMarket(a.arg.toUpperCase()) || marketBySymbol(a.arg)
+    if (!m) return null
+    // Not awaited: switching loads candles, order book and more, and the reply
+    // should not wait for the network.
+    void nav.setSymbol?.(m.sym)
+    return 'Opening ' + m.base + ' on Radar.'
+  }
+  const learn = await loadLearnIndex()
+  const id = await findLearnTopic(a.arg)
+  // Not an exact id: let the library search for it instead.
+  try {
+    localStorage.setItem('lr-settingsTab', JSON.stringify('learning'))
+  } catch {
+    /* storage unavailable: the tab still opens */
+  }
+  const detail = id ? { id } : { q: a.arg }
+  // Kept on window too: the Learning page loads lazily and may not be
+  // listening yet when this fires. It picks the request up when it mounts.
+  ;(window as unknown as { __lrLearnOpen?: unknown }).__lrLearnOpen = detail
+  nav.switchTab?.('settings')
+  window.dispatchEvent(new CustomEvent('lr:learn-open', { detail }))
+  return id ? 'Opened the guide: ' + learn.get(id) + '.' : 'Searched the Learning guide for "' + a.arg + '".'
+}
+
+function actionButtons(actions: ChatAction[]): string {
+  if (!actions.length) return ''
+  return '<div class="ai-acts">' + actions.map((a) =>
+    '<button type="button" class="ai-act" data-act="' + esc(a.kind + ':' + a.arg) + '">' + esc(actionLabel(a, learnTitle)) + ' →</button>',
+  ).join('') + '</div>'
+}
+
+/** Click on an action button inside the log (delegated from the chat panel). */
+export function onChatLogClick(e: MouseEvent): void {
+  const btn = (e.target as HTMLElement).closest<HTMLElement>('.ai-act')
+  if (!btn || !btn.dataset.act) return
+  const at = btn.dataset.act.indexOf(':')
+  void runAction({ kind: btn.dataset.act.slice(0, at) as ChatAction['kind'], arg: btn.dataset.act.slice(at + 1) })
+}
+
+/** Redraw the saved conversation (after a reload) under the welcome message. */
+let restored = false
+export function restoreChatLog(): void {
+  if (restored) return
+  restored = true
+  const past = chatHistory()
+  if (!past.length) return
+  const log = el('chatLog')
+  if (log) {
+    const sep = document.createElement('div')
+    sep.className = 'ai-sep'
+    sep.textContent = 'Earlier conversation'
+    log.appendChild(sep)
+  }
+  for (const t of past) {
+    if (t.role === 'user') pushMsg(t.content, 'user')
+    else {
+      const { text, actions } = parseActions(t.content)
+      pushMsg(renderMarkdown(text) + actionButtons(actions), 'ai')
+    }
+  }
+}
+
+/** Forget the conversation (the model's memory and the log). */
+export function clearChat(): void {
+  resetChatHistory()
+  const log = el('chatLog')
+  if (log) log.innerHTML = ''
+  pushMsg('Conversation cleared. Ask me about any coin, or say <i>"open SOL"</i>, <i>"take me to signals"</i> or <i>"teach me RSI"</i>.', 'ai')
+}
 
 /** Send one message and stream the reply into the log. Driven by the UI. */
 export async function sendChat(text: string): Promise<void> {
@@ -871,42 +957,57 @@ export async function sendChat(text: string): Promise<void> {
   const typing = pushMsg('<span class="typing"><i></i><i></i><i></i></span>', 'ai')
   const log = el('chatLog')
   try {
-    // The model first, when this deployment has one. It sees the same live
-    // context the panels do, so it can answer things the keyword matcher
-    // below was never going to — a follow-up, a comparison, a "why".
+    // A plain command ("open SOL", "take me to signals") is done at once,
+    // without a round trip to the model, and works even with no model at all.
+    const cmd = localCommand(text, (q) => !!(resolveMarket(q) || resolveMarket(q.toUpperCase())))
+    if (cmd) {
+      const done = await runAction(cmd)
+      if (done) {
+        typing.innerHTML = esc(done)
+        rememberTurn(text, done)
+        return
+      }
+    }
+    // The model, when this deployment has one. It sees the same live context
+    // the panels do, plus the app guide, so it can answer and act.
     let streamed = ''
+    let modelError = ''
+    let noModel = false
     try {
       streamed = await askLlm(text, (full) => {
-        typing.innerHTML = renderMarkdown(full)
+        typing.innerHTML = renderMarkdown(hideTagsWhileStreaming(full))
         if (log) log.scrollTop = log.scrollHeight
       })
     } catch (e) {
-      if (!(e instanceof LlmUnavailable)) throw e
-      // No key configured, or no serverless functions (plain `vite dev`).
-      // Fall through to the local analyst without bothering the user.
+      // No key / no serverless functions: the local analyst answers quietly.
+      // A configured model that failed is said out loud, under the answer.
+      if (!(e instanceof LlmUnavailable)) modelError = e instanceof Error && e.message ? e.message : 'unknown error'
+      else noModel = true
       streamed = ''
     }
     if (streamed.trim()) {
-      typing.innerHTML = renderMarkdown(streamed)
+      const { text: answer, actions } = parseActions(streamed)
+      typing.innerHTML = renderMarkdown(answer) + actionButtons(actions)
+      // The user asked to go somewhere: go, rather than make them click.
+      if (actions.length && isCommand(text)) void runAction(actions[0])
     } else {
-      // The local analyst: deterministic, offline, and still the thing that
-      // answers when there is no model behind the app.
       await new Promise((r) => setTimeout(r, 200))
-      typing.innerHTML = await generateReply(text)
+      const local = await generateReply(text)
+      typing.innerHTML = local + (modelError
+        ? '<div class="ai-err">AI model unavailable right now (' + esc(modelError.slice(0, 160)) + '), so this answer is from the built-in analyst.</div>'
+        : noModel && !toldNoModel
+          ? '<div class="ai-err">No AI model is connected on this site yet, so answers come from the built-in analyst. Commands like “open SOL” still work.</div>'
+          : '')
+      if (noModel) toldNoModel = true
     }
     state.mem.topics.push(text)
     if (state.mem.topics.length > 6) state.mem.topics.shift()
   } catch (e) {
-    // A configured model that actually failed is worth naming, because it is
-    // something the owner of the deployment can go and fix.
     const why = e instanceof Error && e.message ? ' (' + esc(e.message) + ')' : ''
-    try {
-      typing.innerHTML = await generateReply(text)
-    } catch {
-      typing.innerHTML = 'Connection hiccup' + why + ' — try again in a moment.'
-    }
+    typing.innerHTML = 'Something went wrong' + why + ' — try again in a moment.'
+  } finally {
+    if (log) log.scrollTop = log.scrollHeight
+    chatBusy = false
+    if (send) send.disabled = false
   }
-  if (log) log.scrollTop = log.scrollHeight
-  chatBusy = false
-  if (send) send.disabled = false
 }
