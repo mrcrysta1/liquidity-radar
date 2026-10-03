@@ -1,0 +1,51 @@
+# Trading self-test on the Binance futures testnet (Demo account): opens one
+# small random trade the way the bot does (entry, stop, take-profit), checks it
+# appears on Binance and in the website's account mirror, holds it, closes it,
+# and checks everything is flat with fills recorded. Practice money only.
+# Run it from Actions → "Bot self-test" → Run workflow.
+name: Bot self-test (testnet)
+
+on:
+  workflow_dispatch:
+    inputs:
+      symbol:
+        description: Market
+        default: BTCUSDT
+        type: choice
+        options: [BTCUSDT, PAXGUSDT, ETHUSDT]
+      hold_seconds:
+        description: How long to keep the test trade open (10-600)
+        default: '120'
+
+# Shares the bot's queue, so a scheduled bot run never sees (and closes) the test trade.
+concurrency:
+  group: trading-bot
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: radar-worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: radar-worker/package-lock.json
+      - run: npm ci --omit=dev
+      - name: Open and close a random test trade
+        run: node src/selftest.ts
+        env:
+          SELFTEST_SYMBOL: ${{ inputs.symbol }}
+          SELFTEST_HOLD_SEC: ${{ inputs.hold_seconds }}
+          FUTURES_BASE: https://testnet.binancefuture.com
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
+          BINANCE_API_SECRET: ${{ secrets.BINANCE_API_SECRET }}

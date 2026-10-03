@@ -11,6 +11,7 @@
     "start": "node src/index.ts",
     "bot": "node src/bot.ts",
     "train": "node src/train.ts",
+    "selftest": "node src/selftest.ts",
     "test": "node --test \"test/**/*.test.ts\""
   },
   "dependencies": {

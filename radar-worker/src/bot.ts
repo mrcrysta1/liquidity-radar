@@ -10,7 +10,7 @@ import { existsSync } from 'node:fs'
 import { connect } from './db.ts'
 import { Futures, TESTNET } from './bot/futures.ts'
 import { checkLimits } from './bot/risk.ts'
-import { accountFromBinance, ordersFromBinance } from './bot/account.ts'
+import { readAccount } from './bot/account.ts'
 import type { AccountFill } from './bot/account.ts'
 import { BotStore } from './bot/store.ts'
 import { DEFAULT_TRADER, SymbolTrader } from './bot/trader.ts'
@@ -85,20 +85,11 @@ let lastEquityAt = 0
 let fills: AccountFill[] = []
 let lastFillsAt = 0
 async function mirrorAccount(now: number): Promise<void> {
-  const acc = accountFromBinance(await ex.account(), now, ex.base)
-  const syms = [...new Set([...SYMBOLS, ...acc.positions.map((p) => p.symbol)])]
-  const algo = (await Promise.all(syms.map((s) => ex.openAlgo(s).then((r) => r.map((o) => ({ ...o, symbol: s }))).catch(() => [])))).flat()
-  const orders = ordersFromBinance(await ex.openOrders(), algo)
-  if (now - lastFillsAt >= 60_000) {
-    lastFillsAt = now
-    const since = now - 7 * 86_400_000
-    const all = (await Promise.all(syms.map((s) => ex.fills(s, since).then((f) => f.map((x) => ({ ...x, symbol: s }))).catch(() => [])))).flat()
-    fills = all
-      .sort((a, b) => b.time - a.time)
-      .slice(0, 50)
-      .map((f) => ({ symbol: f.symbol, time: f.time, side: f.side, price: f.price, qty: f.qty, realizedPnl: f.realizedPnl, commission: f.commission }))
-  }
-  await store.setState('account', { ...acc, orders, fills })
+  const refresh = now - lastFillsAt >= 60_000
+  if (refresh) lastFillsAt = now
+  const snap = await readAccount(ex, SYMBOLS, now, refresh ? undefined : fills)
+  fills = snap.fills
+  await store.setState('account', snap)
 }
 async function tick(): Promise<void> {
   const now = Date.now()

@@ -172,6 +172,12 @@ journalctl -u radar-bot -f      # watch decisions and trades
 The website's Self Learning tab shows the bot's trades and decisions (it reads
 the same Supabase tables) once `VITE_WHALE_DB_URL` / `VITE_WHALE_DB_KEY` are set.
 
+**Self-test** (testnet only): `npm run selftest` opens one small random trade the
+way the bot does (market entry, exchange-side stop, resting take-profit), checks it
+shows on Binance and in the website's account mirror, holds it (`SELFTEST_HOLD_SEC`,
+default 60), closes it and checks the account is flat with fills recorded. On GitHub:
+Actions → "Bot self-test (testnet)" → Run workflow.
+
 ## Development
 
 ```bash
