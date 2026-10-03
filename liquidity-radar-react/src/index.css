@@ -81,21 +81,33 @@
   --shade-2:0 18px 44px rgba(92,56,28,.14);
   --shade-3:0 20px 50px rgba(92,56,28,.18);
   --glass:rgba(124,78,42,.05);
-  --bg:var(--bg);
-  --card:var(--card);
-  --card2:var(--card2);
-  --border:var(--border);
-  --border2:var(--border2);
-  --primary:#2563EB;
-  --green:#16A34A;
-  --red:#DC2626;
-  --amber:#D97706;
-  --cyan:#0891B2;
-  --purple:#7C3AED;
-  --pink:#DB2777;
-  --txt:var(--txt);
-  --muted:var(--muted);
-  --dim:var(--border2);
+  /* Radar Navy's light palette (features/theme/theme.ts), so the first paint is
+     right before theme.ts writes the chosen palette inline. These used to be
+     self-references (--bg:var(--bg)), which CSS treats as invalid: light mode
+     painted transparent, with black text and a blue accent, until the script ran. */
+  --bg:#EEF3FA;
+  --card:#FFFFFF;
+  --card2:#F6F9FD;
+  --border:#DCE5F1;
+  --border2:#C5D3E6;
+  --primary:#C2410C;
+  --green:#047857;
+  --red:#C8283A;
+  --amber:#B45309;
+  --cyan:#0E7490;
+  --purple:#6D28D9;
+  --pink:#C2410C;
+  --txt:#0F1B2D;
+  --muted:#4B5B73;
+  --dim:#6E7D94;
+  --pRGB:194 65 12;
+  --cRGB:14 116 144;
+  --gRGB:4 120 87;
+  --rRGB:200 40 58;
+  --aRGB:180 83 9;
+  --uRGB:109 40 217;
+  --kRGB:194 65 12;
+  --on-primary:#FFFFFF;
 }
 [data-theme="light"] body{
   background:var(--bg);
