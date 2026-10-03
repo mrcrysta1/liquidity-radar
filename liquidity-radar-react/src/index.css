@@ -1158,6 +1158,34 @@ html.radar-fs .cs-panel{height:100%;max-height:none}
   #radarChartCard .chart-stage{margin-top:6px}
 }
 
+/* ---- Desktop: price-action card header on one row, as in the reference ----
+   Coin and price first, then the timeframes, then status, layout and full
+   screen at the right. The "Price Action · 15m Candles" title repeated what the
+   coin picker and the highlighted timeframe already say, and pushed the toolbar
+   onto a second row; it stays in the DOM (the engine writes it) but is hidden,
+   as it already was on tablets and in full screen. */
+@media(min-width:901px){
+  #radarChartCard .sec-title{display:none}
+  #radarChartCard .sec-head{margin-bottom:8px}
+  #radarChartCard .chart-toolbar{flex:1;flex-wrap:nowrap;gap:8px;min-width:0}
+  #radarChartCard .coin-picker{order:-1;flex:0 1 auto;min-width:0}
+  #radarChartCard .tf-picker{min-width:0;flex-shrink:1}
+  #radarChartCard .tf-switch{max-width:100%;overflow-x:auto;scrollbar-width:none}
+  #radarChartCard .tf-switch::-webkit-scrollbar{display:none}
+  #radarChartCard #wsKlineState{margin-left:auto;white-space:nowrap;flex-shrink:0}
+}
+/* Narrower desktops: the coin's full name goes (as on tablets) so the timeframes keep room. */
+/* Narrower desktops: a ~660px card cannot hold coin + timeframes + status +
+   buttons (~730px). Let the toolbar wrap rather than squeeze: coin and timeframes
+   keep the first row, status and buttons drop to a short second row at the right. */
+@media(min-width:901px) and (max-width:1365px){
+  #radarChartCard .chart-toolbar{flex-wrap:wrap;row-gap:6px}
+  #radarChartCard .coin-picker{flex-shrink:0}
+  #radarChartCard .tf-picker{flex:0 1 auto}
+  /* The buttons that wrap stay at the right edge, under the status badge. */
+  #radarChartCard .chart-toolbar>.layout-picker{margin-left:auto}
+}
+
 /* ---- Phone: price-action card ----------------------------------------
    Timeframes get their own scrolling row; coin + status + layout + full
    screen share the next, and the legend is compacted so it does not bury a
