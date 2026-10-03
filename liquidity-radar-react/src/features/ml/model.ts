@@ -9,6 +9,7 @@ import * as tf from '@tensorflow/tfjs'
 import type { CandleFlat } from '../../services/market'
 import { FEATURE_NAMES, buildDataset, latestFeatures } from './features'
 import type { Sample } from './features'
+import { majorityBaseline } from './edge'
 
 export interface Standardizer {
   mean: number[]
@@ -22,6 +23,9 @@ export interface TrainedModel {
    * actually trust, since it's never seen the data it's scored on. */
   backtestAccuracy: number
   backtestN: number
+  /** Accuracy of always guessing the holdout's more common direction. The
+   *  model has an edge only to the extent it beats this (see edge.ts). */
+  baselineAccuracy: number
   trainedAt: number
   symbol: string
   tf: string
@@ -125,7 +129,10 @@ export async function trainModel(
   if (dataset.length < MIN_SAMPLES) return null
 
   const splitAt = Math.floor(dataset.length * 0.75)
-  const trainSet = dataset.slice(0, splitAt)
+  // Each label looks `horizon` bars ahead, so the last `horizon` training
+  // samples' labels come from inside the test window. Drop them (a purge gap)
+  // so the holdout is genuinely unseen.
+  const trainSet = dataset.slice(0, Math.max(0, splitAt - horizon))
   const testSet = dataset.slice(splitAt)
 
   const trainStd = computeStandardizer(trainSet.map((s) => s.x))
@@ -148,6 +155,7 @@ export async function trainModel(
     standardizer: fullStd,
     backtestAccuracy,
     backtestN: testSet.length,
+    baselineAccuracy: majorityBaseline(testSet.map((s) => s.y)),
     trainedAt: Date.now(),
     symbol,
     tf: tfId,

@@ -1299,6 +1299,30 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
     Math.abs((f60.rows[0].pred - cl.at(-1)) * 4 - (f15.rows[0].pred - cl.at(-1))) < 1e-9)
 }
 
+// ---- direction models: is holdout accuracy an edge? ---------------------------------
+{
+  const { majorityBaseline, provenEdge } = await import(src('features/ml/edge.ts'))
+  eq('edge: majority baseline of 65% up labels', majorityBaseline([...Array(65).fill(1), ...Array(35).fill(0)]), 0.65)
+  eq('edge: majority baseline of 30% up labels', majorityBaseline([...Array(30).fill(1), ...Array(70).fill(0)]), 0.7)
+  // "Always up" in a trending window matches the baseline exactly: no edge.
+  ok('edge: always guessing the trend direction is not an edge', provenEdge(0.65, 0.65, 95) <= 0)
+  // Zero-skill model on 95 balanced holdout bars: how often does each rule wrongly accept it?
+  let seed = 3
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647
+  let oldPass = 0, newPass = 0
+  const trials = 2000
+  for (let t = 0; t < trials; t++) {
+    let hits = 0
+    for (let i = 0; i < 95; i++) if (rnd() < 0.5) hits++
+    const acc = hits / 95
+    if (acc > 0.52) oldPass++
+    if (provenEdge(acc, 0.5, 95) > 0) newPass++
+  }
+  ok('edge: the old 52% bar accepted a zero-skill model ~1/3 of the time', oldPass / trials > 0.25, oldPass / trials)
+  ok('edge: the new bar accepts it ~5% of the time (one-sided 95%)', newPass / trials < 0.08, newPass / trials)
+  ok('edge: a real 10-point lead over the baseline is accepted', provenEdge(0.75, 0.6, 120) > 0)
+}
+
 // ---- signal scanner: grading calls on stop/target, learning per indicator ----------
 {
   const { advanceCall, winRate, learnedWeights, termStats, HOUR, CALL_TTL } = await import(src('features/signals/outcomes.ts'))

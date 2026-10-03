@@ -21,6 +21,7 @@
 // leaves far too few windowed samples to train on honestly. One extra request
 // every couple of minutes is a fair price for a model that saw enough data.
 import type { CandleFlat } from '../../services/market'
+import { provenEdge } from '../ml/edge'
 
 export interface NeuralRead {
   /** Model's probability that the next move is up, 0–1. */
@@ -29,6 +30,8 @@ export interface NeuralRead {
   accuracy: number
   /** How many out-of-sample bars that accuracy was measured over. */
   n: number
+  /** Accuracy of always guessing the holdout's more common direction. */
+  baseline: number
   at: number
 }
 
@@ -104,6 +107,7 @@ export async function trainOneNeural(
           pUp: p.direction === 'up' ? p.confidence : 1 - p.confidence,
           accuracy: trained.backtestAccuracy,
           n: trained.backtestN,
+          baseline: trained.baselineAccuracy,
           at: Date.now(),
         })
       }
@@ -124,17 +128,26 @@ export async function trainOneNeural(
 /**
  * What the neural read is worth to the blended score.
  *
- * Weighted by measured edge, not by confidence. A model that is 51% accurate
- * on its own holdout has no business moving a signal however sure it sounds,
- * so below 52% it contributes exactly nothing; the contribution then ramps to
- * full weight by 65%. This is the part that keeps "advanced" from meaning
- * "louder" — the number only counts to the extent it has earned it.
+ * Weighted by measured edge, not by confidence: holdout accuracy is compared
+ * with always guessing the common direction, and only the lead that chance
+ * would not explain counts (ml/edge.ts). It used a flat 52% bar, which a model
+ * with no skill cleared about a third of the time on ~95 holdout bars, and a
+ * trending window let "always up" clear it outright. The contribution ramps to
+ * full weight once the proven lead reaches 10 points.
  */
 export function neuralAdjustment(read: NeuralRead | null, weight: number): number {
   if (!read || !isFinite(read.pUp) || !isFinite(read.accuracy)) return 0
-  const edge = (read.accuracy - 0.52) / 0.13
+  const edge = provenEdge(read.accuracy, read.baseline ?? 0.5, read.n) / 0.1
   if (edge <= 0) return 0
   return Math.round((read.pUp - 0.5) * 2 * weight * Math.min(1, edge))
+}
+
+/** Plain-words verdict on a read, for the cards and the assistant. */
+export function neuralVerdict(read: NeuralRead): string {
+  const b = read.baseline ?? 0.5
+  return provenEdge(read.accuracy, b, read.n) > 0
+    ? 'beats always-guessing (' + (b * 100).toFixed(0) + '%) by more than chance'
+    : 'no edge over always-guessing (' + (b * 100).toFixed(0) + '%), not counted'
 }
 
 /** Clear everything — used when the scan universe or timeframe changes. */
