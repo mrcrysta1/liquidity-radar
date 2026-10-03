@@ -71,7 +71,7 @@ import { renderFG, renderTopCoins, renderFutures, renderWhales } from '../featur
 import { startConfluence } from '../features/analysis/confluence'
 import { startDivergenceWatch } from '../features/analysis/oiDivergence'
 import { mlOnCandles, setMLWanted } from '../features/ml/store'
-import { refreshInstrumentQuotes } from '../services/instrumentFeed'
+import { refreshInstrumentQuotes, refreshPerpQuotes } from '../services/instrumentFeed'
 import { getShowMLPrediction, onOverlayTogglesChange } from '../features/charts/overlayToggles'
 import { checkRLPriceTick } from '../features/ml/rlStore'
 import { addAlert, checkAlerts, enableAlerts, removeAlert, renderAlerts, syncAlertLines } from '../features/alerts'
@@ -147,7 +147,7 @@ function init(){
   initKeyboard();
   syncChartTitle(); // state.tf was restored from storage when the picker loaded
   const sel=$('symSelect');
-  sel.innerHTML=Object.keys(COINS).map(k=>'<option value="'+COINS[k].sym+'">'+k+'/USDT — '+esc(COINS[k].name)+'</option>').join('');
+  sel.innerHTML=Object.keys(COINS).map(k=>'<option value="'+COINS[k].sym+'">'+(COINS[k].sym.endsWith('USDT')?k+'/USDT':k)+' — '+esc(COINS[k].name)+'</option>').join('');
   sel.value=state.symbol;
 
   initChart();
@@ -177,6 +177,8 @@ function init(){
 
   // Wave 0 — the screen the user is looking at. Price, chart, live stream.
   fetchTickers();
+  const goldQuotes=()=>refreshPerpQuotes().then(()=>{renderTicker();renderTopCoins()});
+  goldQuotes();
   fetchKlines(state.symbol);
   connectStreams(streamCb);
   initTheme();
@@ -221,6 +223,7 @@ function init(){
 
   poll(fetchTickers,20000);
   poll(refreshInstrumentQuotes,20000);
+  poll(goldQuotes,5000);
   poll(fetchMarketCaps,60000);
   poll(function(){fetchFuturesSnapshot().then(renderFutures)},60000);
   poll(fetchWhales,10000);

@@ -4,7 +4,8 @@
 // cache/store updates live here. Every rendering/UI side effect is
 // delegated through the hooks wired by the engine via wireMarketHooks()
 // (the same pattern as userActions), so the engine stays pure orchestration.
-import { isInstrument } from '../constants/instruments'
+import { binancePerpOf, isInstrument } from '../constants/instruments'
+import { perpKlines } from './perpData'
 import { yahooCandles } from './yahoo'
 import { jget } from '../api/client'
 import { cooldownLeft } from '../api/rateLimit'
@@ -102,6 +103,17 @@ async function fetchBase(
   // from. Yahoo has no endTime paging, so a history request past the first
   // page simply ends; the chart stops at the loaded range instead of looping.
   if (isInstrument(sym)) {
+    // Gold: Binance's gold perpetual (live spot-gold price, pages back like
+    // any Binance pair); Yahoo only if Binance futures cannot be reached.
+    const perp = binancePerpOf(sym)
+    if (perp) {
+      try {
+        const rows = await perpKlines(perp, base, need, before)
+        if (rows.length || before) return { rows, source: null }
+      } catch {
+        if (before) return { rows: [], source: null }
+      }
+    }
     if (before) return { rows: [], source: null }
     return { rows: await yahooCandles(sym, base, need), source: null }
   }
@@ -334,12 +346,14 @@ export async function fetchFR(): Promise<void> {
   // asking would just be a guaranteed 400 every poll — and whatever the
   // previous crypto symbol left in state has to go, or gold ends up skewed
   // by Bitcoin's funding rate.
-  if (isInstrument(state.symbol)) {
+  // Gold is the exception: its perpetual (XAUUSDT) has real funding.
+  const frSym = binancePerpOf(state.symbol) ?? state.symbol
+  if (isInstrument(state.symbol) && frSym === state.symbol) {
     state.fr = null
     return
   }
   try {
-    state.fr = await jget('https://fapi.binance.com/fapi/v1/premiumIndex?symbol=' + state.symbol)
+    state.fr = await jget('https://fapi.binance.com/fapi/v1/premiumIndex?symbol=' + frSym)
     hooks!.onFR()
   } catch (e) {
     console.warn('premiumIndex', e)
@@ -353,12 +367,13 @@ export async function fetchOI(): Promise<void> {
   // asking would just be a guaranteed 400 every poll — and whatever the
   // previous crypto symbol left in state has to go, or gold ends up skewed
   // by Bitcoin's funding rate.
-  if (isInstrument(state.symbol)) {
+  const oiSym = binancePerpOf(state.symbol) ?? state.symbol
+  if (isInstrument(state.symbol) && oiSym === state.symbol) {
     state.oi = null
     return
   }
   try {
-    state.oi = await jget('https://fapi.binance.com/fapi/v1/openInterest?symbol=' + state.symbol)
+    state.oi = await jget('https://fapi.binance.com/fapi/v1/openInterest?symbol=' + oiSym)
     hooks!.onOI()
   } catch (e) {
     console.warn('openInterest', e)

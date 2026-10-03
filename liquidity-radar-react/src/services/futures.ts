@@ -7,6 +7,7 @@
 import { state } from './store'
 import { jget } from '../api/client'
 import { COINS, HOT_LIST } from '../constants/market'
+import { binancePerpOf } from '../constants/instruments'
 import { noteCall } from './dataSources'
 
 export interface FuturesEntry {
@@ -33,9 +34,11 @@ interface OiRow {
 }
 
 const FAPI = 'https://fapi.binance.com'
+/** The futures symbol for a hot-list key (gold's spot symbol XAUUSD trades as XAUUSDT). */
+const futSym = (k: string) => binancePerpOf(COINS[k].sym) ?? COINS[k].sym
 
 export async function fetchFuturesSnapshot(): Promise<void> {
-  const symbols = new Set(HOT_LIST.map((k) => COINS[k].sym))
+  const symbols = new Set(HOT_LIST.map(futSym))
   try {
     const [premiums, tickers] = (await Promise.all([
       jget(FAPI + '/fapi/v1/premiumIndex'),
@@ -49,9 +52,9 @@ export async function fetchFuturesSnapshot(): Promise<void> {
     // use it to skip the ones that do not. FLOKI, PEPE and SHIB were failing
     // an open-interest call apiece on every poll and showing up in the data
     // source register as permanently unhealthy.
-    const oiKeys = HOT_LIST.filter((k) => premiumBySym.has(COINS[k].sym))
+    const oiKeys = HOT_LIST.filter((k) => premiumBySym.has(futSym(k)))
     const oiResults = await Promise.allSettled(
-      oiKeys.map((k) => jget(FAPI + '/fapi/v1/openInterest?symbol=' + COINS[k].sym) as Promise<OiRow>),
+      oiKeys.map((k) => jget(FAPI + '/fapi/v1/openInterest?symbol=' + futSym(k)) as Promise<OiRow>),
     )
     const oiByKey = new Map<string, number | null>()
     oiKeys.forEach((k, i) => {
@@ -62,7 +65,7 @@ export async function fetchFuturesSnapshot(): Promise<void> {
 
     const out: Record<string, FuturesEntry> = {}
     HOT_LIST.forEach((k) => {
-      const sym = COINS[k].sym
+      const sym = futSym(k)
       const p = premiumBySym.get(sym)
       const t = tickerBySym.get(sym)
       if (!p || !t) return

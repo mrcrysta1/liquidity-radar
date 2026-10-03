@@ -54,7 +54,7 @@ export const START: LearnSection = {
       inApp: 'Settings → Data sources (live status of every source)',
       tags: ['data', 'api', 'binance', 'sources'],
       body: [
-        { p: 'Prices, candles, order books and trades come mainly from **Binance** (spot and futures), with other exchanges for cross-venue prices, CoinGecko for market-wide numbers, Yahoo Finance for metals, forex and indices, RSS feeds for news, and Forex Factory for the economic calendar.' },
+        { p: 'Prices, candles, order books and trades come mainly from **Binance** (spot and futures), with other exchanges for cross-venue prices, CoinGecko for market-wide numbers, Binance’s gold perpetual (XAUUSDT) for live spot gold (XAUUSD), Yahoo Finance for the other metals, forex and indices, RSS feeds for news, and Forex Factory for the economic calendar.' },
         { warn: 'Free public data can be delayed or rate-limited. Settings → Data sources shows which source is healthy right now.' },
       ],
     },
@@ -168,6 +168,8 @@ export const WHATS_NEW: Array<{ date: string; items: string[] }> = [
       'Self Learning now trains and trades two markets only: BTC (BTCUSDT.P) and Gold (XAUUSDT.P, which follows spot XAUUSD), on Binance futures prices.',
       'Self Learning page cleaned up: the server bot’s trades and activity moved into the Binance account panel, the backtest lab folds away under Advanced, and the deep-network internals panel was removed.',
       'Trading self-test: one click on GitHub opens and closes a small random Demo trade and checks it end to end.',
+      'Gold is now real spot gold (XAUUSD) everywhere: ticker, Top Coins, futures table, bubbles, signals and charts. It replaces the PAXG token and streams live from Binance’s gold perpetual (funding and open interest included).',
+      'The site asks search engines not to index it (noindex, nofollow) and blocks other crawlers.',
     ],
   },
   {

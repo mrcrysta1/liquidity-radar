@@ -11,7 +11,7 @@
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { state } from '../../services/store'
-import { HOT_LIST } from '../../constants/market'
+import { COINS, HOT_LIST } from '../../constants/market'
 import { instrumentOf, isInstrument } from '../../constants/instruments'
 import { baseOf, coinMeta } from '../../utils/coins'
 import { cfmt, pfmt } from '../../utils/format'
@@ -142,7 +142,7 @@ export function AnalysisHead() {
   const t = ticker()
   const range = getRange()
   const z = zones(getHeat().heat)
-  const list = Array.from(new Set([sym, ...HOT_LIST.map((b) => b + 'USDT')]))
+  const list = Array.from(new Set([sym, ...HOT_LIST.map((b) => COINS[b]?.sym ?? b + 'USDT')]))
   const top = z ? [z.buy, z.sell].filter(Boolean).sort((a, b) => (b as Zone).value - (a as Zone).value)[0] : null
   const SECS: Array<[string, string, () => void]> = [
     ['liq', 'Liquidity', () => { setView('liq'); scrollTo('anHeatmap') }],

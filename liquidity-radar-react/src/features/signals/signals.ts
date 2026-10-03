@@ -31,7 +31,7 @@ type Any = any
 // gold, the euro and the S&P go through exactly the same scoring as BTC
 // rather than a parallel, less-tested path.
 const SIGNAL_COINS = [
-  'BTCUSDT', 'ETHUSDT', 'PAXGUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT',
+  'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT',
   'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'SUIUSDT', 'LINKUSDT',
   // Non-crypto: spot gold and silver, the dollar's majors, the two US
   // indices and crude. These have no order book or trade tape, so the
