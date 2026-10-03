@@ -12,6 +12,8 @@ import { COINS } from '../../constants/market'
 import { esc, pfmt, cfmt, chgHtml } from '../../utils/format'
 import { aiComposite, calcATR, forecastFrom } from '../../utils/indicators'
 import { TF_MINUTES, closedOnly, scoreTimeframe as scoreTF } from './scoring'
+import { CALL_TTL, advanceCall, learnedWeights, termStats, winRate } from './outcomes'
+import type { GradedCall, SigCall, WinRate } from './outcomes'
 import { baseOf } from '../../utils/coins'
 import { $ } from '../../utils/dom'
 import { jget } from '../../api/client'
@@ -110,8 +112,9 @@ function marketLabel(sym: string): string {
 
 export let signalData: Any[] = []
 const whaleFlowCache: Record<string, Any> = {}
-let patternHistory: Record<string, { correct: number; total: number }> = {}
-const modelWeights: Record<string, number> = {
+/** Each scoring term's default weight. The live weights (modelWeights) are
+ *  learned from graded calls on top of these (see outcomes.ts). */
+const DEFAULT_WEIGHTS: Record<string, number> = {
   rsi: 25,
   macdCross: 30,
   macdTrend: 10,
@@ -124,66 +127,23 @@ const modelWeights: Record<string, number> = {
   master: 30,
   neural: 20,
 }
+const modelWeights: Record<string, number> = { ...DEFAULT_WEIGHTS }
 
-function loadPatternHistory(): void {
-  try {
-    const d = storageGet<Any>('lr-patternHist', undefined)
-    if (d) patternHistory = d
-  } catch (e) {
-    /* ignore */
-  }
+// Graded calls (outcomes.ts). Replaces lr-patternHist / lr-modelW, which
+// graded a 0.3% move by the next sweep and ratcheted one overall weight.
+const CALLS_KEY = 'lr-sigCalls-v1'
+let calls: { open: SigCall[]; done: GradedCall[] } = { open: [], done: [] }
+function loadCalls(): void {
+  const d = storageGet<Any>(CALLS_KEY, null)
+  if (d && Array.isArray(d.open) && Array.isArray(d.done)) calls = d
+  applyLearnedWeights()
 }
-function savePatternHistory(): void {
-  try {
-    storageSet('lr-patternHist', patternHistory)
-  } catch (e) {
-    /* ignore */
-  }
-}
-function loadModelWeights(): void {
-  try {
-    const d = storageGet<Any>('lr-modelW', undefined)
-    if (d) Object.keys(d).forEach((k) => { if (modelWeights[k] !== undefined) modelWeights[k] = d[k] })
-  } catch (e) {
-    /* ignore */
-  }
-}
-function saveModelWeights(): void {
-  try {
-    storageSet('lr-modelW', modelWeights)
-  } catch (e) {
-    /* ignore */
-  }
+function applyLearnedWeights(): void {
+  // master is the score's overall scale, not an indicator: it is not learned.
+  Object.assign(modelWeights, learnedWeights(DEFAULT_WEIGHTS, calls.done), { master: DEFAULT_WEIGHTS.master })
 }
 
-function recordPatternOutcome(key: string, wrong: number): void {
-  if (!patternHistory[key]) patternHistory[key] = { correct: 0, total: 0 }
-  patternHistory[key].total++
-  if (!wrong) patternHistory[key].correct++
-  if (patternHistory[key].total % 10 === 0) adjustWeights()
-  savePatternHistory()
-}
-
-function adjustWeights(): void {
-  const totalPatterns = Object.keys(patternHistory).length
-  if (totalPatterns < 5) return
-  Object.keys(patternHistory).forEach((k) => {
-    const h = patternHistory[k]
-    if (h.total < 5) return
-    const hitRate = h.correct / h.total
-    // map outcome keys like "master_BUY" / "rsi_15m" back to a valid model-weight key
-    const wKey = k.split('_')[0]
-    if (modelWeights[wKey] === undefined) return
-    if (hitRate > 0.6) {
-      modelWeights[wKey] = Math.min(45, (modelWeights[wKey] || 1) * 1.06)
-    } else if (hitRate < 0.42) {
-      modelWeights[wKey] = Math.max(5, (modelWeights[wKey] || 1) * 0.94)
-    }
-  })
-  saveModelWeights()
-}
-
-/** Scores one timeframe with the scanner's current weights (see scoring.ts). */
+/** Scores one timeframe with the scanner's current (learned) weights (see scoring.ts). */
 function scoreTimeframe(candles: Any[], tfKey: string): Any {
   return scoreTF(candles, tfKey, modelWeights)
 }
@@ -400,44 +360,70 @@ export function scanSignals(): void {
   })
 }
 
-function recordSignalOutcomes(): void {
-  if (!signalData.length) return
-  const prevSignals = storageGet<Any>('lr-lastSignals', {})
-  let touched = 0
-  signalData.forEach((s: Any) => {
-    const old = prevSignals[s.sym]
-    const t = state.tickers[s.sym]
-    if (!old || !t) return
-    const px = t.last
-    if (!(old.price > 0) || !(px > 0)) return
-    const moved = ((px - old.price) / old.price) * 100
-    // require a meaningful move over the scan window (1H/4H horizon)
-    if (Math.abs(moved) < 0.3) return
-    if (old.type === 'BUY' || old.type === 'SELL') {
-      const correct = (old.type === 'BUY' && moved > 0) || (old.type === 'SELL' && moved < 0)
-      recordPatternOutcome('master_' + old.type, correct ? 0 : 1)
-      touched++
-    }
-  })
-  if (touched) {
-    adjustWeights()
-    saveModelWeights()
-  }
-  const current: Record<string, Any> = {}
-  signalData.forEach((s: Any) => {
-    const px = (s.t && s.t.last) ? s.t.last : 0
-    current[s.sym] = { type: s.master.type, score: s.score, ts: Date.now(), price: px }
-  })
-  storageSet('lr-lastSignals', current)
+/** Each term's signed share of a signal's score (+ = towards BUY). */
+function callTerms(sig: Any): Record<string, number> {
+  const out: Record<string, number> = {}
+  const scored = TF_LIST.map((tf, i) => ({ tf, ts: sig.tfScores[i] })).filter((x) => x.ts && x.ts.parts)
+  const totalW = scored.reduce((a, x) => a + x.tf.weight, 0) || 1
+  for (const { tf, ts } of scored)
+    for (const [k, v] of Object.entries(ts.parts as Record<string, number>))
+      out[k] = (out[k] ?? 0) + (v * tf.weight) / totalW
+  if (sig.whale && sig.whale.imbalance) out.whale = sig.whale.imbalance * modelWeights.whale
+  if (sig.neuralAdj) out.neural = sig.neuralAdj
+  return out
 }
 
-/** How often the scanner's direction calls came true (a call counts when
- *  price moved 0.3% its way by the next sweep). Null until there are enough. */
-export function signalHitRate(): { rate: number; n: number } | null {
-  let hits = 0
-  let n = 0
-  Object.keys(patternHistory).forEach((k) => { hits += patternHistory[k].correct; n += patternHistory[k].total })
-  return n > 10 ? { rate: hits / n, n } : null
+/** Advance open calls on fresh hourly candles, then open calls for new signals. */
+function recordSignalOutcomes(): void {
+  if (!signalData.length) return
+  const now = Date.now()
+  const bySym = new Map<string, Any>(signalData.map((x: Any) => [x.sym, x]))
+  const still: SigCall[] = []
+  for (const c of calls.open) {
+    const hourly = bySym.get(c.sym)?.tfScores?.[0]?.candles as Any[] | undefined
+    const res = hourly ? advanceCall(c, hourly, now) : now >= c.expiresAt ? 'expired' : null
+    if (res) calls.done.push({ ...c, result: res, closedAt: now })
+    else still.push(c)
+  }
+  calls.open = still
+  for (const x of signalData) {
+    const p = x.plan
+    if (!p || calls.open.some((c) => c.sym === x.sym)) continue
+    calls.open.push({
+      id: x.sym + ':' + now,
+      sym: x.sym,
+      dir: p.t1 > p.entry ? 'BUY' : 'SELL',
+      entry: p.entry,
+      stop: p.stop,
+      t1: p.t1,
+      openedAt: now,
+      expiresAt: now + CALL_TTL,
+      checkedUntil: 0,
+      terms: callTerms(x),
+      tier: x.conv?.tier,
+    })
+  }
+  calls.done = calls.done.slice(-500)
+  storageSet(CALLS_KEY, calls)
+  applyLearnedWeights()
+}
+
+/** How often the scanner's calls reached their target before their stop.
+ *  Null until 10 calls are decided. */
+export function signalHitRate(): (WinRate & { open: number }) | null {
+  const w = winRate(calls.done)
+  return w.n >= 10 ? { ...w, open: calls.open.length } : null
+}
+
+/** The record behind the scanner's learning, for the UI and the docs. */
+export function signalLearning() {
+  return {
+    record: winRate(calls.done),
+    open: calls.open.length,
+    weights: { ...modelWeights },
+    defaults: { ...DEFAULT_WEIGHTS },
+    terms: termStats(calls.done),
+  }
 }
 
 type SigFilter = 'all' | 'BUY' | 'SELL' | 'WAIT'
@@ -473,10 +459,9 @@ function renderSignals(): void {
       const t = (TIER[b.conv?.tier] || 0) - (TIER[a.conv?.tier] || 0)
       return t !== 0 ? t : Math.abs(b.score) - Math.abs(a.score)
     })
-  let totalHits = 0
-  let totalPreds = 0
-  Object.keys(patternHistory).forEach((k) => { totalHits += patternHistory[k].correct; totalPreds += patternHistory[k].total })
-  const hitRate = totalPreds > 10 ? Math.round((totalHits / totalPreds) * 100) : null
+  const hr = signalHitRate()
+  const hitRate = hr ? Math.round(hr.rate * 100) : null
+  const totalPreds = hr ? hr.n : 0
   if (!shown.length) {
     $('signalGrid')!.innerHTML = '<div class="sig-empty">No ' + (sigFilter === 'all' ? '' : sigFilter.toLowerCase() + ' ') + 'signals in this scan. The scanner refreshes every two minutes.</div>'
     return
@@ -508,7 +493,7 @@ function renderSignals(): void {
         + '<div>24H <b style="color:' + (r24.dp >= 0 ? cGreen : cRed) + '">$' + pfmt(r24.pred) + '</b> (' + pct(r24.dp) + ')' + (s.fc.pUp != null ? (' | P(up) ' + Math.round(s.fc.pUp * 100) + '%') : '') + '</div>'
         + '</div>'
     }
-    const learnHtml = hitRate ? '<div class="sc-learning">Model accuracy: ' + hitRate + '% across ' + totalPreds + ' predictions</div>' : ''
+    const learnHtml = hitRate ? '<div class="sc-learning">Calls that hit target before stop: ' + hitRate + '% of ' + totalPreds + '</div>' : ''
     // The neural read, stated with the accuracy that earned it its weight —
     // and stated plainly when that weight was zero, so a confident-looking
     // probability is never mistaken for one the score actually used.
@@ -731,8 +716,7 @@ export function applySigAnaTheme(): void {
 
 // ===== AUTO-SCAN TIMER =====
 export function startAutoScan(): void {
-  loadPatternHistory()
-  loadModelWeights()
+  loadCalls()
   scanSignals()
   poll(scanSignals, 120000)
 }

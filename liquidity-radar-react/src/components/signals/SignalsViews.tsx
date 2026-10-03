@@ -14,7 +14,7 @@ import { state } from '../../services/store'
 import { baseOf, coinMeta } from '../../utils/coins'
 import { pfmt } from '../../utils/format'
 import { instrumentOf, isInstrument } from '../../constants/instruments'
-import { signalData, signalHitRate } from '../../features/signals/signals'
+import { signalData, signalHitRate, signalLearning } from '../../features/signals/signals'
 import { useTick } from '../useTick'
 import { CoinBadge } from '../common/CoinBadge'
 
@@ -155,6 +155,7 @@ export function SignalsHead() {
   const list = sigs()
   const active = list.filter((s) => s.master.type !== 'WAIT')
   const hit = signalHitRate()
+  const learn = signalLearning()
   const rrs = active.map((s) => s.plan?.rr).filter((x): x is number => !!x && isFinite(x))
   const rr = rrs.length ? rrs.reduce((a, b) => a + b, 0) / rrs.length : null
   return (
@@ -172,7 +173,11 @@ export function SignalsHead() {
           sub={list.length ? `of ${list.length} markets` : undefined} />
         <Stat icon={<Ring v={hit?.rate ?? null} />} label="Win Rate"
           value={hit ? Math.round(hit.rate * 100) + '%' : 'Learning'}
-          sub={hit ? `${hit.n} calls scored` : 'needs 10+ calls'} />
+          sub={
+            hit
+              ? `target before stop · ${hit.n} calls`
+              : `${learn.record.n}/10 calls graded · ${learn.open} open`
+          } />
         <Stat icon={<Ico d={TARGET} size={22} />} label="Avg. RR"
           value={rr ? '1:' + rr.toFixed(1) : '—'} sub="to target 2" />
       </div>

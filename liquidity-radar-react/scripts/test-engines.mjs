@@ -1299,6 +1299,50 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
     Math.abs((f60.rows[0].pred - cl.at(-1)) * 4 - (f15.rows[0].pred - cl.at(-1))) < 1e-9)
 }
 
+// ---- signal scanner: grading calls on stop/target, learning per indicator ----------
+{
+  const { advanceCall, winRate, learnedWeights, termStats, HOUR, CALL_TTL } = await import(src('features/signals/outcomes.ts'))
+  const T0 = 1_700_000_000_000 - (1_700_000_000_000 % HOUR) + 30 * 60_000 // a call made at hh:30
+  const mk = (dir, extra = {}) => ({ id: 'x', sym: 'BTCUSDT', dir, entry: 100, stop: dir === 'BUY' ? 97 : 103, t1: dir === 'BUY' ? 103 : 97,
+    openedAt: T0, expiresAt: T0 + CALL_TTL, checkedUntil: 0, terms: {}, ...extra })
+  const H1 = T0 + 30 * 60_000 // first full hour after the call
+  const c = (t, l, h) => ({ t, l, h })
+  // A wick before the call (same hour, started earlier) must not decide it.
+  eq('outcomes: pre-entry candle ignored, later target = win',
+    advanceCall(mk('BUY'), [c(H1 - HOUR, 90, 110), c(H1, 99, 103.5)], H1 + 2 * HOUR), 'win')
+  eq('outcomes: candle touching stop and target = loss', advanceCall(mk('BUY'), [c(H1, 96, 104)], H1 + 2 * HOUR), 'loss')
+  eq('outcomes: SELL target below = win', advanceCall(mk('SELL'), [c(H1, 96.5, 101)], H1 + 2 * HOUR), 'win')
+  eq('outcomes: SELL stop above = loss', advanceCall(mk('SELL'), [c(H1, 99, 103.2)], H1 + 2 * HOUR), 'loss')
+  // The still-forming candle is never used.
+  eq('outcomes: forming candle not used', advanceCall(mk('BUY'), [c(H1, 99, 104)], H1 + 30 * 60_000), null)
+  // Incremental: nothing decided yet, then decided by a later candle.
+  const inc = mk('BUY')
+  eq('outcomes: still open while levels untouched', advanceCall(inc, [c(H1, 99, 101)], H1 + HOUR), null)
+  eq('outcomes: checkedUntil advances', inc.checkedUntil, H1)
+  eq('outcomes: decided on a later sweep', advanceCall(inc, [c(H1, 99, 101), c(H1 + HOUR, 98, 103.1)], H1 + 2 * HOUR), 'win')
+  // A gap (app closed) means the levels may have been hit unseen: expired, not guessed.
+  const gap = mk('BUY'); advanceCall(gap, [c(H1, 99, 101)], H1 + HOUR)
+  eq('outcomes: gap in candles -> expired', advanceCall(gap, [c(H1 + 5 * HOUR, 99, 103.5)], H1 + 6 * HOUR), 'expired')
+  eq('outcomes: time limit -> expired', advanceCall(mk('BUY'), [c(H1, 99, 101)], T0 + CALL_TTL + 1), 'expired')
+  // Win rate counts wins and losses; expired calls are reported, not counted.
+  const done = (r, terms = {}, dir = 'BUY') => ({ ...mk(dir), terms, result: r, closedAt: 0 })
+  const w = winRate([done('win'), done('loss'), done('loss'), done('expired')])
+  ok('outcomes: win rate = wins / (wins + losses)', w.n === 3 && Math.abs(w.rate - 1 / 3) < 1e-12 && w.expired === 1, w)
+  // Per-indicator learning.
+  const base = { rsi: 25, ema: 12, bb: 18 }
+  eq('learning: weights stay at defaults with too few calls', learnedWeights(base, [done('win', { rsi: 5 })]), base)
+  const hist = []
+  for (let i = 0; i < 40; i++) hist.push(done(i % 5 === 0 ? 'loss' : 'win', { rsi: 5 }))   // rsi-agreeing: 80% win
+  for (let i = 0; i < 40; i++) hist.push(done(i % 5 === 0 ? 'win' : 'loss', { ema: 3 }))   // ema-agreeing: 20% win
+  for (let i = 0; i < 40; i++) hist.push(done(i % 2 ? 'win' : 'loss', { bb: -4 }))         // bb pointed against the call
+  const lw = learnedWeights(base, hist)
+  ok('learning: an indicator whose calls win more gets more weight', lw.rsi > base.rsi && lw.rsi <= base.rsi * 1.5, lw)
+  ok('learning: one whose calls lose gets less, never below half', lw.ema < base.ema && lw.ema >= base.ema * 0.5, lw)
+  eq('learning: an indicator that disagreed with the calls is not credited', lw.bb, base.bb)
+  eq('learning: term stats count only agreeing calls', termStats(hist).bb, undefined)
+  eq('learning: recomputed, not ratcheted (same input, same weights)', JSON.stringify(learnedWeights(base, hist)), JSON.stringify(lw))
+}
+
 // ---- self-learning: training core (runs in a Web Worker in the app) ----------------
 {
   const { trainCore } = await import(src('features/selflearn/train.ts'))
