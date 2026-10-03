@@ -40,6 +40,8 @@ export interface TraderConfig {
   /** Bars of history for training + walk-forward. */
   historyBars: number
   retrainMs: number
+  /** A bar is not traded when the decision comes this long after it closed. */
+  maxLateMs: number
   /** Injected for tests; defaults to Binance spot klines. */
   bars?: (symbol: string, interval: string, count: number) => Promise<Bar[]>
 }
@@ -51,6 +53,7 @@ export const DEFAULT_TRADER: TraderConfig = {
   wf: DEFAULT_WF,
   historyBars: 4380, // ~2 years of 4h bars
   retrainMs: 24 * 3_600_000,
+  maxLateMs: 60 * 60_000,
 }
 
 const vwap = (f: Fill[]) => {
@@ -86,6 +89,15 @@ export class SymbolTrader {
     await this.ex.setup(this.symbol, this.cfg.risk.leverage)
     this.model = await this.store.latestModel(this.symbol, this.cfg.interval)
     if (!this.model || Date.now() - this.model.createdAt > this.cfg.retrainMs) await this.retrain()
+    // Kept in the database, so a bot that runs as short scheduled jobs (BOT_ONCE)
+    // decides each bar once, like the long-running one.
+    this.lastBar = await this.store.getState<number>('lastBar:' + this.symbol, 0)
+  }
+
+  /** Why a trade is being closed, remembered across runs. */
+  private async markClosing(id: number, reason: 'time' | 'tp' | 'error'): Promise<void> {
+    this.closing.set(id, reason)
+    await this.store.setState('closing:' + id, reason)
   }
 
   /** Walk-forward the whole history, then fit the live model on the most recent window. */
@@ -141,7 +153,7 @@ export class SymbolTrader {
     const H = this.cfg.wf.bracket.horizon
     const deadline = open.barTime + (H + 1) * INTERVAL_MS[this.cfg.interval]
     if (now >= deadline && !this.closing.has(open.id)) {
-      this.closing.set(open.id, 'time')
+      await this.markClosing(open.id, 'time')
       await this.store.event('info', this.symbol, `time exit after ${H} bars`)
       await this.flatten(pos)
     }
@@ -164,7 +176,8 @@ export class SymbolTrader {
     const fees = [...entries, ...exits].filter((f) => f.commissionAsset === 'USDT').reduce((a, f) => a + f.commission, 0)
     const gross = exits.reduce((a, f) => a + f.realizedPnl, 0)
     const pnl = gross - fees
-    const reason = this.closing.get(open.id) ?? (open.tpOrderId != null && exits.some((f) => f.orderId === open.tpOrderId) ? 'tp' : 'sl')
+    const stored = await this.store.getState<'time' | 'tp' | 'error' | null>('closing:' + open.id, null)
+    const reason = this.closing.get(open.id) ?? stored ?? (open.tpOrderId != null && exits.some((f) => f.orderId === open.tpOrderId) ? 'tp' : 'sl')
     await this.ex.cancelAllOrders(this.symbol)
     await this.ex.cancelAllAlgo(this.symbol)
     const r = open.riskUsd > 0 ? pnl / open.riskUsd : 0
@@ -179,6 +192,14 @@ export class SymbolTrader {
     const last = b[b.length - 1]
     if (!last || last.t === this.lastBar) return
     this.lastBar = last.t
+    await this.store.setState('lastBar:' + this.symbol, last.t)
+    // A decision reached long after its bar closed (a scheduled run that started
+    // late, or a restart) would enter at a price the model never saw.
+    const late = now - (last.t + INTERVAL_MS[this.cfg.interval])
+    if (late > this.cfg.maxLateMs) {
+      await this.store.event('info', this.symbol, `skipped the ${new Date(last.t + INTERVAL_MS[this.cfg.interval]).toISOString().slice(11, 16)} UTC bar: ${Math.round(late / 60_000)} min since it closed`)
+      return
+    }
     if (!this.model) return
     const ind = indicators(b)
     const i = b.length - 1
@@ -242,7 +263,7 @@ export class SymbolTrader {
     } catch (e) {
       // No stop, no position.
       await this.store.event('error', this.symbol, `trade #${id}: stop could not be placed (${(e as Error).message}) — closing`)
-      this.closing.set(id, 'error')
+      await this.markClosing(id, 'error')
       await this.flatten(await this.ex.position(this.symbol))
       return
     }
@@ -251,7 +272,7 @@ export class SymbolTrader {
       const t = await this.ex.takeProfitLimit(this.symbol, exitSide, roundStep(qty, this.rules.stepSize, this.rules.quantityPrecision), String(tp), `rb-tp-${id}`)
       if (t.status === 'EXPIRED') {
         // Post-only refused: price is already through the target. Take it.
-        this.closing.set(id, 'tp')
+        await this.markClosing(id, 'tp')
         await this.flatten(await this.ex.position(this.symbol))
       } else tpOrder = t.orderId
     } catch (e) {

@@ -134,7 +134,8 @@ export const MODELS: LearnSection = {
       body: [
         { p: 'It decides once per closed 4-hour candle for BTC and PAXG, places a market entry with an exchange-side stop and a take-profit, sizes each trade to risk 0.5% of the account, and has daily-loss and drawdown limits plus a kill switch.' },
         { p: '**Walk-forward test**: its model is trained on about two years of 4-hour candles in rolling blocks and tested on the block after each. In **gated** mode it trades only if that test shows an edge (60+ test trades, positive expectancy and profit factor, and recent blocks profitable). In **explore** mode it trades its best signal even without proof, to gather real fills.' },
-        { p: '**Account mirror**: every 15 seconds the bot reads your Binance futures account (wallet balance, unrealized PNL, margin balance, available balance, open positions, open orders and recent fills) and saves it, so the Self Learning tab shows the same figures as the Binance panel.' },
+        { p: '**Where it runs**: on GitHub Actions, free, every 15 minutes, with no server or PC needed. Each run manages any open trade, decides once on a newly closed 4-hour candle (a candle that closed more than an hour earlier is skipped), and refreshes the account mirror. Exchange-side stop and take-profit orders protect a position between runs.' },
+        { p: '**Account mirror**: on every run the bot reads your Binance futures account (wallet balance, unrealized PNL, margin balance, available balance, open positions, open orders and recent fills) and saves it, so the Self Learning tab shows the same figures as the Binance panel.' },
         { warn: 'Your exchange keys live only on the server running the bot, never in the website. It uses testnet by default and refuses the real exchange unless that is explicitly enabled.' },
       ],
     },

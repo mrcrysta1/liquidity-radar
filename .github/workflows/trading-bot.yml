@@ -1,0 +1,52 @@
+# The testnet trading bot, run by GitHub Actions — free for this public repo,
+# no server or PC needed. Every 15 minutes it runs one tick (radar-worker,
+# BOT_ONCE=1): it mirrors the Binance Demo account for the website, manages any
+# open trade, and decides once on each newly closed 4-hour candle.
+#
+# GitHub's runners are in the US, where Binance's main API is blocked; the
+# futures testnet host and the public market-data mirror are reachable, and the
+# testnet host is the same Demo account. Practice money only.
+#
+# Secrets (Settings → Secrets and variables → Actions):
+#   DATABASE_URL, BINANCE_API_KEY, BINANCE_API_SECRET
+# Stop it: Actions → Trading bot → "…" → Disable workflow.
+name: Trading bot (testnet)
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+# Never two ticks at once: they would both act on the same account.
+concurrency:
+  group: trading-bot
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: radar-worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: radar-worker/package-lock.json
+      - run: npm ci --omit=dev
+      - name: Bot tick
+        run: node src/bot.ts
+        env:
+          BOT_ONCE: '1'
+          BOT_MODE: explore
+          BOT_SYMBOLS: BTCUSDT,PAXGUSDT
+          FUTURES_BASE: https://testnet.binancefuture.com
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
+          BINANCE_API_SECRET: ${{ secrets.BINANCE_API_SECRET }}

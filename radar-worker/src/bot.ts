@@ -26,6 +26,8 @@ for (const k of ['DATABASE_URL', 'BINANCE_API_KEY', 'BINANCE_API_SECRET']) {
 }
 
 const num = (v: string | undefined, d: number) => (v !== undefined && v !== '' && isFinite(Number(v)) ? Number(v) : d)
+// BOT_ONCE=1: run one tick and exit (for a scheduler such as GitHub Actions).
+const ONCE = env.BOT_ONCE === '1'
 const SYMBOLS = (env.BOT_SYMBOLS || 'BTCUSDT,PAXGUSDT').split(',').map((s) => s.trim().toUpperCase()).filter(Boolean)
 const TICK_MS = num(env.BOT_TICK_MS, 15_000)
 const cfg: TraderConfig = {
@@ -50,10 +52,11 @@ for (let attempt = 1; ; attempt++) {
   } catch (e) {
     const wait = Math.min(120, 5 * 2 ** (attempt - 1))
     console.warn(`cannot reach ${ex.base} (attempt ${attempt}): ${(e as Error).message} — retrying in ${wait}s`)
+    if (ONCE && attempt >= 3) process.exit(1)
     await new Promise((r) => setTimeout(r, wait * 1000))
   }
 }
-await store.event('info', null, `bot starting on ${ex.base} (${ex.isTestnet ? 'TESTNET' : 'MAINNET'}) · mode ${cfg.mode} · ${SYMBOLS.join(', ')} · ${cfg.interval} bars · risk ${(cfg.risk.riskPerTrade * 100).toFixed(2)}%/trade`)
+if (!ONCE) await store.event('info', null, `bot starting on ${ex.base} (${ex.isTestnet ? 'TESTNET' : 'MAINNET'}) · mode ${cfg.mode} · ${SYMBOLS.join(', ')} · ${cfg.interval} bars · risk ${(cfg.risk.riskPerTrade * 100).toFixed(2)}%/trade`)
 
 const traders: SymbolTrader[] = []
 for (const s of SYMBOLS) {
@@ -66,6 +69,7 @@ for (const s of SYMBOLS) {
     } catch (e) {
       const wait = Math.min(300, 10 * 2 ** (attempt - 1))
       await store.event('warn', s, `setup failed (attempt ${attempt}): ${(e as Error).message} — retrying in ${wait}s`)
+      if (ONCE && attempt >= 2) process.exit(1)
       await new Promise((r) => setTimeout(r, wait * 1000))
     }
   }
@@ -106,7 +110,7 @@ async function tick(): Promise<void> {
     await store.event('warn', null, 'entries halted — ' + lim.state.haltReason)
     await store.setState('lastHalt', lim.state.haltReason)
   }
-  if (now - lastEquityAt >= 3_600_000) {
+  if (ONCE || now - lastEquityAt >= 3_600_000) {
     lastEquityAt = now
     await store.equity(now - (now % 3_600_000), equity)
   }
@@ -142,4 +146,9 @@ async function shutdown(): Promise<void> {
 process.on('unhandledRejection', (e) => console.error(new Date().toISOString(), 'unhandled:', (e as Error)?.message || e))
 process.on('SIGINT', () => void shutdown())
 process.on('SIGTERM', () => void shutdown())
-void loop()
+if (ONCE) {
+  await tick()
+  console.log(new Date().toISOString(), 'tick done')
+  await db.end().catch(() => {})
+  process.exit(0)
+} else void loop()
