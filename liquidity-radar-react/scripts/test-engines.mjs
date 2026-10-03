@@ -1403,6 +1403,31 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('learning: recomputed, not ratcheted (same input, same weights)', JSON.stringify(learnedWeights(base, hist)), JSON.stringify(lw))
 }
 
+// ---- self-learning: does it actually learn? (controlled experiment) ----------------
+{
+  // Plant a pattern the engine can see from price (drift regimes that persist),
+  // and check it profits on its unseen 30%; on pure noise it must not.
+  const { trainCore } = await import(src('features/selflearn/train.ts'))
+  let seed = 5
+  const rnd = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296
+  const market = (drift0) => {
+    const out = []
+    let p = 100, drift = 0
+    for (let i = 0; i < 3000; i++) {
+      if (i % 60 === 0) drift = (rnd() < 0.5 ? -1 : 1) * drift0
+      const o = p, c = o * (1 + drift + (rnd() - 0.5) * 0.02)
+      out.push({ t: i * 14_400_000, o, h: Math.max(o, c) * (1 + rnd() * 0.004), l: Math.min(o, c) * (1 - rnd() * 0.004), c, v: 100 + rnd() * 50 })
+      p = c
+    }
+    return out
+  }
+  const planted = trainCore(market(0.002), 'swing').holdout
+  seed = 5
+  const noise = trainCore(market(0), 'swing').holdout
+  ok('self-learning: finds a planted pattern and profits on unseen data', planted.n >= 30 && planted.avgR > 0.3, planted)
+  ok('self-learning: makes no profit on pure noise', noise.avgR < 0.05, noise)
+}
+
 // ---- self-learning: training core (runs in a Web Worker in the app) ----------------
 {
   const { trainCore } = await import(src('features/selflearn/train.ts'))
