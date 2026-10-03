@@ -4671,6 +4671,12 @@ span.nn-live.on::before{content:'';display:inline-block;width:6px;height:6px;bor
 .lab-chips small{font-size:11px;color:var(--muted);margin-left:6px}
 .lab-chips button{padding:5px 11px;border-radius:8px;border:1px solid var(--hair-2);background:var(--sunk-2);color:var(--muted);font-size:11.5px;font-weight:700;cursor:pointer}
 .lab-chips button.on{color:var(--txt);border-color:rgba(124,140,255,.7);background:rgba(124,140,255,.16)}
+.lab-fixed{padding:5px 11px;border-radius:8px;border:1px solid rgba(124,140,255,.7);background:rgba(124,140,255,.16);color:var(--txt);font-size:11.5px;font-weight:700}
+.lab-adv{border-radius:14px;border:1px solid var(--hair-2);background:var(--card)}
+.lab-adv>summary{display:flex;align-items:center;gap:8px;padding:12px 14px;cursor:pointer;font-size:12px;font-weight:800;color:var(--txt);text-transform:uppercase;letter-spacing:.04em}
+.lab-adv>summary small{font-size:11px;font-weight:500;color:var(--muted);text-transform:none;letter-spacing:0}
+.lab-adv[open]>summary{border-bottom:1px solid var(--hair-2)}
+.bx-log{max-height:none}
 .lab-mgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px}
 .lab-model{display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:13px;background:var(--sunk-2);border:1px solid var(--hair-2);min-width:0}
 .lab-model.proven{border-color:rgb(var(--gRGB)/.45)}
@@ -4709,8 +4715,6 @@ span.nn-live.on::before{content:'';display:inline-block;width:6px;height:6px;bor
 .lab-btf label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted)}
 .lab-btf .lab-chk{flex-direction:row;align-items:center;gap:6px;padding-bottom:8px}
 .lab-btf .nn-btn{height:36px}
-.lab-botg{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:12px}
-.lab-deep .nn-note{margin-top:-4px}
 .lab-page code{font-family:var(--mono);font-size:11px;padding:1px 5px;border-radius:5px;background:var(--sunk-2)}
 
 /* 1641-1899px: the trend box shares the bar and is ~310px wide; the sparkline
@@ -4740,7 +4744,7 @@ span.nn-live.on::before{content:'';display:inline-block;width:6px;height:6px;bor
   .nn-tfs{justify-self:start;overflow-x:auto;max-width:100%}
   .nn-row-b{grid-template-columns:repeat(2,minmax(0,1fr))}
   .nn-rt{grid-column:1/-1}
-  .lab-row,.lab-botg{grid-template-columns:1fr}
+  .lab-row{grid-template-columns:1fr}
 }
 @media(max-width:760px){
   .nn-row-a{grid-template-columns:1fr;grid-template-areas:"chart" "pred" "sent" "ins" "mov"}

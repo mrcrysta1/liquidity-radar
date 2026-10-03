@@ -1,6 +1,6 @@
 // Walk-forward report, no keys or database needed:
 //
-//   npm run train                 # BTCUSDT and PAXGUSDT
+//   npm run train                 # BTCUSDT and XAUUSDT (gold)
 //   npm run train -- ETHUSDT      # any Binance spot symbols
 //
 // Downloads ~2 years of 4h bars, trains a fresh model per test block on the
@@ -10,13 +10,14 @@ import { closedBars } from './bot/data.ts'
 import { DEFAULT_GATE, DEFAULT_WF, gate, walkForward } from './bot/walkforward.ts'
 import { DEFAULT_TRADER } from './bot/trader.ts'
 
-const symbols = process.argv.slice(2).length ? process.argv.slice(2) : ['BTCUSDT', 'PAXGUSDT']
+const symbols = process.argv.slice(2).length ? process.argv.slice(2) : ['BTCUSDT', 'XAUUSDT']
 const pct = (v: number) => (v * 100).toFixed(1) + '%'
 
 for (const sym of symbols.map((s) => s.toUpperCase())) {
   const t0 = Date.now()
   const b = await closedBars(sym, DEFAULT_TRADER.interval, DEFAULT_TRADER.historyBars)
-  const { metrics: m, foldR } = walkForward(b, DEFAULT_WF)
+  // Same rule as the live bot: young markets get a shorter training window.
+  const { metrics: m, foldR } = walkForward(b, { ...DEFAULT_WF, trainBars: Math.min(DEFAULT_WF.trainBars, Math.floor(b.length * 0.6)) })
   const g = gate(m, DEFAULT_GATE)
   const d = (t: number) => new Date(t).toISOString().slice(0, 10)
   console.log(`\n${sym} · ${b.length} × ${DEFAULT_TRADER.interval} bars, ${d(b[0].t)} → ${d(b[b.length - 1].t)} · ${Math.round((Date.now() - t0) / 1000)}s`)

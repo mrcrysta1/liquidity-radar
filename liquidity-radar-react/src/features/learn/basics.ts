@@ -163,6 +163,14 @@ export const TECH: LearnSection = {
 /** Newest first. Add a line here whenever a feature ships. */
 export const WHATS_NEW: Array<{ date: string; items: string[] }> = [
   {
+    date: '2026-10-04',
+    items: [
+      'Self Learning now trains and trades two markets only: BTC (BTCUSDT.P) and Gold (XAUUSDT.P, which follows spot XAUUSD), on Binance futures prices.',
+      'Self Learning page cleaned up: the server bot’s trades and activity moved into the Binance account panel, the backtest lab folds away under Advanced, and the deep-network internals panel was removed.',
+      'Trading self-test: one click on GitHub opens and closes a small random Demo trade and checks it end to end.',
+    ],
+  },
+  {
     date: '2026-10-03',
     items: [
       'Testnet bot now runs 24/7 for free on GitHub Actions (every 15 minutes), no PC needed.',

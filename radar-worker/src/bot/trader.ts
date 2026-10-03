@@ -53,7 +53,8 @@ export const DEFAULT_TRADER: TraderConfig = {
   wf: DEFAULT_WF,
   historyBars: 4380, // ~2 years of 4h bars
   retrainMs: 24 * 3_600_000,
-  maxLateMs: 60 * 60_000,
+  // Scheduled runs (GitHub Actions) can start well after a bar closes.
+  maxLateMs: 3 * 60 * 60_000,
 }
 
 const vwap = (f: Fill[]) => {
@@ -104,11 +105,14 @@ export class SymbolTrader {
   async retrain(): Promise<void> {
     const t0 = Date.now()
     const b = await this.barsFn(this.symbol, this.cfg.interval, this.cfg.historyBars)
-    const wf = walkForward(b, this.cfg.wf)
+    // Young markets (gold perpetual: listed Dec 2025) have less history than the
+    // usual training window; shrink it so the walk-forward still has test folds.
+    const wfCfg = { ...this.cfg.wf, trainBars: Math.min(this.cfg.wf.trainBars, Math.floor(b.length * 0.6)) }
+    const wf = walkForward(b, wfCfg)
     const g = gate(wf.metrics, DEFAULT_GATE)
     const H = this.cfg.wf.bracket.horizon
     const end = b.length - H
-    const m = fitModel(b, indicators(b), Math.max(0, end - this.cfg.wf.trainBars), end, this.cfg.wf, Date.now() % 100_000)
+    const m = fitModel(b, indicators(b), Math.max(0, end - wfCfg.trainBars), end, wfCfg, Date.now() % 100_000)
     if (!m) {
       await this.store.event('error', this.symbol, `retrain failed: not enough history (${b.length} bars)`)
       return

@@ -28,7 +28,7 @@ for (const k of ['DATABASE_URL', 'BINANCE_API_KEY', 'BINANCE_API_SECRET']) {
 const num = (v: string | undefined, d: number) => (v !== undefined && v !== '' && isFinite(Number(v)) ? Number(v) : d)
 // BOT_ONCE=1: run one tick and exit (for a scheduler such as GitHub Actions).
 const ONCE = env.BOT_ONCE === '1'
-const SYMBOLS = (env.BOT_SYMBOLS || 'BTCUSDT,PAXGUSDT').split(',').map((s) => s.trim().toUpperCase()).filter(Boolean)
+const SYMBOLS = (env.BOT_SYMBOLS || 'BTCUSDT,XAUUSDT').split(',').map((s) => s.trim().toUpperCase()).filter(Boolean)
 const TICK_MS = num(env.BOT_TICK_MS, 15_000)
 const cfg: TraderConfig = {
   ...DEFAULT_TRADER,

@@ -12,7 +12,7 @@ on:
         description: Market
         default: BTCUSDT
         type: choice
-        options: [BTCUSDT, PAXGUSDT, ETHUSDT]
+        options: [BTCUSDT, XAUUSDT]
       hold_seconds:
         description: How long to keep the test trade open (10-600)
         default: '120'

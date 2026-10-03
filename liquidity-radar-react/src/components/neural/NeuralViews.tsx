@@ -13,6 +13,7 @@ import { series } from '../../features/selflearn/features'
 import { insights } from '../../features/selflearn/patterns'
 import { getFeed, labelBars, NN_TFS, setFeedTf, useFeed } from '../../features/selflearn/pageFeed'
 import { STRATS } from '../../features/selflearn/strategy'
+import { marketLabel, perpPrice } from '../../features/selflearn/perp'
 import { proven, setConfig } from '../../features/selflearn/engine'
 import type { SLTrade } from '../../features/selflearn/engine'
 import { useSL } from '../../features/selflearn/useSL'
@@ -32,7 +33,7 @@ const ago = (t: number, now: number) => {
   const m = Math.max(0, Math.round((now - t) / 60_000))
   return m < 1 ? 'just now' : m < 60 ? m + 'm ago' : m < 1440 ? Math.round(m / 60) + 'h ago' : Math.round(m / 1440) + 'd ago'
 }
-const short = (s: string) => s.replace(/USDT$/, '')
+const short = marketLabel
 
 /** ATR% of the last bar against the last 200: where today's volatility sits. */
 function volRank(S: ReturnType<typeof series>, closes: number[]): number | null {
@@ -462,7 +463,7 @@ export function NnMultiTf() {
 
 function TradeRow({ t, lev }: { t: SLTrade; lev: number }) {
   const open = t.closedAt == null
-  const px = state.tickers[t.sym]?.last
+  const px = perpPrice(t.sym)
   const live = open && px ? t.side * (px / t.entry - 1) * 100 : null
   const p = open ? live : t.pnlPct ?? null
   return (

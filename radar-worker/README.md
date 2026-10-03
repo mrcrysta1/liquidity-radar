@@ -103,7 +103,7 @@ than two minutes old.
 
 ## Trading bot (Binance Futures testnet)
 
-`npm run bot` trades BTCUSDT and PAXGUSDT (gold) on 4h bars, long and
+`npm run bot` trades BTCUSDT and XAUUSDT (gold perpetual, follows XAUUSD) on 4h bars, long and
 short, by itself, with no confirmation. It uses **fake testnet money** unless you
 deliberately change two settings.
 

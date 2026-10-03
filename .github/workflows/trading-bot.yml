@@ -45,7 +45,7 @@ jobs:
         env:
           BOT_ONCE: '1'
           BOT_MODE: explore
-          BOT_SYMBOLS: BTCUSDT,PAXGUSDT
+          BOT_SYMBOLS: BTCUSDT,XAUUSDT
           FUTURES_BASE: https://testnet.binancefuture.com
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
