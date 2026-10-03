@@ -6,7 +6,7 @@
 // account is flat again with the fills and P&L recorded. Practice money only.
 //
 //   npm run selftest                 # random side, BTCUSDT, hold 60 s
-//   SELFTEST_SYMBOL=PAXGUSDT SELFTEST_HOLD_SEC=120 npm run selftest
+//   SELFTEST_SYMBOL=XAUUSDT SELFTEST_HOLD_SEC=120 npm run selftest
 //
 // It refuses to run if the symbol already has a position (the bot's), and it
 // always tries to close and cancel everything it opened, even after a failure.
