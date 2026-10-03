@@ -10,7 +10,8 @@ import { instrumentOf, isInstrument } from '../../constants/instruments'
 import { yahooCandles } from '../../services/yahoo'
 import { COINS } from '../../constants/market'
 import { esc, pfmt, cfmt, chgHtml } from '../../utils/format'
-import { aiComposite, calcATR, calcRSI, forecastFrom } from '../../utils/indicators'
+import { aiComposite, calcATR, forecastFrom } from '../../utils/indicators'
+import { TF_MINUTES, closedOnly, scoreTimeframe as scoreTF } from './scoring'
 import { baseOf } from '../../utils/coins'
 import { $ } from '../../utils/dom'
 import { jget } from '../../api/client'
@@ -40,7 +41,6 @@ const TF_LIST = [
   { key: '4h', label: '4H', limit: 100, weight: 0.4 },
   { key: '1d', label: '1D', limit: 60, weight: 0.35 },
 ]
-
 /** Levels a reader can actually act on, derived from volatility rather than guessed. */
 export interface TradePlan {
   entry: number
@@ -183,87 +183,9 @@ function adjustWeights(): void {
   saveModelWeights()
 }
 
-function scoreTimeframe(candles: Any[]): Any {
-  const closes = candles.map((c) => c.c)
-  const vols = candles.map((c) => c.v)
-  if (closes.length < 30) return null
-  const a = aiComposite(candles, closes, vols)
-  const fc = forecastFrom(closes)
-  const last = closes[closes.length - 1]
-  const reasons: string[] = []
-  let score = 0
-  if (a.rsi < 30) {
-    reasons.push('RSI oversold (' + a.rsi.toFixed(0) + ')')
-    score += modelWeights.rsi
-  } else if (a.rsi > 70) {
-    reasons.push('RSI overbought (' + a.rsi.toFixed(0) + ')')
-    score -= modelWeights.rsi
-  } else if (a.rsi < 45) {
-    reasons.push('RSI bearish (' + a.rsi.toFixed(0) + ')')
-    score += Math.round(modelWeights.rsi * 0.3)
-  } else if (a.rsi > 55) {
-    reasons.push('RSI bullish (' + a.rsi.toFixed(0) + ')')
-    score -= Math.round(modelWeights.rsi * 0.3)
-  }
-  if (a.macd.hist > 0 && closes[closes.length - 2] < closes[closes.length - 3]) {
-    reasons.push('MACD bullish cross')
-    score += modelWeights.macdCross
-  } else if (a.macd.hist < 0 && closes[closes.length - 2] > closes[closes.length - 3]) {
-    reasons.push('MACD bearish cross')
-    score -= modelWeights.macdCross
-  } else if (a.macd.hist > 0) {
-    reasons.push('MACD bullish')
-    score += modelWeights.macdTrend
-  } else {
-    reasons.push('MACD bearish')
-    score -= modelWeights.macdTrend
-  }
-  if (last > a.e20) {
-    reasons.push('Above EMA20')
-    score += modelWeights.ema
-  } else {
-    reasons.push('Below EMA20')
-    score -= modelWeights.ema
-  }
-  if (a.bb.pctB < 10) {
-    reasons.push('Lower BB touch')
-    score += modelWeights.bb
-  } else if (a.bb.pctB > 90) {
-    reasons.push('Upper BB stretch')
-    score -= modelWeights.bb
-  }
-  if (a.vt === 'RISING') {
-    reasons.push('Volume rising')
-    score += modelWeights.vol
-  } else if (a.vt === 'FALLING') {
-    reasons.push('Volume falling')
-    score -= modelWeights.vol
-  }
-  const prev10 = closes.slice(-20, -10)
-  const last10 = closes.slice(-10)
-  if (prev10.length >= 10 && last10.length >= 10) {
-    const rsi1 = calcRSI(prev10)
-    const rsi2 = calcRSI(last10)
-    if (rsi1 > rsi2 && last > closes[closes.length - 11]) {
-      reasons.push('Bearish RSI div')
-      score -= modelWeights.diverge
-    } else if (rsi1 < rsi2 && last < closes[closes.length - 11]) {
-      reasons.push('Bullish RSI div')
-      score += modelWeights.diverge
-    }
-  }
-  const swingH = Math.max.apply(null, closes.slice(-20))
-  const swingL = Math.min.apply(null, closes.slice(-20))
-  if (last > swingH * 0.995) {
-    reasons.push('Near resistance $' + pfmt(swingH))
-    score -= 5
-  }
-  if (last < swingL * 1.005) {
-    reasons.push('Near support $' + pfmt(swingL))
-    score += 5
-  }
-  score = Math.max(-100, Math.min(100, score))
-  return { score: score, reasons: reasons.slice(0, 4), ai: a, fc: fc, last: last, candles: candles }
+/** Scores one timeframe with the scanner's current weights (see scoring.ts). */
+function scoreTimeframe(candles: Any[], tfKey: string): Any {
+  return scoreTF(candles, tfKey, modelWeights)
 }
 
 function getWhaleFlow(sym: string): Promise<Any> {
@@ -360,7 +282,7 @@ export function scanSignals(): void {
   const promises = SIGNAL_COINS.map(function (sym) {
     const tfPromises = TF_LIST.map(function (tf) {
       return scanKlineFetch(sym, tf.key).then(function (candles) {
-        const sc = scoreTimeframe(candles)
+        const sc = scoreTimeframe(closedOnly(candles, tf.key), tf.key)
         // masterSignal weights each score by its timeframe, so the score has to
         // carry which timeframe it came from. Without this every coin threw and
         // was swallowed by the catch below — the scanner returned nothing at all.
@@ -677,12 +599,15 @@ export function analyzeSigCoin(input: string): void {
   const tfLabels = ['1H', '4H', '1D']
   const tfPromises: Promise<Any>[] = tfs.map(function (tf) {
     return fetchKlineRows(sym, tf, 120).then(function (data: Any) {
-      const candles = data.map((k: Any) => ({ t: k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5] }))
+      const candles = closedOnly<Any>(
+        data.map((k: Any) => ({ t: k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5] })),
+        tf,
+      )
       const closes = candles.map((c: Any) => c.c)
       const vols = candles.map((c: Any) => c.v)
       const a = aiComposite(candles, closes, vols)
-      const fc = forecastFrom(closes)
-      const sc = scoreTimeframe(candles)
+      const fc = forecastFrom(closes, TF_MINUTES[tf] ?? 60)
+      const sc = scoreTimeframe(candles, tf)
       return { tf: tf, label: tfLabels[tfs.indexOf(tf)], candles: candles, closes: closes, a: a, fc: fc, sc: sc }
     }).catch(function () {
       return { tf: tf, label: tfLabels[tfs.indexOf(tf)], candles: [], closes: [], a: null, fc: null, sc: null }
@@ -712,7 +637,9 @@ export function analyzeSigCoin(input: string): void {
       const sc = d.sc
       const tp = sc.score > 15 ? 'BUY' : sc.score < -15 ? 'SELL' : 'WAIT'
       const tc = tp === 'BUY' ? 'color:var(--green)' : tp === 'SELL' ? 'color:var(--red)' : 'color:var(--amber)'
-      const weight = i === 0 ? 0.4 : i === 1 ? 0.35 : 0.25
+      // Same timeframe weights as the scanner (this used 0.4/0.35/0.25, so the
+      // same coin could get a different verdict here than on its card).
+      const weight = TF_LIST[i]?.weight ?? 0
       masterScore += sc.score * weight
       if (sc.reasons.length) reasons.push(sc.reasons[0])
       tfHtml += '<div class="sig-tf-card">'
