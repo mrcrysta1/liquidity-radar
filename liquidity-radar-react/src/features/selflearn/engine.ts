@@ -24,6 +24,7 @@ import {
   STRATS,
   costR,
   dataset,
+  edgeProven,
   decide,
   levels,
   runBacktest,
@@ -31,7 +32,7 @@ import {
   stats,
   trainPair,
 } from './strategy'
-import type { BacktestOpts, BacktestResult, Pair, Side, StratId } from './strategy'
+import type { BacktestOpts, BacktestResult, EdgeCheck, Pair, Side, StratId } from './strategy'
 
 export interface SLTrade {
   id: string
@@ -214,8 +215,17 @@ export function minEVFor(key: string): number {
   return Math.min(base + 0.3, base + 0.05 * Math.max(0, lossStreak(key) - 2))
 }
 
-/** Made money, over at least 15 trades, on the stretch of history it was not trained on. */
-export const proven = (m: SLModel) => m.holdout.n >= 15 && m.holdout.avgR > 0
+/** The model's edge check: unseen-test trades plus its live paper trades (strategy.ts). */
+export function edgeOf(m: SLModel): EdgeCheck {
+  const key = keyOf(m.sym, m.strat)
+  const liveR = trades
+    .filter((t) => keyOf(t.sym, t.strat) === key && t.r != null && t.reason !== 'manual')
+    .map((t) => t.r as number)
+  return edgeProven(m.holdout, liveR, STRATS[m.strat])
+}
+
+/** Made money beyond what chance explains, on unseen history and live paper trades. */
+export const proven = (m: SLModel) => edgeOf(m).proven
 
 // ---- trades ---------------------------------------------------------------------
 
@@ -324,13 +334,20 @@ async function scanKey(sym: string, strat: StratId): Promise<void> {
   const x = S.X[i]
   m.lastBarT = closedT
   if (!x) return
-  const entry = cs[i].c
+  // Enter at the live price, not the closed bar's close: after the tab was
+  // hidden or at startup that close can be most of a bar old, and the trade
+  // was then checked against live prices it could never have had. A decision
+  // reached long after its bar closed is not acted on at all.
+  const sinceClose = now - (closedT + st.tfMs)
+  const tooLate = sinceClose > Math.min(st.tfMs * 0.25, 30 * 60_000)
+  const live = app.tickers[sym]?.last
+  const entry = live && live > 0 ? live : cs[i].c
   const atr = S.atr[i]
   const minEV = minEVFor(key)
   const d = decide(m.pair, x, entry, atr, st, minEV)
   m.last = { pLong: d.pLong, pShort: d.pShort, evLong: d.evLong, evShort: d.evShort, at: now, price: entry }
   const busyKey = trades.some((t) => t.closedAt == null && t.sym === sym && t.strat === strat)
-  if (config.auto && d.side && !busyKey && (!config.provenOnly || proven(m))) {
+  if (config.auto && d.side && !busyKey && !tooLate && (!config.provenOnly || proven(m))) {
     const { sl, tp } = levels(entry, atr, d.side, st)
     const { setup, note } = setupOf(cs, S, i, d.side)
     const t: SLTrade = {
