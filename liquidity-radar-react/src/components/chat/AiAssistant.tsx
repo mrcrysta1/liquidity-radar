@@ -8,7 +8,10 @@
 // if this subtree re-renders.
 import { useEffect, useRef, useState } from 'react'
 import {
+  clearChat,
   isDockOpen,
+  onChatLogClick,
+  restoreChatLog,
   sendChat,
   setDockOpen,
   subscribeDock,
@@ -16,18 +19,21 @@ import {
 } from '../../features/chat'
 
 const CHIPS: Array<{ q: string; label: string }> = [
+  { q: 'Which coins look strongest right now?', label: '🔥 Strongest coins' },
   { q: 'Analyze BTC', label: '📈 Analyze BTC' },
+  { q: 'Teach me what order flow and CVD are', label: '🎓 Teach me order flow' },
+  { q: 'Take me to the signals', label: '⚡ Go to Signals' },
   // Advertise the coverage that is easy to miss: this is no longer crypto-only.
   { q: 'How is gold looking right now?', label: '🥇 Gold now' },
   { q: 'Compare EURUSD and the S&P 500', label: '🌍 FX vs stocks' },
   { q: 'What is RSI?', label: '🧠 What is RSI?' },
   { q: 'Should I buy pepe?', label: 'Buy PEPE?' },
   { q: 'Show meme coins', label: '🐕 Meme coins' },
-  { q: 'Show signals', label: '⚡ Show signals' },
   { q: 'Fear and greed now', label: 'Fear & Greed' },
   { q: 'Best performer today', label: 'Top gainer today' },
   { q: 'Whale activity?', label: 'Whale watch' },
   { q: 'What patterns do you see?', label: '🔍 Patterns' },
+  { q: 'Open the Learning guide', label: '📘 Learning guide' },
   { q: 'What can you do', label: 'Help' },
 ]
 
@@ -111,6 +117,8 @@ export function AiAssistant() {
     if (!open) return
     // A hidden log has no scroll height, so the position it held while closed
     // is meaningless — drop to the newest message on the way in.
+    // The conversation is saved across reloads: redraw it once, under the welcome.
+    restoreChatLog()
     const log = logRef.current
     if (log) log.scrollTop = log.scrollHeight
     inputRef.current?.focus()
@@ -145,9 +153,11 @@ export function AiAssistant() {
           <div className="ai-avatar">🤖</div>
           <div className="ai-dock-id">
             <div className="ai-dock-name">Radar AI Assistant</div>
-            <div className="ai-dock-sub">crypto · gold · FX · indices · stocks — live from this terminal</div>
+            <div className="ai-dock-sub">analyses markets · opens charts &amp; tabs · teaches the tools</div>
           </div>
-          <span className="badge b-green">ONLINE</span>
+          <button type="button" className="ai-clear" onClick={clearChat} title="Clear the conversation">
+            Clear
+          </button>
           <button
             type="button"
             className="ai-dock-x"
@@ -158,7 +168,8 @@ export function AiAssistant() {
             <CloseIcon />
           </button>
         </div>
-        <div className="chat-log" id="chatLog" ref={logRef}></div>
+        {/* Action buttons in answers ("Open SOL chart") are handled here, by delegation. */}
+        <div className="chat-log" id="chatLog" ref={logRef} onClick={(e) => onChatLogClick(e.nativeEvent)}></div>
         <div className="chips" id="chatChips">
           {CHIPS.map((c) => (
             <button key={c.q} type="button" className="chip" onClick={() => void sendChat(c.q)}>
@@ -178,7 +189,7 @@ export function AiAssistant() {
             type="text"
             id="chatInput"
             ref={inputRef}
-            placeholder="Ask about any coin, indicator, whale moves…"
+            placeholder="Ask anything, or say “open SOL”, “teach me RSI”…"
             autoComplete="off"
             maxLength={300}
           />

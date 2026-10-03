@@ -31,6 +31,23 @@ export const START: LearnSection = {
       ],
     },
     {
+      id: 'ai-assistant',
+      title: 'The AI assistant',
+      summary: 'Ask about any market or concept, or tell it where to go: it reads the live data the app shows and can open coins, tabs and guides for you.',
+      inApp: 'The chat button, bottom right (or press T)',
+      tags: ['assistant', 'chat', 'ai', 'help', 'radar ai'],
+      body: [
+        { list: [
+          '**Go somewhere**: "open SOL", "show me the ETH chart", "take me to signals", "open the guide for fvg". These work instantly.',
+          '**Ask about a market**: "analyze BTC", "which coins look strongest right now?". Answers use the live prices, indicators, scanner and news the app has at that moment.',
+          '**Learn**: "teach me order flow", "what is a fair value gap?". It explains in plain words, then offers the matching guide in this library.',
+        ] },
+        { p: 'Answers can end with buttons such as **Open SOL chart** or **Learn: RSI**. The conversation is kept when you reload; **Clear** starts a new one.' },
+        { p: 'It is powered by a language model (Llama 3.3 via Groq) given the app’s live data with each question. When the model is not available, a built-in analyst answers instead and says so.' },
+        { warn: 'It analyses; it does not advise. It never promises a price or an outcome, and you remain responsible for your trades.' },
+      ],
+    },
+    {
       id: 'data-sources',
       title: 'Where the data comes from',
       summary: 'Public exchange and market APIs, read directly by your browser. Nothing requires an account.',
@@ -148,6 +165,7 @@ export const WHATS_NEW: Array<{ date: string; items: string[] }> = [
   {
     date: '2026-10-03',
     items: [
+      'AI assistant can now open coins, tabs and Learning guides ("open SOL", "take me to signals"), teaches with links to the guide, and remembers the conversation.',
       'Learning library in Settings, with a downloadable PDF.',
       'Signals: win rate now graded on real stop/target outcomes; each indicator learns its own weight.',
       'Signals: fixed RSI momentum signs, real MACD crosses, working RSI divergence, correct forecast horizons.',
