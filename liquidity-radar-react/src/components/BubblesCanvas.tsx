@@ -12,6 +12,8 @@ import { COINS } from '../constants/market'
 import { state } from '../services/store'
 import { setSymbol, switchTab } from '../features/actions/userActions'
 import { useTick } from './useTick'
+import { MkIco } from './market/MarketHead'
+import { MK_ICONS } from './market/mkIcons'
 
 type Any = any
 
@@ -39,7 +41,8 @@ const WALL_THICKNESS = 60
 interface BubbleMeta {
   sym: string
   name: string
-  color: string
+  /** Gain/loss tone as r,g,b — the fill glows from it, the rim is drawn in it. */
+  rgb: [number, number, number]
   pct: number
   r: number
 }
@@ -51,15 +54,14 @@ function pctFor(k: string, tf: Timeframe, tickerPct: number): number | null {
   return mc?.chg7d ?? null
 }
 
-function colorFor(pct: number): string {
-  const t = Math.min(1, Math.abs(pct) / 15)
-  if (pct >= 0) {
-    const g = Math.round(120 + t * 110)
-    return `rgb(${Math.round(20 + t * 10)},${g},${Math.round(90 + t * 20)})`
-  }
-  const r = Math.round(150 + t * 100)
-  return `rgb(${r},${Math.round(40 - t * 20)},${Math.round(50 - t * 10)})`
+/** Brighter for bigger moves: a +12% bubble glows harder than a +0.3% one. */
+function toneFor(pct: number): [number, number, number] {
+  const t = Math.min(1, Math.abs(pct) / 12)
+  if (pct >= 0) return [Math.round(30 + t * 10), Math.round(150 + t * 80), Math.round(105 + t * 20)]
+  return [Math.round(190 + t * 60), Math.round(60 - t * 25), Math.round(75 - t * 20)]
 }
+
+const rgba = (c: [number, number, number], a: number) => `rgba(${c[0]},${c[1]},${c[2]},${a})`
 
 export function BubblesCanvas() {
   const [filter, setFilter] = useState<FilterKey>('all')
@@ -78,6 +80,8 @@ export function BubblesCanvas() {
   // rotation. A ref alone would leave a phone showing desktop-sized bubbles.
   const [stage, setStage] = useState({ w: 800, h: 560 })
   const dragRef = useRef<{ k: string; x: number; y: number; moved: boolean } | null>(null)
+  // Coin logos (from the market-cap feed), loaded once and drawn inside the bigger bubbles.
+  const imgRef = useRef<Map<string, HTMLImageElement>>(new Map())
 
   const now = useTick(4000, ['bubbles'])
   void now
@@ -184,6 +188,8 @@ export function BubblesCanvas() {
     vis.observe(container)
 
     let raf = 0
+    let frame = 0
+    let ink = '#fff'
     let last = performance.now()
     const step = (t: number) => {
       if (!onScreen) {
@@ -206,29 +212,54 @@ export function BubblesCanvas() {
 
       const { w, h } = sizeRef.current
       ctx.clearRect(0, 0, w, h)
+      // Text colour follows the theme; re-read about once a second, not per frame.
+      if (++frame % 60 === 1) ink = getComputedStyle(container).getPropertyValue('--txt').trim() || '#fff'
       bodiesRef.current.forEach((body, k) => {
         const meta = metaRef.current.get(k)
         if (!meta) return
         const { x, y } = body.position
         const r = meta.r
+        const c = meta.rgb
+        // Glass bubble: clear centre, colour gathering towards the rim, bright edge.
+        const g = ctx.createRadialGradient(x, y - r * 0.25, r * 0.15, x, y, r)
+        g.addColorStop(0, rgba(c, 0.1))
+        g.addColorStop(0.72, rgba(c, 0.28))
+        g.addColorStop(1, rgba(c, 0.62))
         ctx.beginPath()
         ctx.arc(x, y, r, 0, Math.PI * 2)
-        ctx.fillStyle = meta.color
-        ctx.globalAlpha = 0.88
+        ctx.fillStyle = g
         ctx.fill()
-        ctx.globalAlpha = 1
-        ctx.lineWidth = dragRef.current?.k === k ? 2 : 0.5
-        ctx.strokeStyle = 'rgba(255,255,255,.25)'
+        ctx.lineWidth = dragRef.current?.k === k ? 3 : 1.6
+        ctx.strokeStyle = rgba(c, 0.95)
         ctx.stroke()
-        if (r > 16) {
-          ctx.fillStyle = '#fff'
-          ctx.textAlign = 'center'
-          ctx.font = Math.max(9, Math.round(r * 0.3)) + 'px sans-serif'
-          ctx.fillText(k, x, y - r * 0.05)
-          if (r > 26) {
-            ctx.font = Math.max(8, Math.round(r * 0.22)) + 'px monospace'
-            ctx.fillText((meta.pct >= 0 ? '+' : '') + meta.pct.toFixed(1) + '%', x, y + r * 0.32)
-          }
+        // A soft highlight, top-left, so it reads as a sphere rather than a disc.
+        ctx.beginPath()
+        ctx.ellipse(x - r * 0.32, y - r * 0.42, r * 0.28, r * 0.13, -0.6, 0, Math.PI * 2)
+        ctx.fillStyle = 'rgba(255,255,255,0.07)'
+        ctx.fill()
+        if (r <= 14) return
+        const img = imgRef.current.get(k)
+        const withLogo = r >= 30 && !!img && img.complete && img.naturalWidth > 0
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        const label = k === 'XAUUSD' ? 'GOLD' : k
+        if (withLogo) {
+          const s2 = r * 0.5
+          ctx.save()
+          ctx.beginPath()
+          ctx.arc(x, y - r * 0.36, s2 / 2, 0, Math.PI * 2)
+          ctx.clip()
+          ctx.drawImage(img!, x - s2 / 2, y - r * 0.36 - s2 / 2, s2, s2)
+          ctx.restore()
+        }
+        const ty = withLogo ? y + r * 0.14 : r > 24 ? y - r * 0.12 : y
+        ctx.fillStyle = ink
+        ctx.font = '700 ' + Math.max(9, Math.round(r * (label.length > 4 ? 0.26 : 0.32))) + 'px Inter, system-ui, sans-serif'
+        ctx.fillText(label, x, ty)
+        if (r > 24) {
+          ctx.font = '600 ' + Math.max(8, Math.round(r * 0.22)) + 'px "JetBrains Mono", ui-monospace, monospace'
+          ctx.fillStyle = rgba([Math.min(255, c[0] + 60), Math.min(255, c[1] + 60), Math.min(255, c[2] + 60)], 1)
+          ctx.fillText((meta.pct >= 0 ? '+' : '') + meta.pct.toFixed(1) + '%', x, ty + r * (withLogo ? 0.34 : 0.4))
         }
       })
       raf = requestAnimationFrame(step)
@@ -311,79 +342,89 @@ export function BubblesCanvas() {
         bodiesRef.current.set(k, body)
         Matter.Composite.add(engine.world, body)
       }
-      metaRef.current.set(k, { sym: c.sym, name: c.name, color: colorFor(pct), pct, r })
+      metaRef.current.set(k, { sym: c.sym, name: c.name, rgb: toneFor(pct), pct, r })
+      const logo = state.marketCaps[k]?.image
+      if (logo && /^https:\/\//.test(logo) && !imgRef.current.has(k)) {
+        const im = new Image()
+        im.src = logo
+        imgRef.current.set(k, im)
+      }
     }
   }, [filtered, tf, stage])
 
   const anyCapData = filtered.some((k) => state.marketCaps[k])
+  const moves = filtered
+    .map((k) => ({ k, pct: pctFor(k, tf, state.tickers[COINS[k].sym]?.pct ?? 0) }))
+    .filter((m): m is { k: string; pct: number } => m.pct != null && isFinite(m.pct))
+  const up = moves.filter((m) => m.pct > 0).length
+  const down = moves.filter((m) => m.pct < 0).length
+  const best = moves.reduce<{ k: string; pct: number } | null>((a, m) => (!a || m.pct > a.pct ? m : a), null)
+  const worst = moves.reduce<{ k: string; pct: number } | null>((a, m) => (!a || m.pct < a.pct ? m : a), null)
+  const name = (k: string) => (k === 'XAUUSD' ? 'Gold' : k)
+  const sgn = (v: number) => (v >= 0 ? '+' : '') + v.toFixed(1) + '%'
+  const FILTERS: Array<[FilterKey, string]> = [['all', 'All coins'], ['major', 'Majors'], ['meme', 'Memes']]
 
   return (
-    <div className="card">
-      <div className="sec-head">
-        <div className="sec-title">Crypto Bubbles</div>
-        <span className="badge b-cyan">{filtered.length} COINS</span>
-      </div>
-      <div className="bub-ctrl">
-        <div className="bub-filter">
-          <button
-            className={'bub-f' + (filter === 'all' ? ' on' : '')}
-            onClick={() => setFilter('all')}
-          >
-            All Coins
-          </button>
-          <button
-            className={'bub-f' + (filter === 'major' ? ' on' : '')}
-            onClick={() => setFilter('major')}
-          >
-            Majors
-          </button>
-          <button
-            className={'bub-f' + (filter === 'meme' ? ' on' : '')}
-            onClick={() => setFilter('meme')}
-          >
-            Memes
-          </button>
+    <div className="bub-page">
+      <header className="sg-head">
+        <div className="sg-title">
+          <span className="sg-logo"><MkIco d={MK_ICONS.bubbles} size={28} /></span>
+          <span>
+            <h2>Crypto Bubbles</h2>
+            <p>Every tracked coin as a bubble: size is how big it is, colour is how it moved</p>
+          </span>
         </div>
-        <div style={{ display: 'flex', gap: 4 }}>
-          {(['1h', '24h', '7d'] as Timeframe[]).map((k) => (
-            <button
-              key={k}
-              className={'bub-f' + (tf === k ? ' on' : '')}
-              onClick={() => setTf(k)}
-              title={
-                k === '1h' || k === '7d'
-                  ? 'From CoinGecko — only available for the tracked Top 16'
-                  : undefined
-              }
-            >
-              {k}
-            </button>
-          ))}
+        <div className="sg-stats bub-stats">
+          <div className="sg-stat">
+            <span className="sg-stat-ico"><MkIco d={MK_ICONS.breadth} size={20} /></span>
+            <span><small>Gainers · losers</small><b><span className="up">{up}</span> <i className="mk-vs">vs</i> <span className="dn">{down}</span></b><em>{filtered.length} coins · {tf}</em></span>
+          </div>
+          <div className="sg-stat">
+            <span className="sg-stat-ico"><MkIco d={MK_ICONS.up} size={20} /></span>
+            <span><small>Top gainer</small><b>{best ? name(best.k) : '—'}</b><em className="up">{best ? sgn(best.pct) : 'waiting for prices'}</em></span>
+          </div>
+          <div className="sg-stat">
+            <span className="sg-stat-ico bub-ico-red"><MkIco d={MK_ICONS.down} size={20} /></span>
+            <span><small>Top loser</small><b>{worst ? name(worst.k) : '—'}</b><em className="dn">{worst ? sgn(worst.pct) : 'waiting for prices'}</em></span>
+          </div>
         </div>
-        <input
-          type="text"
-          placeholder="Search coin…"
-          value={query}
-          onChange={(e) => setQuery(e.currentTarget.value)}
-          className="pf-input"
-          style={{ maxWidth: 160, marginLeft: 'auto' }}
-        />
-      </div>
-      <div className="bub-legend">
-        <span>
-          <i className="lg sog"></i>Gainers
-        </span>
-        <span>
-          <i className="lg sor"></i>Losers
-        </span>
-        <span className="bub-hint">
-          Size ={' '}
-          {anyCapData ? 'market cap (24h volume where cap is unavailable)' : '24h traded volume'} ·
-          color ={' ' + tf} change · drag to move, click to open chart
-        </span>
-      </div>
-      <div ref={containerRef} style={{ position: 'relative', width: '100%', height: 560 }}>
-        <canvas ref={canvasRef} style={{ display: 'block', cursor: 'grab', touchAction: 'none' }} />
+      </header>
+
+      <div className="card bub-card">
+        <div className="bub-ctrl">
+          <div className="sg-chips">
+            {FILTERS.map(([k, l]) => (
+              <button key={k} type="button" className={filter === k ? 'on' : ''} onClick={() => setFilter(k)}>{l}</button>
+            ))}
+          </div>
+          <div className="sg-chips sg-chips-side bub-tf" role="group" aria-label="Change over">
+            {(['1h', '24h', '7d'] as Timeframe[]).map((k) => (
+              <button
+                key={k}
+                type="button"
+                className={tf === k ? 'on' : ''}
+                onClick={() => setTf(k)}
+                title={k === '1h' || k === '7d' ? 'From CoinGecko — only available for the tracked Top 16' : undefined}
+              >
+                {k}
+              </button>
+            ))}
+          </div>
+          <label className="bub-search">
+            <MkIco d="M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM21 21l-4.3-4.3" size={15} />
+            <input type="text" placeholder="Search coin…" value={query} onChange={(e) => setQuery(e.currentTarget.value)} aria-label="Search coin" />
+          </label>
+        </div>
+        <div className="bub-legend">
+          <span><i className="lg sog"></i>Gainers</span>
+          <span><i className="lg sor"></i>Losers</span>
+          <span className="bub-hint">
+            Size = {anyCapData ? 'market cap (24h volume where cap is unavailable)' : '24h traded volume'} · colour = {tf} change · drag to move, click to open the chart
+          </span>
+        </div>
+        <div ref={containerRef} className="bub-stage" style={{ position: 'relative', width: '100%', height: 560 }}>
+          <canvas ref={canvasRef} style={{ display: 'block', cursor: 'grab', touchAction: 'none' }} />
+        </div>
       </div>
     </div>
   )
