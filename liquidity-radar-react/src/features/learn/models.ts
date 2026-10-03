@@ -129,11 +129,12 @@ export const MODELS: LearnSection = {
       title: 'Server bot (Binance Futures testnet)',
       summary:
         'A separate program that trades on Binance\'s Futures **testnet** (practice money) around the clock and records every trade and reason to a database.',
-      inApp: 'Self Learning tab → Server bot card (when connected)',
+      inApp: 'Self Learning tab → Binance account panel and Server bot card',
       tags: ['bot', 'binance', 'testnet', 'auto trade', 'walk-forward'],
       body: [
         { p: 'It decides once per closed 4-hour candle for BTC and PAXG, places a market entry with an exchange-side stop and a take-profit, sizes each trade to risk 0.5% of the account, and has daily-loss and drawdown limits plus a kill switch.' },
         { p: '**Walk-forward test**: its model is trained on about two years of 4-hour candles in rolling blocks and tested on the block after each. In **gated** mode it trades only if that test shows an edge (60+ test trades, positive expectancy and profit factor, and recent blocks profitable). In **explore** mode it trades its best signal even without proof, to gather real fills.' },
+        { p: '**Account mirror**: every 15 seconds the bot reads your Binance futures account (wallet balance, unrealized PNL, margin balance, available balance, open positions, open orders and recent fills) and saves it, so the Self Learning tab shows the same figures as the Binance panel.' },
         { warn: 'Your exchange keys live only on the server running the bot, never in the website. It uses testnet by default and refuses the real exchange unless that is explicitly enabled.' },
       ],
     },

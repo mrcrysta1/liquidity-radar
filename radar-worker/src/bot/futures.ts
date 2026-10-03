@@ -246,6 +246,16 @@ export class Futures {
     await this.request('DELETE', '/fapi/v1/algoOpenOrders', { symbol }).catch(() => {})
   }
 
+  /** Whole account, as the Binance panel shows it (balances and positions). */
+  async account(): Promise<unknown> {
+    return this.request('GET', '/fapi/v2/account')
+  }
+
+  /** Every open regular order (limits, take-profits), all symbols. */
+  async openOrders(): Promise<unknown> {
+    return this.request('GET', '/fapi/v1/openOrders')
+  }
+
   async openAlgo(symbol: string): Promise<Array<{ algoId: number; orderType: string; triggerPrice: string; clientAlgoId: string }>> {
     const r = (await this.request('GET', '/fapi/v1/openAlgoOrders', { symbol })) as unknown
     return Array.isArray(r) ? (r as never) : ((r as { orders?: never[] })?.orders ?? [])

@@ -23,6 +23,7 @@ import {
 import type { SLEventKind, SLModel, SLTrade } from '../../features/selflearn/engine'
 import { useSL } from '../../features/selflearn/useSL'
 import { SERVER_BOT, loadBot } from '../../features/selflearn/serverBot'
+import { BinanceAccount } from './BinanceAccount'
 import type { BotEvent, BotTrade } from '../../features/selflearn/serverBot'
 import { useTick } from '../useTick'
 import { Guard } from '../ErrorBoundary'
@@ -484,6 +485,7 @@ export function LearningLab() {
   return (
     <div className="nn-page lab-page">
       <Guard name="Lab header"><LabHead /></Guard>
+      <Guard name="Binance account"><BinanceAccount /></Guard>
       <Guard name="Models"><Models /></Guard>
       <div className="lab-row">
         <Guard name="Performance"><Performance /></Guard>

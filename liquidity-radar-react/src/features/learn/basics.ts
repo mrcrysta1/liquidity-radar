@@ -165,6 +165,7 @@ export const WHATS_NEW: Array<{ date: string; items: string[] }> = [
   {
     date: '2026-10-03',
     items: [
+      'Self Learning tab: live mirror of the Binance Demo account (balance, PNL, positions, orders, fills), as the bot sees it.',
       'AI assistant can now open coins, tabs and Learning guides ("open SOL", "take me to signals"), teaches with links to the guide, and remembers the conversation.',
       'Learning library in Settings, with a downloadable PDF.',
       'Signals: win rate now graded on real stop/target outcomes; each indicator learns its own weight.',
