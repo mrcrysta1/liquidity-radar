@@ -467,7 +467,7 @@ export function Shell() {
       </section>
 
       <section className="tab-section" id="tab-settings">
-        <DashHead zone="analytics" name="Settings" sub="Every data source this app uses, what it is for, and whether it is answering" />
+        <DashHead zone="analytics" name="Settings" sub="Learn how every tool and model works, check data sources, and change the look" />
         <Guard name="Settings"><WhenTab tab="settings" preload={loadSettings}><Suspense fallback={null}><SettingsPage /></Suspense></WhenTab></Guard>
       </section>
 
