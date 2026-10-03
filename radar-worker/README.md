@@ -153,9 +153,20 @@ the database doesn't know about are closed.
 
 **Setup**
 1. Run `sql/002_bot.sql` in Supabase.
-2. Put your testnet keys in `.env`.
-3. `npm run bot`. On a VM, add a second systemd service like the collector's,
-   with `ExecStart=… src/bot.ts`.
+2. Put your testnet keys in `.env` (Binance → Demo Trading → API Management).
+3. Choose the mode: `BOT_MODE=gated` (default, trades only a proven model) or
+   `BOT_MODE=explore` (trades its best idea anyway, to gather real testnet fills).
+4. `npm run bot` on your PC, or on a VM run the one-shot installer, which sets up
+   **both** services (collector and bot) under systemd:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mrcrysta1/liquidity-radar/master/radar-worker/scripts/setup-vm.sh | bash
+# first run creates radar-worker/.env and stops: fill it in, then run it again
+journalctl -u radar-bot -f      # watch decisions and trades
+```
+
+The website's Self Learning tab shows the bot's trades and decisions (it reads
+the same Supabase tables) once `VITE_WHALE_DB_URL` / `VITE_WHALE_DB_KEY` are set.
 
 ## Development
 
