@@ -216,6 +216,40 @@ export interface BtStats {
   avgBars: number
 }
 
+export interface EdgeCheck {
+  proven: boolean
+  /** Trades the verdict rests on: unseen-test trades plus live paper trades. */
+  n: number
+  avgR: number
+  /** How far above zero avgR has to be before it is unlikely to be luck. */
+  bar: number
+}
+
+/**
+ * Has a model shown an edge beyond chance? Its unseen-test trades and its live
+ * paper trades are pooled, and the average R must clear a one-sided 95% bound
+ * (1.645 standard errors). Test trades are summarised (n, win rate, avg R), so
+ * their spread is estimated from the bracket: a win pays about tp/sl R and a
+ * loss costs about 1R. It used "15 test trades with avg R above zero", which a
+ * coin-flip model passes about half the time, and ignored the live record.
+ */
+export function edgeProven(
+  holdout: { n: number; winRate: number; avgR: number },
+  liveR: number[],
+  st: Strat,
+): EdgeCheck {
+  const spread = st.tpM / st.slM + 1
+  const hVar = Math.max(1e-9, holdout.winRate * (1 - holdout.winRate)) * spread * spread
+  const nL = liveR.length
+  const lMean = nL ? liveR.reduce((a, b) => a + b, 0) / nL : 0
+  const lVar = nL > 1 ? liveR.reduce((a, r) => a + (r - lMean) ** 2, 0) / (nL - 1) : hVar
+  const n = holdout.n + nL
+  if (n < 15) return { proven: false, n, avgR: n ? (holdout.avgR * holdout.n + lMean * nL) / n : 0, bar: Infinity }
+  const avgR = (holdout.avgR * holdout.n + lMean * nL) / n
+  const bar = 1.645 * Math.sqrt((hVar * holdout.n + lVar * nL) / n / n)
+  return { proven: avgR > bar, n, avgR, bar }
+}
+
 export function stats(trades: Array<{ r: number; side: Side; bars?: number }>, riskPct = 1): BtStats {
   const n = trades.length
   const wins = trades.filter((t) => t.r > 0).length

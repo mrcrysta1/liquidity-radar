@@ -1299,6 +1299,20 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
     Math.abs((f60.rows[0].pred - cl.at(-1)) * 4 - (f15.rows[0].pred - cl.at(-1))) < 1e-9)
 }
 
+// ---- self-learning: "edge proven" needs more than luck ------------------------------
+{
+  const { edgeProven, STRATS } = await import(src('features/selflearn/strategy.ts'))
+  const st = STRATS.scalp
+  ok('proven: fewer than 15 trades is never proven', !edgeProven({ n: 10, winRate: 0.6, avgR: 0.5 }, [], st).proven)
+  ok('proven: 15 test trades at +0.1R (the old rule passed this) is not proven',
+    !edgeProven({ n: 15, winRate: 0.45, avgR: 0.1 }, [], st).proven)
+  ok('proven: 60 test trades at +0.5R is proven', edgeProven({ n: 60, winRate: 0.5, avgR: 0.5 }, [], st).proven)
+  const strong = { n: 40, winRate: 0.5, avgR: 0.45 }
+  ok('proven: a borderline test record passes on its own', edgeProven(strong, [], st).proven)
+  ok('proven: live losses can take it away', !edgeProven(strong, Array(30).fill(-1.05), st).proven)
+  ok('proven: live wins can earn it', edgeProven({ n: 15, winRate: 0.45, avgR: 0.1 }, Array(30).fill(2.2), st).proven)
+}
+
 // ---- direction models: is holdout accuracy an edge? ---------------------------------
 {
   const { majorityBaseline, provenEdge } = await import(src('features/ml/edge.ts'))
