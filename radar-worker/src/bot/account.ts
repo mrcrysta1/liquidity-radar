@@ -121,3 +121,33 @@ export function ordersFromBinance(regular: unknown, algo: unknown): AccountOrder
     })
   return out
 }
+
+/** The exchange calls readAccount needs (the bot's Futures client provides them). */
+export interface AccountSource {
+  base: string
+  account(): Promise<unknown>
+  openOrders(): Promise<unknown>
+  openAlgo(symbol: string): Promise<unknown[]>
+  fills(symbol: string, startTime: number): Promise<Array<{ time: number; side: 'BUY' | 'SELL'; price: number; qty: number; realizedPnl: number; commission: number }>>
+}
+
+/**
+ * Read the whole account the way the Binance panel shows it. `fills` (last 7
+ * days) costs more requests, so callers pass the previous list to reuse it.
+ */
+export async function readAccount(ex: AccountSource, symbols: string[], now: number, prevFills?: AccountFill[]): Promise<AccountSnapshot> {
+  const acc = accountFromBinance(await ex.account(), now, ex.base)
+  const syms = [...new Set([...symbols, ...acc.positions.map((p) => p.symbol)])]
+  const algo = (await Promise.all(syms.map((s) => ex.openAlgo(s).then((r) => (r as object[]).map((o) => ({ ...o, symbol: s }))).catch(() => [])))).flat()
+  const orders = ordersFromBinance(await ex.openOrders(), algo)
+  let fills = prevFills
+  if (!fills) {
+    const since = now - 7 * 86_400_000
+    const all = (await Promise.all(syms.map((s) => ex.fills(s, since).then((f) => f.map((x) => ({ ...x, symbol: s }))).catch(() => [])))).flat()
+    fills = all
+      .sort((a, b) => b.time - a.time)
+      .slice(0, 50)
+      .map((f) => ({ symbol: f.symbol, time: f.time, side: f.side, price: f.price, qty: f.qty, realizedPnl: f.realizedPnl, commission: f.commission }))
+  }
+  return { ...acc, orders, fills }
+}
