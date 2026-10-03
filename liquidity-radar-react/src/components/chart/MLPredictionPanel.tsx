@@ -11,6 +11,7 @@ import {
   onOverlayTogglesChange,
   setShowMLPrediction,
 } from '../../features/charts/overlayToggles'
+import { provenEdge } from '../../features/ml/edge'
 
 export function MLPredictionPanel() {
   const [ml, setMl] = useState(getMLState())
@@ -28,15 +29,20 @@ export function MLPredictionPanel() {
   if (!show) return null
 
   const acc = ml.trained ? ml.trained.backtestAccuracy : null
-  const accColor = acc == null ? 'var(--muted)' : acc >= 0.58 ? 'var(--green)' : acc >= 0.52 ? 'var(--amber,#ffc107)' : 'var(--red)'
+  // Judged against always guessing the holdout's common direction, and only
+  // the lead chance would not explain counts (ml/edge.ts).
+  const base = ml.trained ? ml.trained.baselineAccuracy : 0.5
+  const edge = acc == null || !ml.trained ? null : provenEdge(acc, base, ml.trained.backtestN)
+  const accColor = edge == null ? 'var(--muted)' : edge > 0.05 ? 'var(--green)' : edge > 0 ? 'var(--amber,#ffc107)' : 'var(--red)'
+  const basePct = (base * 100).toFixed(0) + '%'
   const trustNote =
-    acc == null
+    edge == null
       ? ''
-      : acc >= 0.58
-        ? 'Reads meaningfully better than chance on its own recent history.'
-        : acc >= 0.52
-          ? 'Only a slight edge over chance — treat as a weak lean, not a signal.'
-          : 'No real edge over chance on this symbol/timeframe right now.'
+      : edge > 0.05
+        ? 'Beats always guessing (' + basePct + ') by more than chance on its own recent history.'
+        : edge > 0
+          ? 'Only a slight edge over always guessing (' + basePct + ') — a weak lean, not a signal.'
+          : 'No real edge: always guessing the common direction scores ' + basePct + ' here.'
 
   return (
     <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 12px', marginBottom: 10 }}>

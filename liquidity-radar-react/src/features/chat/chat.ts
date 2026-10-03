@@ -31,6 +31,7 @@ import { fetchFromXoomar } from '../analysis/calendar'
 import { fngColor } from '../snapshots'
 import { getMLState } from '../ml/store'
 import type { AIScore, CandleLike, Forecast } from '../../types/market'
+import { neuralVerdict } from '../signals/neuralSignal'
 
 // Same alias the sibling feature modules use for values that cross the
 // untyped engine boundary.
@@ -146,8 +147,7 @@ function coinBrief(base: string, d: CtxData): string {
       s += '<br><b>Neural forecast:</b> P(up) ' + chip(Math.round(nr.pUp * 100) + '%')
         + ' · holdout accuracy ' + chip((nr.accuracy * 100).toFixed(1) + '%') + ' over ' + nr.n + ' bars'
         + (sig.neuralAdj ? ' · moved the score by ' + chip((sig.neuralAdj > 0 ? '+' : '') + sig.neuralAdj)
-           : nr.accuracy <= 0.52 ? ' · <span style="color:var(--dim)">no edge over a coin flip, so it was not counted</span>'
-           : ' · <span style="color:var(--dim)">reads this bar as a toss-up</span>')
+           : ' · <span style="color:var(--dim)">' + neuralVerdict(nr) + '</span>')
     } else {
       s += '<br><span style="color:var(--dim)">The neural model has not trained on this market yet — it trains one market every couple of minutes while the Signals tab is open.</span>'
     }

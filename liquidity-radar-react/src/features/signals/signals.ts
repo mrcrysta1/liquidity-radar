@@ -5,7 +5,7 @@
 // signalData is exported as a live binding so the engine's AI chat can keep
 // reading the latest scan results without a copy.
 import * as LightweightCharts from 'lightweight-charts'
-import { getNeuralRead, neuralAdjustment, setNeuralAllowed, trainOneNeural } from './neuralSignal'
+import { getNeuralRead, neuralAdjustment, neuralVerdict, setNeuralAllowed, trainOneNeural } from './neuralSignal'
 import { instrumentOf, isInstrument } from '../../constants/instruments'
 import { yahooCandles } from '../../services/yahoo'
 import { COINS } from '../../constants/market'
@@ -504,9 +504,7 @@ function renderSignals(): void {
         + ' · holdout accuracy ' + (nr.accuracy * 100).toFixed(1) + '% over ' + nr.n + ' bars'
         + (s.neuralAdj
             ? ' · <b class="' + (s.neuralAdj > 0 ? 'up' : 'dn') + '">' + (s.neuralAdj > 0 ? '+' : '') + s.neuralAdj + '</b> to score'
-            : nr.accuracy <= 0.52
-              ? ' · <i>no edge over a coin flip, not counted</i>'
-              : ' · <i>reads this bar as a toss-up, nothing to add</i>')
+            : ' · <i>' + neuralVerdict(nr) + '</i>')
         + '</div>'
       : ''
     const cv = s.conv
