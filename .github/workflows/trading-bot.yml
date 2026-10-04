@@ -1,7 +1,12 @@
 # The testnet trading bot, run by GitHub Actions — free for this public repo,
-# no server or PC needed. Every 15 minutes it runs one tick (radar-worker,
-# BOT_ONCE=1): it mirrors the Binance Demo account for the website, manages any
-# open trade, and decides once on each newly closed 4-hour candle.
+# no server or PC needed. It runs NON-STOP: each run keeps the bot going for
+# 5 h 40 min (a GitHub job may last 6 h), then starts the next run itself, so
+# the bot is always connected. GitHub's own cron is unreliable for short jobs
+# (runs came ~3 h apart instead of every 15 min); here it is only an hourly
+# safety net that restarts the chain if it ever breaks.
+#
+# The bot ticks every 15 s: mirrors the Binance Demo account for the website,
+# manages any open trade, and decides once on each newly closed 4-hour candle.
 #
 # GitHub's runners are in the US, where Binance's main API is blocked; the
 # futures testnet host and the public market-data mirror are reachable, and the
@@ -9,26 +14,52 @@
 #
 # Secrets (Settings → Secrets and variables → Actions):
 #   DATABASE_URL, BINANCE_API_KEY, BINANCE_API_SECRET
-# Stop it: Actions → Trading bot → "…" → Disable workflow.
+# Stop it: Actions → Trading bot → "…" → Disable workflow, then cancel the
+# running run.
 name: Trading bot (testnet)
 
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '17 * * * *'
   workflow_dispatch:
-
-# Never two ticks at once: they would both act on the same account.
-concurrency:
-  group: trading-bot
-  cancel-in-progress: false
+    inputs:
+      chained:
+        description: Started by the previous run (skips the "already running?" check)
+        default: 'false'
 
 permissions:
   contents: read
+  actions: write
 
 jobs:
-  tick:
+  # Safety-net runs only: do nothing if a bot run is already going or queued.
+  check:
+    if: ${{ inputs.chained != 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 3
+    outputs:
+      busy: ${{ steps.c.outputs.busy }}
+    steps:
+      - id: c
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          n=$(gh run list -R "$GITHUB_REPOSITORY" --workflow trading-bot.yml --limit 20 \
+            --json databaseId,status \
+            -q '[.[] | select(.status != "completed") | select(.databaseId != ${{ github.run_id }})] | length')
+          echo "other active runs: $n"
+          if [ "$n" -gt 0 ]; then echo busy=true >> "$GITHUB_OUTPUT"; else echo busy=false >> "$GITHUB_OUTPUT"; fi
+
+  bot:
+    needs: check
+    if: ${{ always() && (inputs.chained == 'true' || needs.check.outputs.busy == 'false') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    # Never two bots at once: they would both act on the same account. A run
+    # started early waits here until the previous one has handed over.
+    concurrency:
+      group: trading-bot
+      cancel-in-progress: false
     defaults:
       run:
         working-directory: radar-worker
@@ -40,13 +71,27 @@ jobs:
           cache: npm
           cache-dependency-path: radar-worker/package-lock.json
       - run: npm ci --omit=dev
-      - name: Bot tick
+      - run: echo "BOT_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+      - name: Run the bot (5 h 40 min)
         run: node src/bot.ts
         env:
-          BOT_ONCE: '1'
+          BOT_RUN_MINUTES: '340'
           BOT_MODE: explore
           BOT_SYMBOLS: BTCUSDT,XAUUSDT
+          BOT_MIN_MARGIN: '100'
           FUTURES_BASE: https://testnet.binancefuture.com
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
           BINANCE_API_SECRET: ${{ secrets.BINANCE_API_SECRET }}
+      # Hand over, even if the bot step failed — but not if someone cancelled the
+      # run, and not after a crash on startup (that would just loop; the hourly
+      # safety net retries instead).
+      - name: Start the next run
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ran=$(( $(date +%s) - BOT_STARTED ))
+          echo "bot ran ${ran}s"
+          if [ "$ran" -lt 600 ]; then echo "too short, not chaining; the hourly run will retry"; exit 0; fi
+          gh workflow run trading-bot.yml -R "$GITHUB_REPOSITORY" --ref master -f chained=true

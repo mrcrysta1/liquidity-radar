@@ -157,7 +157,9 @@ the database doesn't know about are closed.
 3. Choose the mode: `BOT_MODE=gated` (default, trades only a proven model) or
    `BOT_MODE=explore` (trades its best idea anyway, to gather real testnet fills).
 4. **Free, no server:** the repo's GitHub Actions workflow `.github/workflows/trading-bot.yml`
-   runs one tick every 15 minutes (`BOT_ONCE=1`). Add the secrets `DATABASE_URL`,
+   runs the bot non-stop: each run lasts 5 h 40 min (`BOT_RUN_MINUTES=340`, a GitHub job may
+   last 6 h) and then starts the next run itself; an hourly cron only restarts the chain if it
+   breaks (GitHub's cron alone ran a 15-minute schedule ~3 h apart). Add the secrets `DATABASE_URL`,
    `BINANCE_API_KEY`, `BINANCE_API_SECRET` under Settings → Secrets → Actions. GitHub's
    runners are in the US, so it uses `https://testnet.binancefuture.com` (reachable from
    the US; the same Demo account). Or run `npm run bot` on your PC, or on a VM run the one-shot installer, which sets up

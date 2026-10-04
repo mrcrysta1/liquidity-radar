@@ -61,6 +61,19 @@ test('size risks the configured fraction, capped by notional', () => {
   assert.match(tooSmall.reason!, /minimum/)
 })
 
+test('every trade uses at least the minimum margin ($100), within twice the normal risk', () => {
+  // 5,000 USDT account, BTC at 80,000, a 10% stop: risk sizing alone gives
+  // 0.003 BTC ($240 notional, $80 margin at 3x) — under the $100 floor.
+  const wide = size(5_000, 80_000, 8_000, btc, DEFAULT_RISK)
+  assert.equal(wide.qty, '0.004') // $320 notional → $106.67 margin
+  assert.ok((Number(wide.qty) * 80_000) / DEFAULT_RISK.leverage >= 100)
+  assert.ok(wide.riskUsd <= 5_000 * DEFAULT_RISK.riskPerTrade * 2)
+  // A normal stop already sizes far above the floor and is left alone.
+  assert.equal(size(5_000, 80_000, 1_800, btc, DEFAULT_RISK).qty, '0.013')
+  // Turning the floor off restores pure risk sizing.
+  assert.equal(size(5_000, 80_000, 8_000, btc, { ...DEFAULT_RISK, minMarginUsd: 0 }).qty, '0.003')
+})
+
 test('daily loss halts until the next UTC day; drawdown halts for good', () => {
   const day1 = Date.UTC(2026, 0, 1, 12)
   let { state, canEnter } = checkLimits({ day: '', dayStartEquity: 0, peakEquity: 0, halted: false, haltReason: '' }, 10_000, day1, DEFAULT_RISK)

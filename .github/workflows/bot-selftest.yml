@@ -17,9 +17,10 @@ on:
         description: How long to keep the test trade open (10-600)
         default: '120'
 
-# Shares the bot's queue, so a scheduled bot run never sees (and closes) the test trade.
+# Its own queue: the bot runs non-stop, so the test instead sets a lock
+# (bot_state 'selftest:SYMBOL') that makes the bot leave that market alone.
 concurrency:
-  group: trading-bot
+  group: bot-selftest
   cancel-in-progress: false
 
 permissions:

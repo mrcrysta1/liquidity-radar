@@ -30,6 +30,12 @@ const num = (v: string | undefined, d: number) => (v !== undefined && v !== '' &
 const ONCE = env.BOT_ONCE === '1'
 const SYMBOLS = (env.BOT_SYMBOLS || 'BTCUSDT,XAUUSDT').split(',').map((s) => s.trim().toUpperCase()).filter(Boolean)
 const TICK_MS = num(env.BOT_TICK_MS, 15_000)
+// BOT_RUN_MINUTES: run continuously for this long, then exit cleanly so a
+// hosted runner (GitHub Actions, 6 h per job) can hand over to the next run.
+// Those regular handovers are not news, so they log to the console only.
+const RUN_MS = num(env.BOT_RUN_MINUTES, 0) * 60_000
+const DEADLINE = RUN_MS > 0 ? Date.now() + RUN_MS : Infinity
+const HANDOFF = RUN_MS > 0
 const cfg: TraderConfig = {
   ...DEFAULT_TRADER,
   mode: env.BOT_MODE === 'explore' ? 'explore' : 'gated',
@@ -37,6 +43,7 @@ const cfg: TraderConfig = {
     riskPerTrade: num(env.RISK_PER_TRADE, DEFAULT_TRADER.risk.riskPerTrade),
     maxNotionalX: num(env.MAX_NOTIONAL_X, DEFAULT_TRADER.risk.maxNotionalX),
     leverage: num(env.LEVERAGE, DEFAULT_TRADER.risk.leverage),
+    minMarginUsd: num(env.BOT_MIN_MARGIN, DEFAULT_TRADER.risk.minMarginUsd ?? 100),
     maxDailyLoss: num(env.MAX_DAILY_LOSS, DEFAULT_TRADER.risk.maxDailyLoss),
     maxDrawdown: num(env.MAX_DRAWDOWN, DEFAULT_TRADER.risk.maxDrawdown),
   },
@@ -56,7 +63,8 @@ for (let attempt = 1; ; attempt++) {
     await new Promise((r) => setTimeout(r, wait * 1000))
   }
 }
-if (!ONCE) await store.event('info', null, `bot starting on ${ex.base} (${ex.isTestnet ? 'TESTNET' : 'MAINNET'}) · mode ${cfg.mode} · ${SYMBOLS.join(', ')} · ${cfg.interval} bars · risk ${(cfg.risk.riskPerTrade * 100).toFixed(2)}%/trade`)
+if (HANDOFF) console.log(new Date().toISOString(), `bot run started · until ${new Date(DEADLINE).toISOString()}`)
+else if (!ONCE) await store.event('info', null, `bot starting on ${ex.base} (${ex.isTestnet ? 'TESTNET' : 'MAINNET'}) · mode ${cfg.mode} · ${SYMBOLS.join(', ')} · ${cfg.interval} bars · risk ${(cfg.risk.riskPerTrade * 100).toFixed(2)}%/trade`)
 
 const traders: SymbolTrader[] = []
 for (const s of SYMBOLS) {
@@ -118,18 +126,24 @@ async function tick(): Promise<void> {
 }
 
 async function loop(): Promise<void> {
-  while (!stopping) {
+  while (!stopping && Date.now() < DEADLINE) {
     const t0 = Date.now()
     await tick().catch((e) => console.error('tick', e))
     await new Promise((r) => setTimeout(r, Math.max(1000, TICK_MS - (Date.now() - t0))))
   }
+  if (stopping) return
+  // Run time used up: hand over. Positions keep their exchange-side stop and
+  // target, and every bit of state is in the database for the next run.
+  console.log(new Date().toISOString(), 'run time over, handing over to the next run')
+  await db.end().catch(() => {})
+  process.exit(0)
 }
 
 async function shutdown(): Promise<void> {
   if (stopping) return
   stopping = true
   // Open positions keep their exchange-side stop and target; nothing to unwind.
-  await store.event('info', null, 'bot stopping (positions keep their exchange-side stop/target)')
+  if (!HANDOFF) await store.event('info', null, 'bot stopping (positions keep their exchange-side stop/target)')
   await db.end().catch(() => {})
   process.exit(0)
 }
