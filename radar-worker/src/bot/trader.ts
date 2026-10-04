@@ -57,6 +57,21 @@ export const DEFAULT_TRADER: TraderConfig = {
   maxLateMs: 3 * 60 * 60_000,
 }
 
+/**
+ * Settings that depend on the candle size (BOT_INTERVAL). 5-minute bars: about
+ * a month of history, retrain every 6 h, act within 2 min of a close (the bot
+ * ticks every 15 s), and a smaller notional cap — on 5m bars the stop is so
+ * tight that risk sizing alone would reach the cap on every trade, and fees
+ * (~0.14% round trip) are charged on the notional.
+ */
+export const INTERVAL_DEFAULTS: Record<string, Partial<TraderConfig>> = {
+  '5m': { historyBars: 8_640, retrainMs: 6 * 3_600_000, maxLateMs: 2 * 60_000 },
+  '15m': { historyBars: 8_640, retrainMs: 12 * 3_600_000, maxLateMs: 5 * 60_000 },
+  '1h': { historyBars: 8_760, retrainMs: 24 * 3_600_000, maxLateMs: 20 * 60_000 },
+  '4h': {},
+}
+export const INTERVAL_MAX_NOTIONAL_X: Record<string, number> = { '5m': 1, '15m': 1 }
+
 const vwap = (f: Fill[]) => {
   const q = f.reduce((a, x) => a + x.qty, 0)
   return q ? f.reduce((a, x) => a + x.price * x.qty, 0) / q : 0

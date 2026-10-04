@@ -34,7 +34,7 @@ async function get(path: string, hosts = HOSTS): Promise<unknown[][]> {
   throw err
 }
 
-export const INTERVAL_MS: Record<string, number> = { '15m': 900_000, '1h': 3_600_000, '4h': 14_400_000 }
+export const INTERVAL_MS: Record<string, number> = { '5m': 300_000, '15m': 900_000, '1h': 3_600_000, '4h': 14_400_000 }
 
 /**
  * Closed bars only, oldest first, going back `count` bars from now. The bar
