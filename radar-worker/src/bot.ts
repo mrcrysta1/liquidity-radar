@@ -13,7 +13,8 @@ import { checkLimits } from './bot/risk.ts'
 import { readAccount } from './bot/account.ts'
 import type { AccountFill } from './bot/account.ts'
 import { BotStore } from './bot/store.ts'
-import { DEFAULT_TRADER, SymbolTrader } from './bot/trader.ts'
+import { DEFAULT_TRADER, INTERVAL_DEFAULTS, INTERVAL_MAX_NOTIONAL_X, SymbolTrader } from './bot/trader.ts'
+import { INTERVAL_MS } from './bot/data.ts'
 import type { TraderConfig } from './bot/trader.ts'
 
 if (existsSync('.env')) process.loadEnvFile('.env')
@@ -36,12 +37,21 @@ const TICK_MS = num(env.BOT_TICK_MS, 15_000)
 const RUN_MS = num(env.BOT_RUN_MINUTES, 0) * 60_000
 const DEADLINE = RUN_MS > 0 ? Date.now() + RUN_MS : Infinity
 const HANDOFF = RUN_MS > 0
+// BOT_INTERVAL: candle size the bot decides on (5m, 15m, 1h, 4h; default 4h).
+const INTERVAL = INTERVAL_MS[env.BOT_INTERVAL || ''] ? (env.BOT_INTERVAL as string) : DEFAULT_TRADER.interval
+// BOT_MIN_EV: the expected-value bar (R, after fees) a side must clear. "any"
+// = trade the better side on every closed candle, whatever its EV (testing).
+// (A finite number, not -Infinity: the model's settings are stored as JSON.)
+const MIN_EV = env.BOT_MIN_EV === 'any' ? -1e9 : num(env.BOT_MIN_EV, DEFAULT_TRADER.wf.minEvR)
 const cfg: TraderConfig = {
   ...DEFAULT_TRADER,
+  ...INTERVAL_DEFAULTS[INTERVAL],
+  interval: INTERVAL,
+  wf: { ...DEFAULT_TRADER.wf, minEvR: MIN_EV },
   mode: env.BOT_MODE === 'explore' ? 'explore' : 'gated',
   risk: {
     riskPerTrade: num(env.RISK_PER_TRADE, DEFAULT_TRADER.risk.riskPerTrade),
-    maxNotionalX: num(env.MAX_NOTIONAL_X, DEFAULT_TRADER.risk.maxNotionalX),
+    maxNotionalX: num(env.MAX_NOTIONAL_X, INTERVAL_MAX_NOTIONAL_X[INTERVAL] ?? DEFAULT_TRADER.risk.maxNotionalX),
     leverage: num(env.LEVERAGE, DEFAULT_TRADER.risk.leverage),
     minMarginUsd: num(env.BOT_MIN_MARGIN, DEFAULT_TRADER.risk.minMarginUsd ?? 100),
     maxDailyLoss: num(env.MAX_DAILY_LOSS, DEFAULT_TRADER.risk.maxDailyLoss),

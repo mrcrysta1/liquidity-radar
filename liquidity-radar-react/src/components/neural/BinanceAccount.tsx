@@ -149,7 +149,7 @@ export function BinanceAccount({ children }: { children?: ReactNode }) {
                 </tbody>
               </table>
             </div>
-          ) : <p className="nn-empty">No fills in the last 7 days. The bot decides at each 4-hour candle close.</p>}
+          ) : <p className="nn-empty">No fills in the last 7 days. The bot decides at each candle close.</p>}
           {children}
           <p className="nn-note">Read from Binance by the bot with your API keys, which never reach this website. Practice money on the Demo account.</p>
         </>

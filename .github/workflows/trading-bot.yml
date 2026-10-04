@@ -6,7 +6,9 @@
 # safety net that restarts the chain if it ever breaks.
 #
 # The bot ticks every 15 s: mirrors the Binance Demo account for the website,
-# manages any open trade, and decides once on each newly closed 4-hour candle.
+# manages any open trade, and decides on each newly closed 5-minute candle
+# (BOT_INTERVAL). BOT_MIN_EV=any: it takes the better side on every candle
+# while flat — a testing setting; fees make 5m trading lose on average.
 #
 # GitHub's runners are in the US, where Binance's main API is blocked; the
 # futures testnet host and the public market-data mirror are reachable, and the
@@ -78,6 +80,8 @@ jobs:
           BOT_RUN_MINUTES: '340'
           BOT_MODE: explore
           BOT_SYMBOLS: BTCUSDT,XAUUSDT
+          BOT_INTERVAL: 5m
+          BOT_MIN_EV: any
           BOT_MIN_MARGIN: '100'
           FUTURES_BASE: https://testnet.binancefuture.com
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
