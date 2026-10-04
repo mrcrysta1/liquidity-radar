@@ -49,7 +49,7 @@ export interface TraderConfig {
 export const DEFAULT_TRADER: TraderConfig = {
   interval: '4h',
   mode: 'gated',
-  risk: { riskPerTrade: 0.005, maxNotionalX: 2, leverage: 3, maxDailyLoss: 0.03, maxDrawdown: 0.15 },
+  risk: { riskPerTrade: 0.005, maxNotionalX: 2, leverage: 3, minMarginUsd: 100, maxDailyLoss: 0.03, maxDrawdown: 0.15 },
   wf: DEFAULT_WF,
   historyBars: 4380, // ~2 years of 4h bars
   retrainMs: 24 * 3_600_000,
@@ -134,6 +134,9 @@ export class SymbolTrader {
     const open = await this.store.openTrade(this.symbol)
     const pos = await this.ex.position(this.symbol)
     if (open) return this.manage(open, pos, now)
+    // The self-test (src/selftest.ts) is holding a test trade on this market:
+    // that position is not ours to flatten, and nothing new opens beside it.
+    if ((await this.store.getState<number>('selftest:' + this.symbol, 0)) > now) return
     if (pos.amt !== 0) {
       // Not ours (or a record was lost): flatten rather than leave unmanaged risk.
       await this.store.event('error', this.symbol, `unrecorded position ${pos.amt} — closing it`)

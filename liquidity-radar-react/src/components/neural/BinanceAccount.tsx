@@ -46,7 +46,8 @@ export function BinanceAccount({ children }: { children?: ReactNode }) {
   if (!SERVER_BOT) return null
   const a = d?.account
   const hb = d?.heartbeat
-  // The bot runs every 15 minutes (GitHub Actions); allow for a late run.
+  // The bot runs non-stop (GitHub Actions) and checks in every 15 s; a run
+  // hand-over takes a minute or two, so allow plenty of slack.
   const live = !!hb && now - hb.t < 25 * 60_000
   const venue = a?.venue || hb?.venue || ''
   const demo = venue.includes('demo') || venue.includes('testnet')
@@ -77,7 +78,7 @@ export function BinanceAccount({ children }: { children?: ReactNode }) {
         </p>
       ) : (
         <>
-          {!live && <p className="bx-warn">The bot has not checked in for {ago(hb ? hb.t : a.t, now).replace(' ago', '')}, so these figures may differ from Binance now. It normally runs every 15 minutes.</p>}
+          {!live && <p className="bx-warn">The bot has not checked in for {ago(hb ? hb.t : a.t, now).replace(' ago', '')}, so these figures may differ from Binance now. It normally runs non-stop and checks in every 15 seconds.</p>}
           <div className="bx-tiles">
             <div><small>Wallet balance</small><b>{usd(a.walletBalance)}</b></div>
             <div><small>Unrealized PNL</small><b className={a.unrealizedPnl > 0 ? 'up' : a.unrealizedPnl < 0 ? 'dn' : ''}>{signed(a.unrealizedPnl)}</b></div>

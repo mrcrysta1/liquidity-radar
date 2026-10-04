@@ -8,6 +8,12 @@ export interface RiskConfig {
   /** Cap on position notional as a multiple of equity. */
   maxNotionalX: number
   leverage: number
+  /**
+   * Smallest margin (USDT) a trade may use: a wide stop that would size below
+   * it is raised to it, so the risk taken is then above riskPerTrade, but at
+   * most double it. The notional cap still wins. 0 = off.
+   */
+  minMarginUsd?: number
   /** Halt new entries for the rest of the UTC day after losing this fraction. */
   maxDailyLoss: number
   /** Halt until manually reset after equity falls this far below its peak. */
@@ -18,6 +24,7 @@ export const DEFAULT_RISK: RiskConfig = {
   riskPerTrade: 0.005,
   maxNotionalX: 2,
   leverage: 3,
+  minMarginUsd: 100,
   maxDailyLoss: 0.03,
   maxDrawdown: 0.15,
 }
@@ -34,7 +41,11 @@ export function size(equity: number, entry: number, slDist: number, rules: Symbo
   if (!(equity > 0) || !(entry > 0) || !(slDist > 0)) return { qty: '0', notional: 0, riskUsd: 0, reason: 'bad inputs' }
   const byRisk = (equity * r.riskPerTrade) / slDist
   const byNotional = (equity * Math.min(r.maxNotionalX, r.leverage)) / entry
-  const raw = Math.min(byRisk, byNotional)
+  // Margin floor, rounded UP to a whole step so it really reaches the minimum,
+  // but never allowed to more than double the risk the stop implies.
+  const byMargin = Math.ceil(((r.minMarginUsd ?? 0) * r.leverage) / entry / rules.stepSize - 1e-9) * rules.stepSize
+  const floor = Math.min(byMargin, (equity * r.riskPerTrade * 2) / slDist)
+  const raw = Math.min(Math.max(byRisk, floor), byNotional)
   const qty = roundStep(raw, rules.stepSize, rules.quantityPrecision)
   const q = Number(qty)
   if (q < rules.minQty) return { qty: '0', notional: 0, riskUsd: 0, reason: `size ${raw.toPrecision(3)} under the minimum quantity ${rules.minQty}` }

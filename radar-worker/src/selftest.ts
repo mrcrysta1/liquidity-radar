@@ -50,6 +50,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 let opened = false
 try {
   await ex.syncTime()
+  // Tell the always-on bot to leave this market alone until the test is over.
+  await store.setState('selftest:' + SYMBOL, Date.now() + HOLD_MS + 5 * 60_000)
   const rules = await ex.rules(SYMBOL)
   await ex.setup(SYMBOL, 3)
   const before = await ex.position(SYMBOL)
@@ -118,6 +120,7 @@ try {
       check('clean-up', false, (e as Error).message + ' — check the Binance panel and close manually')
     }
   }
+  await store.setState('selftest:' + SYMBOL, 0).catch(() => {})
   const failed = checks.filter((c) => !c[1]).length
   console.log(`\nself-test ${failed ? 'FAILED' : 'PASSED'}: ${checks.length - failed}/${checks.length} checks`)
   await db.end().catch(() => {})
