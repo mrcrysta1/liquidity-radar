@@ -309,9 +309,12 @@ function Dialog({ close }: { close: () => void }) {
   )
 }
 
-export function AccountMenu() {
+export function AccountMenu({ autoOpen = false }: { autoOpen?: boolean }) {
   const a = useAuth()
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(autoOpen)
+  useEffect(() => {
+    if (autoOpen) setOpen(true)
+  }, [autoOpen])
   // A password-reset link opens the dialog on its own.
   const show = open || a.recovery
   const u = a.user
