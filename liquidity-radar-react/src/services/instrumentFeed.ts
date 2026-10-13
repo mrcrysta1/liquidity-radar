@@ -13,13 +13,20 @@ import { state } from './store'
 import { INSTRUMENT_HOT_LIST, binancePerpOf, isInstrument } from '../constants/instruments'
 import { yahooQuote } from './yahoo'
 import { perp24h } from './perpData'
+import { refreshSpotBasis, spotBasis } from './spotGold'
 
-/** Gold comes from Binance futures (no rate-limit worry), the rest from Yahoo. */
+/**
+ * Gold comes from Binance futures (no rate-limit worry), shifted onto the spot
+ * price (services/spotGold); the rest from Yahoo.
+ */
 async function quote(sym: string): Promise<{ last: number; pct: number; qvol: number; high?: number; low?: number } | null> {
   const perp = binancePerpOf(sym)
   if (perp) {
-    const q = await perp24h(perp)
-    if (q) return q
+    const [q] = await Promise.all([perp24h(perp), refreshSpotBasis(perp)])
+    if (q) {
+      const b = spotBasis(perp)
+      return { ...q, last: q.last + b, high: q.high + b, low: q.low + b }
+    }
   }
   const y = await yahooQuote(sym)
   return y ? { last: y.last, pct: y.pct, qvol: y.vol ?? 0, high: y.high, low: y.low } : null
