@@ -129,7 +129,7 @@ function ProfileCard() {
     ['Birthday', p?.birthday ? p.birthday.replace(/^-/, '') : null],
     ['Gender', p?.gender ?? null],
     ['Address', p?.addresses?.map((x) => [x.formatted, x.city, x.country].filter(Boolean).join(', ')).filter(Boolean).join(' · ') || null],
-    ['Work', p?.organizations?.map((o) => [o.title, o.name].filter(Boolean).join(' at ')).join(' · ') || null],
+    ['Work', p?.organizations?.map((o) => [o.title, o.name].filter(Boolean).join(' at ')).filter(Boolean).join(' · ') || null],
   ]
   return (
     <div className="acct-prof">
@@ -281,3 +281,79 @@ function Dialog({ close }: { close: () => void }) {
     return () => document.removeEventListener('keydown', onKey)
   }, [close])
   const title = a.recovery ? 'Reset password' : a.status === 'user' ? 'Your account' : 'Welcome to Liquidity Radar'
+  return createPortal(
+    <div className="acct-overlay" role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.target === e.currentTarget && close()}>
+      <div className="acct-card">
+        <header>
+          <h2>{title}</h2>
+          <button type="button" className="acct-x" aria-label="Close" onClick={close}>✕</button>
+        </header>
+        {a.status === 'off' ? (
+          <div className="acct-body">
+            <p className="acct-note">
+              Sign-in is not switched on for this site yet. The owner needs to add the Supabase project URL and
+              public key (<code>VITE_SUPABASE_URL</code>, <code>VITE_SUPABASE_ANON_KEY</code>) to the deployment.
+              Until then everything still works, saved in this browser.
+            </p>
+          </div>
+        ) : a.status === 'loading' ? (
+          <div className="acct-body"><p className="acct-note">Checking your session…</p></div>
+        ) : a.recovery ? (
+          <NewPassword />
+        ) : a.status === 'user' ? (
+          <SignedIn close={close} />
+        ) : (
+          <SignInForm />
+        )}
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+const INVITED = 'lr-auth-invited'
+const INVITE_DELAY = 3000
+
+export function AccountMenu() {
+  const a = useAuth()
+  const [open, setOpen] = useState(false)
+  // Invite a guest to sign in shortly after load, at most once per session.
+  useEffect(() => {
+    if (a.status !== 'guest') return
+    try {
+      if (sessionStorage.getItem(INVITED)) return
+    } catch {
+      return
+    }
+    const t = setTimeout(() => {
+      try {
+        sessionStorage.setItem(INVITED, '1')
+      } catch {
+        /* storage blocked: the popup may show again next load */
+      }
+      warmAuth()
+      setOpen(true)
+    }, INVITE_DELAY)
+    return () => clearTimeout(t)
+  }, [a.status])
+  // A password-reset link opens the dialog on its own.
+  const show = open || a.recovery
+  const u = a.user
+  return (
+    <>
+      <button
+        type="button"
+        className={'theme-btn icon-btn acct-trigger' + (u ? ' on' : '')}
+        title={u ? u.name + ' · account' : 'Sign in'}
+        aria-label={u ? 'Account: ' + u.name : 'Sign in'}
+        onClick={() => {
+          warmAuth()
+          setOpen(true)
+        }}
+      >
+        {u ? <Avatar src={u.avatar} name={u.name} size={26} /> : <UserIcon />}
+      </button>
+      {show && <Dialog close={() => setOpen(false)} />}
+    </>
+  )
+}
