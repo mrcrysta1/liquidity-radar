@@ -8,7 +8,7 @@ import { COINS, HOT_LIST } from '../../constants/market'
 import { instrumentOf } from '../../constants/instruments'
 import { latestNews } from '../news/newsFeed'
 import { marketBySymbol, resolveMarket } from '../../services/symbolIndex'
-import { yahooCandles } from '../../services/yahoo'
+import { loadCandleWindow } from '../../services/marketData'
 import type { CandleFlat } from '../../services/market'
 import { LlmUnavailable, askLlm, chatHistory, findLearnTopic, learnTitle, loadLearnIndex, rememberTurn, renderMarkdown, resetChatHistory } from './llm'
 import { actionLabel, hideTagsWhileStreaming, isCommand, localCommand, parseActions } from './actions'
@@ -74,7 +74,8 @@ async function loadCtx(base: string): Promise<CtxData> {
   const market = marketBySymbol(base)
   let candles: CandleFlat[]
   if (market && market.kind === 'instrument') {
-    candles = await yahooCandles(market.sym, '15m', 120)
+    // Same source as the chart: gold at its spot price, the rest from Yahoo.
+    candles = await loadCandleWindow(market.sym, '15m', 120)
   } else {
     const sym = market ? market.sym : COINS[base] ? COINS[base].sym : base + 'USDT'
     const data: Array<Array<number | string>> = await fetchKlineRows(sym, '15m', 120)
