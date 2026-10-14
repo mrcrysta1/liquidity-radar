@@ -46,12 +46,13 @@ function openAccountDialog(): boolean {
 
 function invite(): void {
   if (getAuth().status !== 'guest') return
-  markSeen()
   warmAuth()
-  if (!openAccountDialog()) {
-    // The top bar is not there (yet): try again shortly.
-    setTimeout(() => void openAccountDialog(), POLL_MS)
-  }
+  if (openAccountDialog()) return markSeen()
+  // The top bar is not there (yet): try again shortly. Only a dialog that
+  // actually opened counts as seen.
+  setTimeout(() => {
+    if (getAuth().status === 'guest' && openAccountDialog()) markSeen()
+  }, POLL_MS)
 }
 
 /**
