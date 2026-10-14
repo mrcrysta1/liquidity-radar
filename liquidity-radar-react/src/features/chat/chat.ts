@@ -2,8 +2,9 @@
 // chat stack: ctx loader/cache, chip/coinBrief/IND_EXPLAIN helpers, the
 // generateReply rule engine (including the inherited quirk where the
 // conversation/economics section only runs when the prompt mentions
-// pump/moon/mooning), and the chat DOM send/append wiring. The engine only
-// imports pushMsg for the welcome message.
+// pump/moon/mooning), and the chat DOM send/append wiring. pushMsg itself lives
+// in ./log (re-exported here) so the engine's welcome line does not pull this
+// module into the first-load bundle.
 import { COINS, HOT_LIST } from '../../constants/market'
 import { instrumentOf } from '../../constants/instruments'
 import { latestNews } from '../news/newsFeed'
@@ -34,6 +35,7 @@ import { fngColor } from '../snapshots'
 import { getMLState } from '../ml/store'
 import type { AIScore, CandleLike, Forecast } from '../../types/market'
 import { neuralVerdict } from '../signals/neuralSignal'
+import { pushMsg } from './log'
 
 // Same alias the sibling feature modules use for values that cross the
 // untyped engine boundary.
@@ -847,18 +849,7 @@ export async function generateReply(raw: string): Promise<string> {
 // exists without the lookups silently resolving to null.
 const el = <T extends HTMLElement>(id: string): T | null => $(id) as T | null
 
-export function pushMsg(html: string, who: string): HTMLElement {
-  const div = document.createElement('div')
-  div.className = 'msg ' + who
-  if (who === 'user') div.textContent = html
-  else div.innerHTML = html
-  const log = el('chatLog')
-  if (log) {
-    log.appendChild(div)
-    log.scrollTop = log.scrollHeight
-  }
-  return div
-}
+export { pushMsg }
 
 let chatBusy = false
 /** The no-model note is shown once per session, not under every answer. */

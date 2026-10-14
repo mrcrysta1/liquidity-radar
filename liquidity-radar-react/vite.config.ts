@@ -59,7 +59,34 @@ function preloadFonts(): Plugin {
   }
 }
 
+/**
+ * Vendor code in its own long-lived chunks. Library bytes rarely change, so a
+ * deploy that only touches app code no longer invalidates React or the chart
+ * library in the browser cache. TensorFlow.js (loaded on demand by the ML
+ * features, never on the first screen) is split per package so no single
+ * chunk crosses the 500 KB warning. Order matters: the first matching group
+ * wins, so tfjs-core is claimed before the packages that depend on it.
+ */
+const nm = (pkgs: string) => new RegExp(`[\\\\/]node_modules[\\\\/](?:${pkgs})[\\\\/]`)
+const vendorGroups = [
+  { name: 'vendor-react', test: nm('react|react-dom|scheduler'), priority: 30 },
+  { name: 'vendor-charts', test: nm('lightweight-charts|fancy-canvas'), priority: 30 },
+  { name: 'vendor-supabase', test: nm('@supabase|iceberg-js'), priority: 30 },
+  { name: 'tfjs-core', test: nm('@tensorflow[\\\\/]tfjs-core'), priority: 25 },
+  { name: 'tfjs-backend-webgl', test: nm('@tensorflow[\\\\/]tfjs-backend-webgl'), priority: 20 },
+  { name: 'tfjs-backend-cpu', test: nm('@tensorflow[\\\\/]tfjs-backend-cpu'), priority: 20 },
+  { name: 'tfjs-layers', test: nm('@tensorflow[\\\\/]tfjs-layers'), priority: 20 },
+  { name: 'tfjs', test: nm('@tensorflow|long|seedrandom'), priority: 10 },
+]
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), preloadEngine(), preloadFonts()],
+  build: {
+    rolldownOptions: {
+      output: {
+        codeSplitting: { groups: vendorGroups },
+      },
+    },
+  },
 })

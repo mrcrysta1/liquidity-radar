@@ -66,7 +66,7 @@ import {
 import { switchTab, setSymbol, wireUserActions, getActiveTab, subscribeActiveTab } from '../features/actions/userActions'
 import { analyzeSigCoin, onSigSearch, startAutoScan, switchSigMode, setSigFilter } from '../features/signals'
 import { renderMemeUniverse } from '../features/bubbles'
-import { pushMsg } from '../features/chat'
+import { pushMsg } from '../features/chat/log' // not ../features/chat: keeps the assistant out of the boot bundle
 import { renderFG, renderTopCoins, renderFutures, renderWhales } from '../features/snapshots'
 import { startConfluence } from '../features/analysis/confluence'
 import { startDivergenceWatch } from '../features/analysis/oiDivergence'
