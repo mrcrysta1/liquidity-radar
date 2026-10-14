@@ -7,7 +7,7 @@
 import * as LightweightCharts from 'lightweight-charts'
 import { getNeuralRead, neuralAdjustment, neuralVerdict, setNeuralAllowed, trainOneNeural } from './neuralSignal'
 import { instrumentOf, isInstrument } from '../../constants/instruments'
-import { yahooCandles } from '../../services/yahoo'
+import { loadCandleWindow } from '../../services/marketData'
 import { COINS } from '../../constants/market'
 import { esc, pfmt, cfmt, chgHtml } from '../../utils/format'
 import { aiComposite, calcATR, forecastFrom } from '../../utils/indicators'
@@ -223,7 +223,9 @@ function scanKlineFetch(sym: string, tfKey: string): Promise<Any[]> {
     return Promise.resolve(scanCache[key].candles)
   }
   if (isInstrument(sym)) {
-    return yahooCandles(sym, tfKey, 60).then(function (candles) {
+    // marketData knows where each instrument is priced: gold is Binance's
+    // perpetual shifted onto spot (the chart's price), the rest Yahoo.
+    return loadCandleWindow(sym, tfKey, 60).then(function (candles) {
       if (candles.length) scanCache[key] = { ts: Date.now(), candles: candles }
       return candles as Any[]
     })
@@ -339,7 +341,7 @@ export function scanSignals(): void {
       // One market's worth of deep history, fetched only for whichever
       // market is actually being trained this sweep.
       const loadDeep = function (sym: string): Promise<Any[]> {
-        if (isInstrument(sym)) return yahooCandles(sym, '1h', 400) as Promise<Any[]>
+        if (isInstrument(sym)) return loadCandleWindow(sym, '1h', 400) as Promise<Any[]>
         return fetchKlineRows(sym, '1h', 400)
           .then(function (data: Any) {
             return data.map((k: Any) => ({ t: k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5] })).filter(mdVal.candle)

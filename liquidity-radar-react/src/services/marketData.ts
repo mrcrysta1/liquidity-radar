@@ -6,6 +6,7 @@
 // (the same pattern as userActions), so the engine stays pure orchestration.
 import { binancePerpOf, isInstrument } from '../constants/instruments'
 import { perpKlines } from './perpData'
+import { refreshSpotBasis, spotBasis } from './spotGold'
 import { yahooCandles } from './yahoo'
 import { jget } from '../api/client'
 import { cooldownLeft } from '../api/rateLimit'
@@ -103,12 +104,21 @@ async function fetchBase(
   // from. Yahoo has no endTime paging, so a history request past the first
   // page simply ends; the chart stops at the loaded range instead of looping.
   if (isInstrument(sym)) {
-    // Gold: Binance's gold perpetual (live spot-gold price, pages back like
-    // any Binance pair); Yahoo only if Binance futures cannot be reached.
+    // Gold: Binance's gold perpetual (pages back like any Binance pair),
+    // shifted onto the spot price (services/spotGold); Yahoo only if Binance
+    // futures cannot be reached.
     const perp = binancePerpOf(sym)
     if (perp) {
       try {
-        const rows = await perpKlines(perp, base, need, before)
+        const [rows] = await Promise.all([perpKlines(perp, base, need, before), refreshSpotBasis(perp)])
+        const b = spotBasis(perp)
+        if (b)
+          for (const r of rows) {
+            r.o += b
+            r.h += b
+            r.l += b
+            r.c += b
+          }
         if (rows.length || before) return { rows, source: null }
       } catch {
         if (before) return { rows: [], source: null }
