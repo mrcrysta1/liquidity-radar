@@ -44,6 +44,7 @@ import { Guard } from './ErrorBoundary'
 import { HomeDashboard, HomeHero } from './HomeDashboard'
 import { RadarHero, RadarLower, RadarMetrics, RadarSide } from './radar/RadarViews'
 import { ChartIntel, QuickTools, WorkspaceHead } from './charts/ChartsViews'
+import { MultiChartGrid } from './chart/MultiChartGrid'
 import { SignalsBoard, SignalsHead } from './signals/SignalsViews'
 import { AccountMenu } from './auth/AccountMenu'
 import { initAuth } from '../features/auth/session'
@@ -286,7 +287,7 @@ export function Shell() {
         </div>
         <div className="card ws-card">
           <Guard name="Workspace header"><WorkspaceHead /></Guard>
-          <div className="multi-chart-grid" id="mcGrid"></div>
+          <Guard name="Chart workspace"><MultiChartGrid /></Guard>
         </div>
         <Guard name="Quick tools"><QuickTools /></Guard>
       </section>
