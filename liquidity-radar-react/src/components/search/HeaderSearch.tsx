@@ -1,11 +1,16 @@
-// A search button in the header that opens the coin search in a dropdown.
+// A search button in the header that opens the market search in a dropdown.
 // The reference design has a full-width search row; the app keeps its one-row
 // header and offers the same search behind this button instead. Opens with the
 // cursor in the box, closes on a pick, Escape or a click outside. The "/" key
 // opens it too (features/keyboard dispatches lr:open-search).
+//
+// The search itself is the shared CoinMenu (components/chart/CoinPicker), so
+// it finds and shows markets exactly as every other picker does.
 import { useEffect, useRef, useState } from 'react'
 import { SearchIcon } from '../icons'
-import { CoinSearchWidget } from './CoinSearchWidget'
+import { CoinMenu } from '../chart/CoinPicker'
+import { setSymbol } from '../../features/actions/userActions'
+import { state } from '../../services/store'
 
 export const OPEN_SEARCH_EVENT = 'lr:open-search'
 
@@ -34,16 +39,25 @@ export function HeaderSearch() {
         type="button"
         className="theme-btn icon-btn"
         id="searchBtn"
-        title="Search coins (/)"
-        aria-label="Search coins"
+        title="Search markets (/)"
+        aria-label="Search markets"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
       >
         <SearchIcon size={17} />
       </button>
       {open && (
-        <div className="hsearch-pop" role="dialog" aria-label="Search coins">
-          <CoinSearchWidget autoFocus onDone={() => setOpen(false)} />
+        <div className="hsearch-pop" role="dialog" aria-label="Search markets">
+          <CoinMenu
+            inputId="coinSearch"
+            className="cp-inline"
+            value={state.symbol}
+            onPick={(sym) => {
+              setOpen(false)
+              void setSymbol(sym)
+            }}
+            onClose={() => setOpen(false)}
+          />
         </div>
       )}
     </div>

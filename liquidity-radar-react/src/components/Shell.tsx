@@ -310,9 +310,14 @@ export function Shell() {
         </div>
       
         <div id="sigSearchView" style={{ 'display': 'none' }}>
-          <div className="sig-search-wrap" style={{ 'position': 'relative' }}>
-            <span className="sig-search-icon">SEARCH</span>
-            <input className="sig-search-box" id="sigSearchBox" type="text" placeholder="Search any coin... e.g. BTC, ETH, SOL, PEPE" onInput={(e) => { w.onSigSearch(e.currentTarget.value) }} onKeyDown={(e) => { if(e.key==='Enter')w.analyzeSigCoin(e.currentTarget.value) }} />
+          <div className="sig-search-wrap">
+            <CoinPicker
+              tabs={['signals']}
+              label="Analyze market"
+              className="sig-picker"
+              onPick={(sym) => w.analyzeSigCoin(sym)}
+              trigger={<span className="cp-id"><b>Search any market to analyze…</b><small>Coins, gold, forex, indices, stocks</small></span>}
+            />
           </div>
           <div id="sigAnalysisResult"></div>
         </div>

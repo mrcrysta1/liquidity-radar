@@ -18,6 +18,7 @@ import { baseOf } from '../../utils/coins'
 import { $ } from '../../utils/dom'
 import { jget } from '../../api/client'
 import { fetchKlineRows } from '../../services/failover'
+import { resolveMarketText } from '../markets/catalog'
 import { poll } from '../../services/pollScheduler'
 import { state } from '../../services/store'
 import { md, mdTf, mdVal } from '../../services/market'
@@ -552,7 +553,7 @@ export function switchSigMode(mode: string): void {
   document.querySelectorAll<HTMLElement>('.sig-mode-tab').forEach((t) => { t.classList.toggle('active', t.dataset.sigmode === mode) })
   $('sigAutoView')!.style.display = mode === 'auto' ? '' : 'none'
   $('sigSearchView')!.style.display = mode === 'search' ? '' : 'none'
-  if (mode === 'search') $('sigSearchBox')!.focus()
+  if (mode === 'search') document.querySelector<HTMLElement>('#sigSearchView .cp-trigger')?.focus()
 }
 
 export function onSigSearch(val: string): void {
@@ -560,20 +561,8 @@ export function onSigSearch(val: string): void {
   sigSearchTimer = setTimeout(() => analyzeSigCoin(val), 400)
 }
 
-function resolveSigSym(input: string): string | null {
-  const s = input.trim().toUpperCase()
-  if (!s) return null
-  if (s.endsWith('USDT')) return s
-  const aliases: Record<string, string> = {
-    BTC: 'BTCUSDT', ETH: 'ETHUSDT', SOL: 'SOLUSDT', BNB: 'BNBUSDT', XRP: 'XRPUSDT', DOGE: 'DOGEUSDT', ADA: 'ADAUSDT',
-    AVAX: 'AVAXUSDT', DOT: 'DOTUSDT', LINK: 'LINKUSDT', UNI: 'UNIUSDT', TRUMP: 'TRUMPUSDT', PEPE: 'PEPEUSDT', WIF: 'WIFUSDT',
-    FLOKI: 'FLOKIUSDT', SHIB: 'SHIBUSDT', BONK: 'BONKUSDT', SUI: 'SUIUSDT', ARB: 'ARBUSDT', OP: 'OPUSDT', NEAR: 'NEARUSDT',
-    MATIC: 'MATICUSDT', ATOM: 'ATOMUSDT', LTC: 'LTCUSDT', FIL: 'FILUSDT', APT: 'APTUSDT', NEIRO: 'NEIROUSDT', TREMP: 'TREMPUSDT',
-  }
-  if (aliases[s]) return aliases[s]
-  if (typeof COINS !== 'undefined') { const found = Object.keys(COINS).find((k) => k === s); if (found) return COINS[found]!.sym }
-  return s + 'USDT'
-}
+/** Free text ("gold", "eth", "PEPEUSDT") to a symbol, through the shared market catalog. */
+const resolveSigSym = (input: string): string | null => resolveMarketText(input)
 
 export function analyzeSigCoin(input: string): void {
   const sym = resolveSigSym(input)
@@ -583,7 +572,12 @@ export function analyzeSigCoin(input: string): void {
   const tfs = ['1h', '4h', '1d']
   const tfLabels = ['1H', '4H', '1D']
   const tfPromises: Promise<Any>[] = tfs.map(function (tf) {
-    return fetchKlineRows(sym, tf, 120).then(function (data: Any) {
+    // Gold, FX and the other instruments are not exchange pairs; their candles
+    // come through marketData, which knows where each one is priced.
+    const rows: Promise<Any> = isInstrument(sym)
+      ? loadCandleWindow(sym, tf, 120).then((cs) => cs.map((c) => [c.t, c.o, c.h, c.l, c.c, c.v]))
+      : fetchKlineRows(sym, tf, 120)
+    return rows.then(function (data: Any) {
       const candles = closedOnly<Any>(
         data.map((k: Any) => ({ t: k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5] })),
         tf,

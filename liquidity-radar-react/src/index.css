@@ -3944,11 +3944,10 @@ td .sk,b .sk{display:inline-block;vertical-align:middle}
 .mc-id{display:flex;align-items:center;gap:8px;min-width:0}
 .mc-id .tk-ico{width:28px;height:28px;margin:0;font-size:13px;flex-shrink:0}
 .mc-id>span{display:flex;flex-direction:column;min-width:0}
-.mc-sym{
-  background:none;border:none;color:var(--txt);font-weight:800;font-size:13px;padding:0;cursor:pointer;outline:none;
-  font-family:'Inter',sans-serif;max-width:120px;
-}
-.mc-sym option{background:var(--card);color:var(--txt)}
+/* The panel's coin picker (components/chart/CoinPicker): the cell already shows the icon. */
+.mc-sym{display:flex;min-width:0}
+.mc-sym .cp-ico{display:none}
+.mc-sym .cp-trigger{padding:2px 8px}
 .mc-px{display:flex;gap:6px;font-family:var(--mono);font-size:11.5px}
 .mc-px b{color:var(--txt);font-weight:700}
 .mc-px i{font-style:normal;font-weight:700}
@@ -3975,11 +3974,9 @@ td .sk,b .sk{display:inline-block;vertical-align:middle}
 }
 .mc-add b{font-size:17px;color:var(--cyan)}
 .mc-add small{font-size:11.5px;max-width:220px}
-.mc-add-sym{
-  margin-top:4px;padding:7px 10px;border-radius:9px;border:1px solid rgb(var(--cRGB)/.5);background:var(--sunk-2);
-  color:var(--cyan);font-size:12px;cursor:pointer;width:min(220px,100%)
-}
-.mc-add-sym option{background:var(--card);color:var(--txt)}
+.mc-add-sym{display:flex;margin-top:4px;width:min(220px,100%)}
+.mc-add-sym .cp-trigger{width:100%;justify-content:space-between;padding:7px 10px;border-color:rgb(var(--cRGB)/.5)}
+.mc-add-sym .cp-id b{font-size:12px;color:var(--cyan)}
 
 /* quick tools */
 .qt{margin-top:14px;padding:12px 14px;border-radius:16px}
@@ -5414,3 +5411,25 @@ html[data-palette="glass"] .acct-card{background:linear-gradient(145deg,rgba(255
 .bx h4 i{font-style:normal;font-weight:600;color:var(--dim);margin-left:6px}
 .bx-table td small{display:block;font-size:var(--text-xs);color:var(--dim)}
 @media(max-width:760px){.bx-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}.bx-head{flex-wrap:wrap}.bx-open{margin-left:0}}
+
+/* ---- Shared coin picker: every placement --------------------------------
+   components/chart/CoinPicker is the one market search/select in the app. */
+.cp-tag{flex-shrink:0;padding:1px 6px;border-radius:6px;font-size:var(--text-xs);font-weight:700;color:var(--muted);background:var(--sunk-2);border:1px solid var(--hair-2)}
+.cp-menu.cp-float{position:fixed;z-index:1250}
+.cp-menu.cp-inline{position:static;width:auto;border:none;border-radius:0;box-shadow:none;background:transparent;animation:none;overflow:visible}
+.cp-menu.cp-inline .cp-search-wrap{margin:0 0 8px}
+.cp-menu.cp-inline .cp-list{padding:0}
+.coin-picker.compact .cp-trigger{min-width:0;gap:7px;padding:3px 9px 3px 4px}
+.coin-picker.compact .cp-ico{width:22px;height:22px;font-size:11px}
+.rc-sym{display:flex;min-width:0}
+.rc-sym .cp-trigger{padding:2px 8px 2px 3px}
+.an-sym-picker .cp-trigger{min-width:250px;padding:6px 12px 6px 6px;border-radius:12px}
+.an-sym-picker .cp-ico{width:32px;height:32px}
+.sig-picker,.sig-picker .cp-trigger{width:100%}
+.sig-picker .cp-trigger{padding:10px 14px;border-radius:11px}
+.sig-picker .cp-id b{font-family:inherit;font-weight:600;color:var(--dim)}
+.al-sym{flex:1 1 140px}
+.al-sym .cp-trigger{width:100%;padding:6px 10px 6px 5px}
+.lab-btf .lab-fld{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted)}
+.lab-btf .lab-fld .cp-trigger{width:100%;padding:5px 9px 5px 4px}
+@media(max-width:640px){.an-sym-picker{flex:1}.an-sym-picker .cp-trigger{min-width:0;width:100%}}
