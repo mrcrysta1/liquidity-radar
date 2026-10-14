@@ -81,6 +81,16 @@ export function switchTab(tab: string): void {
  * Make `sym` the app's coin. By default this also brings up the Radar tab;
  * `keepTab` leaves the user where they are (e.g. picking a chart in a layout).
  */
+const symbolListeners: Array<() => void> = []
+/** Called whenever the charted coin changes. */
+export function subscribeSymbol(fn: () => void): () => void {
+  symbolListeners.push(fn)
+  return () => {
+    const i = symbolListeners.indexOf(fn)
+    if (i !== -1) symbolListeners.splice(i, 1)
+  }
+}
+
 export async function setSymbol(sym: string, opts: { keepTab?: boolean } = {}): Promise<void> {
   if (!sym) return
   if (state.symbol === sym) {
@@ -88,6 +98,7 @@ export async function setSymbol(sym: string, opts: { keepTab?: boolean } = {}): 
     return
   }
   state.symbol = sym
+  symbolListeners.slice().forEach((fn) => fn())
   Object.keys(state.ctxCache).forEach((k) => delete state.ctxCache[k])
   state._liq = null
   state._sr = null

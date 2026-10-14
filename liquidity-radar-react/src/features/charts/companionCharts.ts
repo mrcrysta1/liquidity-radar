@@ -45,7 +45,7 @@ import { getChartStyle, manualRangeFor, setChartStyle, styleDef, subscribeChartS
 import type { ChartStyleId } from './chartStyle'
 import { mainIndicatorStore, serializeIndicators } from './indicators/store'
 import { state } from '../../services/store'
-import { setSymbol } from '../actions/userActions'
+import { setSymbol, subscribeSymbol } from '../actions/userActions'
 import { createIndicatorRenderer } from './indicators/render'
 import type { IndicatorRenderer } from './indicators/render'
 import { panelIndicatorStore } from './indicators/panelStore'
@@ -231,10 +231,7 @@ export function applyLayout(): void {
     // reload (or another device) comes back to the same charts.
     subscribeTimeframe(persistSoon)
     subscribeChartStyle(persistSoon)
-    window.addEventListener('pagehide', persist)
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'hidden') persist()
-    })
+    subscribeSymbol(persistSoon)
   }
   applyGrid()
   // Panel headers changed: the indicator buttons re-mount into them.
