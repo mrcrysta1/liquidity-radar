@@ -1,6 +1,6 @@
 // Mount the shared CoinPicker into a plain DOM element, for the chart panels
-// that are still built as HTML strings (features/charts multiCharts and
-// companionCharts). Their cells clip overflow, so the menu floats.
+// that are still built as HTML strings (features/charts/companionCharts).
+// Their cells clip overflow, so the menu floats.
 import { createRoot } from 'react-dom/client'
 import type { Root } from 'react-dom/client'
 import { CoinPicker } from './CoinPicker'
