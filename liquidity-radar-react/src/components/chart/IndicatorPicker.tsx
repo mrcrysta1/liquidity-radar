@@ -5,7 +5,7 @@
 // It works against one chart's store: the main chart's by default, or a
 // multi-chart panel's (variant 'panel': a small header button whose menu
 // floats over the page, since panel cells clip their contents).
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import {
@@ -20,7 +20,9 @@ import type { IndicatorInstance, IndicatorStore } from '../../features/charts/in
 import { PINE_TYPE, pineStatus, subscribePine } from '../../features/charts/pine/indicator'
 import type { PineInput } from '../../features/charts/pine/runtime'
 import { editPineInstance } from '../../features/charts/pine/draft'
-import { PinePanel } from './PinePanel'
+// The Pine editor and its example scripts load on first open of the Pine tab,
+// not with the first screen.
+const PinePanel = lazy(() => import('./PinePanel').then((m) => ({ default: m.PinePanel })))
 
 /** One Pine input, in the same settings grid as a built-in's params. */
 function PineInputField({
@@ -241,7 +243,11 @@ export function IndicatorPicker({
         )}
       </div>
 
-      {tab === 'pine' && <PinePanel store={store} />}
+      {tab === 'pine' && (
+        <Suspense fallback={null}>
+          <PinePanel store={store} />
+        </Suspense>
+      )}
       {tab === 'catalog' && (
         <div className="ind-cols">
           <div className="ind-active">

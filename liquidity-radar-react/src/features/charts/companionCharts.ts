@@ -30,6 +30,7 @@ import { getTimeframe } from './timeframes'
 import { createIndicatorRenderer } from './indicators/render'
 import type { IndicatorRenderer } from './indicators/render'
 import { panelIndicatorStore } from './indicators/panelStore'
+import { mountCoinPicker, unmountCoinPickers } from '../../components/chart/mountCoinPicker'
 
 type Any = any
 
@@ -201,11 +202,7 @@ function addPanel(i: number): void {
     '<span class="rc-ind" data-ind-slot="' +
     p.slot +
     '"></span>' +
-    '<select class="rc-sym" aria-label="Chart symbol">' +
-    Object.keys(COINS)
-      .map((k) => '<option value="' + COINS[k].sym + '">' + k + '</option>')
-      .join('') +
-    '</select>' +
+    '<span class="rc-sym"></span>' +
     '<select class="rc-tf" aria-label="Chart timeframe">' +
     TIMEFRAMES.map((t) => '<option value="' + t.id + '">' + t.label + '</option>').join('') +
     '</select>' +
@@ -215,15 +212,17 @@ function addPanel(i: number): void {
   p.el = cell
   panels.push(p)
 
-  const symSel = cell.querySelector('.rc-sym') as HTMLSelectElement
   const tfSel = cell.querySelector('.rc-tf') as HTMLSelectElement
-  symSel.value = p.sym
   tfSel.value = p.tf
-  symSel.addEventListener('change', () => {
-    p.sym = symSel.value
-    syncTitle(p)
-    reload(p)
-    persist()
+  // The shared coin picker: any market (loadCandles handles instruments too).
+  mountCoinPicker(cell.querySelector('.rc-sym') as HTMLElement, {
+    value: p.sym,
+    onPick: (sym) => {
+      p.sym = sym
+      syncTitle(p)
+      reload(p)
+      persist()
+    },
   })
   tfSel.addEventListener('change', () => {
     p.tf = tfSel.value
@@ -260,6 +259,7 @@ function destroyPanel(i: number): void {
       /* already gone */
     }
   }
+  if (p.el) unmountCoinPickers(p.el)
   p.el?.remove()
   panels.splice(i, 1)
 }

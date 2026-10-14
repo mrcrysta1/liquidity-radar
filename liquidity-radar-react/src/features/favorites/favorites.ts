@@ -5,6 +5,7 @@
 // Saved like every other setting, so it travels with a signed-in account.
 import { useSyncExternalStore } from 'react'
 import { storageGet, storageSet } from '../../services/storage'
+import { isInstrument } from '../../constants/instruments'
 
 const KEY = 'lr-favCoins'
 const PIN_KEY = 'lr-pinCoin'
@@ -59,7 +60,8 @@ export function setPinned(base: string | null): void {
 }
 /** The pair the Radar opens on: the pinned coin, else BTC. */
 export const defaultSymbol = () => (pinned ? symOf(pinned) : 'BTCUSDT')
-export const symOf = (base: string) => base + 'USDT'
+/** A favourite's pair: instruments (gold: XAUUSD) are their own symbol, coins trade against USDT. */
+export const symOf = (base: string) => (isInstrument(base) ? base : base + 'USDT')
 
 /** Favourites if any (pinned first), else the default watchlist. */
 export const watchList = () => {

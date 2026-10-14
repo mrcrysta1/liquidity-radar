@@ -44,6 +44,7 @@ import { Guard } from './ErrorBoundary'
 import { HomeDashboard, HomeHero } from './HomeDashboard'
 import { RadarHero, RadarLower, RadarMetrics, RadarSide } from './radar/RadarViews'
 import { ChartIntel, QuickTools, WorkspaceHead } from './charts/ChartsViews'
+import { MultiChartGrid } from './chart/MultiChartGrid'
 import { SignalsBoard, SignalsHead } from './signals/SignalsViews'
 import { AccountMenu } from './auth/AccountMenu'
 import { initAuth } from '../features/auth/session'
@@ -286,7 +287,7 @@ export function Shell() {
         </div>
         <div className="card ws-card">
           <Guard name="Workspace header"><WorkspaceHead /></Guard>
-          <div className="multi-chart-grid" id="mcGrid"></div>
+          <Guard name="Chart workspace"><MultiChartGrid /></Guard>
         </div>
         <Guard name="Quick tools"><QuickTools /></Guard>
       </section>
@@ -310,9 +311,14 @@ export function Shell() {
         </div>
       
         <div id="sigSearchView" style={{ 'display': 'none' }}>
-          <div className="sig-search-wrap" style={{ 'position': 'relative' }}>
-            <span className="sig-search-icon">SEARCH</span>
-            <input className="sig-search-box" id="sigSearchBox" type="text" placeholder="Search any coin... e.g. BTC, ETH, SOL, PEPE" onInput={(e) => { w.onSigSearch(e.currentTarget.value) }} onKeyDown={(e) => { if(e.key==='Enter')w.analyzeSigCoin(e.currentTarget.value) }} />
+          <div className="sig-search-wrap">
+            <CoinPicker
+              tabs={['signals']}
+              label="Analyze market"
+              className="sig-picker"
+              onPick={(sym) => w.analyzeSigCoin(sym)}
+              trigger={<span className="cp-id"><b>Search any market to analyze…</b><small>Coins, gold, forex, indices, stocks</small></span>}
+            />
           </div>
           <div id="sigAnalysisResult"></div>
         </div>
