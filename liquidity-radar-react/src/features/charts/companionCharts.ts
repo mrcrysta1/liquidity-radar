@@ -310,8 +310,12 @@ export function activateCell(pos: number): void {
 
   mainIndicatorStore.replace(cellSet)
   if (incoming.style !== getChartStyle()) setChartStyle(incoming.style)
-  if (incoming.tf !== getTimeframe()) setTimeframe(incoming.tf)
-  if (incoming.sym && incoming.sym !== state.symbol) void setSymbol(incoming.sym, { keepTab: true })
+  // Coin and timeframe both changing: one load of the new pair, not a load
+  // of the old coin at the new timeframe first (fast clicking queued those
+  // behind each other and kept the old candles on screen).
+  const symChange = !!incoming.sym && incoming.sym !== state.symbol
+  if (incoming.tf !== getTimeframe()) setTimeframe(incoming.tf, { reload: !symChange })
+  if (symChange) void setSymbol(incoming.sym, { keepTab: true })
   persist()
   emit()
 }
