@@ -21,11 +21,17 @@
 // active cell's set lives in the main chart's store; the two swap with it.
 import * as LightweightCharts from 'lightweight-charts'
 import { isInstrument } from '../../constants/instruments'
-import { COINS } from '../../constants/market'
 import { baseOf, coinMeta } from '../../utils/coins'
 import { pfmt } from '../../utils/format'
 import { $ } from '../../utils/dom'
-import { chartTheme, mapCandle } from './chartRender'
+import {
+  chartTheme,
+  createPriceSeries,
+  priceSeriesData,
+  priceSeriesPoint,
+  themePriceSeries,
+} from './chartRender'
+import { autoRangeSize, buildRangeBars, minSafeRange } from './series/rangeBars'
 import { LAYOUTS, MAX_CHARTS, cells, layoutSpec, rowCount } from './layouts'
 import { loadCandles } from '../../services/marketData'
 import { mdSym, mdTf } from '../../services/market'
@@ -35,7 +41,7 @@ import { TIMEFRAMES, tfDef } from '../../services/timeframe'
 import type { Folder } from '../../services/timeframe'
 import { storageGet, storageSet } from '../../services/storage'
 import { getTimeframe, setTimeframe, subscribeTimeframe } from './timeframes'
-import { getChartStyle, setChartStyle, styleDef, subscribeChartStyle } from './chartStyle'
+import { getChartStyle, manualRangeFor, setChartStyle, styleDef, subscribeChartStyle } from './chartStyle'
 import type { ChartStyleId } from './chartStyle'
 import { mainIndicatorStore, serializeIndicators } from './indicators/store'
 import { state } from '../../services/store'
@@ -63,6 +69,7 @@ interface Panel {
   style: ChartStyleId
   el: HTMLElement | null
   chart: Any
+  /** The price series, built for `style` (see chartRender createPriceSeries). */
   candleSeries: Any
   volSeries: Any
   folder: Folder | null
@@ -74,6 +81,11 @@ interface Panel {
   slot: string
   /** Candles on the chart, kept for the panel's indicators. */
   candles: CandleFlat[]
+  /** Bars on the chart: the candles, or range bars built from them. */
+  shown: CandleFlat[]
+  /** Range-bar size and the closed-candle key it was sized on. */
+  rangeSize: number
+  rangeKey: string
   ind: IndicatorRenderer | null
   indOff: (() => void) | null
   indTimer: ReturnType<typeof setTimeout> | null
@@ -331,6 +343,9 @@ function addPanel(pos: number): void {
     token: 0,
     slot: 'c' + pos,
     candles: [],
+    shown: [],
+    rangeSize: 0,
+    rangeKey: '',
     ind: null,
     indOff: null,
     indTimer: null,
@@ -439,7 +454,13 @@ function initChart(p: Panel): void {
     },
     grid: { vertLines: { color: th.grid }, horzLines: { color: th.grid } },
     rightPriceScale: { borderColor: th.border },
-    timeScale: { borderColor: th.border, timeVisible: true, secondsVisible: false, rightOffset: 4 },
+    // Range bars are spaced by the second (see series/rangeBars), like the main chart.
+    timeScale: {
+      borderColor: th.border,
+      timeVisible: true,
+      secondsVisible: isRangeCell(p),
+      rightOffset: 4,
+    },
     crosshair: {
       mode: 0,
       vertLine: { color: th.pline, labelBackgroundColor: th.pline },
@@ -448,13 +469,9 @@ function initChart(p: Panel): void {
     localization: { priceFormatter: (v: number) => pfmt(v) },
   } as Any)
   p.chart = chart
-  p.candleSeries = chart.addCandlestickSeries({
-    upColor: th.up,
-    downColor: th.dn,
-    borderVisible: false,
-    wickUpColor: th.up,
-    wickDownColor: th.dn,
-  })
+  // The same series the main chart builds for this style, so a cell keeps its
+  // look whether or not it is the active one.
+  p.candleSeries = createPriceSeries(chart, p.style)
   p.volSeries = chart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: 'vol' })
   p.volSeries.priceScale().applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } })
   const store = panelIndicatorStore(p.slot)
@@ -477,6 +494,11 @@ function initChart(p: Panel): void {
     if (!legend || !param.time || !param.seriesData) return
     const d = param.seriesData.get(p.candleSeries)
     if (!d) return
+    if (d.open == null) {
+      // Line, area and baseline carry the close alone.
+      legend.innerHTML = '<span>C ' + pfmt(d.value) + '</span>'
+      return
+    }
     legend.innerHTML =
       '<span style="color:' +
       (d.close >= d.open ? 'var(--green)' : 'var(--red)') +
@@ -521,7 +543,8 @@ function drawIndicators(p: Panel): void {
   p.indAt = Date.now()
   if (!p.ind || !p.chart) return
   try {
-    p.ind.render(p.candles)
+    // Over the bars on screen, so indicators share the price series' times.
+    p.ind.render(p.shown)
   } catch (e) {
     console.warn('companion indicators', e)
   }
@@ -534,16 +557,74 @@ function scheduleIndicators(p: Panel): void {
   p.indTimer = setTimeout(() => drawIndicators(p), wait)
 }
 
+const isRangeCell = (p: Panel): boolean => !!styleDef(p.style).rangeBars
+
+/**
+ * What the panel draws: its candles, or for Range bars the bars built from
+ * them. Sized like the main chart (rangeView): the coin's manual size, else
+ * ATR(14) of the closed candles, never below the safe floor — and keyed on
+ * the closed candles so the size holds still while the live one ticks.
+ */
+function barsFor(p: Panel): CandleFlat[] {
+  const src = p.candles
+  if (!isRangeCell(p) || !src.length) return src
+  const n = src.length
+  const manual = manualRangeFor(p.sym)
+  const key = [p.sym, n, src[0].t, n > 1 ? src[n - 2].t : 0, manual ?? 'a'].join('|')
+  if (key !== p.rangeKey) {
+    p.rangeKey = key
+    p.rangeSize = Math.max(manual ?? autoRangeSize(src), minSafeRange(src))
+  }
+  return buildRangeBars(src, p.rangeSize)
+}
+
+const volBar = (c: CandleFlat): Any => ({
+  time: Math.floor(c.t / 1000),
+  value: c.v,
+  color: c.c >= c.o ? 'rgba(0,230,118,.35)' : 'rgba(255,23,68,.35)',
+})
+
+const sameBar = (a: CandleFlat, b: CandleFlat): boolean =>
+  a.t === b.t && a.o === b.o && a.h === b.h && a.l === b.l && a.c === b.c
+
+/**
+ * A live tick on range bars: it can extend the last bar, close it and open
+ * new ones, or reshape earlier ones. update() only reaches the last bar, so
+ * anything deeper is a setData with the view kept (as chartRender does).
+ */
+function pushRangeBars(p: Panel): void {
+  const next = barsFor(p)
+  const prev = p.shown
+  let k = Math.max(0, prev.length - 64)
+  while (k < prev.length && k < next.length && sameBar(prev[k], next[k])) k++
+  const tailOnly =
+    prev.length > 0 &&
+    next.length >= prev.length &&
+    k >= prev.length - 1 &&
+    (k === prev.length || next[k].t === prev[k].t)
+  if (tailOnly) {
+    for (let i = Math.max(k, prev.length - 1); i < next.length; i++) {
+      p.candleSeries.update(priceSeriesPoint(p.style, next[i]))
+      p.volSeries.update(volBar(next[i]))
+    }
+  } else {
+    const ts = p.chart.timeScale()
+    const keep = ts.getVisibleLogicalRange()
+    p.candleSeries.setData(priceSeriesData(p.style, next))
+    p.volSeries.setData(next.map(volBar))
+    if (keep) ts.setVisibleLogicalRange(keep)
+  }
+  p.shown = next
+}
+
 function draw(p: Panel, candles: CandleFlat[]): void {
   p.candles = candles.slice()
-  p.candleSeries.setData(candles.map(mapCandle))
-  p.volSeries.setData(
-    candles.map((c) => ({
-      time: Math.floor(c.t / 1000),
-      value: c.v,
-      color: c.c >= c.o ? 'rgba(0,230,118,.35)' : 'rgba(255,23,68,.35)',
-    })),
-  )
+  p.shown = barsFor(p)
+  // Baseline is coloured around the first close, as on the main chart.
+  if (p.style === 'baseline' && candles.length)
+    p.candleSeries.applyOptions({ baseValue: { type: 'price', price: candles[0].c } })
+  p.candleSeries.setData(priceSeriesData(p.style, p.shown))
+  p.volSeries.setData(p.shown.map(volBar))
   drawIndicators(p)
   p.chart.timeScale().fitContent()
   const last = candles[candles.length - 1]
@@ -580,13 +661,13 @@ function connect(p: Panel, token: number): void {
         arr.push(c)
         if (arr.length > 1500) arr.shift()
       }
+      if (isRangeCell(p)) pushRangeBars(p)
+      else {
+        p.shown = arr
+        p.candleSeries.update(priceSeriesPoint(p.style, c))
+        p.volSeries.update(volBar(c))
+      }
       scheduleIndicators(p)
-      p.candleSeries.update(mapCandle(c))
-      p.volSeries.update({
-        time: Math.floor(c.t / 1000),
-        value: c.v,
-        color: c.c >= c.o ? 'rgba(0,230,118,.35)' : 'rgba(255,23,68,.35)',
-      })
       const legend = p.el?.querySelector('.rc-legend') as HTMLElement | null
       if (legend)
         legend.innerHTML =
@@ -655,14 +736,7 @@ export function applyCompanionTheme(): void {
       rightPriceScale: { borderColor: th.border },
       timeScale: { borderColor: th.border },
     })
-    p.candleSeries?.applyOptions({
-      upColor: th.up,
-      downColor: th.dn,
-      wickUpColor: th.up,
-      wickDownColor: th.dn,
-      borderUpColor: th.up,
-      borderDownColor: th.dn,
-    })
+    if (p.candleSeries) themePriceSeries(p.candleSeries, p.style)
     p.ind?.refreshColors()
   })
 }
