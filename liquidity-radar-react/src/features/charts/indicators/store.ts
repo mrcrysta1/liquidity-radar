@@ -49,6 +49,7 @@ const KEY = 'lr-chartIndicators'
 /** Per-chart cap. The Pro terminal has none; 50 keeps a full redraw (every
  *  indicator over a few thousand bars, on each data load) comfortably fast. */
 const MAX = 50
+export const MAIN_MAX_INDICATORS = MAX
 
 /** What the chart shows before anyone adds one: nothing. Every user, and
  *  every new account, starts from a clean chart and picks their own. */
@@ -201,6 +202,8 @@ export interface IndicatorStore {
   setSource(uid: string, source: string): void
   resetIndicators(): void
   subscribe(fn: Listener): () => void
+  /** Take over another chart's set (persisted form), e.g. when charts swap. */
+  replace(data: unknown): void
   /** Re-read from storage (the slot's data moved) without writing back. */
   reload(): void
 }
@@ -349,6 +352,10 @@ export function createIndicatorStore(opts: IndicatorStoreOptions): IndicatorStor
         const i = listeners.indexOf(fn)
         if (i !== -1) listeners.splice(i, 1)
       }
+    },
+    replace(data) {
+      items = sanitizeIndicators(data, max, prefix)
+      commit()
     },
     reload() {
       items = read()

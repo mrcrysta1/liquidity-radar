@@ -295,9 +295,12 @@ export function CoinPicker({
   float = false,
   label = 'Symbol',
   className = '',
+  keepTab = false,
 }: {
   /** The selected symbol; defaults to the charted one. */
   value?: string
+  /** Switch the chart without bringing up the Radar tab (the chart toolbar). */
+  keepTab?: boolean
   /** Called with the chosen symbol instead of switching the chart to it. */
   onPick?: (sym: string, base: string) => void
   /** Button content; defaults to the selected market and its price. */
@@ -378,7 +381,7 @@ export function CoinPicker({
   const pick = (sym: string) => {
     setOpen(false)
     if (onPick) onPick(sym, marketRow(sym).ticker)
-    else void setSymbol(sym)
+    else void setSymbol(sym, { keepTab })
   }
 
   const menu = open ? (

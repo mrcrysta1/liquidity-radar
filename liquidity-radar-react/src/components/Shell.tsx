@@ -180,7 +180,7 @@ export function Shell() {
             <div className="sec-title" id="chartTitle">Price Action · 15m Candles</div>
             <div className="chart-toolbar">
               <TimeframePicker />
-              <CoinPicker />
+              <CoinPicker keepTab />
               {/* Filled and kept in sync by the engine; the picker above is its face. */}
               <select id="symSelect" hidden aria-hidden="true" tabIndex={-1}></select>
               <span className="badge b-cyan" id="wsKlineState">WS SYNCING</span>
