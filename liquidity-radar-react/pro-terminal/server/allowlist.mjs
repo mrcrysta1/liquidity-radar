@@ -5,6 +5,7 @@ export const ALLOW = new Set([
   'cryptocurrency.cv', 'news.google.com', 'www.federalreserve.gov', 'www.sec.gov', 'www.cftc.gov', 'feeds.reuters.com', 'www.cnbc.com', 'feeds.content.dowjones.io', 'www.marketwatch.com',
   'www.binance.com', 'announcements.bybit.com', 'www.okx.com',
   'query1.finance.yahoo.com', 'query2.finance.yahoo.com', // Yahoo Finance: metals, energy, FX, indices, equities
+  'forex-data-feed.swissquote.com', // Swissquote public quotes: backup spot gold (services/spotGold)
 ]);
 export async function proxyFetch(target) {
   let u; try { u = new URL(target); } catch { return { status: 400, body: 'bad url', type: 'text/plain' }; }
