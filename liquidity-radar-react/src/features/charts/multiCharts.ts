@@ -29,6 +29,7 @@ import { isInstrument } from '../../constants/instruments'
 import { createIndicatorRenderer } from './indicators/render'
 import type { IndicatorRenderer } from './indicators/render'
 import { panelIndicatorStore, prunePanelSlots, shiftPanelSlots } from './indicators/panelStore'
+import { mountCoinPicker, unmountCoinPickers } from '../../components/chart/mountCoinPicker'
 
 type Any = any
 
@@ -54,18 +55,6 @@ const IND_THROTTLE_MS = 1000
 const slotOf = (p: McPanel) => 'mc' + mcPanels.indexOf(p)
 
 const MC_INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d']
-const MC_COINS = [
-  'BTCUSDT',
-  'ETHUSDT',
-  'SOLUSDT',
-  'DOGEUSDT',
-  'PEPEUSDT',
-  'WIFUSDT',
-  'TRUMPUSDT',
-  'XRPUSDT',
-  'SUIUSDT',
-  'BNBUSDT',
-]
 let mcPanels: McPanel[] = []
 let mcIdCounter = 0
 const MAX_PANELS = 8
@@ -271,9 +260,7 @@ function renderMCGrid(): void {
       '<div class="multi-chart-cell" data-mc-id="' + p.id + '">' +
       '<div class="mc-head">' +
       '<span class="mc-id"><i class="tk-ico" style="border-color:' + meta.color + '66;background:' + meta.color + '1f;color:' + meta.color + '">' + icon + '</i>' +
-      '<span><select class="mc-sym" aria-label="Symbol" onchange="mcChangeSymbol(' + p.id + ',this.value)">' +
-      MC_COINS.concat(MC_COINS.indexOf(p.sym) === -1 ? [p.sym] : []).map((s) => opt(s, p.sym, baseOf(s) + '/USDT')).join('') +
-      '</select><small class="mc-px" id="mcPx' + p.id + '">…</small></span></span>' +
+      '<span><span class="mc-sym" data-mc-sym="' + p.id + '"></span><small class="mc-px" id="mcPx' + p.id + '">…</small></span></span>' +
       '<div class="mc-controls">' +
       '<span class="mc-ind" data-ind-slot="mc' + mcPanels.indexOf(p) + '" data-ind-label="' + baseOf(p.sym).replace(/"/g, '') + '/USDT ' + p.interval + '"></span>' +
       '<select aria-label="Interval" onchange="mcChangeInterval(' + p.id + ',this.value)">' +
@@ -291,11 +278,23 @@ function renderMCGrid(): void {
       '<div class="mc-add">' +
       '<button class="mc-add-btn" onclick="mcAdd(\'BTCUSDT\',\'1h\')" aria-label="Add chart"><svg width="30" height="30" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>' +
       '<b>+ Add Chart</b><small>Add more assets, compare or build a new workspace.</small>' +
-      '<select class="mc-add-sym" aria-label="Choose symbol" onchange="if(this.value)mcAdd(this.value,\'1h\')">' +
-      '<option value="">Choose Symbol</option>' + MC_COINS.map((s) => '<option value="' + s + '">' + baseOf(s) + '/USDT</option>').join('') +
-      '</select></div>'
+      '<span class="mc-add-sym"></span></div>'
   }
+  unmountCoinPickers(grid)
   grid.innerHTML = html
+  // Panels read Binance pairs only (fetchKlineRows + the kline hub).
+  mcPanels.forEach(function (p) {
+    const host = grid.querySelector('[data-mc-sym="' + p.id + '"]') as HTMLElement | null
+    if (host) mountCoinPicker(host, { value: p.sym, cryptoOnly: true, onPick: (sym) => mcChangeSymbol(p.id, sym) })
+  })
+  const addHost = grid.querySelector('.mc-add-sym') as HTMLElement | null
+  if (addHost)
+    mountCoinPicker(addHost, {
+      cryptoOnly: true,
+      label: 'Choose symbol',
+      triggerText: 'Choose Symbol',
+      onPick: (sym) => mcAdd(sym, '1h'),
+    })
   mcPanels.forEach(function (p) {
     mcInitChart(p)
   })

@@ -16,6 +16,7 @@ import {
 } from '../../features/alerts'
 import type { AlertCond, AlertKind } from '../../features/alerts'
 import { CONDS_BY_KIND, condLabel } from '../../features/alerts/rules'
+import { CoinPicker } from '../chart/CoinPicker'
 
 const TECH_TFS = ['1m', '5m', '15m', '30m', '1h', '4h', '1d']
 const COOLDOWNS = [1, 5, 15, 60, 240]
@@ -145,14 +146,14 @@ export function AlertsModal() {
                 All favourites ({watchList().length})
               </span>
             ) : (
-              <input
-                id="alSym"
-                className="pf-input"
-                placeholder="Symbol (BTCUSDT)"
+              <CoinPicker
                 value={sym}
-                onChange={(e) => setSym(e.target.value)}
-                style={{ flex: '1 1 110px' }}
-                autoComplete="off"
+                onPick={(s) => setSym(s)}
+                compact
+                float
+                tabs={null}
+                label="Alert symbol"
+                className="al-sym"
               />
             )}
             <select

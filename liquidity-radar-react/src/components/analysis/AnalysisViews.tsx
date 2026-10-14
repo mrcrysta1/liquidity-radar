@@ -33,6 +33,7 @@ import {
 import { confluenceSummary, getConfluenceRows, onConfluenceChange } from '../../features/analysis/confluence'
 import { useTick } from '../useTick'
 import { CoinBadge } from '../common/CoinBadge'
+import { CoinPicker } from '../chart/CoinPicker'
 
 type Candle = { t: number; o: number; h: number; l: number; c: number; v: number }
 const ANALYSIS = ['analysis']
@@ -142,7 +143,6 @@ export function AnalysisHead() {
   const t = ticker()
   const range = getRange()
   const z = zones(getHeat().heat)
-  const list = Array.from(new Set([sym, ...HOT_LIST.map((b) => COINS[b]?.sym ?? b + 'USDT')]))
   const top = z ? [z.buy, z.sell].filter(Boolean).sort((a, b) => (b as Zone).value - (a as Zone).value)[0] : null
   const SECS: Array<[string, string, () => void]> = [
     ['liq', 'Liquidity', () => { setView('liq'); scrollTo('anHeatmap') }],
@@ -166,15 +166,7 @@ export function AnalysisHead() {
           </span>
         </span>
       </div>
-      <label className="an-sym">
-        <CoinBadge sym={sym} size={32} />
-        <span>
-          <select value={sym} onChange={(e) => w.setSymbol?.(e.target.value)} aria-label="Symbol">
-            {list.map((s) => <option key={s} value={s}>{pair(s)}</option>)}
-          </select>
-          <small>{isInstrument(sym) ? 'Yahoo' : 'Binance'}</small>
-        </span>
-      </label>
+      <CoinPicker tabs={ANALYSIS} className="an-sym-picker" />
       <div className="an-price">
         <b>{t?.last ? '$' + pfmt(t.last) : '—'}</b>
         <i className={(t?.pct ?? 0) >= 0 ? 'up' : 'dn'}>{pct(t?.pct)}</i>

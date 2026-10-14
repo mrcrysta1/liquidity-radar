@@ -24,6 +24,7 @@ import { SERVER_BOT, loadBot } from '../../features/selflearn/serverBot'
 import { BinanceAccount } from './BinanceAccount'
 import type { BotEvent, BotTrade } from '../../features/selflearn/serverBot'
 import { useTick } from '../useTick'
+import { CoinPicker } from '../chart/CoinPicker'
 import { Guard } from '../ErrorBoundary'
 import { CoinBadge, EquityCurve, Ico, NnCard } from './parts'
 import { NI } from './icons'
@@ -311,7 +312,7 @@ function BacktestLab() {
   return (
     <NnCard title="Backtest Lab" icon={NI.flask} className="lab-bt" id="labBacktest">
       <div className="lab-btf">
-        <label>Market<select value={o.sym} onChange={(e) => setO({ ...o, sym: e.target.value })}>{SL_MARKETS.map((s) => <option key={s} value={s}>{short(s)}</option>)}</select></label>
+        <div className="lab-fld">Market<CoinPicker value={o.sym} markets={SL_MARKETS} onPick={(sym) => setO({ ...o, sym })} tabs={['selflearn']} compact label="Backtest market" /></div>
         <label>Style<select value={o.strat} onChange={(e) => setStrat(e.target.value as StratId)}>{(Object.keys(STRATS) as StratId[]).map((k) => <option key={k} value={k}>{STRATS[k].label} · {STRATS[k].tf}</option>)}</select></label>
         {num('bars', 'Bars', 500, 600, 6000)}
         {num('trainFrac', 'Train share', 0.05, 0.3, 0.8)}
