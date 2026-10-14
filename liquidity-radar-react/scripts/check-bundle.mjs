@@ -7,7 +7,8 @@
 // the first screen, while TensorFlow.js and other ML packages are dynamic
 // imports that never touch the initial load. Budgets below reflect that:
 // entry-critical chunks are held tight, lazy chunks get room.
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
+import { gzipSync } from 'node:zlib'
 import { join } from 'node:path'
 
 const ASSETS = 'dist/assets'
