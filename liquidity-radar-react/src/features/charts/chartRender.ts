@@ -17,11 +17,12 @@ import { onIndicatorsChange } from './indicators/store'
 import { isReplayOn, onReplayChange, visibleCandles } from './replay'
 import {
   getChartStyle,
-  isOhlcStyle,
   onChartStyleChange,
   onRangeSettingsChange,
   styleDef,
 } from './chartStyle'
+import type { ChartStyleId } from './chartStyle'
+import type { CandleFlat } from '../../services/market'
 import { CUSTOM_VIEWS, toCandleData } from './series/customSeries'
 import { displayCandles, isRangeMode, snapChartTime, timeOnlyCandles } from './series/rangeView'
 import { tfDef } from '../../services/timeframe'
@@ -123,54 +124,154 @@ export function applyChartTheme(): void {
     rightPriceScale: { borderColor: th.border },
     timeScale: { borderColor: th.border },
   })
-  // Only feed each series the options it actually has — a line series has no
-  // wick colours, and unknown keys are silently ignored, hiding mistakes.
-  if (candleSeries) {
-    const id = getChartStyle()
-    const pRGB = cv('pRGB') || '41 98 255'
-    if (CUSTOM_VIEWS[id]) {
-      candleSeries.applyOptions({
-        upColor: th.up,
-        downColor: th.dn,
-        wickColor: th.txt,
-        textColor: th.txt,
-        gridColor: isLightTheme() ? 'rgba(75,85,99,.3)' : 'rgba(143,160,181,.25)',
-        priceLineColor: th.pline,
-      })
-    } else if (id === 'candle' || id === 'hollow' || id === 'range') {
-      candleSeries.applyOptions({
-        upColor: id === 'hollow' ? 'rgba(0,0,0,0)' : th.up,
-        downColor: id === 'hollow' ? 'rgba(0,0,0,0)' : th.dn,
-        borderVisible: id === 'hollow',
-        borderUpColor: th.up,
-        borderDownColor: th.dn,
-        wickUpColor: th.up,
-        wickDownColor: th.dn,
-        priceLineColor: th.pline,
-      })
-    } else if (id === 'bar') {
-      candleSeries.applyOptions({ upColor: th.up, downColor: th.dn, priceLineColor: th.pline })
-    } else if (id === 'area') {
-      candleSeries.applyOptions({
-        lineColor: cv('primary'),
-        topColor: 'rgb(' + pRGB + ' / .34)',
-        bottomColor: 'rgb(' + pRGB + ' / 0)',
-        priceLineColor: th.pline,
-      })
-    } else if (id === 'baseline') {
-      candleSeries.applyOptions({
-        topLineColor: th.up,
-        bottomLineColor: th.dn,
-        priceLineColor: th.pline,
-      })
-    } else {
-      candleSeries.applyOptions({ color: cv('primary'), priceLineColor: th.pline })
-    }
-  }
+  if (candleSeries) themePriceSeries(candleSeries, getChartStyle())
   refreshIndicatorColors()
+}
+
+/**
+ * Re-colour a price series made by createPriceSeries for style `id`.
+ * Only feed each series the options it actually has — a line series has no
+ * wick colours, and unknown keys are silently ignored, hiding mistakes.
+ */
+export function themePriceSeries(series: Any, id: ChartStyleId): void {
+  const th = chartTheme()
+  const pRGB = cv('pRGB') || '41 98 255'
+  if (CUSTOM_VIEWS[id]) {
+    series.applyOptions({
+      upColor: th.up,
+      downColor: th.dn,
+      wickColor: th.txt,
+      textColor: th.txt,
+      gridColor: isLightTheme() ? 'rgba(75,85,99,.3)' : 'rgba(143,160,181,.25)',
+      priceLineColor: th.pline,
+    })
+  } else if (id === 'candle' || id === 'hollow' || id === 'range') {
+    series.applyOptions({
+      upColor: id === 'hollow' ? 'rgba(0,0,0,0)' : th.up,
+      downColor: id === 'hollow' ? 'rgba(0,0,0,0)' : th.dn,
+      borderVisible: id === 'hollow',
+      borderUpColor: th.up,
+      borderDownColor: th.dn,
+      wickUpColor: th.up,
+      wickDownColor: th.dn,
+      priceLineColor: th.pline,
+    })
+  } else if (id === 'bar') {
+    series.applyOptions({ upColor: th.up, downColor: th.dn, priceLineColor: th.pline })
+  } else if (id === 'area') {
+    series.applyOptions({
+      lineColor: cv('primary'),
+      topColor: 'rgb(' + pRGB + ' / .34)',
+      bottomColor: 'rgb(' + pRGB + ' / 0)',
+      priceLineColor: th.pline,
+    })
+  } else if (id === 'baseline') {
+    series.applyOptions({
+      topLineColor: th.up,
+      bottomLineColor: th.dn,
+      priceLineColor: th.pline,
+    })
+  } else {
+    series.applyOptions({ color: cv('primary'), priceLineColor: th.pline })
+  }
 }
 export function mapCandle(c: Any): Any {
   return { time: Math.floor(c.t / 1000), open: c.o, high: c.h, low: c.l, close: c.c }
+}
+
+/** Series data for style `id`: custom bars, OHLC, or a single closing value. */
+export function priceSeriesData(id: ChartStyleId, candles: CandleFlat[]): Any[] {
+  const def = styleDef(id)
+  if (def.custom) return toCandleData(candles)
+  if (def.ohlc) return candles.map(mapCandle)
+  return candles.map((c) => ({ time: Math.floor(c.t / 1000), value: c.c }))
+}
+/** One bar of series data for style `id` — what series.update() takes. */
+export function priceSeriesPoint(id: ChartStyleId, c: CandleFlat): Any {
+  return priceSeriesData(id, [c])[0]
+}
+
+/**
+ * Add the price series for style `id` to chart `c`. The main chart and the
+ * multi-chart companions share it, so a style looks the same in every cell.
+ * `baseline` is the Baseline style's base price (its first close).
+ */
+export function createPriceSeries(c: Any, id: ChartStyleId, baseline = 0): Any {
+  const th = chartTheme()
+  const pRGB = cv('pRGB') || '41 98 255'
+  const custom = CUSTOM_VIEWS[id]
+  if (custom) {
+    // Our own pane renderer, drawing inside the chart's price scale.
+    return c.addCustomSeries(custom(), {
+      upColor: th.up,
+      downColor: th.dn,
+      wickColor: th.txt,
+      textColor: th.txt,
+      gridColor: isLightTheme() ? 'rgba(75,85,99,.3)' : 'rgba(143,160,181,.25)',
+      rows: 14,
+      priceLineColor: th.pline,
+      priceLineStyle: 2,
+    })
+  } else if (id === 'hollow') {
+    return c.addCandlestickSeries({
+      upColor: 'rgba(0,0,0,0)',
+      downColor: 'rgba(0,0,0,0)',
+      borderVisible: true,
+      borderUpColor: th.up,
+      borderDownColor: th.dn,
+      wickUpColor: th.up,
+      wickDownColor: th.dn,
+      priceLineColor: th.pline,
+      priceLineStyle: 2,
+    })
+  } else if (id === 'bar') {
+    return c.addBarSeries({
+      upColor: th.up,
+      downColor: th.dn,
+      thinBars: false,
+      priceLineColor: th.pline,
+      priceLineStyle: 2,
+    })
+  } else if (id === 'area') {
+    return c.addAreaSeries({
+      lineColor: cv('primary'),
+      lineWidth: 2,
+      topColor: 'rgb(' + pRGB + ' / .34)',
+      bottomColor: 'rgb(' + pRGB + ' / 0)',
+      priceLineColor: th.pline,
+      priceLineStyle: 2,
+    })
+  } else if (id === 'line') {
+    return c.addLineSeries({
+      color: cv('primary'),
+      lineWidth: 2,
+      priceLineColor: th.pline,
+      priceLineStyle: 2,
+    })
+  } else if (id === 'baseline') {
+    return c.addBaselineSeries({
+      baseValue: { type: 'price', price: baseline },
+      topLineColor: th.up,
+      topFillColor1: 'rgba(0,230,118,.28)',
+      topFillColor2: 'rgba(0,230,118,.02)',
+      bottomLineColor: th.dn,
+      bottomFillColor1: 'rgba(255,23,68,.02)',
+      bottomFillColor2: 'rgba(255,23,68,.28)',
+      lineWidth: 2,
+      priceLineColor: th.pline,
+      priceLineStyle: 2,
+    })
+  }
+  // Candles, and range bars (OHLC bars built off the clock).
+  return c.addCandlestickSeries({
+    upColor: th.up,
+    downColor: th.dn,
+    borderVisible: false,
+    wickUpColor: th.up,
+    wickDownColor: th.dn,
+    priceLineColor: th.pline,
+    priceLineStyle: 2,
+  })
 }
 
 // ---- Overlay / pane series management ----
@@ -193,83 +294,8 @@ function applyChartStyle(): void {
   chartState.styleSeries = null
   candleSeries = null
 
-  const th = chartTheme()
-  const id = getChartStyle()
-  const pRGB = cv('pRGB') || '41 98 255'
-  const custom = CUSTOM_VIEWS[id]
-  if (custom) {
-    // Our own pane renderer, drawing inside the chart's price scale.
-    candleSeries = chart.addCustomSeries(custom(), {
-      upColor: th.up,
-      downColor: th.dn,
-      wickColor: th.txt,
-      textColor: th.txt,
-      gridColor: isLightTheme() ? 'rgba(75,85,99,.3)' : 'rgba(143,160,181,.25)',
-      rows: 14,
-      priceLineColor: th.pline,
-      priceLineStyle: 2,
-    })
-  } else if (id === 'hollow') {
-    candleSeries = chart.addCandlestickSeries({
-      upColor: 'rgba(0,0,0,0)',
-      downColor: 'rgba(0,0,0,0)',
-      borderVisible: true,
-      borderUpColor: th.up,
-      borderDownColor: th.dn,
-      wickUpColor: th.up,
-      wickDownColor: th.dn,
-      priceLineColor: th.pline,
-      priceLineStyle: 2,
-    })
-  } else if (id === 'bar') {
-    candleSeries = chart.addBarSeries({
-      upColor: th.up,
-      downColor: th.dn,
-      thinBars: false,
-      priceLineColor: th.pline,
-      priceLineStyle: 2,
-    })
-  } else if (id === 'area') {
-    candleSeries = chart.addAreaSeries({
-      lineColor: cv('primary'),
-      lineWidth: 2,
-      topColor: 'rgb(' + pRGB + ' / .34)',
-      bottomColor: 'rgb(' + pRGB + ' / 0)',
-      priceLineColor: th.pline,
-      priceLineStyle: 2,
-    })
-  } else if (id === 'line') {
-    candleSeries = chart.addLineSeries({
-      color: cv('primary'),
-      lineWidth: 2,
-      priceLineColor: th.pline,
-      priceLineStyle: 2,
-    })
-  } else if (id === 'baseline') {
-    const base = state.candles.length ? state.candles[0].c : 0
-    candleSeries = chart.addBaselineSeries({
-      baseValue: { type: 'price', price: base },
-      topLineColor: th.up,
-      topFillColor1: 'rgba(0,230,118,.28)',
-      topFillColor2: 'rgba(0,230,118,.02)',
-      bottomLineColor: th.dn,
-      bottomFillColor1: 'rgba(255,23,68,.02)',
-      bottomFillColor2: 'rgba(255,23,68,.28)',
-      lineWidth: 2,
-      priceLineColor: th.pline,
-      priceLineStyle: 2,
-    })
-  } else {
-    candleSeries = chart.addCandlestickSeries({
-      upColor: th.up,
-      downColor: th.dn,
-      borderVisible: false,
-      wickUpColor: th.up,
-      wickDownColor: th.dn,
-      priceLineColor: th.pline,
-      priceLineStyle: 2,
-    })
-  }
+  const base = state.candles.length ? state.candles[0].c : 0
+  candleSeries = createPriceSeries(chart, getChartStyle(), base)
   chartState.styleSeries = candleSeries
   priceSeriesSubs.forEach((f) => f(candleSeries))
 }
@@ -483,13 +509,7 @@ export function updateChartData(fit = false): void {
   syncSecondsVisible()
   const keep = fit ? null : ts.getVisibleLogicalRange()
   const prevFirst = chartState.firstBarTime as number | undefined
-  if (styleDef(getChartStyle()).custom) {
-    candleSeries.setData(toCandleData(candles))
-  } else if (isOhlcStyle()) {
-    candleSeries.setData(candles.map(mapCandle))
-  } else {
-    candleSeries.setData(candles.map((c) => ({ time: Math.floor(c.t / 1000), value: c.c })))
-  }
+  candleSeries.setData(priceSeriesData(getChartStyle(), candles))
   rangeShown = isRangeMode() ? candles : []
   renderIndicators(candles)
   renderDeltaPane(timeOnlyCandles(), indicatorPaneCount())
@@ -621,12 +641,8 @@ export function updateChartLast(c: Any): void {
     pushRangeLive()
     const lb = rangeShown[rangeShown.length - 1]
     if (lb) c = lb
-  } else if (styleDef(getChartStyle()).custom) {
-    candleSeries.update(toCandleData([c])[0])
-  } else if (isOhlcStyle()) {
-    candleSeries.update(mapCandle(c))
   } else {
-    candleSeries.update({ time: Math.floor(c.t / 1000), value: c.c })
+    candleSeries.update(priceSeriesPoint(getChartStyle(), c))
   }
   // The candle follows the tape frame by frame, but indicators and the legend
   // are recomputed over the whole series — far too much work to repeat on every
