@@ -12,7 +12,8 @@
     "smoke": "node scripts/smoke.mjs",
     "preview": "vite preview",
     "test": "node scripts/test-engines.mjs",
-    "verify": "npm run lint && tsc --noEmit && npm test && npm run build && npm run smoke"
+    "check:bundle": "node scripts/check-bundle.mjs",
+    "verify": "npm run lint && tsc --noEmit && npm test && npm run build && npm run check:bundle && npm run smoke"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.2",
