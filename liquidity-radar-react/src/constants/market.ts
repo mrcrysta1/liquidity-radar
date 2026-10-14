@@ -30,11 +30,18 @@ export const COINS: Record<string, CoinMeta> = {
   INJ: { sym: 'INJUSDT', name: 'Injective', icon: '💉', color: '#00BFFF' },
   TIA: { sym: 'TIAUSDT', name: 'Celestia', icon: 'T', color: '#7B2BF9' },
   SEI: { sym: 'SEIUSDT', name: 'Sei', icon: '🌊', color: '#9E1F19' },
+  // Spot gold (forex XAUUSD), priced from Binance's gold perpetual — see
+  // constants/instruments.ts. Replaced the PAXG token.
+  XAUUSD: { sym: 'XAUUSD', name: 'Gold (Spot)', icon: '🥇', color: '#D4AF37' },
 }
 
-export const TOP16 = [
+/* The hot list: what the Top Coins table, the movers strip and the futures
+   snapshot all track. Gold sits third, straight after the two majors — it is
+   a different asset class to everything else here and is meant to be seen. */
+export const HOT_LIST = [
   'BTC',
   'ETH',
+  'XAUUSD',
   'SOL',
   'BNB',
   'DOGE',
@@ -56,6 +63,7 @@ export const CELEBS = ['TRUMP', 'DOGE', 'PEPE', 'WIF', 'FLOKI', 'SHIB', 'BONK']
 export const TICKER_COINS = [
   'BTC',
   'ETH',
+  'XAUUSD',
   'SOL',
   'BNB',
   'DOGE',

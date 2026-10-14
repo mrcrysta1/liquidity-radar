@@ -1,26 +1,37 @@
 import type { CandleLike } from '../types/market'
+import { isInstrument } from '../constants/instruments'
 import { state } from './store'
 import { $ } from '../utils/dom'
+import { DEFAULT_TF, TF_IDS, isTf, normalizeTf } from './timeframe'
 
 // --- Symbol / timeframe normalization -----------------------
 
-export const mdTfs = ['1m', '5m', '15m', '1h', '4h', '1d']
+// Every interval the chart can display, native or resampled. The catalogue
+// and the resampling rules live in ./timeframe.
+export const mdTfs = TF_IDS
 
 export function mdSym(s: unknown): string | null {
   if (!s) return null
   const str = String(s).trim().toUpperCase().replace(/-/g, '')
+  // A Yahoo-priced instrument is already a whole symbol. Appending USDT to it
+  // produced things like XAUUSDUSDT, which every Binance endpoint rejects —
+  // guard at the root so no present or future caller has to remember.
+  if (isInstrument(str)) return str
   if (!/USDT$/.test(str)) return str + 'USDT'
   return str
 }
 
 export function mdTf(t: unknown): string {
-  if (!t) return '15m'
-  const str = String(t).toLowerCase().trim()
+  if (!t) return DEFAULT_TF
+  const raw = String(t).trim()
+  // Month is the one interval whose case is load-bearing ('1M' month vs '1m'
+  // minute), so exact ids are matched before anything is folded to lower case.
+  if (isTf(raw)) return raw
+  const str = raw.toLowerCase()
   if (str === '60m' || str === '60') return '1h'
-  if (str === '24h' || str === '1d' || str === 'd') return '1d'
-  if (str === '240' || str === '4h') return '4h'
-  if (mdTfs.indexOf(str) !== -1) return str
-  return '15m'
+  if (str === '24h' || str === 'd') return '1d'
+  if (str === '240') return '4h'
+  return normalizeTf(str)
 }
 
 export interface CandleFlat {
@@ -158,6 +169,24 @@ export function mdStoreCandles(sym: unknown, tf: unknown, arr: unknown): boolean
   return true
 }
 
+/**
+ * Replace the newest candle in the store, in place.
+ *
+ * mdStoreCandles revalidates the whole series, which is right for a REST load
+ * but far too much work to repeat for every trade print; this touches only the
+ * bar that changed, and refuses anything that is not that bar.
+ */
+export function mdPatchLastCandle(sym: unknown, tf: unknown, c: unknown): boolean {
+  if (!mdVal.sym(sym) || !mdTf(tf) || !mdVal.candle(c)) return false
+  const arr = md.candles[String(sym) + '|' + mdTf(tf)]
+  if (!arr || !arr.length) return false
+  const bar = c as CandleFlat
+  if (arr[arr.length - 1].t !== bar.t) return false
+  arr[arr.length - 1] = bar
+  md.lastUpdate.candles = Date.now()
+  return true
+}
+
 export function mdStoreOB(sym: unknown, ob: unknown): boolean {
   if (!mdVal.sym(sym) || !mdVal.obj(ob)) return false
   const o = ob as { bids?: Array<Array<number | string>>; asks?: Array<Array<number | string>> }
@@ -184,9 +213,11 @@ export function mdDataAge(kind: keyof MdLastUpdate): number | null {
 
 // staleness thresholds (ms)
 export const mdStale = {
-  tickers: 6000,
+  // The ticker stream pushes every second and depth only on change, so a
+  // quiet pair can pause for several seconds without anything being wrong.
+  tickers: 15000,
   candles: 90000,
-  ob: 6000,
+  ob: 20000,
   fr: 45000,
   oi: 45000,
   whales: 30000,
@@ -251,7 +282,7 @@ export function mdHearbeat(kind: 'ws' | 'rest'): void {
 export function mdRefreshHealth(): MdHealth {
   const now = Date.now()
   mdHealth.staleWarn.length = 0
-  if (md.conn.ws.streams > 0 && now - mdHealth.lastWsMsg > 8000)
+  if (md.conn.ws.streams > 0 && now - mdHealth.lastWsMsg > 12000)
     mdHealth.staleWarn.push('WS stalled')
   if (mdHealth.lastWsMsg === 0) mdHealth.staleWarn.push('no live stream')
   Object.keys(mdStale).forEach(function (k) {
@@ -282,16 +313,15 @@ export function mdPill(): void {
   const h = mdRefreshHealth()
   const live = md.conn.ws.streams > 0
   const stale = h.staleWarn.length > 0
-  pill.classList.toggle('off', !live || stale)
-  if (!live) {
-    txt.textContent = 'CONNECTING…'
-    return
-  }
-  if (stale) {
-    txt.textContent = 'RECONNECTING…'
-    return
-  }
-  txt.textContent = 'LIVE · ' + md.conn.ws.streams + ' STREAMS'
+  const down = !live || stale
+  pill.classList.toggle('off', down)
+  // The pill says only Live/Try; the detail lives in the tooltip.
+  txt.textContent = down ? 'Try' : 'Live'
+  pill.title = !live
+    ? 'No live streams'
+    : stale
+      ? 'Stale feed: ' + h.staleWarn.join(', ')
+      : md.conn.ws.streams + ' live stream' + (md.conn.ws.streams === 1 ? '' : 's')
 }
 
 // --- Diagnostics / debug mode --------------------------------

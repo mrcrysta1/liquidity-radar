@@ -154,7 +154,13 @@ export function aiComposite(candles: CandleLike[], closes: number[], vols: numbe
   }
 }
 
-export function forecastFrom(closes: number[]): Forecast {
+/**
+ * Linear-regression projection for the next 1/4/8/24 hours.
+ * `barMinutes` is the candle size of `closes` (default 15m, the original
+ * caller); the step counts are derived from it, so 1h or daily candles get
+ * real 1H/24H horizons instead of 4x / 96x too far.
+ */
+export function forecastFrom(closes: number[], barMinutes = 15): Forecast {
   const win = closes.slice(-20)
   const last = closes[closes.length - 1]
   const lr = linReg(win)
@@ -167,11 +173,12 @@ export function forecastFrom(closes: number[]): Forecast {
   const sd =
     Math.sqrt(rets.reduce((a, b) => a + (b - meanR) * (b - meanR), 0) / rets.length) || 0.001
   const damp = 0.55
+  const steps = (hours: number) => (hours * 60) / barMinutes
   const defs: Array<[number, string, number]> = [
-    [1, '1H', 4],
-    [4, '4H', 16],
-    [8, '8H', 32],
-    [24, '24H', 96],
+    [1, '1H', steps(1)],
+    [4, '4H', steps(4)],
+    [8, '8H', steps(8)],
+    [24, '24H', steps(24)],
   ]
   const baseConf = [74, 62, 50, 38]
   const rows: ForecastRow[] = defs.map(function (def, idx) {

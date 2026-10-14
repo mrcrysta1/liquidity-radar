@@ -177,37 +177,32 @@ export function renderAnalysis(s: AnalyticsSnapshot): void {
   $('mRSI')!.textContent = s.rsi.toFixed(1)
   $('mRSI')!.style.color = s.rsiZone[0] === 'OVERBOUGHT' ? 'var(--red)' : s.rsiZone[0] === 'OVERSOLD' ? 'var(--green)' : 'var(--txt)'
   $('mRSIZone')!.textContent = s.rsiZone[0]; $('mRSIZone')!.className = 'badge ' + s.rsiZone[1]
-  $('indRSI')!.textContent = s.rsi.toFixed(1)
-  $('indRSIb')!.textContent = s.rsiZone[0]; $('indRSIb')!.className = 'badge ' + s.rsiZone[1]
 
   $('mMACD')!.textContent = (s.mBull ? '+' : '') + s.histPct + '%'
   $('mMACD')!.style.color = s.mBull ? 'var(--green)' : 'var(--red)'
   $('mMACDZone')!.textContent = s.mBull ? 'BULLISH' : 'BEARISH'; $('mMACDZone')!.className = 'badge ' + (s.mBull ? 'b-green' : 'b-red')
-  $('indMACD')!.textContent = s.macdHist.toFixed(s.last > 100 ? 2 : 6)
-  $('indMACDb')!.textContent = s.mBull ? 'HIST > 0' : 'HIST < 0'; $('indMACDb')!.className = 'badge ' + (s.mBull ? 'b-green' : 'b-red')
+  // The raw histogram the Technical Indicators card used to carry: the tile's
+  // headline is the percentage, which compares across coins, but the absolute
+  // value is what a MACD reader actually wants beneath it.
+  $('mMACDSub')!.textContent = 'hist ' + s.macdHist.toFixed(s.last > 100 ? 2 : 6) + ' · 12/26/9'
 
   $('mEMA')!.textContent = pfmt(s.e20)
   $('mEMAZone')!.textContent = s.above ? 'PRICE ABOVE' : 'PRICE BELOW'; $('mEMAZone')!.className = 'badge ' + (s.above ? 'b-green' : 'b-red')
   $('mEMASub')!.textContent = (s.above ? 'uptrend bias' : 'downtrend bias') + ' · Δ ' + s.e20Pct + '%'
-  $('indEMA')!.textContent = pfmt(s.e20)
-  $('indEMAb')!.textContent = s.above ? 'ABOVE ✓' : 'BELOW ✕'; $('indEMAb')!.className = 'badge ' + (s.above ? 'b-green' : 'b-red')
 
   $('mBB')!.textContent = s.pb.toFixed(1) + '%'
   $('mBBZone')!.textContent = s.bbZone[0]; $('mBBZone')!.className = 'badge ' + s.bbZone[1]
-  $('indBB')!.textContent = s.pb.toFixed(1) + '%'
-  $('indBBb')!.textContent = s.bbZone[0]; $('indBBb')!.className = 'badge ' + s.bbZone[1]
-  $('indBBs')!.textContent = 'bands ' + pfmt(s.bbLo) + ' – ' + pfmt(s.bbUp)
+  // Live band prices rather than a static "20, 2σ" caption — the one thing the
+  // card said that the tile did not.
+  $('mBBSub')!.textContent = 'bands ' + pfmt(s.bbLo) + ' – ' + pfmt(s.bbUp)
 
-  $('indVT')!.textContent = s.vt
-  $('indVTb')!.textContent = s.vtc[0]; $('indVTb')!.className = 'badge ' + s.vtc[1]
+  $('mVT')!.textContent = s.vt
+  $('mVTZone')!.textContent = s.vtc[0]; $('mVTZone')!.className = 'badge ' + s.vtc[1]
 
   $('mAIScore')!.textContent = (s.score > 0 ? '+' : '') + s.score
   $('mAIScore')!.style.color = s.color
   $('mAIZone')!.textContent = s.label; $('mAIZone')!.className = 'badge ' + s.badge
   $('mAIMarker')!.style.left = 'calc(' + s.mkPos + '% - 2px)'
-  $('indScoreMarker')!.style.left = 'calc(' + s.mkPos + '% - 2px)'
-  $('indScoreLbl')!.textContent = (s.score > 0 ? '+' : '') + s.score + ' · ' + s.label
-  $('indScoreLbl')!.style.color = s.color
 
   $('mVol')!.textContent = s.dv.toFixed(2) + '%'
   $('mVol')!.style.color = s.dv > 4 ? 'var(--red)' : s.dv > 1.5 ? 'var(--amber)' : 'var(--green)'
@@ -223,6 +218,10 @@ export function renderAnalysis(s: AnalyticsSnapshot): void {
   $('liqSym')!.textContent = state.symbol
   $('vpSym')!.textContent = state.symbol + ' · 96 BARS'
   if (s.mark != null) $('liqMark')!.textContent = '$' + pfmt(s.mark)
+  // Only a perpetual has a premium index; for everything else this is simply
+  // the last traded price, and saying otherwise would misdescribe the number.
+  const markSrc = $('liqMarkSrc')
+  if (markSrc) markSrc.textContent = state.fr ? 'fapi premium index' : 'last traded price'
   if (state.fr) {
     const rate = parseFloat((state.fr as FrLike).lastFundingRate)
     $('mFR')!.textContent = (rate * 100).toFixed(4) + '%'
@@ -230,7 +229,16 @@ export function renderAnalysis(s: AnalyticsSnapshot): void {
     $('mFRNext')!.textContent = rate > 0 ? 'longs pay shorts' : rate < 0 ? 'shorts pay longs' : 'flat'
     if ((state.fr as FrLike).nextFundingTime) {
       const upd = () => {
-        const ms = (state.fr as FrLike).nextFundingTime! - Date.now()
+        // The symbol can change out from under this timer. Switching to a
+        // market with no funding — spot gold, EUR/USD, the S&P — nulls
+        // state.fr, and this kept reading it once a second.
+        const fr = state.fr as FrLike | null
+        if (!fr || !fr.nextFundingTime) {
+          clearInterval(state._frTimer as number | undefined)
+          state._frTimer = undefined
+          return
+        }
+        const ms = fr.nextFundingTime - Date.now()
         if (ms < 0) return
         const hh = Math.floor(ms / 3600000), mm = Math.floor((ms % 3600000) / 60000), ss = Math.floor((ms % 60000) / 1000)
         $('mFRNext')!.textContent = (rate > 0 ? 'longs pay · ' : 'shorts pay · ') + String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0') + ':' + String(ss).padStart(2, '0') + ' to funding'
@@ -239,6 +247,14 @@ export function renderAnalysis(s: AnalyticsSnapshot): void {
       clearInterval(state._frTimer as number | undefined)
       state._frTimer = setInterval(upd, 1000)
     }
+  } else {
+    // Nothing published for this market. Stop the countdown and say so,
+    // rather than leaving the previous symbol's funding on screen.
+    clearInterval(state._frTimer as number | undefined)
+    state._frTimer = undefined
+    $('mFR')!.textContent = '—'
+    $('mFR')!.style.color = 'var(--muted)'
+    $('mFRNext')!.textContent = 'no funding on this market'
   }
   if (s.liq) {
     const oiN = s.liq.oiN
@@ -254,6 +270,27 @@ export function renderAnalysis(s: AnalyticsSnapshot): void {
     if (lB) lB.style.width = s.liq.liqLBars + '%'
     if (sB) sB.style.width = s.liq.liqSBars + '%'
     $('liqLev')!.textContent = Math.abs(parseFloat(s.liq.srDist)) + '% below support at $' + pfmt(s.liq.sup)
+  } else {
+    // These panels are written straight into the DOM, so without this the
+    // previous symbol's numbers simply stayed on screen under the new
+    // symbol's heading — spot gold was showing Bitcoin's support level and
+    // liquidation clusters, which is far worse than showing nothing.
+    const dash = (id: string, txt = '—') => {
+      const el = $(id)
+      if (el) el.textContent = txt
+    }
+    dash('mOI')
+    dash('mOISub', 'no open interest on this market')
+    dash('liqOI')
+    dash('liqATR')
+    dash('liqLongRange')
+    dash('liqShortRange')
+    dash('liqLongEst', 'no perpetual futures for this market')
+    dash('liqShortEst', 'no perpetual futures for this market')
+    dash('liqLev', 'no liquidation model for this market')
+    const lB = $('liqLongBar'), sB = $('liqShortBar')
+    if (lB) lB.style.width = '0%'
+    if (sB) sB.style.width = '0%'
   }
   if (s.vpHtml != null) $('vpList')!.innerHTML = s.vpHtml
 }

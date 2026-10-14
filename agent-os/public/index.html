@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <title>Agent OS — Control Center</title>
+    <link rel="stylesheet" href="./dashboard.css" />
+  </head>
+  <body>
+    <div class="os-root" id="os-root">
+      <!-- Compact bar (shown when collapsed) -->
+      <div class="os-compact" id="os-compact" hidden>
+        <div class="os-compact-dots" id="os-compact-dots">…</div>
+        <button class="os-btn os-btn--icon" id="os-compact-expand" title="Expand control center" aria-label="Expand">❐</button>
+      </div>
+
+      <!-- Full panel -->
+      <section class="os-panel glass" id="os-panel">
+        <header class="os-header">
+          <div class="os-brand">
+            <span class="os-logo" aria-hidden="true">◈</span>
+            <div>
+              <h1>Agent OS <span>Control Center</span></h1>
+              <p class="os-sub" id="os-subtitle">Liquidity Radar · Agent Operating System</p>
+            </div>
+          </div>
+          <div class="os-header-actions">
+            <button class="os-btn os-btn--icon" id="os-refresh" title="Refresh now" aria-label="Refresh">⟳</button>
+            <button class="os-btn os-btn--icon os-active" id="os-auto-toggle" title="Toggle auto refresh (15s)" aria-label="Auto refresh">◔</button>
+            <button class="os-btn os-btn--icon" id="os-pin-toggle" title="Keep on top (within browser workspace)" aria-label="Pin on top">📌</button>
+            <button class="os-btn os-btn--icon" id="os-collapse" title="Collapse to compact bar" aria-label="Collapse">–</button>
+          </div>
+        </header>
+
+        <div class="os-toolbar">
+          <label class="os-field">
+            <span>Opacity</span>
+            <input type="range" id="os-opacity" min="40" max="100" value="92" />
+          </label>
+          <span class="os-status-pills" id="os-status-pills"></span>
+        </div>
+
+        <!-- Agents -->
+        <section class="os-section" aria-label="Agents">
+          <h2 class="os-section-title">Agents</h2>
+          <div class="os-agent-grid" id="os-agents"><div class="os-loading">Loading agents…</div></div>
+        </section>
+
+        <!-- Project overview -->
+        <section class="os-section" aria-label="Project overview">
+          <h2 class="os-section-title">Project</h2>
+          <div class="os-overview" id="os-overview"><div class="os-loading">Loading overview…</div></div>
+        </section>
+
+        <!-- Task list -->
+        <section class="os-section" aria-label="Task activity">
+          <h2 class="os-section-title">Task Activity <span class="os-count" id="os-task-count"></span></h2>
+          <div class="os-tasklist" id="os-tasklist"><div class="os-loading">Loading tasks…</div></div>
+        </section>
+      </section>
+
+      <!-- Footer (always visible) -->
+      <footer class="os-footer glass" id="os-footer">
+        <span>Last updated: <b id="os-updated">—</b></span>
+        <span id="os-source">source: —</span>
+        <span id="os-git">git: —</span>
+        <span class="os-footer-err" id="os-error" hidden></span>
+      </footer>
+    </div>
+
+    <div class="os-toast" id="os-toast" hidden></div>
+    <script src="./dashboard.js"></script>
+  </body>
+</html>

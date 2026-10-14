@@ -1,32 +1,73 @@
 import * as LightweightCharts from 'lightweight-charts'
+import { venueOf } from '../../utils/coins'
 import { COINS, TICKER_COINS } from '../../constants/market'
 import { pfmt, nfmt, cfmt, chgHtml } from '../../utils/format'
 import { baseOf, coinMeta } from '../../utils/coins'
 import { $, showToast } from '../../utils/dom'
-import { emaArr, smaArr, calcBBList, vwapSeries, calcRSI, macdSeries } from '../../utils/indicators'
 import { state } from '../../services/store'
+import { storageGet, storageSet } from '../../services/storage'
+import {
+  attachIndicatorChart,
+  indicatorLegend,
+  indicatorPaneCount,
+  refreshIndicatorColors,
+  renderIndicators,
+} from './indicators/render'
+import { onIndicatorsChange } from './indicators/store'
+import { isReplayOn, onReplayChange, visibleCandles } from './replay'
+import {
+  getChartStyle,
+  isOhlcStyle,
+  onChartStyleChange,
+  onRangeSettingsChange,
+  styleDef,
+} from './chartStyle'
+import { CUSTOM_VIEWS, toCandleData } from './series/customSeries'
+import { displayCandles, isRangeMode, snapChartTime, timeOnlyCandles } from './series/rangeView'
+import { tfDef } from '../../services/timeframe'
+import { mountCloseTimer, updateCloseTimer } from './closeTimer'
+import {
+  drawToolDef,
+  getDrawTool,
+  isMagnet,
+  onClearAllDrawings,
+  onDrawToolChange,
+  onUndoDrawing,
+  setDrawTool,
+  setDrawingCount,
+  setPendingPoints,
+} from './drawTools'
+import { shape } from './drawings/geometry'
+import type { Drawing, MapCtx, Shape } from './drawings/geometry'
+import { fetchOlderKlines, historyExhausted } from '../../services/marketData'
+import { attachDeltaPane, renderDeltaPane } from './deltaPane'
+import { attachWhaleBubbles, renderWhaleBubbles, watchLiveWhales } from './whaleBubbles'
+import { attachVolumeProfile, renderVolumeProfile } from './volumeProfileOverlay'
+import { onDeltaChange } from '../delta/delta'
+import { onOverlayTogglesChange } from './overlayToggles'
 
 type Any = any
-
 ;(window as Any).LightweightCharts = LightweightCharts
 
 let chart: Any = null
 let candleSeries: Any = null
-let volSeries: Any = null
+// Alert price lines (features/alerts/alertLines) hang off the price series,
+// which is rebuilt on every style change — let them follow it.
+const priceSeriesSubs = new Set<(s: Any) => void>()
+export const getPriceSeries = (): Any => candleSeries
+export function onPriceSeriesChange(fn: (s: Any) => void): () => void {
+  priceSeriesSubs.add(fn)
+  return () => priceSeriesSubs.delete(fn)
+}
+// Chart style lives in ./chartStyle and indicators in indicators/store — both
+// persist. What is left here is the live series handles and the drawings of
+// the coin on screen (saved per coin, see currentDrawings).
 const chartState: {
-  style: string
-  overlays: Record<string, boolean>
-  panes: Record<string, boolean>
-  period: number
   drawTool: string | null
   drawings: Any[]
   drawBuf: Any[]
   [key: string]: Any
 } = {
-  style: 'candle',
-  overlays: { ema: true, sma: true, boll: true, vwap: false },
-  panes: { vol: true, rsi: false, macd: false },
-  period: 20,
   drawTool: null,
   drawings: [],
   drawBuf: [],
@@ -82,246 +123,157 @@ export function applyChartTheme(): void {
     rightPriceScale: { borderColor: th.border },
     timeScale: { borderColor: th.border },
   })
-  if (candleSeries)
-    candleSeries.applyOptions({
-      upColor: th.up,
-      downColor: th.dn,
-      wickUpColor: th.up,
-      wickDownColor: th.dn,
-      priceLineColor: th.pline,
-      borderUpColor: th.up,
-      borderDownColor: th.dn,
-    })
-  if (chartState.rsiSeries) chartState.rsiSeries.applyOptions({ color: cv('purple') })
-  if (chartState.macdHist) chartState.macdHist.applyOptions({})
-  refreshOverlayColors()
+  // Only feed each series the options it actually has — a line series has no
+  // wick colours, and unknown keys are silently ignored, hiding mistakes.
+  if (candleSeries) {
+    const id = getChartStyle()
+    const pRGB = cv('pRGB') || '41 98 255'
+    if (CUSTOM_VIEWS[id]) {
+      candleSeries.applyOptions({
+        upColor: th.up,
+        downColor: th.dn,
+        wickColor: th.txt,
+        textColor: th.txt,
+        gridColor: isLightTheme() ? 'rgba(75,85,99,.3)' : 'rgba(143,160,181,.25)',
+        priceLineColor: th.pline,
+      })
+    } else if (id === 'candle' || id === 'hollow' || id === 'range') {
+      candleSeries.applyOptions({
+        upColor: id === 'hollow' ? 'rgba(0,0,0,0)' : th.up,
+        downColor: id === 'hollow' ? 'rgba(0,0,0,0)' : th.dn,
+        borderVisible: id === 'hollow',
+        borderUpColor: th.up,
+        borderDownColor: th.dn,
+        wickUpColor: th.up,
+        wickDownColor: th.dn,
+        priceLineColor: th.pline,
+      })
+    } else if (id === 'bar') {
+      candleSeries.applyOptions({ upColor: th.up, downColor: th.dn, priceLineColor: th.pline })
+    } else if (id === 'area') {
+      candleSeries.applyOptions({
+        lineColor: cv('primary'),
+        topColor: 'rgb(' + pRGB + ' / .34)',
+        bottomColor: 'rgb(' + pRGB + ' / 0)',
+        priceLineColor: th.pline,
+      })
+    } else if (id === 'baseline') {
+      candleSeries.applyOptions({
+        topLineColor: th.up,
+        bottomLineColor: th.dn,
+        priceLineColor: th.pline,
+      })
+    } else {
+      candleSeries.applyOptions({ color: cv('primary'), priceLineColor: th.pline })
+    }
+  }
+  refreshIndicatorColors()
 }
 export function mapCandle(c: Any): Any {
   return { time: Math.floor(c.t / 1000), open: c.o, high: c.h, low: c.l, close: c.c }
 }
 
 // ---- Overlay / pane series management ----
-function rebuildOverlays(): void {
-  if (!chart || !candleSeries) return
-  const candles = state.candles
-  const o = chartState.overlays
-  const period = chartState.period
-  const defs = [
-    ['ema', '#FFD54F', cv('pink'), 'EMA'],
-    ['sma', '#64B5F6', cv('cyan'), 'SMA'],
-    ['bollUp', '#B388FF', cv('purple'), 'BB UP'],
-    ['bollLo', '#B388FF', cv('purple'), 'BB LO'],
-    ['vwap', '#FF5252', cv('amber'), 'VWAP'],
-  ]
-  defs.forEach(function (d) {
-    const key = d[0]
-    const col = d[1]
-    const lightCol = d[2]
-    const lbl = d[3]
-    const on = key === 'bollUp' ? o.boll : key === 'bollLo' ? o.boll : o[key]
-    let data: Any[] = []
-    if (on && candles.length) {
-      const closes = candles.map((c) => c.c)
-      if (key === 'ema')
-        data = candles.map((c, i) => ({
-          time: Math.floor(c.t / 1000),
-          value: emaArr(closes, period)[i],
-        }))
-      else if (key === 'sma') {
-        const s = smaArr(closes, period)
-        data = candles.map((c, i) => ({ time: Math.floor(c.t / 1000), value: s[i] }))
-      } else if (key === 'bollUp') {
-        const bb = calcBBList(closes, period)
-        data = candles.map((c, i) => ({ time: Math.floor(c.t / 1000), value: bb[i].up }))
-      } else if (key === 'bollLo') {
-        const bb = calcBBList(closes, period)
-        data = candles.map((c, i) => ({ time: Math.floor(c.t / 1000), value: bb[i].lo }))
-      } else if (key === 'vwap') data = vwapSeries(candles, 0)
-    }
-    const existing = chartState.overlaySeries ? chartState.overlaySeries[key] : null
-    let s = existing
-    if (s && !on) {
-      chart.removeSeries(s)
-      delete chartState.overlaySeries[key]
-      return
-    }
-    if (!s && on) {
-      s = chart.addLineSeries({
-        color: isLightTheme() ? lightCol : col,
-        lineWidth: key === 'vwap' ? 1 : 2,
-        lineStyle: key === 'bollUp' || key === 'bollLo' ? 2 : 0,
-        lastValueVisible: false,
-        priceLineVisible: false,
-        crosshairMarkerVisible: false,
-        title: lbl,
-        priceScaleId: 'right',
-      })
-      if (!chartState.overlaySeries) chartState.overlaySeries = {}
-      chartState.overlaySeries[key] = s
-    }
-    if (s) s.setData(data.filter((x) => x && x.value != null && isFinite(x.value)))
-  })
-}
-function refreshOverlayColors(): void {
-  if (!chartState.overlaySeries) return
-  const map: Record<string, string> = {
-    ema: isLightTheme() ? cv('pink') : '#FFD54F',
-    sma: isLightTheme() ? cv('cyan') : '#64B5F6',
-    bollUp: cv('purple'),
-    bollLo: cv('purple'),
-    vwap: isLightTheme() ? cv('amber') : '#FF5252',
-  }
-  Object.keys(map).forEach(function (k) {
-    if (chartState.overlaySeries[k]) chartState.overlaySeries[k].applyOptions({ color: map[k] })
-  })
-}
-function rebuildVolume(): void {
-  if (!volSeries) return
-  const on = chartState.panes.vol
-  if (!on && chartState.volumeSeries) {
-    chart.removeSeries(chartState.volumeSeries)
-    chartState.volumeSeries = null
-    volSeries = null
-    return
-  }
-  if (on && !chartState.volumeSeries) {
-    chartState.volumeSeries = chart.addHistogramSeries({
-      priceFormat: { type: 'volume' },
-      priceScaleId: 'vol',
-    })
-    chartState.volumeSeries.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } })
-    volSeries = chartState.volumeSeries
-  }
-  if (on)
-    chartState.volumeSeries.setData(
-      state.candles.map((c) => ({
-        time: Math.floor(c.t / 1000),
-        value: c.v,
-        color: c.c >= c.o ? 'rgba(0,230,118,.4)' : 'rgba(255,23,68,.4)',
-      })),
-    )
-}
-function rebuildRSI(): void {
-  if (!chart) return
-  const on = chartState.panes.rsi
-  if (!on && chartState.rsiSeries && chartState.rsiLine) {
-    chart.removeSeries(chartState.rsiLine)
-    chartState.rsiLine = null
-    chartState.rsiSeries = null
-    return
-  }
-  if (!on) return
-  const closes = state.candles.map((c) => c.c)
-  const rsiArr = closes.map((_, i) => calcRSI(closes.slice(0, i + 1), 14))
-  if (!chartState.rsiLine) {
-    chartState.rsiLine = chart.addLineSeries({
-      color: cv('purple'),
-      lineWidth: 2,
-      priceScaleId: 'rsi',
-      lastValueVisible: true,
-      priceLineVisible: false,
-      title: 'RSI',
-    })
-    chartState.rsiLine.priceScale().applyOptions({ scaleMargins: { top: 0.05, bottom: 0.05 } })
-  }
-  chartState.rsiLine.setData(
-    state.candles.map((c, i) => ({ time: Math.floor(c.t / 1000), value: rsiArr[i] })),
-  )
-}
-function rebuildMACD(): void {
-  if (!chart) return
-  const on = chartState.panes.macd
-  if (!on && chartState.macdHist && chartState.macdLine) {
-    chart.removeSeries(chartState.macdLine)
-    chart.removeSeries(chartState.macdHist)
-    chartState.macdLine = null
-    chartState.macdHist = null
-    return
-  }
-  if (!on) return
-  const closes = state.candles.map((c) => c.c)
-  const m = macdSeries(closes)
-  const tArr = state.candles.map((c) => Math.floor(c.t / 1000))
-  if (!chartState.macdHist) {
-    chartState.macdHist = chart.addHistogramSeries({
-      priceScaleId: 'macd',
-      priceFormat: { type: 'price', precision: closes[0] > 100 ? 2 : 8 },
-      priceLineVisible: false,
-      lastValueVisible: false,
-      title: 'MACD',
-    })
-    chartState.macdHist.priceScale().applyOptions({ scaleMargins: { top: 0.05, bottom: 0.05 } })
-    chartState.macdLine = chart.addLineSeries({
-      color: cv('cyan'),
-      lineWidth: 1,
-      priceScaleId: 'macd',
-      priceLineVisible: false,
-      lastValueVisible: false,
-    })
-  }
-  chartState.macdHist.setData(
-    state.candles.map((c, i) => ({
-      time: tArr[i],
-      value: m.hist[i],
-      color: m.hist[i] >= 0 ? 'rgba(0,230,118,.55)' : 'rgba(255,23,68,.55)',
-    })),
-  )
-  chartState.macdLine.setData(state.candles.map((c, i) => ({ time: tArr[i], value: m.line[i] })))
-}
-function rebuildChartLayers(): void {
-  if (!chart) return
-  rebuildOverlays()
-  rebuildVolume()
-  rebuildRSI()
-  rebuildMACD()
-}
+/**
+ * Rebuild the price series for the current style.
+ *
+ * Every style gets a freshly created series: the old one is removed and the
+ * module reference cleared first, because keeping a stale handle is exactly
+ * what used to make "switch back to Candles" silently draw nothing.
+ */
 function applyChartStyle(): void {
   if (!chart) return
-  const s = chartState.style
-  const existing = chartState.styleSeries
-  if (existing) {
-    chart.removeSeries(existing)
-    chartState.styleSeries = null
-  }
-  if (s === 'candle' || s === 'hollow') {
-    if (!candleSeries && s === 'candle') {
-      const th = chartTheme()
-      candleSeries = chart.addCandlestickSeries({
-        upColor: th.up,
-        downColor: th.dn,
-        borderVisible: false,
-        wickUpColor: th.up,
-        wickDownColor: th.dn,
-        priceLineColor: th.pline,
-        priceLineStyle: 2,
-      })
-    } else if (s === 'hollow') {
-      const th = chartTheme()
-      candleSeries = chart.addCandlestickSeries({
-        upColor: 'rgba(0,0,0,0)',
-        downColor: 'rgba(0,0,0,0)',
-        borderVisible: true,
-        borderUpColor: th.up,
-        borderDownColor: th.dn,
-        wickUpColor: th.up,
-        wickDownColor: th.dn,
-        priceLineColor: th.pline,
-        priceLineStyle: 2,
-      })
+  if (chartState.styleSeries) {
+    try {
+      chart.removeSeries(chartState.styleSeries)
+    } catch (e) {
+      /* already detached */
     }
-    chartState.styleSeries = candleSeries
-  } else if (s === 'area') {
+  }
+  chartState.styleSeries = null
+  candleSeries = null
+
+  const th = chartTheme()
+  const id = getChartStyle()
+  const pRGB = cv('pRGB') || '41 98 255'
+  const custom = CUSTOM_VIEWS[id]
+  if (custom) {
+    // Our own pane renderer, drawing inside the chart's price scale.
+    candleSeries = chart.addCustomSeries(custom(), {
+      upColor: th.up,
+      downColor: th.dn,
+      wickColor: th.txt,
+      textColor: th.txt,
+      gridColor: isLightTheme() ? 'rgba(75,85,99,.3)' : 'rgba(143,160,181,.25)',
+      rows: 14,
+      priceLineColor: th.pline,
+      priceLineStyle: 2,
+    })
+  } else if (id === 'hollow') {
+    candleSeries = chart.addCandlestickSeries({
+      upColor: 'rgba(0,0,0,0)',
+      downColor: 'rgba(0,0,0,0)',
+      borderVisible: true,
+      borderUpColor: th.up,
+      borderDownColor: th.dn,
+      wickUpColor: th.up,
+      wickDownColor: th.dn,
+      priceLineColor: th.pline,
+      priceLineStyle: 2,
+    })
+  } else if (id === 'bar') {
+    candleSeries = chart.addBarSeries({
+      upColor: th.up,
+      downColor: th.dn,
+      thinBars: false,
+      priceLineColor: th.pline,
+      priceLineStyle: 2,
+    })
+  } else if (id === 'area') {
     candleSeries = chart.addAreaSeries({
       lineColor: cv('primary'),
-      topColor: 'rgba(41,98,255,.35)',
-      bottomColor: 'rgba(41,98,255,0)',
+      lineWidth: 2,
+      topColor: 'rgb(' + pRGB + ' / .34)',
+      bottomColor: 'rgb(' + pRGB + ' / 0)',
+      priceLineColor: th.pline,
+      priceLineStyle: 2,
     })
-    chartState.styleSeries = candleSeries
+  } else if (id === 'line') {
+    candleSeries = chart.addLineSeries({
+      color: cv('primary'),
+      lineWidth: 2,
+      priceLineColor: th.pline,
+      priceLineStyle: 2,
+    })
+  } else if (id === 'baseline') {
+    const base = state.candles.length ? state.candles[0].c : 0
+    candleSeries = chart.addBaselineSeries({
+      baseValue: { type: 'price', price: base },
+      topLineColor: th.up,
+      topFillColor1: 'rgba(0,230,118,.28)',
+      topFillColor2: 'rgba(0,230,118,.02)',
+      bottomLineColor: th.dn,
+      bottomFillColor1: 'rgba(255,23,68,.02)',
+      bottomFillColor2: 'rgba(255,23,68,.28)',
+      lineWidth: 2,
+      priceLineColor: th.pline,
+      priceLineStyle: 2,
+    })
   } else {
-    candleSeries = chart.addLineSeries({ color: cv('primary'), lineWidth: 2 })
-    chartState.styleSeries = candleSeries
+    candleSeries = chart.addCandlestickSeries({
+      upColor: th.up,
+      downColor: th.dn,
+      borderVisible: false,
+      wickUpColor: th.up,
+      wickDownColor: th.dn,
+      priceLineColor: th.pline,
+      priceLineStyle: 2,
+    })
   }
+  chartState.styleSeries = candleSeries
+  priceSeriesSubs.forEach((f) => f(candleSeries))
 }
+export { renderWhaleBubbles } from './whaleBubbles'
 export function initChart(): void {
   if (!(window as Any).LightweightCharts) {
     $('legendOHLC')!.textContent = 'Chart library failed to load'
@@ -330,8 +282,11 @@ export function initChart(): void {
   const el = $('chart')!
   const th = chartTheme()
   chart = LightweightCharts.createChart(el, {
-    width: el.clientWidth,
-    height: el.clientHeight,
+    // autoSize lets the library watch the container itself. Passing explicit
+    // width/height instead makes it write inline sizes onto the element, which
+    // then override the CSS — that is what used to leave the chart stuck at
+    // whatever height the side panel had stretched it to.
+    autoSize: true,
     layout: {
       background: { type: 'solid', color: th.bg },
       textColor: th.txt,
@@ -352,39 +307,104 @@ export function initChart(): void {
       },
     },
   } as Any)
-  candleSeries = chart.addCandlestickSeries({
-    upColor: th.up,
-    downColor: th.dn,
-    borderVisible: false,
-    wickUpColor: th.up,
-    wickDownColor: th.dn,
-    priceLineColor: th.pline,
-    priceLineStyle: 2,
-  })
-  chartState.styleSeries = candleSeries
-  chartState.volumeSeries = chart.addHistogramSeries({
-    priceFormat: { type: 'volume' },
-    priceScaleId: 'vol',
-  })
-  chartState.volumeSeries.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } })
-  volSeries = chartState.volumeSeries
+  applyChartStyle()
+  attachIndicatorChart(chart)
+  attachDeltaPane(chart)
+  attachWhaleBubbles(chart, candleSeries, $('chartWrap')!)
+  attachVolumeProfile(chart, candleSeries, $('chartWrap')!)
+  // The countdown reads the live series each time, so a style change that
+  // replaces the series does not strand it.
+  // Range bars do not close on the clock, so there is nothing to count down.
+  mountCloseTimer(chart, () => (isRangeMode() ? null : candleSeries))
+  // While the cursor is over a bar the legend shows that bar; live ticks must
+  // not overwrite it, and leaving the chart hands it back to the live candle.
   chart.subscribeCrosshairMove((param: Any) => {
-    if (!param.time || !param.seriesData) return
-    const cp = state.candles.find((c) => Math.floor(c.t / 1000) === param.time)
-    if (cp) renderLegend(cp.o, cp.h, cp.l, cp.c, null, true)
+    const cp =
+      param.time && param.point
+        ? displayCandles().find((c) => Math.floor(c.t / 1000) === param.time)
+        : null
+    if (!cp) {
+      if (hoverTime != null) {
+        hoverTime = null
+        renderLiveLegend()
+      }
+      return
+    }
+    hoverTime = param.time as number
+    renderLegend(cp.o, cp.h, cp.l, cp.c, cp.v, true)
   })
   chart.timeScale().subscribeVisibleTimeRangeChange(function () {
     redrawDrawings()
   })
+  // The chart resizes itself; these only need to follow it. One exception:
+  // the chart is built at startup while the Home screen is showing, so its
+  // first fit happens at zero width and leaves the candles crammed into the
+  // right half once a chart tab opens. Re-fit the first time it has a width.
+  let fitW = el.clientWidth
   new ResizeObserver(() => {
-    if (chart && el.clientWidth)
-      chart.applyOptions({ width: el.clientWidth, height: el.clientHeight })
+    if (fitW < 60 && el.clientWidth >= 60 && state.candles.length) chart.timeScale().fitContent()
+    fitW = el.clientWidth
     redrawDrawings()
+    updateCloseTimer()
   }).observe(el)
   setupDrawLayer()
   initChartToolbar()
   initFullScreen()
-  rebuildChartLayers()
+  // Adding, editing or replaying an indicator redraws through the same path as
+  // a fresh data load, so there is one place where series are built.
+  onIndicatorsChange(() => updateChartData(false))
+  onReplayChange((modeChanged: boolean) => updateChartData(modeChanged))
+  let wasRange = isRangeMode()
+  onChartStyleChange(() => {
+    // Same bars, drawn differently — keep whatever the user has zoomed or
+    // panned to instead of snapping back to the newest candle. The range is
+    // read before the series is swapped, because removing the only price
+    // series can reset the time scale on its own. Into or out of range bars
+    // the bars themselves change, so that view is refitted instead.
+    const ts = chart.timeScale()
+    const keep = ts.getVisibleLogicalRange()
+    const refit = wasRange !== isRangeMode()
+    wasRange = isRangeMode()
+    applyChartStyle()
+    attachWhaleBubbles(chart, candleSeries, $('chartWrap')!)
+    attachVolumeProfile(chart, candleSeries, $('chartWrap')!)
+    updateChartData(refit)
+    if (!keep || refit) return
+    ts.setVisibleLogicalRange(keep)
+    requestAnimationFrame(() => {
+      const now = ts.getVisibleLogicalRange()
+      if (now && Math.abs(now.to - keep.to) > 0.5) ts.setVisibleLogicalRange(keep)
+    })
+  })
+  // A new range size rebuilds every bar: a new dataset, so refit.
+  onRangeSettingsChange(() => updateChartData(true))
+  watchForOlderHistory()
+  // Delta bars stream in far faster than the chart should repaint — coalesce
+  // to the next frame, same reasoning as the live-tick indicator refresh
+  // below (IND_REFRESH_MS): the eye cannot read faster than that anyway.
+  let deltaPending = false
+  onDeltaChange(() => {
+    if (deltaPending) return
+    deltaPending = true
+    requestAnimationFrame(() => {
+      deltaPending = false
+      renderDeltaPane(timeOnlyCandles(), indicatorPaneCount())
+    })
+  })
+  onOverlayTogglesChange(() => {
+    renderDeltaPane(timeOnlyCandles(), indicatorPaneCount())
+    renderWhaleBubbles()
+    renderVolumeProfile(visibleCandles())
+  })
+  watchLiveWhales()
+  updateChartData(true)
+}
+/** Bar time (seconds) under the crosshair, or null when the cursor is off the chart. */
+let hoverTime: number | null = null
+function renderLiveLegend(): void {
+  const candles = displayCandles()
+  const lc = candles[candles.length - 1]
+  if (lc) renderLegend(lc.o, lc.h, lc.l, lc.c, lc.v, false)
 }
 function renderLegend(o: Any, h: Any, l: Any, c: Any, v: Any, isCross: Any): void {
   if (!isFinite(o)) return
@@ -403,193 +423,417 @@ function renderLegend(o: Any, h: Any, l: Any, c: Any, v: Any, isCross: Any): voi
     '">' +
     pfmt(c) +
     '</b></span>' +
-    (v != null ? '<span>VOL <b>' + nfmt(v) + '</b></span>' : '')
+    (v != null ? '<span>VOL <b>' + nfmt(v) + '</b></span>' : '') +
+    indicatorLegendHtml()
 }
-export function updateChartData(): void {
-  if (!chart || !state.candles.length) return
-  const s = chartState.style
-  if (s === 'candle' || s === 'hollow') {
-    candleSeries.setData(state.candles.map(mapCandle))
-  } else {
-    candleSeries.setData(state.candles.map((c) => ({ time: Math.floor(c.t / 1000), value: c.c })))
-  }
-  if (chartState.panes.vol && chartState.volumeSeries)
-    chartState.volumeSeries.setData(
-      state.candles.map((c) => ({
-        time: Math.floor(c.t / 1000),
-        value: c.v,
-        color: c.c >= c.o ? 'rgba(0,230,118,.4)' : 'rgba(255,23,68,.4)',
-      })),
+
+/**
+ * The active indicators' latest values, appended to the OHLC legend.
+ *
+ * Cached: building this recomputes every indicator across the whole series,
+ * which is far too much work to repeat for each trade print. The OHLC half of
+ * the legend is rebuilt every frame so it always equals the header price;
+ * these values are refreshed a few times a second, which is as fast as a
+ * moving average can meaningfully change anyway.
+ */
+let indLegendHtml = ''
+export function refreshIndicatorLegend(): void {
+  indLegendHtml = buildIndicatorLegend()
+}
+function indicatorLegendHtml(): string {
+  return indLegendHtml
+}
+function buildIndicatorLegend(): string {
+  const rows = indicatorLegend(displayCandles())
+  if (!rows.length) return ''
+  return rows
+    .map(
+      (r) =>
+        '<span class="leg-ind"><i>' +
+        r.label +
+        '</i>' +
+        r.parts
+          .map(
+            (p) =>
+              '<b style="color:' +
+              p.color +
+              '">' +
+              (p.big ? nfmt(p.value) : pfmt(p.value)) +
+              '</b>',
+          )
+          .join('') +
+        '</span>',
     )
-  rebuildChartLayers()
-  chart.timeScale().fitContent()
-  const lc = state.candles[state.candles.length - 1]
-  renderLegend(lc.o, lc.h, lc.l, lc.c, lc.v, false)
+    .join('')
 }
+/**
+ * Redraw the series.
+ *
+ * `fit` resets the viewport and belongs only to a genuinely new dataset — a
+ * fresh load, a symbol or interval change, entering or leaving replay.
+ * Everything else (toggling an indicator, paging in older history, stepping
+ * replay) keeps whatever the user has scrolled to; refitting on every redraw
+ * would yank the view back to the right edge mid-drag.
+ */
+export function updateChartData(fit = false): void {
+  if (!chart) return
+  const candles = displayCandles()
+  if (!candles.length) return
+  const ts = chart.timeScale()
+  syncSecondsVisible()
+  const keep = fit ? null : ts.getVisibleLogicalRange()
+  const prevFirst = chartState.firstBarTime as number | undefined
+  if (styleDef(getChartStyle()).custom) {
+    candleSeries.setData(toCandleData(candles))
+  } else if (isOhlcStyle()) {
+    candleSeries.setData(candles.map(mapCandle))
+  } else {
+    candleSeries.setData(candles.map((c) => ({ time: Math.floor(c.t / 1000), value: c.c })))
+  }
+  rangeShown = isRangeMode() ? candles : []
+  renderIndicators(candles)
+  renderDeltaPane(timeOnlyCandles(), indicatorPaneCount())
+  renderWhaleBubbles()
+  if (fit) {
+    ts.fitContent()
+  } else if (keep) {
+    // Older candles land in front of index 0, so the same bars now sit that
+    // many indices further along — shift the range to stay put.
+    const added = countPrepended(prevFirst, candles)
+    const want = { from: keep.from + added, to: keep.to + added }
+    ts.setVisibleLogicalRange(want)
+    // Adding a series (a new indicator pane) makes the chart scroll back to
+    // the newest bar after this call returns, so claim the range again once
+    // its own layout has settled.
+    requestAnimationFrame(() => {
+      const now = ts.getVisibleLogicalRange()
+      if (now && Math.abs(now.to - want.to) > 0.5) ts.setVisibleLogicalRange(want)
+    })
+  }
+  chartState.firstBarTime = candles[0].t
+  const lc = candles[candles.length - 1]
+  refreshIndicatorLegend()
+  if (hoverTime == null) renderLegend(lc.o, lc.h, lc.l, lc.c, lc.v, false)
+  redrawDrawings()
+  updateCloseTimer()
+}
+
+/**
+ * How many bars were prepended since the last draw. Range bars rebuilt from a
+ * longer history need not reproduce the old first bar exactly, so this counts
+ * up to the first bar at or after it.
+ */
+function countPrepended(prevFirst: number | undefined, candles: Any[]): number {
+  if (prevFirst == null || !candles.length || candles[0].t >= prevFirst) return 0
+  const i = candles.findIndex((c) => c.t >= prevFirst)
+  return i > 0 ? i : 0
+}
+
+/** Seconds on the time axis for sub-minute intervals and for range bars. */
+let secondsShown = false
+function syncSecondsVisible(): void {
+  const want = isRangeMode() || tfDef(state.tf).base === '1s'
+  if (want === secondsShown) return
+  secondsShown = want
+  chart.applyOptions({ timeScale: { secondsVisible: want } })
+}
+
+/** The range bars last handed to the price series. */
+let rangeShown: Any[] = []
+const sameBar = (a: Any, b: Any): boolean =>
+  a.t === b.t && a.o === b.o && a.h === b.h && a.l === b.l && a.c === b.c
+
+/**
+ * A live tick on range bars. The tick can extend the last bar, close it and
+ * open new ones, or — when the live candle flips direction and its walk
+ * changes — rebuild bars it produced earlier. series.update() can only touch
+ * the last bar or append, so anything deeper is a setData with the viewport
+ * kept where it was.
+ */
+function pushRangeLive(): void {
+  const next = displayCandles()
+  if (!next.length) return
+  const prev = rangeShown
+  let k = Math.max(0, prev.length - 64)
+  while (k < prev.length && k < next.length && sameBar(prev[k], next[k])) k++
+  const tailOnly =
+    prev.length > 0 &&
+    next.length >= prev.length &&
+    k >= prev.length - 1 &&
+    (k === prev.length || next[k].t === prev[k].t)
+  if (tailOnly) {
+    for (let i = Math.max(k, prev.length - 1); i < next.length; i++)
+      candleSeries.update(mapCandle(next[i]))
+  } else {
+    const ts = chart.timeScale()
+    const keep = ts.getVisibleLogicalRange()
+    candleSeries.setData(next.map(mapCandle))
+    if (keep) ts.setVisibleLogicalRange(keep)
+  }
+  rangeShown = next
+}
+
+// ---- Lazy history on pan ----
+// Dragging towards the left edge pulls in the next page of older candles, so
+// the chart keeps going back instead of ending in empty space.
+const HISTORY_TRIGGER = 30
+let historyPending = false
+let userMovedChart = false
+function watchForOlderHistory(): void {
+  // A fresh fit starts the range at bar 0, which is indistinguishable from
+  // "scrolled to the oldest bar" — so wait for a real pan or zoom before
+  // paging, otherwise every load would pull history nobody asked for.
+  const el = $('chart')
+  if (el) {
+    const moved = () => {
+      userMovedChart = true
+    }
+    el.addEventListener('mousedown', moved)
+    el.addEventListener('wheel', moved, { passive: true })
+    el.addEventListener('touchstart', moved, { passive: true })
+  }
+  chart.timeScale().subscribeVisibleLogicalRangeChange((range: Any) => {
+    if (!range || historyPending || !userMovedChart) return
+    // Replay draws a slice of what is already loaded; nothing to fetch.
+    if (isReplayOn() || range.from > HISTORY_TRIGGER || historyExhausted()) return
+    historyPending = true
+    fetchOlderKlines()
+      .then((added) => {
+        if (added > 0) updateChartData()
+      })
+      .finally(() => {
+        historyPending = false
+      })
+  })
+}
+
+// A live tick moves the candle immediately; the indicators behind it are
+// recomputed on the next frame so a 1s stream cannot run the maths ten times a
+// second for no visible gain.
+let indPending = false
+let indLast = 0
+const IND_REFRESH_MS = 250
 export function updateChartLast(c: Any): void {
   if (!candleSeries) return
-  const s = chartState.style
-  if (s === 'candle' || s === 'hollow') {
+  // Replay owns the viewport while it is on — the tape must not jump ahead.
+  if (isReplayOn()) return
+  if (isRangeMode()) {
+    pushRangeLive()
+    const lb = rangeShown[rangeShown.length - 1]
+    if (lb) c = lb
+  } else if (styleDef(getChartStyle()).custom) {
+    candleSeries.update(toCandleData([c])[0])
+  } else if (isOhlcStyle()) {
     candleSeries.update(mapCandle(c))
   } else {
     candleSeries.update({ time: Math.floor(c.t / 1000), value: c.c })
   }
-  if (chartState.panes.vol && chartState.volumeSeries)
-    chartState.volumeSeries.update({
-      time: Math.floor(c.t / 1000),
-      value: c.v,
-      color: c.c >= c.o ? 'rgba(0,230,118,.4)' : 'rgba(255,23,68,.4)',
+  // The candle follows the tape frame by frame, but indicators and the legend
+  // are recomputed over the whole series — far too much work to repeat on every
+  // trade print, and nothing the eye could read that fast anyway.
+  // Hovering an older bar keeps its values; hovering the live one follows it.
+  if (hoverTime == null || hoverTime === Math.floor(c.t / 1000))
+    renderLegend(c.o, c.h, c.l, c.c, c.v, hoverTime != null)
+  const now = Date.now()
+  if (!indPending && now - indLast >= IND_REFRESH_MS) {
+    indPending = true
+    requestAnimationFrame(() => {
+      indPending = false
+      indLast = Date.now()
+      if (!isReplayOn()) {
+        const shown = displayCandles()
+        renderIndicators(shown)
+        renderDeltaPane(timeOnlyCandles(), indicatorPaneCount())
+        refreshIndicatorLegend()
+        const lc = shown[shown.length - 1]
+        if (lc && hoverTime == null) renderLegend(lc.o, lc.h, lc.l, lc.c, lc.v, false)
+      }
+      updateCloseTimer()
     })
-  updateOverlayLast(c)
+  }
   redrawDrawings()
 }
-function updateOverlayLast(c: Any): void {
-  if (!chart) return
-  const candles = state.candles
-  if (!candles.length) return
-  const o = chartState.overlays
-  const period = chartState.period
-  const closes = candles.map((x) => x.c)
-  const upd = (series: Any, value: Any) => {
-    if (series && value != null && isFinite(value))
-      series.update({ time: Math.floor(c.t / 1000), value: value })
-  }
-  if (o.ema && chartState.overlaySeries && chartState.overlaySeries.ema)
-    upd(chartState.overlaySeries.ema, emaArr(closes, period)[closes.length - 1])
-  if (o.sma && chartState.overlaySeries && chartState.overlaySeries.sma) {
-    const s = smaArr(closes, period)
-    upd(chartState.overlaySeries.sma, s[s.length - 1])
-  }
-  if (o.boll && chartState.overlaySeries) {
-    const bb = calcBBList(closes, period)[closes.length - 1]
-    if (bb.up != null) upd(chartState.overlaySeries.bollUp, bb.up)
-    if (bb.lo != null) upd(chartState.overlaySeries.bollLo, bb.lo)
-  }
-  if (o.vwap && chartState.overlaySeries) {
-    const vv = vwapSeries(candles, 0)[candles.length - 1]
-    if (vv) upd(chartState.overlaySeries.vwap, vv.value)
-  }
-  if (chartState.panes.rsi && chartState.rsiLine) {
-    const r = calcRSI(closes, 14)
-    chartState.rsiLine.update({ time: Math.floor(c.t / 1000), value: r })
-  }
-  if (chartState.panes.macd && chartState.macdHist && chartState.macdLine) {
-    const m = macdSeries(closes)
-    const t = Math.floor(closes.length ? c.t / 1000 : 0)
-    chartState.macdHist.update({
-      time: Math.floor(c.t / 1000),
-      value: m.hist[m.hist.length - 1],
-      color: m.hist[m.hist.length - 1] >= 0 ? 'rgba(0,230,118,.55)' : 'rgba(255,23,68,.55)',
-    })
-    chartState.macdLine.update({ time: Math.floor(c.t / 1000), value: m.line[m.line.length - 1] })
-  }
+// ---- Toolbar wiring ----
+
+function initChartToolbar(): void {
+  // Drawing tools live in their own dropdown now; the chart only reacts to
+  // what that store says is armed.
+  onDrawToolChange(function () {
+    chartState.drawBuf = []
+    chartState._preview = null
+    chartState._eraseHit = -1
+    updateDrawHit()
+    syncDrawHint()
+    redrawDrawings()
+  })
+  onClearAllDrawings(function () {
+    currentDrawings()
+    chartState.drawings = []
+    chartState.drawBuf = []
+    chartState._eraseHit = -1
+    saveDrawings()
+    publishDrawingCount()
+    redrawDrawings()
+    showToast('Drawings cleared')
+  })
+  onUndoDrawing(function () {
+    if (chartState.drawBuf.length) chartState.drawBuf = []
+    else if (currentDrawings().pop()) saveDrawings()
+    chartState._eraseHit = -1
+    publishDrawingCount()
+    redrawDrawings()
+  })
+  syncDrawHint()
 }
 
-// ---- Toolbar wiring ----
-function syncToolbarChips(): void {
-  document.querySelectorAll('#chartBtnRow .tv-chip').forEach(function (chip) {
-    const ind = (chip as HTMLElement).dataset.ind
-    const pane = (chip as HTMLElement).dataset.pane
-    const drw = (chip as HTMLElement).dataset.drw
-    let on = false
-    if (ind) on = chartState.overlays[ind]
-    else if (pane) on = chartState.panes[pane]
-    else if (drw) on = chartState.drawTool === drw
-    chip.classList.toggle('on', !!on)
-    if (drw) chip.classList.toggle('drw-on', on)
-  })
-  const per = $('indPeriod') as HTMLInputElement | null
-  if (per) per.value = String(chartState.period)
+// ---- Saved drawings, one set per coin ----
+// Every drawing is anchored in time + price (see snapToCandle), so it stays
+// valid across timeframes of the same coin but means nothing on another one.
+// The set on screen follows state.symbol lazily: whatever touches the drawings
+// goes through currentDrawings(), which swaps sets the moment the coin changes.
+const DRAWINGS_KEY = 'lr-drawings-v1'
+const DRAWINGS_MAX_COINS = 50
+const DRAWINGS_MAX_PER_COIN = 200
+let drawingsSym: string | null = null
+
+function validDrawing(d: Any): boolean {
+  return !!d && typeof d.type === 'string' && Array.isArray(d.points)
 }
-function setTool(tool: Any): void {
-  const group = tool === 'hline' || tool === 'trend' || tool === 'ray'
-  if (!group) {
-    chartState.drawTool = null
+
+function currentDrawings(): Any[] {
+  const sym = String(state.symbol || '')
+  if (sym !== drawingsSym) {
+    drawingsSym = sym
+    const all = storageGet<Record<string, Any[]>>(DRAWINGS_KEY, {})
+    const list = all && Array.isArray(all[sym]) ? all[sym] : []
+    chartState.drawings = list.filter(validDrawing)
     chartState.drawBuf = []
-  } else if (chartState.drawTool === tool) {
-    chartState.drawTool = null
-    chartState.drawBuf = []
-  } else {
-    chartState.drawTool = tool
-    chartState.drawBuf = []
+    chartState._preview = null
+    chartState._eraseHit = -1
+    chartState._freehand = null
+    chartState._freeXY = null
+    chartState._captionDraft = null
+    closeLabelInput()
+    publishDrawingCount()
   }
+  return chartState.drawings
+}
+
+/** Write the current coin's set back; the most recently edited coins are kept. */
+function saveDrawings(): void {
+  if (drawingsSym == null) return
+  const stored = storageGet<Record<string, Any[]>>(DRAWINGS_KEY, {})
+  const all: Record<string, Any[]> = stored && typeof stored === 'object' ? stored : {}
+  delete all[drawingsSym]
+  if (chartState.drawings.length) all[drawingsSym] = chartState.drawings.slice(-DRAWINGS_MAX_PER_COIN)
+  const keys = Object.keys(all)
+  keys.slice(0, Math.max(0, keys.length - DRAWINGS_MAX_COINS)).forEach((k) => delete all[k])
+  storageSet(DRAWINGS_KEY, all)
+}
+
+function publishDrawingCount(): void {
+  setDrawingCount(chartState.drawings.length)
+  setPendingPoints(chartState.drawBuf.length)
+}
+
+function syncDrawHint(): void {
   const hint = $('drawHint')
-  if (hint)
-    hint.textContent = chartState.drawTool
-      ? 'Active: ' + chartState.drawTool + ' — click on the chart to place points'
-      : 'Select a drawing tool, then click two points on the chart'
-  syncToolbarChips()
-}
-function initChartToolbar(): void {
-  document.querySelectorAll('#chartBtnRow .tv-chip').forEach(function (chip) {
-    chip.addEventListener('click', function () {
-      if ((chip as HTMLElement).dataset.ind) {
-        const k = (chip as HTMLElement).dataset.ind!
-        chartState.overlays[k] = !chartState.overlays[k]
-        rebuildOverlays()
-      } else if ((chip as HTMLElement).dataset.pane) {
-        const k = (chip as HTMLElement).dataset.pane!
-        chartState.panes[k] = !chartState.panes[k]
-        if (k === 'vol') rebuildVolume()
-        else if (k === 'rsi') rebuildRSI()
-        else rebuildMACD()
-      } else if ((chip as HTMLElement).dataset.drw) {
-        setTool((chip as HTMLElement).dataset.drw)
-      }
-      syncToolbarChips()
-    })
-  })
-  const per = $('indPeriod') as HTMLInputElement | null
-  if (per) {
-    per.addEventListener('change', function () {
-      let v = parseInt(per.value, 10)
-      if (!(v >= 2)) v = 20
-      if (v > 200) v = 200
-      v = Math.round(v)
-      chartState.period = v
-      per.value = String(v)
-      rebuildOverlays()
-    })
-  }
-  const styleSel = $('chartStyle')
-  if (styleSel) {
-    styleSel.addEventListener('change', function () {
-      chartState.style = (styleSel as HTMLSelectElement).value
-      applyChartStyle()
-      updateChartData()
-    })
-  }
-  syncToolbarChips()
+  if (!hint) return
+  const def = drawToolDef(getDrawTool())
+  hint.textContent = def ? def.name + ' — ' + def.hint : ''
 }
 
 // ---- Full screen ----
+// Two layers. The `radar-fs` class pins the chart card over the whole
+// viewport (every browser). On top of that the Fullscreen API asks the
+// browser to drop its own chrome — address bar, tab strip, and on a phone the
+// status bar and system navigation too. iPhone Safari has no element
+// fullscreen, so there the class alone does the work.
+type FsDoc = Document & {
+  webkitFullscreenElement?: Element | null
+  webkitExitFullscreen?: () => Promise<void> | void
+}
+type FsEl = HTMLElement & { webkitRequestFullscreen?: () => Promise<void> | void }
+
+function nativeFsElement(): Element | null {
+  const d = document as FsDoc
+  return d.fullscreenElement || d.webkitFullscreenElement || null
+}
+
+function enterNativeFs(): void {
+  const el = document.documentElement as FsEl
+  try {
+    const p = el.requestFullscreen
+      ? el.requestFullscreen({ navigationUI: 'hide' })
+      : el.webkitRequestFullscreen?.()
+    if (p && typeof p.catch === 'function') p.catch(function () {})
+  } catch {
+    /* refused (not a user gesture, iframe without allowfullscreen) — the CSS layer still applies */
+  }
+}
+
+function exitNativeFs(): void {
+  if (!nativeFsElement()) return
+  const d = document as FsDoc
+  try {
+    const p = d.exitFullscreen ? d.exitFullscreen() : d.webkitExitFullscreen?.()
+    if (p && typeof p.catch === 'function') p.catch(function () {})
+  } catch {
+    /* already out */
+  }
+}
+
+function applyFsState(fs: boolean): void {
+  document.documentElement.classList.toggle('radar-fs', fs)
+  const btn = $('fsBtn')
+  if (btn) {
+    btn.textContent = fs ? '✕' : '⛶'
+    btn.title = fs ? 'Exit full screen [F]' : 'Full screen [F]'
+  }
+  // The stage-height sync (companionCharts) listens for resize; entering
+  // native fullscreen fires one too, but the CSS-only path would not.
+  window.dispatchEvent(new Event('resize'))
+  resizeChart()
+  if (fs && window.scrollTo) window.scrollTo(0, 0)
+  // The chart keeps its bar spacing as it grows, which left the candles in
+  // the right half of a full-screen chart. Fit them to the new size once the
+  // layout has settled (native fullscreen resizes a frame or two later).
+  setTimeout(() => {
+    if (chart && state.candles.length) chart.timeScale().fitContent()
+  }, 350)
+}
+
+export function isFullScreen(): boolean {
+  return document.documentElement.classList.contains('radar-fs')
+}
+
+export function setFullScreen(fs: boolean): void {
+  if (fs === isFullScreen()) return
+  applyFsState(fs)
+  if (fs) enterNativeFs()
+  else exitNativeFs()
+}
+
 function initFullScreen(): void {
   const btn = $('fsBtn')
   if (!btn) return
   btn.addEventListener('click', function () {
-    const fs = document.documentElement.classList.toggle('radar-fs')
-    btn.textContent = fs ? '✕' : '⛶'
-    btn.title = fs ? 'Exit full screen [F]' : 'Full screen [F]'
-    if (chart) {
-      chart.applyOptions({
-        width: chart._cw || $('chart')!.clientWidth,
-        height: chart._ch || $('chart')!.clientHeight,
-      })
-    }
-    requestAnimationFrame(function () {
-      if (chart && $('chart')!.clientWidth)
-        chart.applyOptions({ width: $('chart')!.clientWidth, height: $('chart')!.clientHeight })
-      redrawDrawings()
-    })
-    if (fs && window.scrollTo) window.scrollTo(0, 0)
+    setFullScreen(!isFullScreen())
   })
+  // The browser can leave fullscreen on its own — Esc, the Android back
+  // gesture, a swipe from the edge. Follow it so the chart does not stay
+  // pinned over a page whose browser bars have come back.
+  const onNativeChange = function () {
+    if (!nativeFsElement() && isFullScreen()) applyFsState(false)
+  }
+  document.addEventListener('fullscreenchange', onNativeChange)
+  document.addEventListener('webkitfullscreenchange', onNativeChange)
 }
 
 export function resizeChart(): void {
   requestAnimationFrame(function () {
-    if (chart && $('chart')!.clientWidth)
-      chart.applyOptions({ width: $('chart')!.clientWidth, height: $('chart')!.clientHeight })
     redrawDrawings()
+    updateCloseTimer()
   })
 }
 
@@ -609,34 +853,112 @@ function setupDrawLayer(): void {
   chartState.drawCanvas = cv
   const overlay = document.createElement('div')
   overlay.id = 'drawHit'
-  overlay.style.cssText = 'position:absolute;inset:0;z-index:6;cursor:crosshair;display:none;'
+  // touch-action:none: while a tool is armed (the only time this layer is
+  // shown) a finger draws instead of scrolling the page or panning the chart.
+  overlay.style.cssText =
+    'position:absolute;inset:0;z-index:6;cursor:crosshair;display:none;touch-action:none;'
   wrap.appendChild(overlay)
   overlay.addEventListener('click', function (e) {
-    if (!chartState.drawTool) return
-    const r = overlay.getBoundingClientRect()
-    const x = e.clientX - r.left + (chart._leftPad || 0)
-    const y = e.clientY - r.top
-    placeDrawPointFromXY(x, y)
-  })
-  overlay.addEventListener('dblclick', function (e) {
-    if (chartState.drawTool) {
-      destroyActiveDrawings()
-    }
-  })
-  overlay.addEventListener('mousemove', function (e) {
-    if (!chartState.drawTool) return
+    const tool = getDrawTool()
+    if (!tool) return
+    const def = drawToolDef(tool)
+    if (def && def.points === -1) return // freehand is handled by drag
     const r = overlay.getBoundingClientRect()
     const x = e.clientX - r.left
     const y = e.clientY - r.top
-    const time = chart.timeScale().coordinateToTime(x)
-    const price = chart.priceScale('right').coordinateToPrice(y)
-    if (chartState.drawBuf.length && time != null && price != null) {
-      chartState._preview = { time: time, price: price }
+    if (tool === 'erase') {
+      const i = drawingAt(x, y)
+      if (i === -1) return
+      currentDrawings().splice(i, 1)
+      saveDrawings()
+      chartState._eraseHit = -1
+      publishDrawingCount()
+      redrawDrawings()
+      return
+    }
+    placeDrawPointFromXY(x, y)
+  })
+  // Open-ended shapes (polyline, patterns you want to cut short) finish here.
+  overlay.addEventListener('dblclick', function (e) {
+    const def = drawToolDef(getDrawTool())
+    if (!def) return
+    const r = overlay.getBoundingClientRect()
+    if (def.points === 0) commitPending(e.clientX - r.left, e.clientY - r.top)
+  })
+  // Freehand: press, drag, release. Pointer events, so a finger or pen draws
+  // exactly like the mouse; capture keeps the stroke even past the edge.
+  overlay.addEventListener('pointerdown', function (e) {
+    const def = drawToolDef(getDrawTool())
+    if (!def || def.points !== -1) return
+    try {
+      overlay.setPointerCapture(e.pointerId)
+    } catch {
+      /* synthetic or already-released pointer */
+    }
+    const r = overlay.getBoundingClientRect()
+    chartState._freehand = []
+    const fx = e.clientX - r.left
+    const fy = e.clientY - r.top
+    chartState._freeXY = [fx, fy]
+    const pt = snapToCandle(fx, fy)
+    if (pt) chartState._freehand.push(pt)
+  })
+  overlay.addEventListener('pointerup', function () {
+    const def = drawToolDef(getDrawTool())
+    if (!def || def.points !== -1) return
+    const pts = chartState._freehand || []
+    chartState._freehand = null
+    chartState._freeXY = null
+    if (pts.length > 1) {
+      currentDrawings().push({ type: 'brush', color: def.color || '#4FC3F7', points: pts })
+      saveDrawings()
+      publishDrawingCount()
+    }
+    redrawDrawings()
+  })
+  // The browser took the touch back (a system gesture): drop the stroke.
+  overlay.addEventListener('pointercancel', function () {
+    chartState._freehand = null
+    chartState._freeXY = null
+    redrawDrawings()
+  })
+  overlay.addEventListener('pointermove', function (e) {
+    const tool = getDrawTool()
+    if (!tool) return
+    const r = overlay.getBoundingClientRect()
+    const x = e.clientX - r.left
+    const y = e.clientY - r.top
+    if (tool === 'erase') {
+      // Highlight whatever a click would remove, so nothing vanishes by surprise.
+      const i = drawingAt(x, y)
+      if (i !== chartState._eraseHit) {
+        chartState._eraseHit = i
+        overlay.style.cursor = i === -1 ? 'crosshair' : 'pointer'
+        redrawDrawings()
+      }
+      return
+    }
+    const snapped = snapToCandle(x, y)
+    if (!snapped) return
+    if (chartState._freehand) {
+      // Sample on raw pixel distance: two positions inside one bar map to the
+      // same time, so a time-based gate would swallow most of the stroke.
+      const prev = chartState._freeXY
+      if (!prev || Math.hypot(x - prev[0], y - prev[1]) > 3) {
+        chartState._freeXY = [x, y]
+        chartState._freehand.push(snapped)
+        redrawDrawings(true)
+      }
+      return
+    }
+    if (chartState.drawBuf.length) {
+      chartState._preview = snapped
       redrawDrawings(true)
     }
   })
-  overlay.addEventListener('mouseleave', function () {
+  overlay.addEventListener('pointerleave', function () {
     chartState._preview = null
+    chartState._eraseHit = -1
     redrawDrawings()
   })
   chartState.drawHit = overlay
@@ -644,44 +966,135 @@ function setupDrawLayer(): void {
 }
 function updateDrawHit(): void {
   if (!chartState.drawHit) return
-  chartState.drawHit.style.display = chartState.drawTool ? 'block' : 'none'
+  const tool = getDrawTool()
+  chartState.drawHit.style.display = tool ? 'block' : 'none'
+  chartState.drawHit.style.cursor = tool === 'erase' ? 'pointer' : 'crosshair'
 }
-function placeDrawPointFromXY(x: Any, y: Any): void {
+
+/**
+ * Snap a pixel position to a point on the chart. With the magnet on, the price
+ * jumps to the nearest open/high/low/close of the candle under the cursor —
+ * the same idea as TradingView's magnet.
+ */
+const MAGNET_PX = 14
+function snapToCandle(x: Any, y: Any): Any {
   const time = chart.timeScale().coordinateToTime(x)
-  let price = null
+  let price: number | null
   try {
-    price = chart.priceScale('right').coordinateToPrice(y)
+    price = candleSeries ? candleSeries.coordinateToPrice(y) : null
   } catch (e) {
-    /* ignore */
+    price = null
   }
-  if (time == null || price == null) return
-  chartState.drawBuf.push({ time: time, price: price })
-  const tool = chartState.drawTool
-  const need = tool === 'hline' ? 1 : 2
-  if (chartState.drawBuf.length >= need) {
-    if (tool === 'hline') {
-      const p = chartState.drawBuf[0]
-      chartState.drawings.push({ type: 'hline', color: '#FFD54F', points: [p] })
-    } else {
-      const [a, b] = chartState.drawBuf
-      chartState.drawings.push({ type: tool, color: '#4FC3F7', points: [a, b] })
+  if (time == null || price == null) return null
+  if (!isMagnet() || !candleSeries) return { time: time, price: price }
+  const candles = displayCandles()
+  const c = candles.find((k) => Math.floor(k.t / 1000) === time)
+  if (!c) return { time: time, price: price }
+  let best = price
+  let bestDist = Infinity
+  for (const v of [c.o, c.h, c.l, c.c]) {
+    const cy = candleSeries.priceToCoordinate(v)
+    if (cy == null) continue
+    const d = Math.abs(cy - y)
+    if (d < bestDist) {
+      bestDist = d
+      best = v
     }
-    chartState.drawBuf = []
-    redrawDrawings()
-  } else {
-    redrawDrawings()
   }
+  return { time: time, price: bestDist <= MAGNET_PX ? best : price }
 }
-function destroyActiveDrawings(): void {
-  const tool = chartState.drawTool
-  if (!tool) return
-  if (tool === 'hline') chartState.drawings = chartState.drawings.filter((d) => d.type !== 'hline')
-  else
-    chartState.drawings = chartState.drawings.filter((d) => d.type !== 'trend' && d.type !== 'ray')
-  chartState.drawBuf = []
+
+function placeDrawPointFromXY(x: Any, y: Any): void {
+  const def = drawToolDef(getDrawTool())
+  if (!def) return
+  const pt = snapToCandle(x, y)
+  if (!pt) return
+  chartState.drawBuf.push(pt)
+  setPendingPoints(chartState.drawBuf.length)
+  // points === 0 means open-ended: keep collecting until a double-click.
+  if (def.points > 0 && chartState.drawBuf.length >= def.points) commitPending(x, y)
   redrawDrawings()
-  showToast('Cleared ' + tool + ' drawings')
 }
+
+/** Turn the points collected so far into a drawing. (x, y) is the last click. */
+function commitPending(x: number, y: number): void {
+  const def = drawToolDef(getDrawTool())
+  if (!def) return
+  const pts = chartState.drawBuf
+  const min = def.points > 0 ? def.points : 2
+  if (pts.length < min) return
+  const drawing: Any = { type: def.id, color: def.color || '#4FC3F7', points: pts.slice() }
+  chartState.drawBuf = []
+  chartState._preview = null
+  if (def.text) {
+    // The caption is typed in place; the drawing lands once it is confirmed.
+    const sym = drawingsSym
+    chartState._captionDraft = { ...drawing, text: '…' }
+    askCaption(x, y, function (caption) {
+      chartState._captionDraft = null
+      if (caption != null && sym === drawingsSym) {
+        drawing.text = caption
+        currentDrawings().push(drawing)
+        saveDrawings()
+      }
+      publishDrawingCount()
+      redrawDrawings()
+    })
+    publishDrawingCount()
+    redrawDrawings()
+    return
+  }
+  currentDrawings().push(drawing)
+  saveDrawings()
+  publishDrawingCount()
+  redrawDrawings()
+}
+
+/**
+ * Caption input for the text tools, typed right where the label goes.
+ * Enter saves, Esc cancels, clicking away saves whatever was typed.
+ */
+let labelInput: HTMLInputElement | null = null
+function closeLabelInput(): void {
+  const el = labelInput
+  labelInput = null
+  el?.remove()
+}
+function askCaption(x: number, y: number, done: (caption: string | null) => void): void {
+  closeLabelInput()
+  const wrap = $('chartWrap')
+  if (!wrap) return done(null)
+  const el = document.createElement('input')
+  el.type = 'text'
+  el.className = 'draw-label-input'
+  el.placeholder = 'Label'
+  el.maxLength = 80
+  el.setAttribute('aria-label', 'Drawing label')
+  el.style.left = Math.max(4, Math.min(x, wrap.clientWidth - 170)) + 'px'
+  el.style.top = Math.max(4, Math.min(y - 14, wrap.clientHeight - 32)) + 'px'
+  labelInput = el
+  let settled = false
+  const finish = (caption: string | null) => {
+    if (settled) return
+    settled = true
+    if (labelInput === el) closeLabelInput()
+    done(caption)
+  }
+  el.addEventListener('keydown', function (e) {
+    e.stopPropagation()
+    if (e.key === 'Enter') finish(el.value.trim() || 'Note')
+    else if (e.key === 'Escape') finish(null)
+  })
+  el.addEventListener('blur', function () {
+    finish(el.value.trim() || null)
+  })
+  // Clicks on the field must not place points on the draw layer beneath.
+  el.addEventListener('pointerdown', (e) => e.stopPropagation())
+  el.addEventListener('click', (e) => e.stopPropagation())
+  wrap.appendChild(el)
+  el.focus()
+}
+
 function resizeDrawCanvas(): void {
   const cv = chartState.drawCanvas
   const wrap = $('chartWrap')
@@ -696,7 +1109,162 @@ function resizeDrawCanvas(): void {
   cv.style.width = w + 'px'
   cv.style.height = h + 'px'
 }
+/**
+ * Endpoints of a drawing in canvas pixels, rays already extended. The renderer
+ * and the eraser's hit test both go through this, so what you can click is
+ * exactly what you can see.
+ */
+/** Everything the geometry engine needs to turn prices and times into pixels. */
+function mapCtx(cw: number, ch: number): MapCtx {
+  const ts = chart.timeScale()
+  return {
+    x: (t: number) => ts.timeToCoordinate(snapChartTime(t) as Any),
+    y: (pr: number) => (candleSeries ? candleSeries.priceToCoordinate(pr) : null),
+    cw: cw,
+    ch: ch,
+    fmt: (pr: number) => pfmt(pr),
+    closesBetween(t1: number, t2: number) {
+      const lo = Math.min(t1, t2) * 1000
+      const hi = Math.max(t1, t2) * 1000
+      return displayCandles()
+        .filter((k) => k.t >= lo && k.t <= hi)
+        .map((k) => k.c)
+    },
+    barsBetween(t1: number, t2: number) {
+      const lo = Math.min(t1, t2) * 1000
+      const hi = Math.max(t1, t2) * 1000
+      return displayCandles().filter((k) => k.t >= lo && k.t <= hi).length
+    },
+    timeLabel(t: number) {
+      return new Date(t * 1000).toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    },
+  }
+}
+
+function shapeOf(d: Any, cw: number, ch: number): Shape | null {
+  if (!chart || !candleSeries) return null
+  try {
+    return shape(d as Drawing, mapCtx(cw, ch))
+  } catch (e) {
+    return null
+  }
+}
+
+/** Index of the drawing under a pixel position, or -1. */
+const HIT_PX = 7
+function drawingAt(x: Any, y: Any): number {
+  const cv = chartState.drawCanvas
+  if (!cv) return -1
+  const dpr = window.devicePixelRatio || 1
+  const cw = cv.width / dpr
+  const ch = cv.height / dpr
+  const drawings = currentDrawings()
+  for (let i = drawings.length - 1; i >= 0; i--) {
+    const sh = shapeOf(drawings[i], cw, ch)
+    if (!sh) continue
+    for (const g of sh.segs) {
+      if (pointToSegment(x, y, g.x1, g.y1, g.x2, g.y2) <= HIT_PX) return i
+    }
+    for (const l of sh.labels) {
+      if (l.box && Math.abs(l.x - x) < 60 && Math.abs(l.y - y) < 12) return i
+    }
+  }
+  return -1
+}
+
+function pointToSegment(px: Any, py: Any, x1: Any, y1: Any, x2: Any, y2: Any): number {
+  const dx = x2 - x1
+  const dy = y2 - y1
+  const len = dx * dx + dy * dy
+  let t = len ? ((px - x1) * dx + (py - y1) * dy) / len : 0
+  t = Math.max(0, Math.min(1, t))
+  return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy))
+}
+
+function paintShape(ctx: Any, sh: Shape, base: string, doomed: boolean): void {
+  const stroke = doomed ? cv('red') || '#FF1744' : base
+  sh.fills.forEach((f) => {
+    if (f.pts.length < 6) return
+    ctx.save()
+    ctx.fillStyle = doomed ? 'rgba(255,23,68,.14)' : f.color
+    ctx.beginPath()
+    ctx.moveTo(f.pts[0], f.pts[1])
+    for (let i = 2; i < f.pts.length; i += 2) ctx.lineTo(f.pts[i], f.pts[i + 1])
+    ctx.closePath()
+    ctx.fill()
+    ctx.restore()
+  })
+  if (doomed) {
+    ctx.save()
+    ctx.strokeStyle = 'rgba(255,23,68,.32)'
+    ctx.lineWidth = 9
+    ctx.lineCap = 'round'
+    sh.segs.forEach((g) => {
+      ctx.beginPath()
+      ctx.moveTo(g.x1, g.y1)
+      ctx.lineTo(g.x2, g.y2)
+      ctx.stroke()
+    })
+    ctx.restore()
+  }
+  sh.segs.forEach((g) => {
+    ctx.save()
+    ctx.strokeStyle = doomed ? stroke : g.color || base
+    ctx.lineWidth = g.width || (doomed ? 2.2 : 1.7)
+    ctx.lineCap = 'round'
+    ctx.setLineDash(g.dash || [])
+    ctx.beginPath()
+    ctx.moveTo(g.x1, g.y1)
+    ctx.lineTo(g.x2, g.y2)
+    ctx.stroke()
+    ctx.restore()
+  })
+  sh.arcs.forEach((a) => {
+    if (a.rx <= 0 || a.ry <= 0) return
+    ctx.save()
+    ctx.strokeStyle = doomed ? stroke : a.color || base
+    ctx.lineWidth = doomed ? 2.2 : 1.7
+    ctx.setLineDash(a.dash || [])
+    ctx.beginPath()
+    ctx.ellipse(a.cx, a.cy, a.rx, a.ry, 0, 0, Math.PI * 2)
+    ctx.stroke()
+    ctx.restore()
+  })
+  sh.handles.forEach((h) => {
+    ctx.save()
+    ctx.fillStyle = doomed ? stroke : base
+    ctx.beginPath()
+    ctx.arc(h.x, h.y, 2.6, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.restore()
+  })
+  sh.labels.forEach((l) => {
+    ctx.save()
+    ctx.font = '10px JetBrains Mono, monospace'
+    ctx.textAlign = l.align || 'left'
+    const w = ctx.measureText(l.text).width
+    if (l.box) {
+      const bx = l.align === 'center' ? l.x - w / 2 : l.align === 'right' ? l.x - w : l.x
+      ctx.fillStyle = 'rgba(6,11,24,.78)'
+      ctx.fillRect(bx - 4, l.y - 10, w + 8, 14)
+      ctx.strokeStyle = doomed ? stroke : l.color || base
+      ctx.lineWidth = 1
+      ctx.strokeRect(bx - 4, l.y - 10, w + 8, 14)
+    }
+    ctx.fillStyle = doomed ? stroke : l.color || base
+    ctx.fillText(l.text, l.x, l.y)
+    ctx.restore()
+  })
+}
+
 function redrawDrawings(includePreview?: Any): void {
+  renderVolumeProfile(visibleCandles())
+  renderWhaleBubbles()
   const cv = chartState.drawCanvas
   if (!cv || !chart) return
   resizeDrawCanvas()
@@ -706,158 +1274,46 @@ function redrawDrawings(includePreview?: Any): void {
   ctx.clearRect(0, 0, cv.width / dpr, cv.height / dpr)
   const cw = cv.width / dpr
   const ch = cv.height / dpr
-  const ts = chart.timeScale()
-  const ps = chart.priceScale('right')
-  const toXY = function (p: Any) {
-    const x = ts.timeToCoordinate(p.time)
-    const y = ps.priceToCoordinate(p.price)
-    return { x: x, y: y }
-  }
-  function lineXY(a: Any, b: Any) {
-    const A = toXY(a)
-    const B = toXY(b)
-    if (A.x == null || B.x == null || A.y == null || B.y == null) return null
-    return { A, B }
-  }
-  chartState.drawings.forEach(function (d) {
-    ctx.save()
-    ctx.strokeStyle = d.color
-    ctx.lineWidth = 1.8
-    ctx.lineCap = 'round'
-    ctx.font = '10px JetBrains Mono, monospace'
-    ctx.fillStyle = d.color
-    if (d.type === 'hline') {
-      const pt = toXY(d.points[0])
-      if (pt.y == null) return ctx.restore()
-      ctx.setLineDash([5, 4])
-      ctx.beginPath()
-      ctx.moveTo(0, pt.y)
-      ctx.lineTo(cw, pt.y)
-      ctx.stroke()
-      ctx.setLineDash([])
-      if (pt.x != null) {
-        ctx.fillText('┄ ' + pfmt(d.points[0].price), pt.x + 6, pt.y - 4)
-      }
-    } else {
-      const [a, b] = d.points
-      const lr = lineXY(a, b)
-      if (!lr) return ctx.restore()
-      const X1 = lr.A.x
-      const Y1 = lr.A.y
-      let X2 = lr.B.x
-      const Y2 = lr.B.y
-      if (d.type === 'ray') {
-        const dx = X2 - X1
-        const dy = Y2 - Y1
-        const t = (cw - X1) / dx
-        X2 = X1 + dx * t
-      }
-      ctx.beginPath()
-      ctx.moveTo(X1, Y1)
-      ctx.lineTo(X2, Y2)
-      ctx.stroke()
-      ctx.beginPath()
-      ctx.arc(X1, Y1, 2.5, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.beginPath()
-      ctx.arc(X2, Y2, 2.5, 0, Math.PI * 2)
-      ctx.fill()
-    }
-    ctx.restore()
+  if (!candleSeries) return
+
+  currentDrawings().forEach(function (d: Any, i: number) {
+    const sh = shapeOf(d, cw, ch)
+    if (sh) paintShape(ctx, sh, d.color, i === chartState._eraseHit)
   })
-  if (includePreview && chartState.drawBuf.length === 1 && chartState._preview) {
-    const a = chartState.drawBuf[0]
-    const A = toXY(a)
-    const P = toXY(chartState._preview)
-    if (A.x != null && A.y != null && P.x != null && P.y != null) {
+
+  // A text drawing waiting for its caption stays visible while it is typed.
+  if (chartState._captionDraft) {
+    const sh = shapeOf(chartState._captionDraft, cw, ch)
+    if (sh) {
       ctx.save()
-      ctx.strokeStyle = 'rgba(255,255,255,.45)'
-      ctx.lineWidth = 1
-      ctx.setLineDash([3, 3])
-      ctx.beginPath()
-      ctx.moveTo(A.x, A.y)
-      ctx.lineTo(P.x, P.y)
-      ctx.stroke()
+      ctx.globalAlpha = 0.65
+      paintShape(ctx, sh, chartState._captionDraft.color, false)
       ctx.restore()
     }
   }
-}
 
-// ---- Order book render ----
-export function renderOB(): void {
-  const bids: Any = state.ob.bids
-  const asks: Any = state.ob.asks
-  if (!bids.length || !asks.length) return
-  const bb = bids[0][0]
-  const ba = asks[0][0]
-  const mid = (bb + ba) / 2
-  const spreadBps = ((ba - bb) / mid) * 1e4
-  $('obSpreadV')!.textContent =
-    'spread ' + (ba - bb).toFixed(ba < 1 ? 6 : 2) + ' (' + spreadBps.toFixed(2) + ' bps)'
-  $('obMid')!.textContent = 'mid ' + pfmt(mid)
-  const rows = function (arr: Any[], cls: string) {
-    const maxN =
-      Math.max.apply(
-        null,
-        arr.map((x) => x[0] * x[1]),
-      ) || 1
-    return arr
-      .map(function (lv) {
-        const n = lv[0] * lv[1]
-        const w = Math.max(2, (n / maxN) * 100)
-        return (
-          '<div class="ob-row ' +
-          cls +
-          '"><span class="fill ' +
-          cls +
-          '" style="width:' +
-          w +
-          '%"></span><span class="op">' +
-          pfmt(lv[0]) +
-          '</span><span class="oa">' +
-          nfmt(lv[1]) +
-          '</span></div>'
-        )
-      })
-      .join('')
-  }
-  $('obAsks')!.innerHTML = rows(asks.slice(0, 10).reverse(), 'ask')
-  $('obBids')!.innerHTML = rows(bids.slice(0, 10), 'bid')
-  renderHeatmap()
-  function renderHeatmap() {
-    $('hmSym')!.textContent = baseOf(state.symbol) + ' ±15 LEVELS'
-    const all: Any[] = asks.slice(0, 8).concat(bids.slice(0, 8))
-    const maxN =
-      Math.max.apply(
-        null,
-        all.map((x) => x[0] * x[1]),
-      ) || 1
-    const hm = function (arr: Any[], side: string) {
-      return arr
-        .map(function (lv) {
-          const n = lv[0] * lv[1]
-          const r = n / maxN
-          const col =
-            side === 'ask'
-              ? 'rgba(255,23,68,' + (0.18 + r * 0.6).toFixed(2) + ')'
-              : 'rgba(0,230,118,' + (0.18 + r * 0.6).toFixed(2) + ')'
-          return (
-            '<div class="hm-row"><span class="hm-lbl">' +
-            pfmt(lv[0]) +
-            '</span><span class="hm-barzone"><span class="hm-bar" style="width:' +
-            Math.max(3, r * 100).toFixed(1) +
-            '%;background:' +
-            col +
-            '"></span></span><span class="hm-val">' +
-            cfmt(n) +
-            '</span></div>'
-          )
-        })
-        .join('')
+  // The shape being placed, following the cursor.
+  if (includePreview) {
+    const def = drawToolDef(getDrawTool())
+    const live = chartState._freehand
+      ? { type: 'brush', color: def?.color || '#4FC3F7', points: chartState._freehand }
+      : chartState.drawBuf.length && chartState._preview && def
+        ? {
+            type: def.id,
+            color: def.color || '#4FC3F7',
+            points: chartState.drawBuf.concat([chartState._preview]),
+            text: def.text ? '…' : undefined,
+          }
+        : null
+    if (live) {
+      const sh = shapeOf(live, cw, ch)
+      if (sh) {
+        ctx.save()
+        ctx.globalAlpha = 0.65
+        paintShape(ctx, sh, live.color, false)
+        ctx.restore()
+      }
     }
-    $('hmAsks')!.innerHTML = hm(asks.slice(0, 8).reverse(), 'ask')
-    $('hmBids')!.innerHTML = hm(bids.slice(0, 8), 'bid')
-    $('hmMid')!.textContent = '—— MID ' + pfmt(mid) + ' ——'
   }
 }
 
@@ -868,8 +1324,24 @@ export function renderHero(): void {
   $('heroIcon')!.textContent = meta.icon
   $('heroIcon')!.style.borderColor = meta.color + '55'
   $('heroName')!.textContent = meta.name
-  $('heroPair')!.textContent = meta.sym + ' · BINANCE SPOT'
-  if (!t) return
+  $('heroPair')!.textContent = meta.sym + ' · ' + venueOf(state.symbol)
+  if (!t) {
+    // The name and venue above have already switched to the new market. If we
+    // simply returned here, the price block kept the *previous* symbol's
+    // numbers — so selecting spot gold showed Bitcoin's price under a XAUUSD
+    // heading until the first quote landed. Blank it instead; an instrument
+    // is polled rather than streamed, so that gap is a second or two.
+    const el = $('heroPrice')!
+    el.textContent = '—'
+    el.dataset.p = '0'
+    $('heroChg')!.innerHTML = ''
+    $('heroUpdated')!.textContent = ''
+    $('hsHigh')!.textContent = '—'
+    $('hsLow')!.textContent = '—'
+    $('hsVol')!.textContent = '—'
+    $('hsTrades')!.textContent = '—'
+    return
+  }
   const el = $('heroPrice')!
   const prev = parseFloat(el.dataset.p || '0')
   const cur = t.last
@@ -883,11 +1355,25 @@ export function renderHero(): void {
   el.dataset.p = cur
   $('heroChg')!.innerHTML = chgHtml(t.pct) + ' <span style="color:var(--dim)">24h</span>'
   $('heroUpdated')!.textContent = '· ' + new Date().toLocaleTimeString()
-  $('hsHigh')!.textContent = '$' + pfmt(t.high)
-  $('hsLow')!.textContent = '$' + pfmt(t.low)
-  $('hsVol')!.textContent = cfmt(t.qvol)
-  $('hsTrades')!.textContent = nfmt(t.trades)
-  if (state.fr) $('hsMark')!.textContent = '$' + pfmt(parseFloat((state.fr as Any).markPrice))
+  // An instrument priced by Yahoo reports no trade count, and FX and indices
+  // report no volume at all. Printing a formatted undefined — or a confident
+  // "0 trades" for Apple — would be worse than saying nothing.
+  const dash = (v: unknown, fmt: (x: Any) => string): string =>
+    v == null || (typeof v === 'number' && !isFinite(v)) ? '—' : fmt(v)
+  $('hsHigh')!.textContent = dash(t.high, (v) => '$' + pfmt(v))
+  $('hsLow')!.textContent = dash(t.low, (v) => '$' + pfmt(v))
+  $('hsVol')!.textContent = t.qvol ? cfmt(t.qvol) : '—'
+  $('hsTrades')!.textContent = dash(t.trades, (v) => nfmt(v))
+  $('hsMark')!.textContent = state.fr
+    ? '$' + pfmt(parseFloat((state.fr as Any).markPrice))
+    : '—'
+}
+
+/** A round coin badge: the CoinGecko logo once it is known, else the glyph. */
+function tickIcon(key: string, glyph: string, color: string): string {
+  const img = (state.marketCaps as Record<string, { image?: string }> | undefined)?.[key]?.image
+  const inner = img && /^https:\/\//.test(img) ? '<img src="' + img.replace(/"/g, '') + '" alt="" loading="lazy">' : glyph
+  return '<i class="tk-ico" style="border-color:' + color + '66;background:' + color + '1f;color:' + color + '">' + inner + '</i>'
 }
 
 export function renderTicker(): void {
@@ -901,11 +1387,8 @@ export function renderTicker(): void {
       (c.sym === state.symbol ? ' active' : '') +
       '" data-sym="' +
       c.sym +
-      '"><span class="ts" style="color:' +
-      c.color +
-      '">' +
-      c.icon +
-      ' ' +
+      '"><span class="ts">' +
+      tickIcon(k, c.icon, c.color) +
       k +
       '</span><span class="tp">' +
       pr +
@@ -915,4 +1398,40 @@ export function renderTicker(): void {
     )
   }).join('')
   $('tickerTrack')!.innerHTML = items + items
+}
+
+/**
+ * The main chart as an image (Charts tab → Quick Tools → Export).
+ *
+ * takeScreenshot() only paints the library's own canvases, so the overlays
+ * stacked on top of it inside #chartWrap (drawings, volume profile, whale
+ * bubbles) are composited in at the position they sit on screen.
+ */
+export function chartScreenshot(): HTMLCanvasElement | null {
+  try {
+    if (!chart) return null
+    const shot = chart.takeScreenshot() as HTMLCanvasElement
+    const el = $('chart')
+    const wrap = $('chartWrap')
+    if (!el || !wrap || !el.clientWidth) return shot
+    const out = document.createElement('canvas')
+    out.width = shot.width
+    out.height = shot.height
+    const ctx = out.getContext('2d')
+    if (!ctx) return shot
+    ctx.drawImage(shot, 0, 0)
+    // The screenshot is in device pixels; overlays are measured in CSS pixels.
+    const cr = el.getBoundingClientRect()
+    const kx = shot.width / cr.width
+    const ky = shot.height / cr.height
+    wrap.querySelectorAll('canvas').forEach((c) => {
+      if (el.contains(c) || !c.width || !c.height) return
+      const r = c.getBoundingClientRect()
+      if (!r.width || !r.height || getComputedStyle(c).display === 'none') return
+      ctx.drawImage(c, (r.left - cr.left) * kx, (r.top - cr.top) * ky, r.width * kx, r.height * ky)
+    })
+    return out
+  } catch {
+    return null
+  }
 }

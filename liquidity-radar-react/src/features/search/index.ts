@@ -1,1 +1,0 @@
-export { initSearch } from './search'

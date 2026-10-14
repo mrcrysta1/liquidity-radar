@@ -5,12 +5,21 @@
 // signalData is exported as a live binding so the engine's AI chat can keep
 // reading the latest scan results without a copy.
 import * as LightweightCharts from 'lightweight-charts'
+import { getNeuralRead, neuralAdjustment, neuralVerdict, setNeuralAllowed, trainOneNeural } from './neuralSignal'
+import { instrumentOf, isInstrument } from '../../constants/instruments'
+import { loadCandleWindow } from '../../services/marketData'
 import { COINS } from '../../constants/market'
 import { esc, pfmt, cfmt, chgHtml } from '../../utils/format'
-import { aiComposite, calcRSI, forecastFrom } from '../../utils/indicators'
+import { aiComposite, calcATR, forecastFrom } from '../../utils/indicators'
+import { TF_MINUTES, closedOnly, scoreTimeframe as scoreTF } from './scoring'
+import { CALL_TTL, advanceCall, learnedWeights, termStats, winRate } from './outcomes'
+import type { GradedCall, SigCall, WinRate } from './outcomes'
 import { baseOf } from '../../utils/coins'
 import { $ } from '../../utils/dom'
 import { jget } from '../../api/client'
+import { fetchKlineRows } from '../../services/failover'
+import { resolveMarketText } from '../markets/catalog'
+import { poll } from '../../services/pollScheduler'
 import { state } from '../../services/store'
 import { md, mdTf, mdVal } from '../../services/market'
 import { storageGet, storageSet } from '../../services/storage'
@@ -18,15 +27,95 @@ import { chartTheme, mapCandle } from '../charts/chartRender'
 
 type Any = any
 
-const SIGNAL_COINS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'SUIUSDT', 'LINKUSDT']
-const TF_LIST = [
-  { key: '1h', label: '1H', limit: 100, weight: 0.5 },
-  { key: '1d', label: '1D', limit: 60, weight: 0.5 },
+// What the scanner sweeps. Crypto pairs and Yahoo-priced instruments sit in
+// one list on purpose: every score below is computed from candles alone, so
+// gold, the euro and the S&P go through exactly the same scoring as BTC
+// rather than a parallel, less-tested path.
+const SIGNAL_COINS = [
+  'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT',
+  'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'SUIUSDT', 'LINKUSDT',
+  // Non-crypto: spot gold and silver, the dollar's majors, the two US
+  // indices and crude. These have no order book or trade tape, so the
+  // whale-flow term simply does not contribute for them.
+  'XAUUSD', 'XAGUSD', 'EURUSD', 'GBPUSD', 'USDJPY', 'SPX500', 'NAS100', 'WTIUSD',
 ]
+const TF_LIST = [
+  { key: '1h', label: '1H', limit: 100, weight: 0.25 },
+  { key: '4h', label: '4H', limit: 100, weight: 0.4 },
+  { key: '1d', label: '1D', limit: 60, weight: 0.35 },
+]
+/** Levels a reader can actually act on, derived from volatility rather than guessed. */
+export interface TradePlan {
+  entry: number
+  stop: number
+  t1: number
+  t2: number
+  /** Distance to stop, as a percentage of entry. */
+  riskPct: number
+  /** Reward-to-risk at the second target. */
+  rr: number
+  atr: number
+}
+
+/**
+ * Turn a direction into levels using ATR, so the stop sits outside the noise
+ * this market actually makes rather than at a round percentage.
+ *
+ * 1.5 ATR for the stop and 1.5/3.0 ATR for the targets is the conventional
+ * swing framing; it is stated plainly in the UI so it can be judged, not
+ * taken on trust. A WAIT signal gets no plan — inventing one would be the
+ * dishonest part.
+ */
+function tradePlan(dir: 'BUY' | 'SELL', entry: number, atr: number): TradePlan | null {
+  if (!(entry > 0) || !(atr > 0)) return null
+  const sign = dir === 'BUY' ? 1 : -1
+  const stop = entry - sign * 1.5 * atr
+  const risk = Math.abs(entry - stop)
+  if (!(risk > 0)) return null
+  return {
+    entry,
+    stop,
+    t1: entry + sign * 1.5 * atr,
+    t2: entry + sign * 3 * atr,
+    riskPct: (risk / entry) * 100,
+    rr: (3 * atr) / risk,
+    atr,
+  }
+}
+
+export type Conviction = 'STRONG' | 'MODERATE' | 'WEAK'
+
+/**
+ * How much the scan actually agrees with itself.
+ *
+ * Strength alone overstates a signal that only one timeframe believes in, so
+ * conviction needs both: a score that clears the bar, and timeframes pointing
+ * the same way. Three aligned beats one loud one.
+ */
+function conviction(score: number, breakdown: Any[]): { tier: Conviction; agree: number; of: number } {
+  const dir = score > 0 ? 'BUY' : 'SELL'
+  const rated = breakdown.filter((b: Any) => b.type !== 'WAIT')
+  const agree = rated.filter((b: Any) => b.type === dir).length
+  const mag = Math.abs(score)
+  let tier: Conviction = 'WEAK'
+  if (mag >= 45 && agree >= 2) tier = 'STRONG'
+  else if (mag >= 22 && agree >= 2) tier = 'MODERATE'
+  else if (mag >= 45) tier = 'MODERATE'
+  return { tier, agree, of: breakdown.length }
+}
+/** How a scanned market is written on a card. Not everything is a pair —
+ *  "XAUUSD/USDT" would be nonsense, and so would "Gold/USDT". */
+function marketLabel(sym: string): string {
+  const inst = instrumentOf(sym)
+  if (inst) return inst.sym + ' · ' + inst.name
+  return baseOf(sym) + '/USDT'
+}
+
 export let signalData: Any[] = []
 const whaleFlowCache: Record<string, Any> = {}
-let patternHistory: Record<string, { correct: number; total: number }> = {}
-const modelWeights: Record<string, number> = {
+/** Each scoring term's default weight. The live weights (modelWeights) are
+ *  learned from graded calls on top of these (see outcomes.ts). */
+const DEFAULT_WEIGHTS: Record<string, number> = {
   rsi: 25,
   macdCross: 30,
   macdTrend: 10,
@@ -37,150 +126,34 @@ const modelWeights: Record<string, number> = {
   whale: 15,
   forecast: 10,
   master: 30,
+  neural: 20,
+}
+const modelWeights: Record<string, number> = { ...DEFAULT_WEIGHTS }
+
+// Graded calls (outcomes.ts). Replaces lr-patternHist / lr-modelW, which
+// graded a 0.3% move by the next sweep and ratcheted one overall weight.
+const CALLS_KEY = 'lr-sigCalls-v1'
+let calls: { open: SigCall[]; done: GradedCall[] } = { open: [], done: [] }
+function loadCalls(): void {
+  const d = storageGet<Any>(CALLS_KEY, null)
+  if (d && Array.isArray(d.open) && Array.isArray(d.done)) calls = d
+  applyLearnedWeights()
+}
+function applyLearnedWeights(): void {
+  // master is the score's overall scale, not an indicator: it is not learned.
+  Object.assign(modelWeights, learnedWeights(DEFAULT_WEIGHTS, calls.done), { master: DEFAULT_WEIGHTS.master })
 }
 
-function loadPatternHistory(): void {
-  try {
-    const d = storageGet<Any>('lr-patternHist', undefined)
-    if (d) patternHistory = d
-  } catch (e) {
-    /* ignore */
-  }
-}
-function savePatternHistory(): void {
-  try {
-    storageSet('lr-patternHist', patternHistory)
-  } catch (e) {
-    /* ignore */
-  }
-}
-function loadModelWeights(): void {
-  try {
-    const d = storageGet<Any>('lr-modelW', undefined)
-    if (d) Object.keys(d).forEach((k) => { if (modelWeights[k] !== undefined) modelWeights[k] = d[k] })
-  } catch (e) {
-    /* ignore */
-  }
-}
-function saveModelWeights(): void {
-  try {
-    storageSet('lr-modelW', modelWeights)
-  } catch (e) {
-    /* ignore */
-  }
-}
-
-function recordPatternOutcome(key: string, wrong: number): void {
-  if (!patternHistory[key]) patternHistory[key] = { correct: 0, total: 0 }
-  patternHistory[key].total++
-  if (!wrong) patternHistory[key].correct++
-  if (patternHistory[key].total % 10 === 0) adjustWeights()
-  savePatternHistory()
-}
-
-function adjustWeights(): void {
-  const totalPatterns = Object.keys(patternHistory).length
-  if (totalPatterns < 5) return
-  Object.keys(patternHistory).forEach((k) => {
-    const h = patternHistory[k]
-    if (h.total < 5) return
-    const hitRate = h.correct / h.total
-    // map outcome keys like "master_BUY" / "rsi_15m" back to a valid model-weight key
-    const wKey = k.split('_')[0]
-    if (modelWeights[wKey] === undefined) return
-    if (hitRate > 0.6) {
-      modelWeights[wKey] = Math.min(45, (modelWeights[wKey] || 1) * 1.06)
-    } else if (hitRate < 0.42) {
-      modelWeights[wKey] = Math.max(5, (modelWeights[wKey] || 1) * 0.94)
-    }
-  })
-  saveModelWeights()
-}
-
-function scoreTimeframe(candles: Any[]): Any {
-  const closes = candles.map((c) => c.c)
-  const vols = candles.map((c) => c.v)
-  if (closes.length < 30) return null
-  const a = aiComposite(candles, closes, vols)
-  const fc = forecastFrom(closes)
-  const last = closes[closes.length - 1]
-  const reasons: string[] = []
-  let score = 0
-  if (a.rsi < 30) {
-    reasons.push('RSI oversold (' + a.rsi.toFixed(0) + ')')
-    score += modelWeights.rsi
-  } else if (a.rsi > 70) {
-    reasons.push('RSI overbought (' + a.rsi.toFixed(0) + ')')
-    score -= modelWeights.rsi
-  } else if (a.rsi < 45) {
-    reasons.push('RSI bearish (' + a.rsi.toFixed(0) + ')')
-    score += Math.round(modelWeights.rsi * 0.3)
-  } else if (a.rsi > 55) {
-    reasons.push('RSI bullish (' + a.rsi.toFixed(0) + ')')
-    score -= Math.round(modelWeights.rsi * 0.3)
-  }
-  if (a.macd.hist > 0 && closes[closes.length - 2] < closes[closes.length - 3]) {
-    reasons.push('MACD bullish cross')
-    score += modelWeights.macdCross
-  } else if (a.macd.hist < 0 && closes[closes.length - 2] > closes[closes.length - 3]) {
-    reasons.push('MACD bearish cross')
-    score -= modelWeights.macdCross
-  } else if (a.macd.hist > 0) {
-    reasons.push('MACD bullish')
-    score += modelWeights.macdTrend
-  } else {
-    reasons.push('MACD bearish')
-    score -= modelWeights.macdTrend
-  }
-  if (last > a.e20) {
-    reasons.push('Above EMA20')
-    score += modelWeights.ema
-  } else {
-    reasons.push('Below EMA20')
-    score -= modelWeights.ema
-  }
-  if (a.bb.pctB < 10) {
-    reasons.push('Lower BB touch')
-    score += modelWeights.bb
-  } else if (a.bb.pctB > 90) {
-    reasons.push('Upper BB stretch')
-    score -= modelWeights.bb
-  }
-  if (a.vt === 'RISING') {
-    reasons.push('Volume rising')
-    score += modelWeights.vol
-  } else if (a.vt === 'FALLING') {
-    reasons.push('Volume falling')
-    score -= modelWeights.vol
-  }
-  const prev10 = closes.slice(-20, -10)
-  const last10 = closes.slice(-10)
-  if (prev10.length >= 10 && last10.length >= 10) {
-    const rsi1 = calcRSI(prev10)
-    const rsi2 = calcRSI(last10)
-    if (rsi1 > rsi2 && last > closes[closes.length - 11]) {
-      reasons.push('Bearish RSI div')
-      score -= modelWeights.diverge
-    } else if (rsi1 < rsi2 && last < closes[closes.length - 11]) {
-      reasons.push('Bullish RSI div')
-      score += modelWeights.diverge
-    }
-  }
-  const swingH = Math.max.apply(null, closes.slice(-20))
-  const swingL = Math.min.apply(null, closes.slice(-20))
-  if (last > swingH * 0.995) {
-    reasons.push('Near resistance $' + pfmt(swingH))
-    score -= 5
-  }
-  if (last < swingL * 1.005) {
-    reasons.push('Near support $' + pfmt(swingL))
-    score += 5
-  }
-  score = Math.max(-100, Math.min(100, score))
-  return { score: score, reasons: reasons.slice(0, 4), ai: a, fc: fc, last: last }
+/** Scores one timeframe with the scanner's current (learned) weights (see scoring.ts). */
+function scoreTimeframe(candles: Any[], tfKey: string): Any {
+  return scoreTF(candles, tfKey, modelWeights)
 }
 
 function getWhaleFlow(sym: string): Promise<Any> {
+  // Metals, FX, indices and equities have no public trade tape. Returning
+  // null leaves the whale term out of the blend rather than scoring them
+  // against a zero they never had the chance to earn.
+  if (isInstrument(sym)) return Promise.resolve(null)
   const cached = whaleFlowCache[sym]
   if (cached && Date.now() - cached.ts < 30000) return cached
   return jget('https://api.binance.com/api/v3/trades?symbol=' + sym + '&limit=500').then(function (trades: Any) {
@@ -250,7 +223,15 @@ function scanKlineFetch(sym: string, tfKey: string): Promise<Any[]> {
     scanCache[key] = { ts: Date.now(), candles: state.candles.slice() }
     return Promise.resolve(scanCache[key].candles)
   }
-  return jget('https://api.binance.com/api/v3/klines?symbol=' + sym + '&interval=' + tfKey + '&limit=60').then(function (data: Any) {
+  if (isInstrument(sym)) {
+    // marketData knows where each instrument is priced: gold is Binance's
+    // perpetual shifted onto spot (the chart's price), the rest Yahoo.
+    return loadCandleWindow(sym, tfKey, 60).then(function (candles) {
+      if (candles.length) scanCache[key] = { ts: Date.now(), candles: candles }
+      return candles as Any[]
+    })
+  }
+  return fetchKlineRows(sym, tfKey, 60).then(function (data: Any) {
     const candles = data.map((k: Any) => ({ t: k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5] })).filter(mdVal.candle)
     if (candles.length) scanCache[key] = { ts: Date.now(), candles: candles }
     return candles
@@ -264,8 +245,13 @@ export function scanSignals(): void {
   const promises = SIGNAL_COINS.map(function (sym) {
     const tfPromises = TF_LIST.map(function (tf) {
       return scanKlineFetch(sym, tf.key).then(function (candles) {
-        return scoreTimeframe(candles)
-      }).catch(function () {
+        const sc = scoreTimeframe(closedOnly(candles, tf.key), tf.key)
+        // masterSignal weights each score by its timeframe, so the score has to
+        // carry which timeframe it came from. Without this every coin threw and
+        // was swallowed by the catch below — the scanner returned nothing at all.
+        return sc ? { ...sc, tf: tf.key } : null
+      }).catch(function (e) {
+        console.warn('signal tf', sym, tf.key, e)
         return null
       })
     })
@@ -282,18 +268,61 @@ export function scanSignals(): void {
         else if (whale.imbalance < -0.15) whaleText = 'Whale distribution (sell ' + cfmt(whale.sellUsd) + ' vs buy ' + cfmt(whale.buyUsd) + ')'
         else whaleText = 'Whale flow balanced (buy ' + cfmt(whale.buyUsd) + ' / sell ' + cfmt(whale.sellUsd) + ')'
       }
-      // blend master with whale flow and learning-adjusted master weight
-      const blend = Math.max(-100, Math.min(100, Math.round(master.score * ((modelWeights.master || 30) / 30) + whaleAdj)))
+      // The in-browser direction model's read, when one has been trained for
+      // this market recently. It is weighted by its own measured out-of-sample
+      // accuracy, so a model with no demonstrated edge moves the score by
+      // nothing at all however confident it sounds.
+      const neural = getNeuralRead(sym)
+      const neuralAdj = neuralAdjustment(neural, modelWeights.neural || 20)
+      // blend master with whale flow, the neural read and the learning-adjusted master weight
+      const blend = Math.max(-100, Math.min(100, Math.round(master.score * ((modelWeights.master || 30) / 30) + whaleAdj + neuralAdj)))
       const allReasons: string[] = []
       tfScores.forEach((ts: Any) => { if (ts && ts.reasons.length) allReasons.push(ts.reasons[0]) })
       const t = state.tickers[sym]
+      // Levels come off the 4H series where it scored, since that is the
+      // timeframe the plan is framed on; failing that, any series with enough
+      // bars to measure ATR. Preferring a fixed slot meant one quiet timeframe
+      // left an otherwise good signal with no levels at all.
+      const swing =
+        [1, 2, 0]
+          .map((i) => tfScores[i])
+          .find((x: Any) => x && x.candles && x.candles.length >= 20) || null
+      const atr = swing && swing.candles ? calcATR(swing.candles, 14) : 0
+      // A market we just scored should never render without a price. The
+      // instruments are polled rather than streamed, so on the first sweep
+      // the quote often has not landed yet — fall back to the very candles
+      // the score was computed from instead of printing a dash.
+      let tk: Any = t
+      if (!tk) {
+        const daily = tfScores[2] as Any
+        const cs: Any[] =
+          (daily && daily.candles && daily.candles.length >= 2 ? daily.candles : null) ||
+          (swing && swing.candles && swing.candles.length >= 2 ? swing.candles : null) ||
+          []
+        if (cs.length >= 2) {
+          const last = cs[cs.length - 1].c
+          const prev = cs[cs.length - 2].c
+          tk = { last, pct: prev ? ((last - prev) / prev) * 100 : 0, qvol: 0 }
+        }
+      }
+      const px = (tk && tk.last) || (swing && swing.last) || 0
+      const conv = conviction(blend, master.breakdown)
+      const dir = blend > 15 ? 'BUY' : blend < -15 ? 'SELL' : null
+      // The badge classified the pre-whale score while the card printed the
+      // blended one, so a coin could read "WAIT (-28)" and carry a sell plan.
+      // One score, one label.
+      master.type = dir || 'WAIT'
+      const plan = dir ? tradePlan(dir, px, atr) : null
       let fcObj: Any = null
       const s1 = tfScores[0] ? tfScores[0].fc : null
       if (s1 && s1.rows) {
         fcObj = { rows: s1.rows, pUp: 1 / (1 + Math.exp(-blend / 45)) }
       }
-      return { sym: sym, score: blend, master: master, tfScores: tfScores, whale: whale, whaleText: whaleText, t: t, fc: fcObj, reasons: allReasons.slice(0, 4) }
-    }).catch(function () {
+      return { sym: sym, score: blend, master: master, tfScores: tfScores, whale: whale, whaleText: whaleText, t: tk, fc: fcObj, neural: neural, neuralAdj: neuralAdj, reasons: allReasons.slice(0, 4), plan: plan, conv: conv }
+    }).catch(function (e) {
+      // A coin dropping out used to be silent, which made a scanner returning
+      // nothing at all indistinguishable from a quiet market.
+      console.warn('signal scan', sym, e)
       return null
     })
   })
@@ -302,52 +331,145 @@ export function scanSignals(): void {
     signalData.sort(function (a, b) { return Math.abs(b.score) - Math.abs(a.score) })
     renderSignals()
     recordSignalOutcomes()
+    // Train at most one market's direction model per sweep, and only while
+    // the scanner is actually on screen. Nineteen models per sweep is the
+    // shape of the bug that pinned this app at 7fps; one every couple of
+    // minutes, yielded per batch, is not noticeable. Candles come from the
+    // scan cache, so this adds no requests.
+    const onScreen = !!document.getElementById('tab-signals')?.classList.contains('active')
+    setNeuralAllowed(onScreen)
+    if (onScreen) {
+      // One market's worth of deep history, fetched only for whichever
+      // market is actually being trained this sweep.
+      const loadDeep = function (sym: string): Promise<Any[]> {
+        if (isInstrument(sym)) return loadCandleWindow(sym, '1h', 400) as Promise<Any[]>
+        return fetchKlineRows(sym, '1h', 400)
+          .then(function (data: Any) {
+            return data.map((k: Any) => ({ t: k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5] })).filter(mdVal.candle)
+          })
+      }
+      // Deliberately no re-render here. The score on a card already has the
+      // neural term folded in, so painting a freshly trained read onto cards
+      // whose scores were computed without it would show a number that
+      // disagrees with the signal beside it. It lands on the next sweep,
+      // where everything is recomputed together and stays consistent.
+      void trainOneNeural(SIGNAL_COINS, loadDeep as Any)
+    }
   }).catch(function (e) {
     console.warn('Signal scan failed:', e)
     if (badge) badge.textContent = 'SCAN FAILED'
     if (badge) badge.style.background = 'rgba(255,23,68,.15)'
-    $('signalGrid')!.innerHTML = '<div style="text-align:center;padding:40px;color:var(--dim)"><b style="color:var(--red);font-size:14px">Scanner Error</b><br><span style="font-size:12px;margin-top:6px;display:block">Could not reach Binance API. Retrying in 2 minutes.</span></div>'
+    $('signalGrid')!.innerHTML = '<div style="text-align:center;padding:40px;color:var(--dim)"><b style="color:var(--red);font-size:14px">Scanner Error</b><br><span style="font-size:12px;margin-top:6px;display:block">Could not reach the market data APIs. Retrying in 2 minutes.</span></div>'
   })
 }
 
+/** Each term's signed share of a signal's score (+ = towards BUY). */
+function callTerms(sig: Any): Record<string, number> {
+  const out: Record<string, number> = {}
+  const scored = TF_LIST.map((tf, i) => ({ tf, ts: sig.tfScores[i] })).filter((x) => x.ts && x.ts.parts)
+  const totalW = scored.reduce((a, x) => a + x.tf.weight, 0) || 1
+  for (const { tf, ts } of scored)
+    for (const [k, v] of Object.entries(ts.parts as Record<string, number>))
+      out[k] = (out[k] ?? 0) + (v * tf.weight) / totalW
+  if (sig.whale && sig.whale.imbalance) out.whale = sig.whale.imbalance * modelWeights.whale
+  if (sig.neuralAdj) out.neural = sig.neuralAdj
+  return out
+}
+
+/** Advance open calls on fresh hourly candles, then open calls for new signals. */
 function recordSignalOutcomes(): void {
   if (!signalData.length) return
-  const prevSignals = storageGet<Any>('lr-lastSignals', {})
-  let touched = 0
-  signalData.forEach((s: Any) => {
-    const old = prevSignals[s.sym]
-    const t = state.tickers[s.sym]
-    if (!old || !t) return
-    const px = t.last
-    if (!(old.price > 0) || !(px > 0)) return
-    const moved = ((px - old.price) / old.price) * 100
-    // require a meaningful move over the scan window (1H/4H horizon)
-    if (Math.abs(moved) < 0.3) return
-    if (old.type === 'BUY' || old.type === 'SELL') {
-      const correct = (old.type === 'BUY' && moved > 0) || (old.type === 'SELL' && moved < 0)
-      recordPatternOutcome('master_' + old.type, correct ? 0 : 1)
-      touched++
-    }
-  })
-  if (touched) {
-    adjustWeights()
-    saveModelWeights()
+  const now = Date.now()
+  const bySym = new Map<string, Any>(signalData.map((x: Any) => [x.sym, x]))
+  const still: SigCall[] = []
+  for (const c of calls.open) {
+    const hourly = bySym.get(c.sym)?.tfScores?.[0]?.candles as Any[] | undefined
+    const res = hourly ? advanceCall(c, hourly, now) : now >= c.expiresAt ? 'expired' : null
+    if (res) calls.done.push({ ...c, result: res, closedAt: now })
+    else still.push(c)
   }
-  const current: Record<string, Any> = {}
-  signalData.forEach((s: Any) => {
-    const px = (s.t && s.t.last) ? s.t.last : 0
-    current[s.sym] = { type: s.master.type, score: s.score, ts: Date.now(), price: px }
-  })
-  storageSet('lr-lastSignals', current)
+  calls.open = still
+  for (const x of signalData) {
+    const p = x.plan
+    if (!p || calls.open.some((c) => c.sym === x.sym)) continue
+    calls.open.push({
+      id: x.sym + ':' + now,
+      sym: x.sym,
+      dir: p.t1 > p.entry ? 'BUY' : 'SELL',
+      entry: p.entry,
+      stop: p.stop,
+      t1: p.t1,
+      openedAt: now,
+      expiresAt: now + CALL_TTL,
+      checkedUntil: 0,
+      terms: callTerms(x),
+      tier: x.conv?.tier,
+    })
+  }
+  calls.done = calls.done.slice(-500)
+  storageSet(CALLS_KEY, calls)
+  applyLearnedWeights()
+}
+
+/** How often the scanner's calls reached their target before their stop.
+ *  Null until 10 calls are decided. */
+export function signalHitRate(): (WinRate & { open: number }) | null {
+  const w = winRate(calls.done)
+  return w.n >= 10 ? { ...w, open: calls.open.length } : null
+}
+
+/** The record behind the scanner's learning, for the UI and the docs. */
+export function signalLearning() {
+  return {
+    record: winRate(calls.done),
+    open: calls.open.length,
+    weights: { ...modelWeights },
+    defaults: { ...DEFAULT_WEIGHTS },
+    terms: termStats(calls.done),
+  }
+}
+
+type SigFilter = 'all' | 'BUY' | 'SELL' | 'WAIT'
+let sigFilter: SigFilter = 'all'
+
+/** Filter chips live above the grid; the scan itself is unchanged by them. */
+export function setSigFilter(f: string): void {
+  sigFilter = (['all', 'BUY', 'SELL', 'WAIT'].indexOf(f) !== -1 ? f : 'all') as SigFilter
+  renderSignals()
 }
 
 function renderSignals(): void {
-  $('sigCount')!.textContent = signalData.length + ' COINS · ' + TF_LIST.length + ' TIMEFRAMES'
-  let totalHits = 0
-  let totalPreds = 0
-  Object.keys(patternHistory).forEach((k) => { totalHits += patternHistory[k].correct; totalPreds += patternHistory[k].total })
-  const hitRate = totalPreds > 10 ? Math.round((totalHits / totalPreds) * 100) : null
-  $('signalGrid')!.innerHTML = signalData.map(function (s) {
+  $('sigCount')!.textContent = signalData.length + ' MARKETS · ' + TF_LIST.length + ' TIMEFRAMES'
+  const counts = { all: signalData.length, BUY: 0, SELL: 0, WAIT: 0 } as Record<string, number>
+  signalData.forEach((s: Any) => { counts[s.master.type] = (counts[s.master.type] || 0) + 1 })
+  const bar = $('sigFilters')
+  if (bar) {
+    bar.innerHTML = ([
+      ['all', 'All'], ['BUY', 'Buy'], ['SELL', 'Sell'], ['WAIT', 'Watch'],
+    ] as Array<[string, string]>).map(function (f) {
+      return '<button class="sig-chip ' + f[0].toLowerCase() + (sigFilter === f[0] ? ' on' : '') +
+        '" onclick="setSigFilter(&quot;' + f[0] + '&quot;)">' + f[1] +
+        '<i>' + (counts[f[0]] || 0) + '</i></button>'
+    }).join('')
+  }
+  // Rank by conviction first, then by strength — a strong reading that only one
+  // timeframe shares should not outrank a moderate one they all agree on.
+  const TIER: Record<string, number> = { STRONG: 2, MODERATE: 1, WEAK: 0 }
+  const shown = signalData
+    .filter((s: Any) => sigFilter === 'all' || s.master.type === sigFilter)
+    .slice()
+    .sort((a: Any, b: Any) => {
+      const t = (TIER[b.conv?.tier] || 0) - (TIER[a.conv?.tier] || 0)
+      return t !== 0 ? t : Math.abs(b.score) - Math.abs(a.score)
+    })
+  const hr = signalHitRate()
+  const hitRate = hr ? Math.round(hr.rate * 100) : null
+  const totalPreds = hr ? hr.n : 0
+  if (!shown.length) {
+    $('signalGrid')!.innerHTML = '<div class="sig-empty">No ' + (sigFilter === 'all' ? '' : sigFilter.toLowerCase() + ' ') + 'signals in this scan. The scanner refreshes every two minutes.</div>'
+    return
+  }
+  $('signalGrid')!.innerHTML = shown.map(function (s) {
     const ms = s.master
     const type = ms.type
     const typeCls = type === 'BUY' ? 'sig-buy' : type === 'SELL' ? 'sig-sell' : 'sig-wait'
@@ -374,12 +496,45 @@ function renderSignals(): void {
         + '<div>24H <b style="color:' + (r24.dp >= 0 ? cGreen : cRed) + '">$' + pfmt(r24.pred) + '</b> (' + pct(r24.dp) + ')' + (s.fc.pUp != null ? (' | P(up) ' + Math.round(s.fc.pUp * 100) + '%') : '') + '</div>'
         + '</div>'
     }
-    const learnHtml = hitRate ? '<div class="sc-learning">Model accuracy: ' + hitRate + '% across ' + totalPreds + ' predictions</div>' : ''
+    const learnHtml = hitRate ? '<div class="sc-learning">Calls that hit target before stop: ' + hitRate + '% of ' + totalPreds + '</div>' : ''
+    // The neural read, stated with the accuracy that earned it its weight —
+    // and stated plainly when that weight was zero, so a confident-looking
+    // probability is never mistaken for one the score actually used.
+    const nr = s.neural
+    const neuralHtml = nr
+      ? '<div class="sc-neural">'
+        + '<span class="sc-neural-k">Neural</span> P(up) <b>' + Math.round(nr.pUp * 100) + '%</b>'
+        + ' · holdout accuracy ' + (nr.accuracy * 100).toFixed(1) + '% over ' + nr.n + ' bars'
+        + (s.neuralAdj
+            ? ' · <b class="' + (s.neuralAdj > 0 ? 'up' : 'dn') + '">' + (s.neuralAdj > 0 ? '+' : '') + s.neuralAdj + '</b> to score'
+            : ' · <i>' + neuralVerdict(nr) + '</i>')
+        + '</div>'
+      : ''
+    const cv = s.conv
+    const convHtml = cv
+      ? '<span class="sc-conv ' + cv.tier.toLowerCase() + '" title="' + cv.agree + ' of ' + cv.of +
+        ' timeframes agree">' + cv.tier + ' <i>' + cv.agree + '/' + cv.of + ' TF</i></span>'
+      : ''
+    const p = s.plan
+    const planHtml = p
+      ? '<div class="sc-plan">'
+        + '<div class="sc-plan-head"><span>Plan</span><span class="sc-rr">R:R ' + p.rr.toFixed(1) + ':1</span></div>'
+        + '<div class="sc-plan-grid">'
+        + '<div><small>Entry</small><b>' + pfmt(p.entry) + '</b></div>'
+        + '<div><small>Stop</small><b class="dn">' + pfmt(p.stop) + '</b><i>' + p.riskPct.toFixed(2) + '%</i></div>'
+        + '<div><small>Target 1</small><b class="up">' + pfmt(p.t1) + '</b></div>'
+        + '<div><small>Target 2</small><b class="up">' + pfmt(p.t2) + '</b></div>'
+        + '</div>'
+        + '<small class="sc-plan-note">1.5×ATR stop, 1.5× and 3×ATR targets · ATR(14) 4H = ' + pfmt(p.atr) + '</small>'
+        + '</div>'
+      : ''
     return '<div class="signal-card ' + typeCls + '">'
-      + '<div class="sc-head"><span class="sc-coin">' + baseOf(s.sym) + '/USDT ' + price + ' ' + chg + '</span><span class="sc-type ' + badgeCls + '">' + type + '</span></div>'
-      + '<div class="sc-tf-row">' + tfBadges + '</div>'
+      + '<div class="sc-head"><span class="sc-coin">' + marketLabel(s.sym) + ' ' + price + ' ' + chg + '</span><span class="sc-type ' + badgeCls + '">' + type + '</span></div>'
+      + '<div class="sc-tf-row">' + tfBadges + convHtml + '</div>'
       + '<div class="sc-conf"><div class="sc-conf-bar"><div class="sc-conf-fill" style="width:' + Math.min(100, conf) + '%;background:' + confColor + '"></div></div></div>'
       + '<div class="sc-reasons">' + s.reasons.map((r: string) => '&bull; ' + esc(r)).join('<br>') + '</div>'
+      + planHtml
+      + neuralHtml
       + (s.whaleText ? '<div class="sc-whale ' + whaleClass + '">' + esc(s.whaleText) + '</div>' : '')
       + forecastHtml
       + learnHtml
@@ -398,7 +553,7 @@ export function switchSigMode(mode: string): void {
   document.querySelectorAll<HTMLElement>('.sig-mode-tab').forEach((t) => { t.classList.toggle('active', t.dataset.sigmode === mode) })
   $('sigAutoView')!.style.display = mode === 'auto' ? '' : 'none'
   $('sigSearchView')!.style.display = mode === 'search' ? '' : 'none'
-  if (mode === 'search') $('sigSearchBox')!.focus()
+  if (mode === 'search') document.querySelector<HTMLElement>('#sigSearchView .cp-trigger')?.focus()
 }
 
 export function onSigSearch(val: string): void {
@@ -406,42 +561,41 @@ export function onSigSearch(val: string): void {
   sigSearchTimer = setTimeout(() => analyzeSigCoin(val), 400)
 }
 
-function resolveSigSym(input: string): string | null {
-  const s = input.trim().toUpperCase()
-  if (!s) return null
-  if (s.endsWith('USDT')) return s
-  const aliases: Record<string, string> = {
-    BTC: 'BTCUSDT', ETH: 'ETHUSDT', SOL: 'SOLUSDT', BNB: 'BNBUSDT', XRP: 'XRPUSDT', DOGE: 'DOGEUSDT', ADA: 'ADAUSDT',
-    AVAX: 'AVAXUSDT', DOT: 'DOTUSDT', LINK: 'LINKUSDT', UNI: 'UNIUSDT', TRUMP: 'TRUMPUSDT', PEPE: 'PEPEUSDT', WIF: 'WIFUSDT',
-    FLOKI: 'FLOKIUSDT', SHIB: 'SHIBUSDT', BONK: 'BONKUSDT', SUI: 'SUIUSDT', ARB: 'ARBUSDT', OP: 'OPUSDT', NEAR: 'NEARUSDT',
-    MATIC: 'MATICUSDT', ATOM: 'ATOMUSDT', LTC: 'LTCUSDT', FIL: 'FILUSDT', APT: 'APTUSDT', NEIRO: 'NEIROUSDT', TREMP: 'TREMPUSDT',
-  }
-  if (aliases[s]) return aliases[s]
-  if (typeof COINS !== 'undefined') { const found = Object.keys(COINS).find((k) => k === s); if (found) return COINS[found]!.sym }
-  return s + 'USDT'
-}
+/** Free text ("gold", "eth", "PEPEUSDT") to a symbol, through the shared market catalog. */
+const resolveSigSym = (input: string): string | null => resolveMarketText(input)
 
 export function analyzeSigCoin(input: string): void {
   const sym = resolveSigSym(input)
   if (!sym || sym === 'USDT') return
   const el = $('sigAnalysisResult')!
-  el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--dim)">Analyzing ' + baseOf(sym) + '...</div>'
+  el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--dim)">Analyzing ' + marketLabel(sym) + '...</div>'
   const tfs = ['1h', '4h', '1d']
   const tfLabels = ['1H', '4H', '1D']
   const tfPromises: Promise<Any>[] = tfs.map(function (tf) {
-    return jget('https://api.binance.com/api/v3/klines?symbol=' + sym + '&interval=' + tf + '&limit=120').then(function (data: Any) {
-      const candles = data.map((k: Any) => ({ t: k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5] }))
+    // Gold, FX and the other instruments are not exchange pairs; their candles
+    // come through marketData, which knows where each one is priced.
+    const rows: Promise<Any> = isInstrument(sym)
+      ? loadCandleWindow(sym, tf, 120).then((cs) => cs.map((c) => [c.t, c.o, c.h, c.l, c.c, c.v]))
+      : fetchKlineRows(sym, tf, 120)
+    return rows.then(function (data: Any) {
+      const candles = closedOnly<Any>(
+        data.map((k: Any) => ({ t: k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5] })),
+        tf,
+      )
       const closes = candles.map((c: Any) => c.c)
       const vols = candles.map((c: Any) => c.v)
       const a = aiComposite(candles, closes, vols)
-      const fc = forecastFrom(closes)
-      const sc = scoreTimeframe(candles)
+      const fc = forecastFrom(closes, TF_MINUTES[tf] ?? 60)
+      const sc = scoreTimeframe(candles, tf)
       return { tf: tf, label: tfLabels[tfs.indexOf(tf)], candles: candles, closes: closes, a: a, fc: fc, sc: sc }
     }).catch(function () {
       return { tf: tf, label: tfLabels[tfs.indexOf(tf)], candles: [], closes: [], a: null, fc: null, sc: null }
     })
   })
-  const newsPromise: Promise<Any> = jget('https://cryptocurrency.cv/api/news?coin=' + baseOf(sym).toLowerCase()).catch(function () {
+  // The crypto news endpoint has nothing to say about the S&P or the euro.
+  const newsPromise: Promise<Any> = isInstrument(sym)
+    ? Promise.resolve(null)
+    : jget('https://cryptocurrency.cv/api/news?coin=' + baseOf(sym).toLowerCase()).catch(function () {
     return { articles: [] }
   })
   const whalePromise = getWhaleFlow(sym)
@@ -462,7 +616,9 @@ export function analyzeSigCoin(input: string): void {
       const sc = d.sc
       const tp = sc.score > 15 ? 'BUY' : sc.score < -15 ? 'SELL' : 'WAIT'
       const tc = tp === 'BUY' ? 'color:var(--green)' : tp === 'SELL' ? 'color:var(--red)' : 'color:var(--amber)'
-      const weight = i === 0 ? 0.4 : i === 1 ? 0.35 : 0.25
+      // Same timeframe weights as the scanner (this used 0.4/0.35/0.25, so the
+      // same coin could get a different verdict here than on its card).
+      const weight = TF_LIST[i]?.weight ?? 0
       masterScore += sc.score * weight
       if (sc.reasons.length) reasons.push(sc.reasons[0])
       tfHtml += '<div class="sig-tf-card">'
@@ -492,13 +648,13 @@ export function analyzeSigCoin(input: string): void {
       whaleHtml = '<div style="margin-top:14px;padding:10px;background:var(--card2);border:1px solid var(--border);border-radius:9px">'
         + '<div style="font-size:11px;font-weight:700;margin-bottom:6px">Whale Flow (Last 500 Trades)</div>'
         + '<div style="display:flex;gap:14px;font-family:var(--mono);font-size:12px">'
-        + '<span style="color:var(--green)">Buy: $' + cfmt(whale.buyUsd) + '</span>'
-        + '<span style="color:var(--red)">Sell: $' + cfmt(whale.sellUsd) + '</span>'
+        + '<span style="color:var(--green)">Buy: ' + cfmt(whale.buyUsd) + '</span>'
+        + '<span style="color:var(--red)">Sell: ' + cfmt(whale.sellUsd) + '</span>'
         + '<span style="color:var(--dim)">Imbalance: ' + (whale.imbalance > 0 ? '+' : '') + (whale.imbalance * 100).toFixed(1) + '%</span>'
         + '</div></div>'
     }
     const html = '<div class="sig-analysis">'
-      + '<div class="sig-ana-head"><span class="sig-ana-coin">' + baseOf(sym) + '/USDT</span><span class="sig-ana-price" style="color:' + (t && t.pct >= 0 ? 'var(--green)' : 'var(--red)') + '">' + (t ? '$' + pfmt(t.last) : '--') + ' ' + chg + '</span></div>'
+      + '<div class="sig-ana-head"><span class="sig-ana-coin">' + marketLabel(sym) + '</span><span class="sig-ana-price" style="color:' + (t && t.pct >= 0 ? 'var(--green)' : 'var(--red)') + '">' + (t ? '$' + pfmt(t.last) : '--') + ' ' + chg + '</span></div>'
       + '<div class="sig-ana-chart" id="sigAnaChartWrap"></div>'
       + '<div class="sig-tf-grid">' + tfHtml + '</div>'
       + '<div class="sig-verdict ' + vc + '"><div class="sv-label">MASTER VERDICT</div><div class="sv-type">' + masterType + ' (' + (masterScore > 0 ? '+' : '') + masterScore + ')</div><div class="sv-reason">' + reasons.slice(0, 4).join(' · ') + '</div></div>'
@@ -510,7 +666,7 @@ export function analyzeSigCoin(input: string): void {
     setTimeout(() => renderSigAnaChart(tfData[0].candles, sym), 100)
   }).catch(function (e) {
     console.warn('Analysis failed:', e)
-    el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--dim)"><b style="color:var(--red)">Analysis Failed</b><br><span style="font-size:12px;margin-top:6px;display:block">Could not load data for ' + baseOf(sym) + '. Check the symbol and try again.</span></div>'
+    el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--dim)"><b style="color:var(--red)">Analysis Failed</b><br><span style="font-size:12px;margin-top:6px;display:block">Could not load data for ' + marketLabel(sym) + '. Check the symbol and try again.</span></div>'
   })
 }
 
@@ -553,10 +709,8 @@ export function applySigAnaTheme(): void {
 }
 
 // ===== AUTO-SCAN TIMER =====
-let autoScanInterval: Any = null
 export function startAutoScan(): void {
-  loadPatternHistory()
-  loadModelWeights()
+  loadCalls()
   scanSignals()
-  autoScanInterval = setInterval(scanSignals, 120000)
+  poll(scanSignals, 120000)
 }

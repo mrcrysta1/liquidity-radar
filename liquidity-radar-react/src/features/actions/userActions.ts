@@ -4,8 +4,17 @@
 // module stays free of UI/stream concerns. The classic-script globals are
 // re-exposed on window by the engine's exposeGlobals().
 import { $ } from '../../utils/dom'
+import { isInstrument } from '../../constants/instruments'
+import { primeInstrument } from '../../services/instrumentFeed'
 import { state } from '../../services/store'
+import { placeChartForTab } from '../charts/chartHost'
 import type { StreamsCallbacks } from '../../services/streams'
+import { resetDelta } from '../delta/delta'
+import { resetWhaleFlow } from '../whales/whaleFlow'
+import { resetConfluence } from '../analysis/confluence'
+import { checkDivergence } from '../analysis/oiDivergence'
+import { resetML } from '../ml/store'
+import { resetRL } from '../ml/rlStore'
 
 type Any = any
 
@@ -16,6 +25,7 @@ export interface UserActionCallbacks {
   fetchOI(): Promise<Any>
   fetchWhales(): Promise<Any>
   connectStreams(cb: StreamsCallbacks): void
+  disconnectStreams(cb?: StreamsCallbacks): void
   streamCb: StreamsCallbacks
   renderHero(): void
   renderTicker(): void
@@ -27,16 +37,43 @@ export function wireUserActions(callbacks: UserActionCallbacks): void {
   cbs = callbacks
 }
 
+/**
+ * Which tab is active, for React components that need to reflect it — e.g.
+ * the sidebar's own nav highlight. switchTab() below still drives the actual
+ * `.tab-section`/`.tab-btn` visibility imperatively (that part predates this
+ * pub/sub and works fine); this only adds a way for React state to follow
+ * along, since a component with no subscription has no way to know the tab
+ * changed and would otherwise only show whatever it rendered on mount.
+ */
+let activeTab = 'home'
+type TabListener = (tab: string) => void
+const tabListeners: TabListener[] = []
+export function getActiveTab(): string {
+  return activeTab
+}
+export function subscribeActiveTab(fn: TabListener): () => void {
+  tabListeners.push(fn)
+  return () => {
+    const i = tabListeners.indexOf(fn)
+    if (i !== -1) tabListeners.splice(i, 1)
+  }
+}
+
 export function switchTab(tab: string): void {
   state.tab = tab
+  activeTab = tab
+  tabListeners.slice().forEach((fn) => fn(tab))
   document.querySelectorAll<HTMLElement>('.tab-btn').forEach((b) => {
     const on = b.dataset.tab === tab
     b.classList.toggle('active', on)
     b.setAttribute('aria-selected', on ? 'true' : 'false')
   })
-  document.querySelectorAll<HTMLElement>('.tab-section').forEach((s) =>
-    s.classList.toggle('active', s.id === 'tab-' + tab),
-  )
+  document
+    .querySelectorAll<HTMLElement>('.tab-section')
+    .forEach((s) => s.classList.toggle('active', s.id === 'tab-' + tab))
+  // The price-action chart is shown on both Radar and Charts — move the one
+  // card into whichever of them is now visible.
+  placeChartForTab(tab)
   window.scrollTo({ top: 0 })
 }
 
@@ -52,6 +89,12 @@ export async function setSymbol(sym: string): Promise<void> {
   state._sr = null
   state._ai = null
   state.whales = []
+  resetDelta(sym)
+  resetWhaleFlow()
+  resetConfluence(sym)
+  checkDivergence()
+  resetML()
+  resetRL()
   $('heroPrice')!.textContent = '—'
   $('heroPrice')!.dataset.p = '0'
   $('wsKlineState')!.textContent = 'SYNCING'
@@ -67,7 +110,15 @@ export async function setSymbol(sym: string): Promise<void> {
   sel.value = sym
   cbs!.renderTicker()
   switchTab('radar')
-  await Promise.all([
+  // Stop the previous coin's streams now: left running through the fetches
+  // below, they kept writing its prices into this coin's state.
+  cbs!.disconnectStreams(cbs!.streamCb)
+  // allSettled: one failed fetch (funding, OI...) must not stop the streams
+  // from reconnecting below.
+  await Promise.allSettled([
+    // A Yahoo instrument has no websocket to fill in its price, so fetch one
+    // up front rather than leaving the hero on a dash until the next poll.
+    primeInstrument(sym),
     cbs!.fetchKlines(sym),
     cbs!.fetchOB(),
     cbs!.fetchFR(),
@@ -75,5 +126,12 @@ export async function setSymbol(sym: string): Promise<void> {
     cbs!.fetchWhales(),
   ])
   cbs!.connectStreams(cbs!.streamCb)
+  // These instruments have no stream, so leaving the badge on "WS LIVE" or
+  // "SYNCING" would claim a connection that does not exist.
+  if (isInstrument(sym)) {
+    const ks = $('wsKlineState')!
+    ks.textContent = 'POLLED'
+    ks.className = 'badge b-cyan'
+  }
   cbs!.renderHero()
 }

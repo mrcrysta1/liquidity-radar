@@ -13,7 +13,32 @@ const MIME = {
   '.css': 'text/css',
   '.svg': 'image/svg+xml',
 }
-const CHROME = process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe'
+function findChrome() {
+  if (process.env.CHROME_PATH) return process.env.CHROME_PATH
+  const candidates =
+    process.platform === 'win32'
+      ? [
+          'C:/Program Files/Google/Chrome/Application/chrome.exe',
+          'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
+        ]
+      : process.platform === 'darwin'
+        ? ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome']
+        : [
+            '/usr/bin/google-chrome',
+            '/usr/bin/google-chrome-stable',
+            '/usr/bin/chromium',
+            '/usr/bin/chromium-browser',
+            '/snap/bin/chromium',
+          ]
+  const found = candidates.find((p) => existsSync(p))
+  if (!found) {
+    throw new Error(
+      'No Chrome/Chromium found. Set CHROME_PATH env var to your browser executable.',
+    )
+  }
+  return found
+}
+const CHROME = findChrome()
 
 if (!existsSync(DIST)) throw new Error('dist/ not found — run `npm run build` first')
 
@@ -80,8 +105,21 @@ server.listen(PORT, async () => {
 
     const count = (sel) => page.evaluate((s) => document.querySelectorAll(s).length, sel)
 
-    results.tabButtons = await count('.tab-btn')
-    results.sections = await count('.tab-section')
+    // Assert the invariant, not a headcount: every section must be reachable
+    // and every nav button must point at a section that exists. A raw count
+    // breaks whenever navigation is rearranged, which tells you nothing.
+    results.nav = await page.evaluate(() => {
+      const targets = [...new Set([...document.querySelectorAll('.tab-btn')].map((b) => b.dataset.tab))].sort()
+      const sections = [...document.querySelectorAll('.tab-section')].map((s) => s.id.replace(/^tab-/, '')).sort()
+      return {
+        buttons: document.querySelectorAll('.tab-btn').length,
+        targets,
+        sections,
+        unreachable: sections.filter((s) => !targets.includes(s)),
+        dangling: targets.filter((t) => !sections.includes(t)),
+      }
+    })
+    results.sections = results.nav.sections.length
 
     const sample = async (label) =>
       page
@@ -141,11 +179,12 @@ server.listen(PORT, async () => {
 
   const missing = (r) => r === undefined || r === null || r === '' || r === '—'
   const gates = [
-    ['tab buttons rendered', results.tabButtons === 9],
-    ['tab sections rendered', results.sections === 9],
+    ['every section is reachable from nav', results.nav.unreachable.length === 0],
+    ['no nav button points at a missing section', results.nav.dangling.length === 0],
+    ['tab sections rendered', results.sections >= 9],
     [
-      'streams live (LIVE·N STREAMS)',
-      !missing(results['t+15s']) && /^LIVE/.test(results['t+15s'].status),
+      'streams live (status pill reads Live)',
+      !missing(results['t+15s']) && /^Live$/i.test(results['t+15s'].status),
     ],
     ['live hero price present', !missing(results['t+15s']) && !missing(results['t+15s'].heroPrice)],
     ['ticker populated', !missing(results['t+15s']) && results['t+15s'].tickerCount >= 1],
