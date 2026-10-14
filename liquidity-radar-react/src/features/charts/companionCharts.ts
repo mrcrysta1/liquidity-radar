@@ -34,8 +34,8 @@ import type { CandleFlat } from '../../services/market'
 import { TIMEFRAMES, tfDef } from '../../services/timeframe'
 import type { Folder } from '../../services/timeframe'
 import { storageGet, storageSet } from '../../services/storage'
-import { getTimeframe, setTimeframe } from './timeframes'
-import { getChartStyle, setChartStyle, styleDef } from './chartStyle'
+import { getTimeframe, setTimeframe, subscribeTimeframe } from './timeframes'
+import { getChartStyle, setChartStyle, styleDef, subscribeChartStyle } from './chartStyle'
 import type { ChartStyleId } from './chartStyle'
 import { mainIndicatorStore, serializeIndicators } from './indicators/store'
 import { state } from '../../services/store'
@@ -43,7 +43,7 @@ import { setSymbol } from '../actions/userActions'
 import { createIndicatorRenderer } from './indicators/render'
 import type { IndicatorRenderer } from './indicators/render'
 import { panelIndicatorStore } from './indicators/panelStore'
-import { mountCoinPicker, unmountCoinPickers } from '../../components/chart/mountCoinPicker'
+import { unmountCoinPickers } from '../../components/chart/mountCoinPicker'
 
 type Any = any
 
@@ -143,6 +143,15 @@ function mainCfg(): CellCfg {
 
 const panelAt = (pos: number) => panels.find((p) => p.pos === pos)
 
+let persistTimer: ReturnType<typeof setTimeout> | null = null
+function persistSoon(): void {
+  if (persistTimer) return
+  persistTimer = setTimeout(() => {
+    persistTimer = null
+    persist()
+  }, 0)
+}
+
 function persist(): void {
   panels.forEach((p) => {
     saved[p.pos] = { sym: p.sym, tf: p.tf, style: p.style }
@@ -182,8 +191,39 @@ export function setLayout(n: number): void {
   emit()
 }
 
+let booted = false
+
 /** Re-apply the current layout — also the entry point used on boot. */
 export function applyLayout(): void {
+  if (!booted) {
+    booted = true
+    // The app boots on its default coin; when the active chart is another
+    // cell, that cell's coin is what the main chart was showing. This runs
+    // before the engine's first load and stream connect, which then simply
+    // use it — no second round of requests.
+    const want = active > 0 && active < layout ? saved[active]?.sym : ''
+    if (want && want !== state.symbol) {
+      state.symbol = want
+      const sel = $('symSelect') as HTMLSelectElement | null
+      if (sel) {
+        if (!sel.querySelector('option[value="' + want + '"]')) {
+          const opt = document.createElement('option')
+          opt.value = want
+          opt.textContent = baseOf(want) + '/USDT'
+          sel.appendChild(opt)
+        }
+        sel.value = want
+      }
+    }
+    // Keep the stored active cell current as the toolbar changes it, so a
+    // reload (or another device) comes back to the same charts.
+    subscribeTimeframe(persistSoon)
+    subscribeChartStyle(persistSoon)
+    window.addEventListener('pagehide', persist)
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') persist()
+    })
+  }
   applyGrid()
   // Panel headers changed: the indicator buttons re-mount into them.
   emit()
@@ -201,7 +241,6 @@ function applyGrid(): void {
     else active = 0
   }
   const rows = rowCount(spec)
-  const geom = cells(spec)
 
   grid.style.gridTemplateColumns = 'repeat(' + spec.cols + ', minmax(0, 1fr))'
   grid.style.gridTemplateRows = 'repeat(' + rows + ', minmax(0, 1fr))'
@@ -252,7 +291,9 @@ export function activateCell(pos: number): void {
   panelIndicatorStore('c' + from).replace(mainSet)
   saved[from] = mainCfg()
   active = pos
-  addPanel(from)
+  // A layout shrinking past the active cell lands here: the cell it leaves
+  // is about to be dropped, so don't build a chart only to destroy it.
+  if (from < layout) addPanel(from)
   placeCells()
 
   mainIndicatorStore.replace(cellSet)
@@ -261,7 +302,6 @@ export function activateCell(pos: number): void {
   if (incoming.sym && incoming.sym !== state.symbol) void setSymbol(incoming.sym, { keepTab: true })
   persist()
   emit()
-  requestAnimationFrame(resizeAll)
 }
 
 function defaultFor(pos: number): CellCfg {
@@ -308,14 +348,36 @@ function addPanel(pos: number): void {
     '<span class="rc-meta"></span>' +
     '</div>' +
     '<div class="rc-body"><div class="rc-legend">Loading…</div></div>'
-  grid.appendChild(cell)
+  // DOM order follows grid position, so Tab moves through cells in the
+  // order they are seen.
+  const next = panels
+    .filter((q) => q.pos > pos && q.el)
+    .sort((a, b) => a.pos - b.pos)[0]
+  grid.insertBefore(cell, next ? next.el : null)
   p.el = cell
   panels.push(p)
-  cell.addEventListener('click', () => activateCell(p.pos))
+  // Panning or scaling a chart ends in a click too: only a press that stays
+  // put picks the chart.
+  let downX = 0
+  let downY = 0
+  cell.addEventListener('pointerdown', (e) => {
+    downX = e.clientX
+    downY = e.clientY
+  })
+  cell.addEventListener('click', (e) => {
+    if (Math.abs(e.clientX - downX) > 4 || Math.abs(e.clientY - downY) > 4) return
+    activateCell(p.pos)
+  })
   cell.addEventListener('keydown', (e) => {
     if (e.target !== cell || (e.key !== 'Enter' && e.key !== ' ')) return
     e.preventDefault()
     activateCell(p.pos)
+    // The focused cell is gone (it became the main chart): keep focus there.
+    const wrap = $('chartWrap')
+    if (wrap) {
+      wrap.tabIndex = -1
+      wrap.focus({ preventScroll: true })
+    }
   })
   syncTitle(p)
   initChart(p)

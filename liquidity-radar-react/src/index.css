@@ -544,6 +544,7 @@ html.radar-fs #chart{height:100% !important}
 .rc-cell:hover{border-color:var(--border2)}
 .rc-cell:focus-visible{outline:none;border-color:var(--primary);box-shadow:0 0 0 2px rgb(var(--pRGB)/.25)}
 .rc-meta{font-family:var(--mono);font-size:var(--text-xs);color:var(--muted);flex-shrink:0}
+.chart-wrap:focus{outline:none}
 .chart-layout.multi .chart-wrap.is-active{border-radius:10px;box-shadow:0 0 0 2px var(--primary);z-index:1}
 .rc-legend{
   position:absolute;top:4px;left:6px;z-index:5;pointer-events:none;
