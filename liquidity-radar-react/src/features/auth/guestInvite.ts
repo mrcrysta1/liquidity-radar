@@ -1,29 +1,34 @@
 // A guest who has not signed in is invited to do so a few seconds after the
-// app settles. The invite re-uses the account dialog (Sign in / Create
-// account / Continue with Google) by opening the existing account button's
-// dialog once per browser session. Nothing else changes: guests keep full
-// access and can keep browsing after closing it.
+// app settles. The invite opens the existing account dialog (Sign in / Create
+// account / Continue with Google) by clicking the account button in the top
+// bar, once per browser session. Guests keep full access and can keep
+// browsing after closing it.
 //
 // Kept out of AccountMenu.tsx on purpose: the dialog stays untouched and the
-// invite logic stays small, testable, and impossible to regress.
+// invite stays small and impossible to regress.
+import { getAuth, warmAuth } from './session'
 
 /** sessionStorage flag so the invite never nags twice in one session. */
 const SEEN_KEY = 'lr-auth-invite-seen'
-/** How long to wait after boot before showing the invite. */
+/** How long to wait after the session settles before showing the invite. */
 const DELAY_MS = 3000
+/** How often to re-check while the auth session is still loading. */
+const POLL_MS = 300
+/** Give up on the invite if the session never settles. */
+const MAX_WAIT_MS = 20000
 
 let armed = false
 
-function alreadyShown(): boolean {
+function seen(): boolean {
   try {
     return sessionStorage.getItem(SEEN_KEY) === '1'
   } catch {
-    // Private browsing: never block the invite, never nag a second time.
+    // Private browsing: never show it rather than nag on every page.
     return true
   }
 }
 
-function markShown(): void {
+function markSeen(): void {
   try {
     sessionStorage.setItem(SEEN_KEY, '1')
   } catch {
@@ -31,34 +36,42 @@ function markShown(): void {
   }
 }
 
-/** True once the session check has settled and the visitor is a guest. */
-function guestReady(getAuth: () => { status: string }): boolean {
-  return getAuth().status === 'guest'
+/** The account button in the top bar (see AccountMenu.tsx). Clicking it opens the dialog. */
+function openAccountDialog(): boolean {
+  const btn = document.querySelector<HTMLButtonElement>('.acct-trigger')
+  if (!btn) return false
+  btn.click()
+  return true
+}
+
+function invite(): void {
+  if (getAuth().status !== 'guest') return
+  markSeen()
+  warmAuth()
+  if (!openAccountDialog()) {
+    // The top bar is not there (yet): try again shortly.
+    setTimeout(() => void openAccountDialog(), POLL_MS)
+  }
 }
 
 /**
- * Arm the invite. Called once at boot (see App.tsx). The invite only fires
- * if the visitor is a guest once the auth session has settled; it never
- * fires for a signed-in user, an unconfigured site, or while the session
- * check is still running.
+ * Arm the invite. Called once at boot (see App.tsx). Waits for the auth
+ * session to settle, then invites a guest once per browser session. Never
+ * fires for a signed-in user or when auth is not configured.
  */
-export function armGuestInvite(
-  getAuth: () => { status: string },
-  warmAuth: () => void,
-  openAccountDialog: () => void,
-): void {
+export function armGuestInvite(): void {
   if (armed) return
   armed = true
-  if (!guestReady(getAuth)) return
-  if (alreadyShown()) return
-  const t = setTimeout(() => {
-    // Re-check in case the visitor signed in (e.g. in another tab) while the
-    // timer was running, or the session settled to a user meanwhile.
-    if (getAuth().status !== 'guest') return
-    markShown()
-    warmAuth()
-    openAccountDialog()
-  }, DELAY_MS)
-  // If the component unmounts or the app tears down, drop the timer.
-  return void t as void
+  if (seen()) return
+  const start = Date.now()
+  const t = setInterval(() => {
+    const status = getAuth().status
+    if (status === 'guest') {
+      clearInterval(t)
+      setTimeout(invite, DELAY_MS)
+    } else if (status !== 'loading' || Date.now() - start > MAX_WAIT_MS) {
+      // Signed in, auth off, or the check never settles: no invite.
+      clearInterval(t)
+    }
+  }, POLL_MS)
 }
