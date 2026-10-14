@@ -1,6 +1,8 @@
 // The account button in the top bar and its dialog: sign in or create an
 // account with email and password, continue with Google, reset a password,
 // and — once signed in — see what is saved to the account and sign out.
+// Guests are also invited to sign in by a popup that opens a few seconds
+// after the app settles — once per browser session.
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { createPortal } from 'react-dom'
@@ -309,9 +311,31 @@ function Dialog({ close }: { close: () => void }) {
   )
 }
 
+const INVITED = 'lr-auth-invited'
+const INVITE_DELAY = 3000
+
 export function AccountMenu() {
   const a = useAuth()
   const [open, setOpen] = useState(false)
+  // Invite a guest to sign in shortly after load, at most once per session.
+  useEffect(() => {
+    if (a.status !== 'guest') return
+    try {
+      if (sessionStorage.getItem(INVITED)) return
+    } catch {
+      return
+    }
+    const t = setTimeout(() => {
+      try {
+        sessionStorage.setItem(INVITED, '1')
+      } catch {
+        /* storage blocked: the popup may show again next load */
+      }
+      warmAuth()
+      setOpen(true)
+    }, INVITE_DELAY)
+    return () => clearTimeout(t)
+  }, [a.status])
   // A password-reset link opens the dialog on its own.
   const show = open || a.recovery
   const u = a.user
