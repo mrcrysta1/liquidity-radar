@@ -77,10 +77,14 @@ export function switchTab(tab: string): void {
   window.scrollTo({ top: 0 })
 }
 
-export async function setSymbol(sym: string): Promise<void> {
+/**
+ * Make `sym` the app's coin. By default this also brings up the Radar tab;
+ * `keepTab` leaves the user where they are (e.g. picking a chart in a layout).
+ */
+export async function setSymbol(sym: string, opts: { keepTab?: boolean } = {}): Promise<void> {
   if (!sym) return
   if (state.symbol === sym) {
-    switchTab('radar')
+    if (!opts.keepTab) switchTab('radar')
     return
   }
   state.symbol = sym
@@ -109,7 +113,7 @@ export async function setSymbol(sym: string): Promise<void> {
   }
   sel.value = sym
   cbs!.renderTicker()
-  switchTab('radar')
+  if (!opts.keepTab) switchTab('radar')
   // Stop the previous coin's streams now: left running through the fetches
   // below, they kept writing its prices into this coin's state.
   cbs!.disconnectStreams(cbs!.streamCb)

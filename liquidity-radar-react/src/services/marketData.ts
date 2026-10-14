@@ -273,6 +273,10 @@ function schedulePrimaryProbe(key: string): void {
   }, PRIMARY_PROBE_MS)
 }
 
+// Bumped by every load: a response that a newer load (another coin or
+// timeframe picked meanwhile) has superseded is dropped, never drawn.
+let klineSeq = 0
+
 export async function fetchKlines(sym: string): Promise<void> {
   // A newer request supersedes any pending retry.
   if (klineRetry) {
@@ -281,8 +285,10 @@ export async function fetchKlines(sym: string): Promise<void> {
   }
   const tf = mdTf(state.tf || DEFAULT_TF)
   const key = mdSym(sym) + '|' + tf
+  const seq = ++klineSeq
   try {
     const { candles, folder, source } = await loadCandles(sym, tf)
+    if (seq !== klineSeq) return
     if (!candles.length) throw new Error('empty')
     state.candles = candles
     mainFolder.key = key
@@ -303,6 +309,7 @@ export async function fetchKlines(sym: string): Promise<void> {
     hooks!.onKlines()
     if (source && !source.primary) schedulePrimaryProbe(key)
   } catch (e) {
+    if (seq !== klineSeq) return
     console.warn('klines', e)
     // REST fallback: serve recent cached candles so the chart isn't left blank
     const cached =

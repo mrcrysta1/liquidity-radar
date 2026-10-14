@@ -11,7 +11,7 @@
 // per-instance shape as the main chart's 'lr-chartIndicators' (which this
 // never touches).
 import { storageGet, storageSet } from '../../../services/storage.ts'
-import { createIndicatorStore } from './store.ts'
+import { MAIN_MAX_INDICATORS, createIndicatorStore } from './store.ts'
 import type { IndicatorStore } from './store.ts'
 import { forgetPine } from '../pine/indicator.ts'
 
@@ -54,7 +54,9 @@ export function panelIndicatorStore(slot: string): IndicatorStore {
   if (!SLOT_RE.test(slot)) throw new Error('bad panel slot ' + slot)
   s = createIndicatorStore({
     id: slot,
-    max: PANEL_MAX_INDICATORS,
+    // Layout cells swap sets with the main chart when one becomes the active
+    // chart, so they hold as many as it does; nothing is lost in the swap.
+    max: slot.startsWith('mc') ? PANEL_MAX_INDICATORS : MAIN_MAX_INDICATORS,
     // A distinct uid prefix per family keeps panel instances apart from the
     // main chart's in the Pine run cache, which is keyed by uid.
     prefix: slot.startsWith('mc') ? 'w' : 'p',

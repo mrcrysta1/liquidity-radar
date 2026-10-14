@@ -1,16 +1,24 @@
 // Companion charts for the price-action multi-chart layouts.
 //
-// Cell 1 of the grid is the main chart (#chartWrap) and is left alone. This
-// module owns cells 2..n: it builds them into #chartLayout, gives each its own
-// symbol/interval selects, REST load and kline socket, and tears them down
-// again when the layout shrinks. Chart plumbing mirrors multiCharts.ts; candle
+// One cell of the grid is the *active* chart: the full main chart (#chartWrap),
+// which the toolbar drives — coin, timeframe, style, indicators, drawings,
+// replay. Like the Pro terminal, there is one set of controls, not one per
+// chart: clicking another cell makes it the active one. The main chart then
+// takes over that cell's coin, timeframe, style and indicators and moves into
+// its place (CSS `order`), and the chart it was showing becomes a companion
+// in the cell it left. Nothing on screen changes position; the controls just
+// follow the chart you picked.
+//
+// This module owns the other cells: it builds them into #chartLayout, gives
+// each a REST load and kline socket, and tears them down again when the
+// layout shrinks. Chart plumbing mirrors multiCharts.ts; candle
 // loading goes through the shared resampling loader so companions support the
 // same intervals as the main chart. Live bars arrive over the shared kline hub
 // (services/failover), so any number of companions share one socket.
 //
 // Each companion carries its own indicator set (indicators/panelStore, slot
-// 'c<cell index>'), drawn by its own renderer over its own candles; the
-// header's indicators button is a React portal (PanelIndicatorButtons).
+// 'c<cell position>'), drawn by its own renderer over its own candles. The
+// active cell's set lives in the main chart's store; the two swap with it.
 import * as LightweightCharts from 'lightweight-charts'
 import { isInstrument } from '../../constants/instruments'
 import { COINS } from '../../constants/market'
@@ -26,7 +34,12 @@ import type { CandleFlat } from '../../services/market'
 import { TIMEFRAMES, tfDef } from '../../services/timeframe'
 import type { Folder } from '../../services/timeframe'
 import { storageGet, storageSet } from '../../services/storage'
-import { getTimeframe } from './timeframes'
+import { getTimeframe, setTimeframe } from './timeframes'
+import { getChartStyle, setChartStyle, styleDef } from './chartStyle'
+import type { ChartStyleId } from './chartStyle'
+import { mainIndicatorStore, serializeIndicators } from './indicators/store'
+import { state } from '../../services/store'
+import { setSymbol } from '../actions/userActions'
 import { createIndicatorRenderer } from './indicators/render'
 import type { IndicatorRenderer } from './indicators/render'
 import { panelIndicatorStore } from './indicators/panelStore'
@@ -34,10 +47,20 @@ import { mountCoinPicker, unmountCoinPickers } from '../../components/chart/moun
 
 type Any = any
 
-interface Panel {
-  id: number
+/** What a cell shows; the active cell's comes from the main chart. */
+interface CellCfg {
   sym: string
   tf: string
+  style: ChartStyleId
+}
+
+interface Panel {
+  id: number
+  /** Grid position (0-based); the main chart holds `active`. */
+  pos: number
+  sym: string
+  tf: string
+  style: ChartStyleId
   el: HTMLElement | null
   chart: Any
   candleSeries: Any
@@ -47,7 +70,7 @@ interface Panel {
   off: (() => void) | null
   ro: ResizeObserver | null
   token: number
-  /** Indicator slot, 'c1'..: the panel's cell in the layout. */
+  /** Indicator slot, 'c<pos>': the panel's cell in the layout. */
   slot: string
   /** Candles on the chart, kept for the panel's indicators. */
   candles: CandleFlat[]
@@ -80,7 +103,10 @@ const FALLBACK_SYMS = [
 ]
 
 let layout = storedLayout()
-let saved: Array<{ sym: string; tf: string }> = []
+/** Grid position of the main (active) chart. */
+let active = 0
+/** Last known setup of every position, so a cell comes back as it was. */
+let saved: Array<CellCfg | null> = []
 const panels: Panel[] = []
 let idCounter = 0
 let tokenCounter = 0
@@ -91,24 +117,47 @@ function storedLayout(): number {
   return LAYOUTS.some((l) => l.n === n) ? n : 1
 }
 
+function cleanCfg(p: Any): CellCfg | null {
+  if (!p || typeof p.sym !== 'string' || !p.sym) return null
+  return { sym: String(p.sym), tf: mdTf(p.tf), style: styleDef(p.style).id }
+}
+
 ;(function restorePanels() {
   const s = storageGet<Any>(STORE_KEY, null)
-  const list = s && Array.isArray(s.panels) ? s.panels : []
-  saved = list
-    .filter((p: Any) => p && typeof p.sym === 'string')
-    .slice(0, MAX_CHARTS)
-    .map((p: Any) => ({ sym: String(p.sym), tf: mdTf(p.tf) }))
+  if (!s || typeof s !== 'object') return
+  if (Array.isArray(s.cells)) {
+    // { n, active, cells: [by grid position] }
+    saved = s.cells.slice(0, MAX_CHARTS).map(cleanCfg)
+    const a = Number(s.active)
+    active = Number.isInteger(a) && a >= 0 && a < layout ? a : 0
+  } else if (Array.isArray(s.panels)) {
+    // Older shape: { n, panels: [cells 2..n] }, main chart always first.
+    saved = [null as CellCfg | null].concat(s.panels.slice(0, MAX_CHARTS - 1).map(cleanCfg))
+  }
 })()
 
+/** The active cell's setup, read live from the main chart. */
+function mainCfg(): CellCfg {
+  return { sym: String(state.symbol || ''), tf: getTimeframe(), style: getChartStyle() }
+}
+
+const panelAt = (pos: number) => panels.find((p) => p.pos === pos)
+
 function persist(): void {
-  storageSet(STORE_KEY, {
-    n: layout,
-    panels: panels.map((p) => ({ sym: p.sym, tf: p.tf })),
+  panels.forEach((p) => {
+    saved[p.pos] = { sym: p.sym, tf: p.tf, style: p.style }
   })
+  saved[active] = mainCfg()
+  storageSet(STORE_KEY, { n: layout, active, cells: saved })
 }
 
 export function getLayout(): number {
   return layout
+}
+
+/** Grid position of the chart the toolbar is driving. */
+export function getActiveCell(): number {
+  return active
 }
 
 type Listener = () => void
@@ -145,6 +194,12 @@ function applyGrid(): void {
   const wrap = $('chartWrap')
   if (!grid || !wrap) return
   const spec = layoutSpec(layout)
+  // The active chart is in a cell the new layout drops: hand the controls
+  // back to the first cell before it goes.
+  if (active >= spec.n) {
+    if (panelAt(0)) activateCell(0)
+    else active = 0
+  }
   const rows = rowCount(spec)
   const geom = cells(spec)
 
@@ -154,30 +209,78 @@ function applyGrid(): void {
   grid.style.minHeight = ''
   syncStageHeight()
   grid.classList.toggle('multi', spec.n > 1)
-  wrap.style.gridColumn = 'span ' + geom[0].span
 
-  while (panels.length > spec.n - 1) destroyPanel(panels.length - 1)
-  for (let i = panels.length; i < spec.n - 1; i++) addPanel(i)
-  panels.forEach((p, i) => {
-    const g = geom[i + 1]
-    if (p.el && g) p.el.style.gridColumn = 'span ' + g.span
-  })
+  for (let i = panels.length - 1; i >= 0; i--) if (panels[i].pos >= spec.n) destroyPanel(i)
+  for (let pos = 0; pos < spec.n; pos++) if (pos !== active && !panelAt(pos)) addPanel(pos)
+  placeCells()
   requestAnimationFrame(resizeAll)
 }
 
-function defaultFor(i: number): { sym: string; tf: string } {
-  if (saved[i]) return saved[i]
-  return { sym: FALLBACK_SYMS[i % FALLBACK_SYMS.length], tf: getTimeframe() }
+/** Put every cell, the main chart included, at its grid position. */
+function placeCells(): void {
+  const wrap = $('chartWrap')
+  if (!wrap) return
+  const spec = layoutSpec(layout)
+  const geom = cells(spec)
+  wrap.style.order = String(active)
+  wrap.style.gridColumn = 'span ' + (geom[active]?.span || 1)
+  wrap.classList.toggle('is-active', spec.n > 1)
+  panels.forEach((p) => {
+    if (!p.el) return
+    p.el.style.order = String(p.pos)
+    p.el.style.gridColumn = 'span ' + (geom[p.pos]?.span || 1)
+  })
 }
 
-function addPanel(i: number): void {
+/**
+ * Make the chart at grid position `pos` the active one — the one the toolbar
+ * drives. The main chart takes over that cell's coin, timeframe, style and
+ * indicators and moves into its place; what the main chart was showing
+ * becomes a companion in the cell it leaves. Drawings follow the coin
+ * already, so they come along on their own.
+ */
+export function activateCell(pos: number): void {
+  const p = panelAt(pos)
+  if (!p || pos === active) return
+  const from = active
+  const incoming: CellCfg = { sym: p.sym, tf: p.tf, style: p.style }
+  const mainSet = serializeIndicators(mainIndicatorStore.getIndicators())
+  const cellSet = serializeIndicators(panelIndicatorStore(p.slot).getIndicators())
+
+  destroyPanel(panels.indexOf(p))
+  panelIndicatorStore('c' + pos).replace([])
+  panelIndicatorStore('c' + from).replace(mainSet)
+  saved[from] = mainCfg()
+  active = pos
+  addPanel(from)
+  placeCells()
+
+  mainIndicatorStore.replace(cellSet)
+  if (incoming.style !== getChartStyle()) setChartStyle(incoming.style)
+  if (incoming.tf !== getTimeframe()) setTimeframe(incoming.tf)
+  if (incoming.sym && incoming.sym !== state.symbol) void setSymbol(incoming.sym, { keepTab: true })
+  persist()
+  emit()
+  requestAnimationFrame(resizeAll)
+}
+
+function defaultFor(pos: number): CellCfg {
+  const s = saved[pos]
+  if (s) return s
+  const n = FALLBACK_SYMS.length
+  return { sym: FALLBACK_SYMS[(pos - 1 + n) % n], tf: getTimeframe(), style: getChartStyle() }
+}
+
+function addPanel(pos: number): void {
   const grid = $('chartLayout')
   if (!grid) return
-  const seed = defaultFor(i)
+  const seed = defaultFor(pos)
   const p: Panel = {
     id: idCounter++,
+    pos,
     sym: seed.sym,
     tf: seed.tf,
+    style: seed.style,
     el: null,
     chart: null,
     candleSeries: null,
@@ -186,59 +289,47 @@ function addPanel(i: number): void {
     off: null,
     ro: null,
     token: 0,
-    slot: 'c' + (i + 1),
+    slot: 'c' + pos,
     candles: [],
     ind: null,
     indOff: null,
     indTimer: null,
     indAt: 0,
   }
+  // No controls of its own: the toolbar drives whichever chart is active,
+  // and clicking this one (or Enter/Space on it) makes it the active chart.
   const cell = document.createElement('div')
   cell.className = 'rc-cell'
+  cell.tabIndex = 0
+  cell.setAttribute('role', 'button')
   cell.innerHTML =
     '<div class="rc-head">' +
     '<span class="rc-title"></span>' +
-    '<div class="rc-controls">' +
-    '<span class="rc-ind" data-ind-slot="' +
-    p.slot +
-    '"></span>' +
-    '<span class="rc-sym"></span>' +
-    '<select class="rc-tf" aria-label="Chart timeframe">' +
-    TIMEFRAMES.map((t) => '<option value="' + t.id + '">' + t.label + '</option>').join('') +
-    '</select>' +
-    '</div></div>' +
+    '<span class="rc-meta"></span>' +
+    '</div>' +
     '<div class="rc-body"><div class="rc-legend">Loading…</div></div>'
   grid.appendChild(cell)
   p.el = cell
   panels.push(p)
-
-  const tfSel = cell.querySelector('.rc-tf') as HTMLSelectElement
-  tfSel.value = p.tf
-  // The shared coin picker: any market (loadCandles handles instruments too).
-  mountCoinPicker(cell.querySelector('.rc-sym') as HTMLElement, {
-    value: p.sym,
-    onPick: (sym) => {
-      p.sym = sym
-      syncTitle(p)
-      reload(p)
-      persist()
-    },
-  })
-  tfSel.addEventListener('change', () => {
-    p.tf = tfSel.value
-    syncTitle(p)
-    reload(p)
-    persist()
+  cell.addEventListener('click', () => activateCell(p.pos))
+  cell.addEventListener('keydown', (e) => {
+    if (e.target !== cell || (e.key !== 'Enter' && e.key !== ' ')) return
+    e.preventDefault()
+    activateCell(p.pos)
   })
   syncTitle(p)
   initChart(p)
 }
 
 function syncTitle(p: Panel): void {
+  const name = baseOf(p.sym) + '/USDT'
+  const tf = TIMEFRAMES.find((t) => t.id === p.tf)?.label || p.tf
   const el = p.el?.querySelector('.rc-title')
-  if (el) el.textContent = coinMeta(p.sym).icon + ' ' + baseOf(p.sym) + '/USDT'
-  const slot = p.el?.querySelector('.rc-ind') as HTMLElement | null
-  if (slot) slot.dataset.indLabel = baseOf(p.sym) + '/USDT ' + p.tf
+  if (el) el.textContent = coinMeta(p.sym).icon + ' ' + name
+  const meta = p.el?.querySelector('.rc-meta')
+  if (meta) meta.textContent = tf
+  p.el?.setAttribute('aria-label', name + ' ' + tf + ' chart. Select to make it the active chart')
+  p.el?.setAttribute('title', 'Click to make ' + name + ' ' + tf + ' the active chart')
 }
 
 function destroyPanel(i: number): void {
