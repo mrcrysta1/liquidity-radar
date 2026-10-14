@@ -1206,14 +1206,15 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('panel ind: Pine not on the main chart', S.getIndicators().length, 2)
   c3.removeIndicator(pineUid)
 
-  // Cap per panel.
-  const c5 = P.panelIndicatorStore('c5')
+  // Cap per panel: Market workspace panels keep the tight cap; layout cells
+  // ('c*') hold as many as the main chart, since they swap sets with it.
+  const c5 = P.panelIndicatorStore('mc5')
   for (let i = 0; i < 14; i++) c5.addIndicator('ema')
-  eq('panel ind: capped at 10 per panel', c5.indicatorCount(), P.PANEL_MAX_INDICATORS)
+  eq('panel ind: capped at 10 per workspace panel', c5.indicatorCount(), P.PANEL_MAX_INDICATORS)
   eq('panel ind: cap reported', c5.maxIndicators(), 10)
   c5.resetIndicators()
   eq('panel ind: reset clears only that panel', [c5.indicatorCount(), c2.indicatorCount()], [0, 2])
-  ok('panel ind: empty slots are not stored', !('c5' in JSON.parse(mem.get('lr-panelIndicators-v1'))))
+  ok('panel ind: empty slots are not stored', !('mc5' in JSON.parse(mem.get('lr-panelIndicators-v1'))))
 
   // Market workspace: removing a panel moves the later panels' sets up.
   const mc = [0, 1, 2].map((i) => P.panelIndicatorStore('mc' + i))
@@ -1243,6 +1244,174 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('panel ind: a non-object store loads empty', c2.indicatorCount(), 0)
   eq('panel ind: main storage still untouched', mem.get('lr-chartIndicators'), mainSaved)
 
+  if (prevLS) Object.defineProperty(globalThis, 'localStorage', prevLS)
+  else delete globalThis.localStorage
+}
+
+// ------------------------------- indicator sets moving between charts (replace)
+{
+  const mem = new Map()
+  const prevLS = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    writable: true,
+    value: {
+      getItem: (k) => (mem.has(k) ? mem.get(k) : null),
+      setItem: (k, v) => mem.set(k, String(v)),
+      removeItem: (k) => mem.delete(k),
+    },
+  })
+  const S = await import(src('features/charts/indicators/store.ts'))
+  const P = await import(src('features/charts/indicators/panelStore.ts'))
+  P.reloadPanelIndicators()
+  const snap = (st) => JSON.stringify(st.getIndicators())
+  const uids = (st) => st.getIndicators().map((i) => i.uid)
+
+  // A source chart with every kind of state worth carrying over.
+  let srcSaved = null
+  const from = S.createIndicatorStore({ id: 't-from', max: 50, prefix: 'p', load: () => null, save: (d) => (srcSaved = d) })
+  from.addIndicator('ema')
+  from.addIndicator('rsi')
+  from.addIndicator('sma')
+  const [ema, rsi, sma] = from.getIndicators()
+  from.setParam(ema.uid, 'length', 34)
+  from.toggleIndicator(rsi.uid)
+  const rsiKey = from.sourceOptions(sma.uid).find((o) => o.key.startsWith(rsi.uid + '.')).key
+  from.setSource(sma.uid, rsiKey)
+  const pineUid = from.addPineIndicator('//@version=5\nindicator("Len", overlay=false)\nlen = input.int(14, "Length")\nplot(ta.sma(close, len))', 'Len')
+  from.setPineInput(pineUid, 'Length', 7)
+  const setA = S.serializeIndicators(from.getIndicators())
+  eq('replace: source fixture saved its set', JSON.stringify(srcSaved), JSON.stringify(setA))
+
+  let saved = null
+  let heard = 0
+  let commits = 0
+  let order = ''
+  const to = S.createIndicatorStore({
+    id: 't-to',
+    max: 50,
+    load: () => null,
+    save: (d) => (saved = d),
+    onCommit: () => {
+      commits++
+      order += 'c'
+    },
+  })
+  const offTo = to.subscribe(() => {
+    heard++
+    order += 'l'
+  })
+  to.addIndicator('macd') // something to be replaced
+  heard = 0
+  commits = 0
+  order = ''
+  to.replace(setA)
+  eq('replace: every instance carried over, uids included', snap(to), snap(from))
+  eq('replace: types and order kept', to.getIndicators().map((i) => i.type), ['ema', 'rsi', 'sma', 'pine'])
+  eq('replace: params kept', to.getIndicators()[0].params.length, 34)
+  eq('replace: visibility kept', to.getIndicators().map((i) => i.visible), [true, false, true, true])
+  eq('replace: source reference survives the move', to.getIndicators()[2].source, rsiKey)
+  ok('replace: referenced instance exists in the new store', to.getIndicators().some((i) => i.uid === rsi.uid))
+  const pine = to.getIndicators()[3]
+  eq('replace: pine script, title and inputs kept', [pine.uid, pine.script, pine.title, pine.pineInputs], [pineUid, from.getIndicators()[3].script, 'Len', { Length: 7 }])
+  eq('replace: the new set is persisted', JSON.stringify(saved), JSON.stringify(setA))
+  eq('replace: listeners told once', heard, 1)
+  eq('replace: onCommit fires once', commits, 1)
+  eq('replace: listeners before onCommit', order, 'lc')
+  eq('replace: the source chart is left as it was', JSON.stringify(S.serializeIndicators(from.getIndicators())), JSON.stringify(setA))
+
+  // Garbage in, empty set out — and still a commit (the old set is gone).
+  for (const junk of [null, undefined, 'junk', 42, { a: 1 }, [null, 7, 'x', { type: 'nope' }, { notype: true }]]) {
+    to.replace(setA)
+    to.replace(junk)
+    eq('replace: garbage ' + JSON.stringify(junk) + ' gives an empty set', to.indicatorCount(), 0)
+  }
+  eq('replace: empty set persisted as []', JSON.stringify(saved), '[]')
+  to.replace([{ uid: 'dup1', type: 'ema' }, { uid: 'dup1', type: 'rsi' }])
+  const dupUids = uids(to)
+  ok('replace: duplicate uids are made unique', dupUids.length === 2 && dupUids[0] === 'dup1' && dupUids[1] !== 'dup1', dupUids)
+  offTo()
+
+  // Capped at the target's max: the first `max` kept, in order; a reference to
+  // a dropped instance falls back to close.
+  const small = S.createIndicatorStore({ id: 't-small', max: 3, load: () => null, save: () => {} })
+  const five = [
+    { uid: 'k1', type: 'ema' },
+    { uid: 'k2', type: 'rsi' },
+    { uid: 'k3', type: 'sma', source: 'k5.v' },
+    { uid: 'k4', type: 'bb' },
+    { uid: 'k5', type: 'ema' },
+  ]
+  small.replace(five)
+  eq('replace: capped at the store max', uids(small), ['k1', 'k2', 'k3'])
+  eq('replace: a source past the cap resets to close', small.getIndicators()[2].source, 'close')
+
+  // ---- the activateCell swap: main <-> companion cell (c0 <- main, main <- c2)
+  const main = S.mainIndicatorStore
+  const c0 = P.panelIndicatorStore('c0')
+  const c2 = P.panelIndicatorStore('c2')
+  main.replace(setA)
+  c2.replace([
+    { uid: 'pq1', type: 'rsi', params: { length: 9 }, visible: true },
+    { uid: 'pq2', type: 'macd', visible: false },
+  ])
+  c0.replace([])
+  const before = { main: snap(main), c2: snap(c2) }
+  const all0 = [...uids(main), ...uids(c2)].sort()
+
+  let mainCommits = 0
+  S.onIndicatorsChange(() => mainCommits++)
+  const A = S.serializeIndicators(main.getIndicators())
+  const B = S.serializeIndicators(c2.getIndicators())
+  c2.replace([])
+  c0.replace(A)
+  main.replace(B)
+  eq('swap: the cell left holds nothing', c2.indicatorCount(), 0)
+  eq('swap: main set moved to the cell main vacated', snap(c0), before.main)
+  eq('swap: cell set now on the main chart', snap(main), before.c2)
+  const all1 = [...uids(main), ...uids(c0), ...uids(c2)].sort()
+  eq('swap: no instance lost or duplicated', all1, all0)
+  eq('swap: uids unique across charts', new Set(all1).size, all1.length)
+  eq('swap: main redraw hook fired once', mainCommits, 1)
+  eq('swap: main storage holds the cell set', mem.get('lr-chartIndicators'), JSON.stringify(B))
+  const stored = JSON.parse(mem.get('lr-panelIndicators-v1'))
+  eq('swap: panel storage holds the moved main set in c0 only', [JSON.stringify(stored.c0), 'c2' in stored], [JSON.stringify(A), false])
+  // Reload from storage: the swap survives a page reload.
+  P.reloadPanelIndicators()
+  eq('swap: c0 survives a reload', snap(c0), before.main)
+  eq('swap: c2 stays empty after a reload', c2.indicatorCount(), 0)
+
+  // Swap back (activate cell 2 again from 0): everything returns home.
+  const A2 = S.serializeIndicators(main.getIndicators())
+  const B2 = S.serializeIndicators(c0.getIndicators())
+  c0.replace([])
+  c2.replace(A2)
+  main.replace(B2)
+  eq('swap back: main set restored', snap(main), before.main)
+  eq('swap back: cell set restored', snap(c2), before.c2)
+  eq('swap back: c0 empty', c0.indicatorCount(), 0)
+  S.onIndicatorsChange(() => {})
+
+  // ---- caps: layout cells match the main chart, workspace panels stay small.
+  eq('cap: companion cell c3 holds as many as main', P.panelIndicatorStore('c3').maxIndicators(), 50)
+  eq('cap: c-slot cap equals MAIN_MAX_INDICATORS', P.panelIndicatorStore('c3').maxIndicators(), S.MAIN_MAX_INDICATORS)
+  eq('cap: workspace panel mc1 keeps the panel cap', P.panelIndicatorStore('mc1').maxIndicators(), 10)
+  eq('cap: mc-slot cap equals PANEL_MAX_INDICATORS', P.panelIndicatorStore('mc1').maxIndicators(), P.PANEL_MAX_INDICATORS)
+  // A full main chart swaps into a cell without losing anything.
+  const full = Array.from({ length: 50 }, (_, i) => ({ uid: 'f' + i, type: 'ema', params: { length: 2 + i } }))
+  main.replace(full)
+  eq('cap: main holds a full 50', main.indicatorCount(), 50)
+  const c3 = P.panelIndicatorStore('c3')
+  c3.replace(S.serializeIndicators(main.getIndicators()))
+  eq('cap: a full main set fits in a cell', c3.indicatorCount(), 50)
+  const mc1 = P.panelIndicatorStore('mc1')
+  mc1.replace(S.serializeIndicators(main.getIndicators()))
+  eq('cap: a workspace panel still caps at 10', mc1.indicatorCount(), 10)
+
+  // Leave the shared stores clean for anything after this block.
+  main.replace([])
+  c3.replace([])
+  mc1.replace([])
   if (prevLS) Object.defineProperty(globalThis, 'localStorage', prevLS)
   else delete globalThis.localStorage
 }
