@@ -1,7 +1,11 @@
-// Multi-chart workspace (Market tab). Faithful extraction from the engine's
-// inline <script>; the classic-script globals (mcAdd/mcRemove/mcChange*) are
-// re-exposed on window by the engine. Chart creation/rendering lives here,
-// matching the chartRender module conventions.
+// Multi-chart workspace (Charts tab). The classic-script globals
+// (mcAdd/mcRemove/mcChange*) are re-exposed on window by the engine.
+//
+// The panel chrome (grid, headers, coin pickers, the Add tile) is React:
+// components/chart/MultiChartGrid renders it from mcSnapshot(). Everything
+// behind it lives here: each panel's LightweightCharts instance (created in
+// the body element the grid hands over via mcAttachBody, disposed by
+// mcDetachBody), its data, its kline hub subscription and its indicators.
 //
 // Each panel carries its own indicator set (indicators/panelStore, slot
 // 'mc<position>'), drawn by its own renderer over its own candles; the
@@ -9,8 +13,6 @@
 import * as LightweightCharts from 'lightweight-charts'
 import { poll } from '../../services/pollScheduler'
 import { pfmt } from '../../utils/format'
-import { baseOf, coinMeta } from '../../utils/coins'
-import { $ } from '../../utils/dom'
 import { state } from '../../services/store'
 import { storageGetRaw, storageSetRaw } from '../../services/storage'
 import { chartTheme, mapCandle } from './chartRender'
@@ -46,6 +48,9 @@ interface McPanel {
   indOff?: (() => void) | null
   indTimer?: ReturnType<typeof setTimeout> | null
   indAt?: number
+  /** The chart body element the grid handed over (null while unmounted). */
+  el?: HTMLElement | null
+  ro?: ResizeObserver | null
   [key: string]: Any
 }
 
@@ -53,24 +58,12 @@ interface McPanel {
 const IND_THROTTLE_MS = 1000
 const slotOf = (p: McPanel) => 'mc' + mcPanels.indexOf(p)
 
-const MC_INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d']
-const MC_COINS = [
-  'BTCUSDT',
-  'ETHUSDT',
-  'SOLUSDT',
-  'DOGEUSDT',
-  'PEPEUSDT',
-  'WIFUSDT',
-  'TRUMPUSDT',
-  'XRPUSDT',
-  'SUIUSDT',
-  'BNBUSDT',
-]
+export const MC_INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d'] as const
 let mcPanels: McPanel[] = []
 let mcIdCounter = 0
 const MAX_PANELS = 8
 
-// The React workspace header (panel count, grid layout) follows these.
+// The React workspace (header, grid, panel indicator buttons) follows these.
 type Listener = () => void
 const listeners: Listener[] = []
 const emit = () => listeners.slice().forEach((fn) => fn())
@@ -92,17 +85,50 @@ export function mcColumns(): number {
 }
 export function mcSetColumns(n: number): void {
   storageSetRaw(COLS_KEY, String(n))
-  const g = $('mcGrid')
-  if (g) g.dataset.cols = String(n)
+  changed()
+}
+
+/** What the grid renders: one entry per panel, in order. */
+export interface McPanelView {
+  id: number
+  sym: string
+  interval: string
+}
+export interface McSnapshot {
+  /** False until initMultiCharts has opened the workspace. */
+  ready: boolean
+  cols: number
+  canAdd: boolean
+  panels: readonly McPanelView[]
+}
+let ready = false
+let snap: McSnapshot = { ready: false, cols: mcColumns(), canAdd: true, panels: [] }
+
+/** The grid's state (a new object only when something changed). */
+export const mcSnapshot = (): McSnapshot => snap
+
+/** Panel list, a symbol, an interval or the columns changed: new snapshot, tell listeners. */
+function changed(): void {
+  snap = {
+    ready,
+    cols: mcColumns(),
+    canAdd: mcCanAdd(),
+    panels: mcPanels.map((p) => ({ id: p.id, sym: p.sym, interval: p.interval })),
+  }
+  emit()
+}
+
+/**
+ * The grid committed a render. Listeners that read the grid's DOM (the panel
+ * indicator buttons look for `[data-ind-slot]`) rescan now that it is there.
+ */
+export function mcGridRendered(): void {
   emit()
 }
 
 export function initMultiCharts(): void {
+  mcPanels.forEach(mcTearDown)
   mcPanels = []
-  mcIdCounter = 0
-  const g = $('mcGrid')!
-  g.innerHTML = ''
-  g.dataset.cols = String(mcColumns())
   // Four majors on the hour, as the workspace opens.
   ;['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'DOGEUSDT'].forEach((sym) => {
     mcPanels.push(blankPanel(sym, '1h'))
@@ -110,7 +136,8 @@ export function initMultiCharts(): void {
   // The workspace always reopens with these four, so indicator sets saved
   // for panels beyond them belong to charts that are gone.
   prunePanelSlots('mc', mcPanels.length)
-  renderMCGrid()
+  ready = true
+  changed() // the grid mounts the panels; each body creates its chart
   poll(mcRefreshAll, 15000)
 }
 
@@ -213,99 +240,91 @@ function mcUpdateLast(p: McPanel, c: Any): void {
 export function mcAdd(sym: string, interval: string): void {
   if (!mcCanAdd()) return
   mcPanels.push(blankPanel(sym || 'BTCUSDT', interval || '1h'))
-  renderMCGrid() // renderMCGrid -> mcInitChart(p) creates chart + loads data for each panel
+  changed() // the grid mounts the new panel; its body creates the chart and loads data
 }
 
 export function mcRemove(id: number): void {
   const idx = mcPanels.findIndex((p) => p.id === id)
   if (idx === -1) return
   // The panels after it move up a place, and their indicators with them.
-  mcDropIndicators(mcPanels[idx])
   shiftPanelSlots('mc', idx, mcPanels.length)
-  if (mcPanels[idx].ws) {
-    mcPanels[idx].ws._dead = true
-    try {
-      mcPanels[idx].ws.close()
-    } catch (e) {
-      /* ignore */
-    }
-  }
-  if (mcPanels[idx].chart) {
-    try {
-      mcPanels[idx].chart.remove()
-    } catch (e) {
-      /* ignore */
-    }
-  }
+  mcTearDown(mcPanels[idx])
   mcPanels.splice(idx, 1)
-  renderMCGrid()
+  // Their charts stay; only their indicator renderers follow the new slots.
+  mcPanels.slice(idx).forEach(mcBindIndicators)
+  changed()
 }
 
-function renderMCGrid(): void {
-  // grid.innerHTML below throws away every panel's chart *host element*,
-  // but LightweightCharts instances aren't tied to DOM removal — each one
-  // keeps its own ResizeObserver, RAF loop and listeners alive until told
-  // to stop via chart.remove(). Without disposing them first here, every
-  // add/remove/symbol-change leaked one zombie chart instance per *other*
-  // panel still on the grid — mcChangeSymbol calls this on every coin swap.
-  mcPanels.forEach(function (p) {
-    mcDropIndicators(p)
-    if (p.chart) {
-      try {
-        p.chart.remove()
-      } catch (e) {
-        /* already detached */
-      }
-      p.chart = null
-    }
-  })
-  const grid = $('mcGrid')!
-  let html = ''
-  const opt = (v: string, cur: string, label: string) =>
-    '<option value="' + v + '"' + (v === cur ? ' selected' : '') + '>' + label + '</option>'
-  mcPanels.forEach(function (p) {
-    const meta = coinMeta(p.sym)
-    const img = (state.marketCaps as Record<string, { image?: string }> | undefined)?.[baseOf(p.sym)]?.image
-    const icon = img && /^https:\/\//.test(img) ? '<img src="' + img.replace(/"/g, '') + '" alt="" loading="lazy">' : meta.icon
-    html +=
-      '<div class="multi-chart-cell" data-mc-id="' + p.id + '">' +
-      '<div class="mc-head">' +
-      '<span class="mc-id"><i class="tk-ico" style="border-color:' + meta.color + '66;background:' + meta.color + '1f;color:' + meta.color + '">' + icon + '</i>' +
-      '<span><select class="mc-sym" aria-label="Symbol" onchange="mcChangeSymbol(' + p.id + ',this.value)">' +
-      MC_COINS.concat(MC_COINS.indexOf(p.sym) === -1 ? [p.sym] : []).map((s) => opt(s, p.sym, baseOf(s) + '/USDT')).join('') +
-      '</select><small class="mc-px" id="mcPx' + p.id + '">…</small></span></span>' +
-      '<div class="mc-controls">' +
-      '<span class="mc-ind" data-ind-slot="mc' + mcPanels.indexOf(p) + '" data-ind-label="' + baseOf(p.sym).replace(/"/g, '') + '/USDT ' + p.interval + '"></span>' +
-      '<select aria-label="Interval" onchange="mcChangeInterval(' + p.id + ',this.value)">' +
-      MC_INTERVALS.map((iv) => opt(iv, p.interval, iv)).join('') +
-      '</select>' +
-      '<button class="mc-x" onclick="mcRemove(' + p.id + ')" title="Remove chart" aria-label="Remove chart">' +
-      '<svg width="12" height="12" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></button>' +
-      '</div></div>' +
-      '<div class="mc-body" id="mcBody' + p.id + '"><div class="mc-legend" id="mcLeg' + p.id + '"></div>' +
-      '<span class="mc-rsi-tag">RSI <b id="mcRsiV' + p.id + '">—</b></span></div>' +
-      '</div>'
-  })
-  if (mcCanAdd()) {
-    html +=
-      '<div class="mc-add">' +
-      '<button class="mc-add-btn" onclick="mcAdd(\'BTCUSDT\',\'1h\')" aria-label="Add chart"><svg width="30" height="30" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>' +
-      '<b>+ Add Chart</b><small>Add more assets, compare or build a new workspace.</small>' +
-      '<select class="mc-add-sym" aria-label="Choose symbol" onchange="if(this.value)mcAdd(this.value,\'1h\')">' +
-      '<option value="">Choose Symbol</option>' + MC_COINS.map((s) => '<option value="' + s + '">' + baseOf(s) + '/USDT</option>').join('') +
-      '</select></div>'
+/** Close the panel's kline subscription. */
+function mcCloseWS(p: McPanel): void {
+  if (!p.ws) return
+  p.ws._dead = true
+  try {
+    p.ws.close()
+  } catch (e) {
+    /* ignore */
   }
-  grid.innerHTML = html
-  mcPanels.forEach(function (p) {
-    mcInitChart(p)
-  })
-  emit()
+}
+
+/**
+ * Dispose the panel's chart. LightweightCharts instances aren't tied to DOM
+ * removal: each keeps its own ResizeObserver, RAF loop and listeners alive
+ * until chart.remove(). So every chart whose host goes away comes through
+ * here (the old innerHTML grid once leaked a zombie chart per panel on every
+ * rebuild this way).
+ */
+function mcDisposeChart(p: McPanel): void {
+  mcDropIndicators(p)
+  p.ro?.disconnect()
+  p.ro = null
+  if (p.chart) {
+    try {
+      p.chart.remove()
+    } catch (e) {
+      /* already detached */
+    }
+  }
+  p.chart = null
+  p.candleSeries = null
+  p.volSeries = null
+  p.rsiSeries = null
+}
+
+/** A panel is going away for good: chart and socket. */
+function mcTearDown(p: McPanel): void {
+  mcDisposeChart(p)
+  mcCloseWS(p)
+  p.el = null
+}
+
+/** The grid mounted panel `id`'s chart body: build its chart there. */
+export function mcAttachBody(id: number, el: HTMLElement): void {
+  const p = mcPanels.find((x) => x.id === id)
+  if (!p) return
+  if (p.el === el && p.chart) return
+  mcDisposeChart(p)
+  p.el = el
+  mcInitChart(p)
+}
+
+/** The grid unmounted panel `id`'s chart body: dispose its chart, keep its data. */
+export function mcDetachBody(id: number, el: HTMLElement): void {
+  const p = mcPanels.find((x) => x.id === id)
+  if (!p || p.el !== el) return
+  mcDisposeChart(p)
+  p.el = null
 }
 
 function mcInitChart(p: McPanel): void {
-  const el = document.getElementById('mcBody' + p.id)
+  const el = p.el
   if (!el) return
   const legEl = document.getElementById('mcLeg' + p.id)
+  // The readouts are written here, not by React; a fresh chart starts them blank.
+  if (legEl) legEl.innerHTML = ''
+  const pxEl = document.getElementById('mcPx' + p.id)
+  if (pxEl) pxEl.textContent = '…'
+  const rsiEl = document.getElementById('mcRsiV' + p.id)
+  if (rsiEl) rsiEl.textContent = '—'
   const w = el.clientWidth,
     h = el.clientHeight || 260
   const th = chartTheme()
@@ -346,26 +365,6 @@ function mcInitChart(p: McPanel): void {
     crosshairMarkerVisible: false,
   })
   rs.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0.02 }, visible: false })
-  // The panel's own indicators. With panes open, candles and volume move up
-  // over them and the built-in RSI strip steps aside; with none, the panel
-  // looks exactly as it always has.
-  const store = panelIndicatorStore(slotOf(p))
-  const ind = createIndicatorRenderer(store.getIndicators, {
-    priceLayout: (_c: Any, bottom: number) => {
-      cs.priceScale().applyOptions({
-        scaleMargins: bottom ? { top: 0.06, bottom: bottom + 0.22 } : { top: 0.06, bottom: 0.36 },
-      })
-      vs.priceScale().applyOptions({
-        scaleMargins: bottom
-          ? { top: 1 - bottom - 0.2, bottom: bottom + 0.04 }
-          : { top: 0.66, bottom: 0.22 },
-      })
-      rs.applyOptions({ visible: !bottom })
-    },
-  })
-  ind.attach(c)
-  p.ind = ind
-  p.indOff = store.subscribe(() => mcDrawIndicators(p))
   c.subscribeCrosshairMove(function (param: Any) {
     if (!param.time || !param.seriesData || !legEl) return
     const d = param.seriesData.get(cs)
@@ -389,17 +388,20 @@ function mcInitChart(p: McPanel): void {
   // fits the candles to nothing and leaves them crammed at the right edge
   // once it opens. Re-fit the first time the panel gets a real width.
   let fitW = el.clientWidth
-  new ResizeObserver(function () {
+  const ro = new ResizeObserver(function () {
     if (!c || !el.clientWidth) return
     c.applyOptions({ width: el.clientWidth, height: el.clientHeight || 260 })
     if (fitW < 60 && el.clientWidth >= 60 && p.candles.length) c.timeScale().fitContent()
     fitW = el.clientWidth
-  }).observe(el)
+  })
+  ro.observe(el)
+  p.ro = ro
   p.chart = c
   p.candleSeries = cs
   p.volSeries = vs
   p.rsiSeries = rs
-  // Re-rendering the grid (a panel added or removed elsewhere) keeps this
+  mcBindIndicators(p)
+  // A chart rebuilt for an existing panel (its body remounted) keeps the
   // panel's data and socket; only a fresh panel, or a new symbol/interval,
   // goes back to the network.
   if (p.candles.length) {
@@ -408,11 +410,49 @@ function mcInitChart(p: McPanel): void {
   } else mcLoadData(p)
 }
 
+/**
+ * Draw the panel's own indicators from its slot's store ('mc<position>').
+ * Called when its chart is built, and again when a panel before it is removed
+ * and it moves up a slot. With panes open, candles and volume move up over
+ * them and the built-in RSI strip steps aside; with none, the panel looks
+ * exactly as it always has.
+ */
+function mcBindIndicators(p: McPanel): void {
+  if (p.ind) p.ind.clear()
+  mcDropIndicators(p)
+  const c = p.chart
+  const cs = p.candleSeries
+  const vs = p.volSeries
+  const rs = p.rsiSeries
+  if (!c || !cs || !vs || !rs) return
+  const priceLayout = (_c: Any, bottom: number) => {
+    cs.priceScale().applyOptions({
+      scaleMargins: bottom ? { top: 0.06, bottom: bottom + 0.22 } : { top: 0.06, bottom: 0.36 },
+    })
+    vs.priceScale().applyOptions({
+      scaleMargins: bottom
+        ? { top: 1 - bottom - 0.2, bottom: bottom + 0.04 }
+        : { top: 0.66, bottom: 0.22 },
+    })
+    rs.applyOptions({ visible: !bottom })
+  }
+  priceLayout(c, 0)
+  const store = panelIndicatorStore(slotOf(p))
+  const ind = createIndicatorRenderer(store.getIndicators, { priceLayout })
+  ind.attach(c)
+  p.ind = ind
+  p.indOff = store.subscribe(() => mcDrawIndicators(p))
+  if (p.candles.length) mcDrawIndicators(p)
+}
+
 function mcLoadData(p: McPanel): void {
   const sym = mdSym(p.sym) as string,
     iv = mdTf(p.interval)
+  // A newer symbol or interval (or the panel's removal) supersedes this request.
+  const stale = () => mcPanels.indexOf(p) === -1 || mdSym(p.sym) !== sym || mdTf(p.interval) !== iv
   fetchKlineRows(sym, iv, 120)
     .then(function (data: Any) {
+      if (stale()) return
       const candles = data.map(mdFromK).filter(Boolean)
       p.candles = candles
       mdCachePut(sym, iv, candles)
@@ -423,6 +463,7 @@ function mcLoadData(p: McPanel): void {
       mcConnectWS(p)
     })
     .catch(function (e) {
+      if (stale()) return
       console.warn('mc load', e)
       const cached = mdCacheGet(sym, iv)
       if (cached && cached.length && p.candleSeries) {
@@ -434,14 +475,7 @@ function mcLoadData(p: McPanel): void {
 }
 
 function mcConnectWS(p: McPanel): void {
-  if (p.ws && p.ws._dead === false) {
-    p.ws._dead = true
-    try {
-      p.ws.close()
-    } catch (e) {
-      /* ignore */
-    }
-  }
+  if (p.ws && p.ws._dead === false) mcCloseWS(p)
   const s = mdSym(p.sym) as string
   const iv = mdTf(p.interval)
   // Instruments (gold, FX...) have no spot kline stream; one bad stream name
@@ -487,17 +521,9 @@ export function mcChangeInterval(id: number, iv: string): void {
   })
   if (!p) return
   p.interval = iv
-  const slot = document.querySelector('[data-mc-id="' + p.id + '"] .mc-ind') as HTMLElement | null
-  if (slot) slot.dataset.indLabel = baseOf(p.sym) + '/USDT ' + iv
-  if (p.ws) {
-    p.ws._dead = true
-    try {
-      p.ws.close()
-    } catch (e) {
-      /* ignore */
-    }
-  }
+  mcCloseWS(p)
   mcLoadData(p)
+  changed()
 }
 
 export function mcChangeSymbol(id: number, sym: string): void {
@@ -507,15 +533,14 @@ export function mcChangeSymbol(id: number, sym: string): void {
   if (!p) return
   p.sym = sym
   p.candles = []
-  if (p.ws) {
-    p.ws._dead = true
-    try {
-      p.ws.close()
-    } catch (e) {
-      /* ignore */
-    }
+  mcCloseWS(p)
+  // A fresh chart for this panel only (it loads the new symbol's data);
+  // every other panel keeps its chart.
+  if (p.el) {
+    mcDisposeChart(p)
+    mcInitChart(p)
   }
-  renderMCGrid() // re-inits this panel's chart, which loads its data once
+  changed()
 }
 
 function mcRefreshAll(): void {

@@ -4,6 +4,7 @@
 import { state } from './store'
 import { binancePerpOf, isInstrument } from '../constants/instruments'
 import { PERP_WS } from './perpData'
+import { spotBasis } from './spotGold'
 import {
   md,
   mdDebug,
@@ -167,6 +168,9 @@ export function connectStreams(cb: StreamsCallbacks): void {
   expectedStreams = 4
   const s = (perp ?? mdSym(state.symbol) ?? '').toLowerCase()
   const WS = perp ? PERP_WS : 'wss://stream.binance.com:9443/ws/'
+  // Gold's perpetual trades at a basis to spot; shift every price onto spot
+  // (services/spotGold). 0 for everything else.
+  const sb = (): number => (perp ? spotBasis(perp) : 0)
   const tf = mdTf(state.tf)
   const def = tfDef(tf)
   const bufKey = mdSym(state.symbol) + '|' + tf
@@ -284,13 +288,14 @@ export function connectStreams(cb: StreamsCallbacks): void {
   make('tk', WS + s + '@ticker', function (d: Any) {
     if (!mdVal.price(+d.c)) return
     const t = ticker()
+    const b = sb()
     // 24h open, kept so a trade print can recompute the change without
     // waiting for the next once-a-second stats frame.
-    t.open = +d.o || t.open
-    t.last = +d.c
+    t.open = +d.o ? +d.o + b : t.open
+    t.last = +d.c + b
     t.pct = +d.P
-    t.high = +d.h
-    t.low = +d.l
+    t.high = +d.h + b
+    t.low = +d.l + b
     t.qvol = +d.q
     t.trades = +d.n
     publishTicker(t)
@@ -331,7 +336,7 @@ export function connectStreams(cb: StreamsCallbacks): void {
     cb.onChartLast(c)
   }
   make('ag', WS + s + '@aggTrade', function (d: Any) {
-    const p = +d.p
+    const p = +d.p + sb()
     if (!mdVal.price(p)) return
     // Delta/whale tracking runs on every print (not coalesced to rAF like the
     // tape paint below) — dropping ticks here would silently under-count CVD.
@@ -347,7 +352,8 @@ export function connectStreams(cb: StreamsCallbacks): void {
   // only once the bucket closes. Native intervals (factor 1) are unchanged.
   make('kl', WS + s + '@kline_' + def.base, function (d: Any) {
     const k = d.k
-    const base = { t: k.t, o: +k.o, h: +k.h, l: +k.l, c: +k.c, v: +k.v }
+    const b = sb()
+    const base = { t: k.t, o: +k.o + b, h: +k.h + b, l: +k.l + b, c: +k.c + b, v: +k.v }
     if (!mdVal.candle(base)) return
     const folder = mainFolder.key === bufKey ? mainFolder.folder : null
     const c = def.factor > 1 ? (folder ? folder.push(base) : null) : base
@@ -378,9 +384,10 @@ export function connectStreams(cb: StreamsCallbacks): void {
     const bids = d.bids || d.b
     const asks = d.asks || d.a
     if (!bids || !bids.length || !asks) return
+    const b0 = sb()
     const ob = {
-      bids: bids.slice(0, 15).map((b: Any) => [+b[0], +b[1]]),
-      asks: asks.slice(0, 15).map((a: Any) => [+a[0], +a[1]]),
+      bids: bids.slice(0, 15).map((b: Any) => [+b[0] + b0, +b[1]]),
+      asks: asks.slice(0, 15).map((a: Any) => [+a[0] + b0, +a[1]]),
     }
     if (!mdStoreOB(state.symbol, ob)) return
     state.ob = ob

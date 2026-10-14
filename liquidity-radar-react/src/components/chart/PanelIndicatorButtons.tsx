@@ -1,8 +1,8 @@
 // The indicators button in every multi-chart panel header.
 //
-// Panel headers are built by the chart modules (companionCharts for the
-// layouts around the main chart, multiCharts for the Market workspace), each
-// with an empty `[data-ind-slot]` placeholder. This finds those placeholders
+// Panel headers carry an empty `[data-ind-slot]` placeholder: companionCharts
+// builds them as HTML for the layouts around the main chart, MultiChartGrid
+// renders them for the Charts workspace. This finds those placeholders
 // whenever either grid changes and portals the regular IndicatorPicker into
 // each, bound to that panel's own indicator store.
 import { useEffect, useState } from 'react'
