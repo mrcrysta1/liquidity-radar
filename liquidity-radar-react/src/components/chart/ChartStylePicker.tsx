@@ -195,6 +195,17 @@ function StyleIcon({ id, size = 16 }: { id: ChartStyleId; size?: number }) {
       </svg>
     )
   }
+  if (id === 'renko') {
+    // Equal bricks on a staircase, three up then a reversal — no wicks.
+    return (
+      <svg {...p}>
+        <rect x="2.5" y="14" width="4" height="6" fill={UP} stroke={UP} strokeWidth="1" />
+        <rect x="7.5" y="8" width="4" height="6" fill={UP} stroke={UP} strokeWidth="1" />
+        <rect x="12.5" y="2" width="4" height="6" fill={UP} stroke={UP} strokeWidth="1" />
+        <rect x="17.5" y="8" width="4" height="6" fill={DN} stroke={DN} strokeWidth="1" />
+      </svg>
+    )
+  }
   if (id === 'sessionvp') {
     return (
       <svg {...p}>
@@ -237,11 +248,12 @@ function StyleIcon({ id, size = 16 }: { id: ChartStyleId; size?: number }) {
 }
 
 /**
- * Range bar size: automatic from ATR(14), or a manual size for the coin on
- * screen. The manual value is applied on Enter or when the field loses focus,
- * not per keystroke — every change rebuilds every bar.
+ * Range bar size / renko box size: automatic from ATR(14), or a manual size
+ * for the coin on screen. The manual value is applied on Enter or when the
+ * field loses focus, not per keystroke — every change rebuilds every bar.
  */
-function RangeSettings() {
+function RangeSettings({ id }: { id: ChartStyleId }) {
+  const label = id === 'renko' ? 'Box size' : 'Range size'
   const sym = String(state.symbol || '')
   const rs = getRangeSettings()
   const info = rangeSizeInfo()
@@ -257,10 +269,10 @@ function RangeSettings() {
   return (
     <div className="range-set" onKeyDown={(e) => e.stopPropagation()}>
       <div className="range-set-head">
-        <span>Range size</span>
+        <span>{label}</span>
         <b>{info.size > 0 ? pfmt(info.size) : '—'}</b>
       </div>
-      <div className="range-set-modes" role="radiogroup" aria-label="Range size">
+      <div className="range-set-modes" role="radiogroup" aria-label={label}>
         <button
           type="button"
           role="radio"
@@ -292,8 +304,10 @@ function RangeSettings() {
             type="text"
             inputMode="decimal"
             value={text}
-            placeholder={info.auto > 0 ? pfmt(info.auto) : 'price range'}
-            aria-label={'Manual range for ' + sym}
+            placeholder={
+              info.auto > 0 ? pfmt(info.auto) : id === 'renko' ? 'box size' : 'price range'
+            }
+            aria-label={(id === 'renko' ? 'Manual box size for ' : 'Manual range for ') + sym}
             onChange={(e) => setText(e.target.value)}
             onBlur={apply}
           />
@@ -301,7 +315,9 @@ function RangeSettings() {
         </form>
       )}
       {info.manual && info.floor > 0 && info.size === info.floor && (
-        <small className="range-set-note">Raised to {pfmt(info.floor)} to keep the bar count sane</small>
+        <small className="range-set-note">
+          Raised to {pfmt(info.floor)} to keep the bar count sane
+        </small>
       )}
     </div>
   )
@@ -363,7 +379,9 @@ export function ChartStylePicker() {
       {open && (
         <div className="style-menu" role="menu" aria-label="Chart style">
           {/* On top, so it is in view the moment range bars are picked. */}
-          {def.rangeBars && <RangeSettings key={String(state.symbol || '')} />}
+          {def.rangeBars && (
+            <RangeSettings key={current + '|' + String(state.symbol || '')} id={current} />
+          )}
           {CHART_STYLES.map((s) => (
             <button
               key={s.id}

@@ -34,6 +34,7 @@ import {
 } from './series/lineFamily'
 import type { LineFamilyColors } from './series/lineFamily'
 import { displayCandles, isRangeMode, snapChartTime, timeOnlyCandles } from './series/rangeView'
+import { renkoSeriesOptions } from './series/renko'
 import { tfDef } from '../../services/timeframe'
 import { mountCloseTimer, updateCloseTimer } from './closeTimer'
 import {
@@ -166,6 +167,8 @@ export function themePriceSeries(series: Any, id: ChartStyleId): void {
       wickDownColor: th.dn,
       priceLineColor: th.pline,
     })
+  } else if (id === 'renko') {
+    series.applyOptions({ ...renkoSeriesOptions(), priceLineColor: th.pline })
   } else if (id === 'bar' || id === 'hlc') {
     series.applyOptions({ upColor: th.up, downColor: th.dn, priceLineColor: th.pline })
   } else {
@@ -243,6 +246,13 @@ export function createPriceSeries(c: Any, id: ChartStyleId, baseline = 0): Any {
       borderDownColor: th.dn,
       wickUpColor: th.up,
       wickDownColor: th.dn,
+      priceLineColor: th.pline,
+      priceLineStyle: 2,
+    })
+  } else if (id === 'renko') {
+    // Bricks: TradingView's renko colours, boxes with no wicks.
+    return c.addCandlestickSeries({
+      ...renkoSeriesOptions(),
       priceLineColor: th.pline,
       priceLineStyle: 2,
     })
@@ -382,7 +392,10 @@ export function initChart(): void {
   // a fresh data load, so there is one place where series are built.
   onIndicatorsChange(() => updateChartData(false))
   onReplayChange((modeChanged: boolean) => updateChartData(modeChanged))
-  let wasRange = isRangeMode()
+  // Which derived bars are on screen ('' for time candles): range ↔ renko
+  // rebuilds the bars as surely as leaving them does.
+  const derivedKind = (): string => (isRangeMode() ? getChartStyle() : '')
+  let wasRange = derivedKind()
   onChartStyleChange(() => {
     // Same bars, drawn differently — keep whatever the user has zoomed or
     // panned to instead of snapping back to the newest candle. The range is
@@ -391,8 +404,8 @@ export function initChart(): void {
     // the bars themselves change, so that view is refitted instead.
     const ts = chart.timeScale()
     const keep = ts.getVisibleLogicalRange()
-    const refit = wasRange !== isRangeMode()
-    wasRange = isRangeMode()
+    const refit = wasRange !== derivedKind()
+    wasRange = derivedKind()
     applyChartStyle()
     attachWhaleBubbles(chart, candleSeries, $('chartWrap')!)
     attachVolumeProfile(chart, candleSeries, $('chartWrap')!)

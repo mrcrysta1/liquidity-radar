@@ -1,5 +1,5 @@
 // What the price-action chart actually draws: the candles themselves, or —
-// with the Range bars style — range bars built from them.
+// with a derived style (Range bars, Renko) — the bars built from them.
 //
 // Everything that shares the chart's time axis (the price series, indicators,
 // drawings, whale bubbles, the crosshair legend) reads displayCandles(), so
@@ -8,8 +8,8 @@
 import { state } from '../../../services/store'
 import type { CandleFlat } from '../../../services/market'
 import { visibleCandles } from '../replay'
-import { isRangeStyle, manualRangeFor } from '../chartStyle'
-import { autoRangeSize, buildRangeBars, minSafeRange } from './rangeBars'
+import { getChartStyle, isRangeStyle, manualRangeFor } from '../chartStyle'
+import { buildDerivedBars, derivedSize } from './derivedBars'
 
 export function isRangeMode(): boolean {
   return isRangeStyle()
@@ -28,14 +28,13 @@ export function rangeSizeInfo(src: CandleFlat[] = visibleCandles()): {
   manual: boolean
 } {
   const sym = String(state.symbol || '')
-  const manual = manualRangeFor(sym)
+  const style = getChartStyle()
+  const manual = manualRangeFor(sym, style)
   const n = src.length
-  const key = [sym, n, n ? src[0].t : 0, n > 1 ? src[n - 2].t : 0, manual ?? 'a'].join('|')
+  const key = [style, sym, n, n ? src[0].t : 0, n > 1 ? src[n - 2].t : 0, manual ?? 'a'].join('|')
   if (key !== sizeKey) {
     sizeKey = key
-    const auto = autoRangeSize(src)
-    const floor = minSafeRange(src)
-    sizeMemo = { size: Math.max(manual ?? auto, floor), auto, floor }
+    sizeMemo = derivedSize(src, manual)
   }
   return { ...sizeMemo, manual: manual != null }
 }
@@ -47,12 +46,13 @@ function buildFor(src: CandleFlat[]): CandleFlat[] {
   const n = src.length
   if (!n) return []
   const size = rangeSizeInfo(src).size
+  const style = getChartStyle()
   const last = src[n - 1]
-  const key = [n, src[0].t, last.t, last.o, last.h, last.l, last.c, last.v, size].join('|')
+  const key = [style, n, src[0].t, last.t, last.o, last.h, last.l, last.c, last.v, size].join('|')
   if (src !== barsSrc || key !== barsKey) {
     barsSrc = src
     barsKey = key
-    barsMemo = buildRangeBars(src, size)
+    barsMemo = buildDerivedBars(style, src, size)
   }
   return barsMemo
 }
