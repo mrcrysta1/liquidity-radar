@@ -4,7 +4,7 @@
 //
 // The bars come from series/kagi.ts and series/pointFigure.ts; what the
 // renderer needs beyond OHLC travels on each bar as `aux`.
-import { makeView } from './customSeries'
+import { makeView } from './customSeries.ts'
 import type { CandleData } from './customSeries'
 import type { KagiAux } from './kagi'
 import type { PnfAux } from './pointFigure'

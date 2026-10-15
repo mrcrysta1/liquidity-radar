@@ -23,7 +23,7 @@ import {
 } from './chartStyle'
 import type { ChartStyleId } from './chartStyle'
 import type { CandleFlat } from '../../services/market'
-import { CUSTOM_VIEWS, toCandleData } from './series/customSeries'
+import { CUSTOM_VIEWS, hollowCandleData, toCandleData } from './series/customSeries'
 import { BASIC_VIEWS, basicSeriesOptions } from './series/basicSeries'
 import { heikinAshiBar, heikinAshiOf } from './series/heikinAshi'
 import {
@@ -137,6 +137,9 @@ export function applyChartTheme(): void {
     timeScale: { borderColor: th.border },
   })
   if (candleSeries) themePriceSeries(candleSeries, getChartStyle())
+  // Hollow candles carry their colours per bar: re-colour the data too.
+  if (candleSeries && getChartStyle() === 'hollow' && displayCandles().length)
+    candleSeries.setData(priceSeriesData('hollow', displayCandles()))
   refreshIndicatorColors()
 }
 
@@ -192,23 +195,46 @@ export function mapCandle(c: Any): Any {
   return { time: Math.floor(c.t / 1000), open: c.o, high: c.h, low: c.l, close: c.c }
 }
 
-/** Series data for style `id`: custom bars, OHLC, or a single closing value. */
-export function priceSeriesData(id: ChartStyleId, candles: CandleFlat[]): Any[] {
+/**
+ * Series data for style `id`: custom bars, OHLC, or a single closing value.
+ * `prev` is the bar before `candles[0]`, which hollow candles (coloured by
+ * the previous close) and the custom styles (sessions) need for a live bar.
+ */
+export function priceSeriesData(
+  id: ChartStyleId,
+  candles: CandleFlat[],
+  prev?: CandleFlat | null,
+): Any[] {
   const def = styleDef(id)
   // Heikin Ashi re-primes its memo here, so live ticks build on these bars.
   if (id === 'heikin') return heikinAshiOf(candles, true).map(mapCandle)
-  if (def.custom) return toCandleData(candles)
+  if (def.custom) return toCandleData(candles, prev)
+  if (id === 'hollow') {
+    const th = chartTheme()
+    return hollowCandleData(candles, th.up, th.dn, prev)
+  }
   if (def.ohlc) return candles.map(mapCandle)
   return candles.map((c) => ({ time: Math.floor(c.t / 1000), value: c.c }))
 }
 /**
  * One bar of series data for style `id` — what series.update() takes.
- * `src` is the candle array `c` belongs to: Heikin Ashi needs the bars before
- * it, since each HA open is built from the previous HA bar.
+ * `prev` is the bar before `c` (hollow candles and sessions need it). `src`
+ * is the candle array `c` belongs to: Heikin Ashi needs the bars before it,
+ * since each HA open is built from the previous HA bar.
  */
-export function priceSeriesPoint(id: ChartStyleId, c: CandleFlat, src?: CandleFlat[]): Any {
+export function priceSeriesPoint(
+  id: ChartStyleId,
+  c: CandleFlat,
+  prev?: CandleFlat | null,
+  src?: CandleFlat[],
+): Any {
   if (id === 'heikin') return mapCandle(heikinAshiBar(src || [c], c))
-  return priceSeriesData(id, [c])[0]
+  return priceSeriesData(id, [c], prev)[0]
+}
+/** The bar before the one starting at `t` in `bars` (searched from the end). */
+export function barBefore(bars: CandleFlat[], t: number): CandleFlat | null {
+  for (let i = bars.length - 1; i >= 0; i--) if (bars[i].t < t) return bars[i]
+  return null
 }
 /**
  * The bars the OHLC legend reports for style `id`: the candles themselves, or
@@ -269,7 +295,8 @@ export function createPriceSeries(c: Any, id: ChartStyleId, baseline = 0): Any {
     return c.addBarSeries({
       upColor: th.up,
       downColor: th.dn,
-      thinBars: false,
+      // TradingView's bars are thin OHLC ticks, not body-width blocks.
+      thinBars: true,
       openVisible: id !== 'hlc',
       priceLineColor: th.pline,
       priceLineStyle: 2,
@@ -675,7 +702,7 @@ export function updateChartLast(c: Any): void {
     if (lb) c = lb
   } else {
     const shown = displayCandles()
-    candleSeries.update(priceSeriesPoint(getChartStyle(), c, shown))
+    candleSeries.update(priceSeriesPoint(getChartStyle(), c, barBefore(shown, c.t), shown))
     // Heikin Ashi: the legend reports the HA bar just drawn (memoised, so cheap).
     if (getChartStyle() === 'heikin') c = heikinAshiBar(shown, c)
     if (getChartStyle() === 'baseline') syncBaselineBase(chart, candleSeries, displayCandles)
