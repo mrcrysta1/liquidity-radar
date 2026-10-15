@@ -388,8 +388,8 @@ async function legendFollows() {
   await sleep(250)
   let b = await read()
   if (a === b) {
-    // Few, wide bars (Point & figure): look for a second bar nearer the live edge.
-    for (const fx of [0.8, 0.9, 0.95]) {
+    // Few, wide bars (Point & figure): sweep the plot for a second bar.
+    for (const fx of [0.05, 0.15, 0.25, 0.45, 0.55, 0.7, 0.8, 0.9, 0.95]) {
       await page.mouse.move(r.x + r.w * fx, r.y + r.h * 0.45)
       await sleep(250)
       b = await read()
