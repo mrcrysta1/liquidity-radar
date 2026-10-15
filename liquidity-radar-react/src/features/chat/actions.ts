@@ -21,6 +21,7 @@ export const TABS: Array<{ id: string; label: string; what: string; words: strin
   { id: 'radar', label: 'Radar', what: 'one market in depth: price, funding, open interest, long/short, live chart, key levels, quick stats', words: ['radar', 'overview'] },
   { id: 'multichart', label: 'Charts', what: 'charting workspace: 40+ indicators, drawings, footprint/TPO/range bars, multi-chart layouts, replay', words: ['charts', 'chart', 'multichart', 'multi chart'] },
   { id: 'signals', label: 'Signals', what: 'signal scanner across 19 markets on 1H/4H/1D with trade plans and a graded win rate', words: ['signals', 'signal', 'scanner'] },
+  { id: 'screener', label: 'Screener', what: 'TradingView-style crypto screener: sortable table of price, change, volume, RSI, MACD, EMAs, volatility, performance and a technical rating, with filters and presets (top gainers/losers, oversold, overbought, strong buy)', words: ['screener', 'screen', 'crypto screener', 'coin screener', 'stock screener'] },
   { id: 'analysis', label: 'Analysis', what: 'liquidation heatmap, volume profile, order flow, liquidation levels, Fibonacci zones', words: ['analysis', 'heatmap', 'liquidation heatmap'] },
   { id: 'neuralnet', label: 'Neural Net', what: 'model predictions, AI insights, market sentiment, top movers', words: ['neural net', 'neural', 'ai prediction', 'predictions'] },
   { id: 'selflearn', label: 'Self Learning', what: 'paper-trading engine, its models, trades, learning log, server bot', words: ['self learning', 'self-learning', 'paper trading', 'learning lab', 'bot'] },
