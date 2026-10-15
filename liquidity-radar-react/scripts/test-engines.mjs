@@ -1791,6 +1791,98 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   themeLineFamilySeries(series, 'area', { ...k, primary: '#ff0000' })
   eq('theme: area follows the new palette', applied[1].topColor, 'rgba(255,0,0,0.28)')
 }
+
+// ---- screener: technical rating, filters, presets, sorting -------------------
+{
+  const S = await import(src('features/screener/logic.ts'))
+
+  // Rating thresholds (TradingView's): > .5 strong buy, > .1 buy, ≥ -.1 neutral, ≥ -.5 sell.
+  eq('screener: rating 0.6 is strong buy', S.ratingOf(0.6), 'strong_buy')
+  eq('screener: rating 0.5 is buy (strict >)', S.ratingOf(0.5), 'buy')
+  eq('screener: rating 0.1 is neutral', S.ratingOf(0.1), 'neutral')
+  eq('screener: rating -0.1 is neutral', S.ratingOf(-0.1), 'neutral')
+  eq('screener: rating -0.3 is sell', S.ratingOf(-0.3), 'sell')
+  eq('screener: rating -0.51 is strong sell', S.ratingOf(-0.51), 'strong_sell')
+  eq('screener: no score, no rating', S.ratingOf(null), null)
+  eq('screener: group score (buy − sell) / votes', S.groupScore({ buy: 3, sell: 1, neutral: 4 }), 0.25)
+  eq('screener: an empty group does not score', S.groupScore({ buy: 0, sell: 0, neutral: 0 }), null)
+
+  const mk = (closes) =>
+    closes.map((c, i) => ({ t: i * 86_400_000, o: c, h: c * 1.01, l: c * 0.99, c, v: 1000 }))
+  const upTrend = mk(Array.from({ length: 220 }, (_, i) => 100 * Math.pow(1.01, i)))
+  const downTrend = mk(Array.from({ length: 220 }, (_, i) => 100 * Math.pow(0.99, i)))
+  const up = S.computeTech(upTrend)
+  const dn = S.computeTech(downTrend)
+  eq('screener: steady uptrend — every MA votes buy', up.maVotes, { buy: 12, sell: 0, neutral: 0 })
+  eq('screener: steady downtrend — every MA votes sell', dn.maVotes, { buy: 0, sell: 12, neutral: 0 })
+  ok('screener: uptrend rates buy or strong buy', up.rating === 'buy' || up.rating === 'strong_buy', up.rating)
+  ok('screener: downtrend rates sell or strong sell', dn.rating === 'sell' || dn.rating === 'strong_sell', dn.rating)
+  ok('screener: uptrend RSI is high', up.rsi > 70, up.rsi)
+  eq('screener: uptrend price above EMA200', S.emaRelation(upTrend.at(-1).c, up.ema200), 'above')
+  near('screener: 1W performance is 7 daily bars back', up.perf1W, (Math.pow(1.01, 7) - 1) * 100, 1e-6)
+  near('screener: 1M performance is 30 daily bars back', dn.perf1M, (Math.pow(0.99, 30) - 1) * 100, 1e-6)
+  ok('screener: ATR% is about the bar range', up.atrPct > 1.5 && up.atrPct < 3.5, up.atrPct)
+  eq('screener: oscillator group has 8 voters', S.oscillatorVotes(upTrend).length, 8)
+  // A new listing: too short for the 100/200 MAs, which then do not vote.
+  const young = S.computeTech(upTrend.slice(-60))
+  eq('screener: MAs without enough history do not vote', young.maVotes.buy + young.maVotes.sell + young.maVotes.neutral, 8)
+  eq('screener: no EMA200 on 60 bars', young.ema200, null)
+  eq('screener: no candles, no rating', S.computeTech([]).rating, null)
+
+  near('screener: absolute change from last and %', S.absChange(110, 10), 10, 1e-9)
+  near('screener: absolute change for a loss', S.absChange(90, -10), -10, 1e-9)
+
+  const tech = (rsi, score) => ({ rsi, score, rating: S.ratingOf(score), macd: 1, macdSignal: 0, macdState: 'bull', ema20: null, ema50: null, ema200: null, atrPct: 2, perf1W: 1, perf1M: 2, maVotes: { buy: 0, sell: 0, neutral: 0 }, oscVotes: { buy: 0, sell: 0, neutral: 0 } })
+  const row = (base, name, pct, vol, t = null, mcap = null) => ({ sym: base + 'USDT', base, name, price: 10, pct, chg: 0, vol, mcap, tech: t })
+  const rows = [
+    row('BTC', 'Bitcoin', 2, 5e9, tech(55, 0.7), 1e12),
+    row('ETH', 'Ethereum', -3, 2e9, tech(25, -0.6)),
+    row('SOL', 'Solana', 8, 9e8, tech(75, 0.3)),
+    row('PEPE', 'Pepe', -12, 4e8, null),
+    row('DOGE', 'Dogecoin', 0.5, 6e8, tech(45, 0)),
+  ]
+  const F = S.EMPTY_FILTERS
+  const bases = (rs) => rs.map((r) => r.base).join(',')
+  eq('screener: no filters keep everything', S.filterRows(rows, F).length, 5)
+  eq('screener: search matches ticker or name', bases(S.filterRows(rows, { ...F, q: 'eth' })), 'ETH')
+  eq('screener: search by name', bases(S.filterRows(rows, { ...F, q: 'doge' })), 'DOGE')
+  eq('screener: min volume', bases(S.filterRows(rows, { ...F, minVol: 1e9 })), 'BTC,ETH')
+  eq('screener: change % range', bases(S.filterRows(rows, { ...F, chgMin: 0, chgMax: 5 })), 'BTC,DOGE')
+  eq('screener: RSI range drops rows still computing', bases(S.filterRows(rows, { ...F, rsiMin: 40, rsiMax: 60 })), 'BTC,DOGE')
+  eq('screener: rating filter, exact', bases(S.filterRows(rows, { ...F, rating: 'strong_buy' })), 'BTC')
+  eq('screener: rating filter, buy or better', bases(S.filterRows(rows, { ...F, rating: 'buy_up' })), 'BTC,SOL')
+  eq('screener: rating filter, sell or worse', bases(S.filterRows(rows, { ...F, rating: 'sell_down' })), 'ETH')
+  ok('screener: indicator filters need indicators', S.needsTech({ ...F, rsiMax: 30 }) && !S.needsTech({ ...F, minVol: 1 }))
+
+  eq('screener: sort by change, descending', bases(S.sortRows(rows, { key: 'pct', dir: 'desc' })), 'SOL,BTC,DOGE,ETH,PEPE')
+  eq('screener: sort by change, ascending', bases(S.sortRows(rows, { key: 'pct', dir: 'asc' })), 'PEPE,ETH,DOGE,BTC,SOL')
+  eq('screener: missing RSI sorts last either way (desc)', bases(S.sortRows(rows, { key: 'rsi', dir: 'desc' })), 'SOL,BTC,DOGE,ETH,PEPE')
+  eq('screener: missing RSI sorts last either way (asc)', bases(S.sortRows(rows, { key: 'rsi', dir: 'asc' })), 'ETH,DOGE,BTC,SOL,PEPE')
+  eq('screener: missing market cap sorts last', S.sortRows(rows, { key: 'mcap', dir: 'asc' })[0].base, 'BTC')
+  eq('screener: sort by symbol', bases(S.sortRows(rows, { key: 'sym', dir: 'asc' })), 'BTC,DOGE,ETH,PEPE,SOL')
+  eq('screener: sort by rating', bases(S.sortRows(rows, { key: 'rating', dir: 'desc' })), 'BTC,SOL,DOGE,ETH,PEPE')
+  eq('screener: sorting does not mutate its input', bases(rows), 'BTC,ETH,SOL,PEPE,DOGE')
+  eq('screener: same header flips direction', S.nextSort({ key: 'vol', dir: 'desc' }, 'vol'), { key: 'vol', dir: 'asc' })
+  eq('screener: a new numeric header starts descending', S.nextSort({ key: 'vol', dir: 'asc' }, 'rsi'), { key: 'rsi', dir: 'desc' })
+  eq('screener: the symbol header starts ascending', S.nextSort({ key: 'vol', dir: 'desc' }, 'sym'), { key: 'sym', dir: 'asc' })
+
+  const base = { filters: { ...F, q: 'so', minVol: 1e6 }, sort: S.DEFAULT_SORT, preset: null }
+  const os = S.applyPreset(base, 'oversold')
+  eq('screener: Oversold preset = RSI < 30, lowest first, search kept', [os.filters.rsiMax, os.filters.minVol, os.filters.q, os.sort.key, os.sort.dir, os.preset], [30, 0, 'so', 'rsi', 'asc', 'oversold'])
+  const g = S.applyPreset(base, 'gainers')
+  eq('screener: Top gainers preset sorts change % descending', [g.filters.chgMin, g.sort.key, g.sort.dir], [0, 'pct', 'desc'])
+  const losers = S.applyPreset({ ...base, filters: F }, 'losers')
+  eq('screener: Top losers lists the fallers, worst first', bases(S.sortRows(S.filterRows(rows, losers.filters), losers.sort)), 'PEPE,ETH')
+  const sb = S.applyPreset({ ...base, filters: F }, 'strongbuy')
+  eq('screener: Strong buy preset', bases(S.sortRows(S.filterRows(rows, sb.filters), sb.sort)), 'BTC')
+  eq('screener: every preset id is distinct', new Set(S.PRESETS.map((p) => p.id)).size, 6)
+
+  const clean = S.sanitizePrefs({ filters: { q: 42, minVol: -5, chgMin: '3', rsiMax: 30, rating: 'moon' }, sort: { key: 'nope', dir: 'up' }, preset: 'oversold' })
+  eq('screener: stored prefs are sanitised', clean, { filters: { ...F, rsiMax: 30 }, sort: S.DEFAULT_SORT, preset: 'oversold' })
+  eq('screener: garbage in storage falls back to defaults', S.sanitizePrefs('x'), { filters: F, sort: S.DEFAULT_SORT, preset: null })
+  eq('screener: valid prefs survive a round trip', S.sanitizePrefs(JSON.parse(JSON.stringify(os))), os)
+}
+
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')
 if (fails.length) {
   fails.forEach((f) => console.log('  FAIL  ' + f))

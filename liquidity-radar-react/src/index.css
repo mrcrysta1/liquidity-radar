@@ -5391,3 +5391,78 @@ html[data-palette="glass"] .acct-card{background:linear-gradient(145deg,rgba(255
 .lab-btf .lab-fld{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted)}
 .lab-btf .lab-fld .cp-trigger{width:100%;padding:5px 9px 5px 4px}
 @media(max-width:640px){.an-sym-picker{flex:1}.an-sym-picker .cp-trigger{min-width:0;width:100%}}
+
+/* ---- Screener (components/screener/Screener.tsx) -------------------------
+   A dense TradingView-style table: sticky header, sticky symbol column when it
+   scrolls sideways, right-aligned mono numbers, rating pills. Tokens only, so
+   light and dark both follow the chosen palette. */
+.sc-card{padding:14px}
+.sc-toolbar{display:flex;flex-direction:column;gap:10px;margin-bottom:10px}
+.sc-presets{display:flex;flex-wrap:wrap;gap:6px}
+.sc-chip{font:inherit;font-size:var(--text-sm);font-weight:600;padding:5px 11px;border-radius:999px;border:1px solid var(--border);background:var(--sunk-1);color:var(--muted);cursor:pointer;transition:color .15s,background-color .15s,border-color .15s}
+.sc-chip:hover{border-color:var(--border2);color:var(--txt)}
+.sc-chip.on{background:rgb(var(--pRGB)/.14);border-color:rgb(var(--pRGB)/.5);color:var(--primary)}
+.sc-filters{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.sc-filters select,.sc-filters input,.sc-search{font:inherit;font-size:var(--text-sm);color:var(--txt);background:var(--sunk-1);border:1px solid var(--border);border-radius:8px;height:30px}
+.sc-filters select{padding:0 8px;cursor:pointer}
+.sc-filters select:focus,.sc-filters input:focus{outline:none;border-color:var(--primary)}
+.sc-search{display:inline-flex;align-items:center;gap:6px;padding:0 8px;color:var(--dim);min-width:170px;flex:1 1 170px;max-width:260px}
+.sc-search:focus-within{border-color:var(--primary)}
+.sc-filters .sc-search input{border:none;background:none;height:28px;padding:0;flex:1;min-width:0}
+.sc-range{display:inline-flex;align-items:center;gap:4px;font-size:var(--text-2xs);font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.06em}
+.sc-range input{width:62px;padding:0 6px;font-family:var(--mono)}
+.sc-reset{font:inherit;font-size:var(--text-sm);font-weight:600;height:30px;padding:0 12px;border-radius:8px;border:1px solid var(--border);background:none;color:var(--primary);cursor:pointer}
+.sc-reset:hover{border-color:var(--primary)}
+.sc-status{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:var(--text-xs);color:var(--dim);margin:0 2px 8px}
+.sc-dot{width:3px;height:3px;border-radius:50%;background:var(--dim)}
+.sc-warn{color:var(--amber)}
+.sc-scroll{overflow:auto;max-height:calc(100vh - 230px);min-height:200px;border:1px solid var(--border);border-radius:10px;-webkit-overflow-scrolling:touch}
+.sc-table{width:100%;min-width:1180px;border-collapse:separate;border-spacing:0;font-variant-numeric:tabular-nums}
+.sc-table th{position:sticky;top:0;z-index:2;background:var(--card2);border-bottom:1px solid var(--border);padding:0;text-align:right;white-space:nowrap}
+.sc-table th button{all:unset;box-sizing:border-box;display:flex;align-items:center;justify-content:flex-end;gap:3px;width:100%;padding:8px;cursor:pointer;font-size:var(--text-2xs);font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--dim)}
+.sc-table th button:hover,.sc-table th button.on{color:var(--txt)}
+.sc-table th button:focus-visible{outline:2px solid var(--primary);outline-offset:-2px}
+.sc-table th.sc-symcol button{justify-content:flex-start}
+.sc-arrow{display:inline-block;width:8px;font-size:8px;color:var(--primary)}
+.sc-table td{padding:6px 8px;border-bottom:1px solid var(--hair-1);font-family:var(--mono);font-size:12px;text-align:right;white-space:nowrap;color:var(--txt)}
+.sc-table tbody tr{cursor:pointer;transition:background-color .12s}
+.sc-table tbody tr:hover,.sc-table tbody tr:focus-visible{background:rgb(var(--pRGB)/.06);outline:none}
+.sc-table tbody tr:focus-visible td.sc-symcol{box-shadow:inset 3px 0 0 var(--primary)}
+.sc-table tbody tr:last-child td{border-bottom:none}
+.sc-table .sc-symcol{text-align:left;position:sticky;left:0;z-index:1;background:var(--card)}
+.sc-table th.sc-symcol{z-index:3;background:var(--card2)}
+.sc-table tbody tr:hover td.sc-symcol{background:linear-gradient(rgb(var(--pRGB)/.06),rgb(var(--pRGB)/.06)),var(--card)}
+.sc-table .up{color:var(--green)}
+.sc-table .dn{color:var(--red)}
+.sc-sym{display:flex;align-items:center;gap:8px;min-width:170px}
+.sc-name{display:flex;flex-direction:column;line-height:1.2;min-width:0}
+.sc-name b{font-size:12.5px;font-weight:700}
+.sc-name small{font-family:system-ui,sans-serif;font-size:var(--text-xs);color:var(--dim);max-width:120px;overflow:hidden;text-overflow:ellipsis}
+.sc-star{all:unset;cursor:pointer;width:18px;text-align:center;font-size:14px;line-height:1;color:var(--dim);border-radius:4px}
+.sc-star:hover,.sc-star.on{color:var(--amber)}
+.sc-star:focus-visible{outline:2px solid var(--primary)}
+.sc-na{color:var(--dim)}
+.sc-macd{font-size:var(--text-xs);font-weight:700}
+.sc-ema{display:inline-flex;gap:5px}
+.sc-ema i{font-style:normal;font-size:10px;width:10px;text-align:center;color:var(--dim)}
+.sc-ema i.up{color:var(--green)}
+.sc-ema i.dn{color:var(--red)}
+.sc-ratecol{min-width:104px}
+.sc-pill{display:inline-block;min-width:78px;text-align:center;padding:2px 8px;border-radius:999px;font-family:system-ui,sans-serif;font-size:var(--text-xs);font-weight:700;border:1px solid transparent}
+.sc-pill.strong_buy{color:var(--green);background:rgb(var(--gRGB)/.18);border-color:rgb(var(--gRGB)/.45)}
+.sc-pill.buy{color:var(--green);background:rgb(var(--gRGB)/.08)}
+.sc-pill.neutral{color:var(--muted);background:var(--hair-1)}
+.sc-pill.sell{color:var(--red);background:rgb(var(--rRGB)/.08)}
+.sc-pill.strong_sell{color:var(--red);background:rgb(var(--rRGB)/.18);border-color:rgb(var(--rRGB)/.45)}
+.sc-skel{cursor:default}
+.sc-empty{display:flex;flex-direction:column;align-items:center;gap:6px;padding:34px 16px;text-align:center;color:var(--muted);font-size:var(--text-sm)}
+.sc-empty b{color:var(--txt);font-size:var(--text-md)}
+.sc-empty .sc-reset{margin-top:6px}
+@media (max-width:760px){
+  .sc-card{padding:10px}
+  .sc-scroll{max-height:none}
+  .sc-search{max-width:none;flex-basis:100%}
+  .sc-sym{min-width:130px}
+  .sc-name small{max-width:80px}
+  .sc-table .sc-symcol{box-shadow:1px 0 0 var(--border)}
+}

@@ -64,8 +64,10 @@ import { ClockChip } from './home/ClockChip'
 import { HeaderSearch } from './search/HeaderSearch'
 import { WhenTab } from './WhenTab'
 const loadSettings = () => import('./SettingsPage')
+const loadScreener = () => import('./screener/Screener')
 const loadCalendar = () => import('./news/EconomicCalendar')
 const SettingsPage = lazy(() => loadSettings().then((m) => ({ default: m.SettingsPage })))
+const Screener = lazy(() => loadScreener().then((m) => ({ default: m.Screener })))
 const AiAssistant = lazy(() => import('./chat/AiAssistant').then((m) => ({ default: m.AiAssistant })))
 const EconomicCalendar = lazy(() => loadCalendar().then((m) => ({ default: m.EconomicCalendar })))
 import { useEffect, useRef } from 'react'
@@ -324,6 +326,11 @@ export function Shell() {
         </div>
       </section>
       
+      <section className="tab-section" id="tab-screener">
+        <DashHead zone="analytics" name="Screener" sub="Every tracked coin, sortable and filterable, with daily indicators and a technical rating" />
+        <Guard name="Screener"><WhenTab tab="screener" preload={loadScreener}><Suspense fallback={null}><Screener /></Suspense></WhenTab></Guard>
+      </section>
+
       <section className="tab-section mk-tab" id="tab-market">
         <MarketHead />
         <Guard name="Coin wishlist"><CoinWishlist /></Guard>
