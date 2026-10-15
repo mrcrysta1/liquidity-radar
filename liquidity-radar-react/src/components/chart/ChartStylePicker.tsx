@@ -14,6 +14,7 @@ import {
 } from '../../features/charts/chartStyle'
 import type { ChartStyleId } from '../../features/charts/chartStyle'
 import { rangeSizeInfo } from '../../features/charts/series/rangeView'
+import { LineFamilyIcon } from './LineFamilyIcon'
 import { state } from '../../services/store'
 import { pfmt } from '../../utils/format'
 
@@ -24,6 +25,8 @@ const PRI = 'var(--primary)'
 /** A miniature of the style, in the palette's own colours. */
 function StyleIcon({ id, size = 16 }: { id: ChartStyleId; size?: number }) {
   const p = { width: size, height: size, viewBox: '0 0 24 24', 'aria-hidden': true as const }
+  const lineFamily = LineFamilyIcon({ id, size })
+  if (lineFamily) return lineFamily
   if (id === 'candle' || id === 'hollow') {
     const hollow = id === 'hollow'
     return (

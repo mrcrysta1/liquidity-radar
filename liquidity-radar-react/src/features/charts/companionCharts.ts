@@ -32,6 +32,7 @@ import {
   themePriceSeries,
 } from './chartRender'
 import { autoRangeSize, buildRangeBars, minSafeRange } from './series/rangeBars'
+import { syncBaselineBase } from './series/lineFamily'
 import { LAYOUTS, MAX_CHARTS, cells, layoutSpec, rowCount } from './layouts'
 import { loadCandles } from '../../services/marketData'
 import { mdSym, mdTf } from '../../services/market'
@@ -621,10 +622,9 @@ function pushRangeBars(p: Panel): void {
 function draw(p: Panel, candles: CandleFlat[]): void {
   p.candles = candles.slice()
   p.shown = barsFor(p)
-  // Baseline is coloured around the first close, as on the main chart.
-  if (p.style === 'baseline' && candles.length)
-    p.candleSeries.applyOptions({ baseValue: { type: 'price', price: candles[0].c } })
   p.candleSeries.setData(priceSeriesData(p.style, p.shown))
+  // Baseline follows the mid of the visible range, as on the main chart.
+  if (p.style === 'baseline') syncBaselineBase(p.chart, p.candleSeries, () => p.shown)
   p.volSeries.setData(p.shown.map(volBar))
   drawIndicators(p)
   p.chart.timeScale().fitContent()
@@ -667,6 +667,7 @@ function connect(p: Panel, token: number): void {
         p.shown = arr
         p.candleSeries.update(priceSeriesPoint(p.style, c, arr))
         p.volSeries.update(volBar(c))
+        if (p.style === 'baseline') syncBaselineBase(p.chart, p.candleSeries, () => p.shown)
       }
       scheduleIndicators(p)
       const legend = p.el?.querySelector('.rc-legend') as HTMLElement | null
