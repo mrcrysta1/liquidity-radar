@@ -7,15 +7,26 @@ import { storageGet, storageSet } from '../../services/storage'
 export type ChartStyleId =
   | 'candle'
   | 'hollow'
+  | 'heikin'
   | 'bar'
+  | 'hlc'
   | 'line'
+  | 'linemarkers'
+  | 'stepline'
   | 'area'
+  | 'hlcarea'
   | 'baseline'
+  | 'columns'
+  | 'highlow'
   | 'volcandle'
   | 'footprint'
   | 'tpo'
   | 'sessionvp'
   | 'range'
+  | 'renko'
+  | 'linebreak'
+  | 'kagi'
+  | 'pnf'
 
 export interface ChartStyleDef {
   id: ChartStyleId
@@ -27,17 +38,42 @@ export interface ChartStyleDef {
   custom?: boolean
   /** Shown under the name where the data behind it is modelled, not measured. */
   estimate?: boolean
-  /** Bars are not time-based: built from price movement (see series/rangeBars). */
+  /**
+   * Bars are not time-based: built from price movement (see
+   * series/derivedBars — range bars, renko), with a size per coin.
+   */
   rangeBars?: boolean
+  /** Tooltip on the "est" tag, where the default range-bar wording does not fit. */
+  estNote?: string
 }
 
 export const CHART_STYLES: ChartStyleDef[] = [
   { id: 'candle', name: 'Candles', hint: 'Filled OHLC candles', ohlc: true },
   { id: 'hollow', name: 'Hollow candles', hint: 'Outlined bodies', ohlc: true },
+  { id: 'heikin', name: 'Heikin Ashi', hint: 'Averaged candles that smooth the trend', ohlc: true },
   { id: 'bar', name: 'Bars', hint: 'Classic OHLC bars', ohlc: true },
+  { id: 'hlc', name: 'HLC bars', hint: 'High-low bars with a close tick', ohlc: true },
   { id: 'line', name: 'Line', hint: 'Closing price', ohlc: false },
+  { id: 'linemarkers', name: 'Line with markers', hint: 'Closing price, a dot per bar', ohlc: false },
+  { id: 'stepline', name: 'Step line', hint: 'Closing price, in steps', ohlc: false },
   { id: 'area', name: 'Area', hint: 'Closing price, filled', ohlc: false },
-  { id: 'baseline', name: 'Baseline', hint: 'Coloured around the first close', ohlc: false },
+  // Drawn by series/hlcArea from the full bar, so it takes the custom-series data.
+  { id: 'hlcarea', name: 'HLC area', hint: 'Close line, high–low range shaded', ohlc: true, custom: true },
+  { id: 'baseline', name: 'Baseline', hint: 'Green above, red below the mid of the view', ohlc: false },
+  {
+    id: 'columns',
+    name: 'Columns',
+    hint: 'Closing price as columns, vs the previous close',
+    ohlc: true,
+    custom: true,
+  },
+  {
+    id: 'highlow',
+    name: 'High-low',
+    hint: 'Each bar from its high to its low',
+    ohlc: true,
+    custom: true,
+  },
   {
     id: 'volcandle',
     name: 'Volume candles',
@@ -73,6 +109,41 @@ export const CHART_STYLES: ChartStyleDef[] = [
     name: 'Range bars',
     hint: 'A new bar every fixed price range',
     ohlc: true,
+    rangeBars: true,
+    estimate: true,
+  },
+  {
+    id: 'renko',
+    name: 'Renko',
+    hint: 'A brick every fixed box on the close',
+    ohlc: true,
+    rangeBars: true,
+  },
+  {
+    id: 'linebreak',
+    name: 'Line break',
+    hint: 'A new line when the close breaks the last N lines',
+    ohlc: true,
+    rangeBars: true,
+    estimate: true,
+    estNote: 'Built from candle closes, not ticks',
+  },
+  {
+    id: 'kagi',
+    name: 'Kagi',
+    hint: 'Thick above the last shoulder, thin below the waist',
+    ohlc: true,
+    custom: true,
+    rangeBars: true,
+    estimate: true,
+    estNote: 'Built from candle closes, not ticks',
+  },
+  {
+    id: 'pnf',
+    name: 'Point & figure',
+    hint: 'X and O columns, N-box reversals',
+    ohlc: true,
+    custom: true,
     rangeBars: true,
     estimate: true,
   },
@@ -127,18 +198,21 @@ export function setChartStyle(id: ChartStyleId): void {
   if (onChange) onChange()
 }
 
-// ---- Range bar size ----
+// ---- Range bar / renko box size ----
 // Auto sizes each coin's bars from ATR(14); manual holds a size per coin,
 // because a price range that suits BTC is meaningless on a sub-dollar coin.
+// Each derived style keeps its own settings (a range size and a renko box are
+// set separately); `id` defaults to the style on screen.
 export type RangeMode = 'auto' | 'manual'
 export interface RangeSettings {
   mode: RangeMode
   /** Manual size per chart symbol, in price units. */
   size: Record<string, number>
 }
-const RANGE_KEY = 'lr-rangeBars'
-let range: RangeSettings = (function () {
-  const raw = storageGet<Record<string, unknown>>(RANGE_KEY, {})
+const RANGE_KEYS: Record<string, string> = { range: 'lr-rangeBars', renko: 'lr-renkoBox' }
+const rangeKeyFor = (id: string): string => RANGE_KEYS[id] || RANGE_KEYS.range
+function loadRange(key: string): RangeSettings {
+  const raw = storageGet<Record<string, unknown>>(key, {})
   const r = raw && typeof raw === 'object' ? raw : {}
   const size: Record<string, number> = {}
   const saved = r.size && typeof r.size === 'object' ? (r.size as Record<string, unknown>) : {}
@@ -147,16 +221,23 @@ let range: RangeSettings = (function () {
     if (n > 0 && isFinite(n)) size[k] = n
   })
   return { mode: r.mode === 'manual' ? 'manual' : 'auto', size }
-})()
+}
+const ranges: Record<string, RangeSettings> = {}
+function rangeOf(id: string): RangeSettings {
+  const key = rangeKeyFor(id)
+  return ranges[key] || (ranges[key] = loadRange(key))
+}
 
 export function isRangeStyle(): boolean {
   return !!styleDef(current).rangeBars
 }
-export function getRangeSettings(): RangeSettings {
+export function getRangeSettings(id: string = current): RangeSettings {
+  const range = rangeOf(id)
   return { mode: range.mode, size: { ...range.size } }
 }
 /** The manual size for a symbol, or null to size automatically. */
-export function manualRangeFor(sym: string): number | null {
+export function manualRangeFor(sym: string, id: string = current): number | null {
+  const range = rangeOf(id)
   if (range.mode !== 'manual') return null
   const n = range.size[sym]
   return n > 0 ? n : null
@@ -167,21 +248,22 @@ let onRangeChange: (() => void) | null = null
 export function onRangeSettingsChange(fn: () => void): void {
   onRangeChange = fn
 }
-function saveRange(): void {
-  storageSet(RANGE_KEY, range)
+function saveRange(id: string, next: RangeSettings): void {
+  const key = rangeKeyFor(id)
+  ranges[key] = next
+  storageSet(key, next)
   listeners.slice().forEach((fn) => fn())
-  if (onRangeChange && isRangeStyle()) onRangeChange()
+  if (onRangeChange && isRangeStyle() && rangeKeyFor(current) === key) onRangeChange()
 }
-export function setRangeMode(mode: RangeMode): void {
+export function setRangeMode(mode: RangeMode, id: string = current): void {
+  const range = rangeOf(id)
   if (mode === range.mode) return
-  range = { ...range, mode }
-  saveRange()
+  saveRange(id, { ...range, mode })
 }
 /** Set (or with a non-positive value, clear) the manual size for a symbol. */
-export function setManualRange(sym: string, size: number): void {
-  const next = { ...range.size }
+export function setManualRange(sym: string, size: number, id: string = current): void {
+  const next = { ...rangeOf(id).size }
   if (size > 0 && isFinite(size)) next[sym] = size
   else delete next[sym]
-  range = { mode: 'manual', size: next }
-  saveRange()
+  saveRange(id, { mode: 'manual', size: next })
 }

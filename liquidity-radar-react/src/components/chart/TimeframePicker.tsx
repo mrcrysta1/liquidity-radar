@@ -1,6 +1,6 @@
 // Timeframe picker for the Radar price-action chart: a row of pinned
 // favourites plus a grouped dropdown holding every interval, each row with a
-// heart that pins or unpins it — the TradingView arrangement.
+// star that pins or unpins it — the TradingView arrangement.
 import { useEffect, useRef, useState } from 'react'
 import {
   TF_GROUPS,
@@ -26,11 +26,11 @@ function pinnedIds(): string[] {
   return isFavourite(cur) ? favs : favs.concat([cur])
 }
 
-function Heart({ filled }: { filled: boolean }) {
+function Star({ filled }: { filled: boolean }) {
   return (
-    <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
+    <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
       <path
-        d="M12 20.3 3.8 12.1a5 5 0 0 1 7.1-7.1l1.1 1.1 1.1-1.1a5 5 0 1 1 7.1 7.1Z"
+        d="m12 3.6 2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.2-4.1 5.8-.8Z"
         fill={filled ? 'currentColor' : 'none'}
         stroke="currentColor"
         strokeWidth="1.8"
@@ -50,7 +50,7 @@ export function TimeframePicker() {
   // The chip row is frozen for as long as the menu is up. `.chart-toolbar` is
   // right-aligned in `.sec-head`, so a chip appearing or disappearing grows the
   // row leftward and slides the picker — and the menu under the cursor — with
-  // it. Hearts therefore only redraw the row once the menu is dismissed.
+  // it. Stars therefore only redraw the row once the menu is dismissed.
   const [frozen, setFrozen] = useState<string[] | null>(null)
   const [customText, setCustomText] = useState('')
   const [customErr, setCustomErr] = useState('')
@@ -201,7 +201,7 @@ export function TimeframePicker() {
         >
           <div className="tf-menu-head">
             <span>Timeframe</span>
-            <span className="tf-menu-hint">♥ pins to the toolbar</span>
+            <span className="tf-menu-hint">★ pins to the toolbar</span>
           </div>
           <form className="tf-custom" onSubmit={submitCustom}>
             <input
@@ -304,7 +304,7 @@ export function TimeframePicker() {
                               title={fav ? 'Unpin from toolbar' : 'Pin to toolbar'}
                               onClick={() => toggleFavourite(t.id)}
                             >
-                              <Heart filled={fav} />
+                              <Star filled={fav} />
                             </button>
                           </div>
                         )

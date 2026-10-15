@@ -31,6 +31,17 @@ const {
 } = await import(src('services/timeframe.ts'))
 const { buildRangeBars, atr, niceRange, autoRangeSize, minSafeRange, MAX_RANGE_BARS } =
   await import(src('features/charts/series/rangeBars.ts'))
+const { heikinAshi, heikinAshiNext, heikinAshiOf, heikinAshiBar } = await import(
+  src('features/charts/series/heikinAshi.ts')
+)
+const { columnUp } = await import(src('features/charts/series/basicSeries.ts'))
+const { buildRenko } = await import(src('features/charts/series/renko.ts'))
+const { buildDerivedBars, derivedSize } = await import(src('features/charts/series/derivedBars.ts'))
+const { buildLineBreak, clampLineBreak } = await import(src('features/charts/series/lineBreak.ts'))
+const { buildKagi, kagiYangEnd } = await import(src('features/charts/series/kagi.ts'))
+const { buildPointFigure, clampPnfReversal, pnfBoxes } = await import(
+  src('features/charts/series/pointFigure.ts')
+)
 const { noteLimitResponse, cooldownLeft, isRateLimited } = await import(src('api/rateLimit.ts'))
 const { pfmt, nfmt, cfmt } = await import(src('utils/format.ts'))
 const { VENUES, isUsdQuoted } = await import(src('features/advanced/venues.ts'))
@@ -286,6 +297,273 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   ok('floor: a tiny range is raised', floor > 0 && buildRangeBars(srcBars, floor).length <= MAX_RANGE_BARS * 1.1, floor)
 }
 
+// ------------------------------------------------------------------ renko
+// Traditional renko on the close: a brick per full box, two boxes to reverse,
+// and the last element may be the forming (partial) brick.
+{
+  // Candles from closes, one minute apart; each opens on the previous close.
+  const fromCloses = (cs, v = 1) =>
+    cs.map((c, i) => {
+      const o = i ? cs[i - 1] : c
+      return { t: i * 60000, o, h: Math.max(o, c) + 0.05, l: Math.min(o, c) - 0.05, c, v }
+    })
+  const oc = (bars) => bars.map((b) => [b.o, b.c])
+  const noWicks = (bars) => bars.every((b) => b.h === Math.max(b.o, b.c) && b.l === Math.min(b.o, b.c))
+
+  eq('renko: empty input', buildRenko([], 1).length, 0)
+  eq('renko: non-positive box', buildRenko(fromCloses([100, 105]), 0).length, 0)
+  eq('renko: non-finite box', buildRenko(fromCloses([100, 105]), Infinity).length, 0)
+
+  // Trend: one box per brick, each opening where the last closed.
+  const up = buildRenko(fromCloses([100, 101, 102, 103.5]), 1)
+  eq('renko: trend lays one brick per box, plus the forming one', oc(up), [[100, 101], [101, 102], [102, 103], [103, 103.5]])
+  ok('renko: bricks have no wicks', noWicks(up))
+  ok('renko: times strictly increase', up.every((b, i) => i === 0 || b.t > up[i - 1].t))
+  ok('renko: times are whole seconds', up.every((b) => b.t % 1000 === 0))
+  // The first brick's move began in candle 0; each later one in the candle
+  // after the previous brick; the forming one in the candle that just closed a brick.
+  eq('renko: each brick takes the candle its move began in', up.map((b) => b.t), [0, 120000, 180000, 181000])
+  eq('renko: exactly on the box edge is a whole brick, no forming one', buildRenko(fromCloses([100, 101, 102]), 1).length, 2)
+
+  // Reversal needs two boxes from the top of the last brick.
+  const pull = buildRenko(fromCloses([100, 101, 102, 103, 102.2, 101.01]), 1)
+  eq('renko: a pullback short of two boxes lays no brick', oc(pull.slice(0, 3)), [[100, 101], [101, 102], [102, 103]])
+  eq('renko: only a forming reversal brick follows it', [pull.length, pull[3].o, pull[3].c], [4, 102, 101.01])
+  const rev = buildRenko(fromCloses([100, 101, 102, 103, 102.2, 101]), 1)
+  eq('renko: two boxes down reverses, from the bottom of the last brick', oc(rev).slice(-1), [[102, 101]])
+  ok('renko: the reversal brick is a down brick', rev[rev.length - 1].c < rev[rev.length - 1].o)
+  const cont = buildRenko(fromCloses([100, 101, 102, 103, 101, 100]), 1)
+  eq('renko: after a reversal one box continues the new trend', oc(cont).slice(-2), [[102, 101], [101, 100]])
+  const back = buildRenko(fromCloses([100, 101, 102, 103, 101, 102.5]), 1)
+  eq('renko: going back up needs two boxes again', oc(back).slice(-2), [[102, 101], [102, 102.5]])
+  const back2 = buildRenko(fromCloses([100, 101, 102, 103, 101, 103]), 1)
+  eq('renko: two boxes up reverses back from the top of the down brick', oc(back2).slice(-1), [[102, 103]])
+  // First move from the start can go either way with one box.
+  eq('renko: the first brick can be down', oc(buildRenko(fromCloses([100, 99]), 1)), [[100, 99]])
+
+  // Gaps: one close several boxes away lays several bricks, a second apart.
+  const gap = buildRenko(fromCloses([100, 104.7]), 1)
+  eq('renko: a 4.7-box jump lays four bricks and a forming one', oc(gap), [[100, 101], [101, 102], [102, 103], [103, 104], [104, 104.7]])
+  eq('renko: bricks from one candle are a second apart', gap.map((b) => b.t), [0, 60000, 61000, 62000, 63000])
+  const gapDown = buildRenko(fromCloses([100, 101, 102, 103, 98.5]), 1)
+  eq('renko: a gap down reverses through several boxes', oc(gapDown).slice(3), [[102, 101], [101, 100], [100, 99], [99, 98.5]])
+  ok('renko: completed bricks span exactly one box', gapDown.slice(0, -1).every((b) => Math.abs(b.h - b.l - 1) < 1e-9))
+  ok('renko: gap bricks have no wicks', noWicks(gapDown))
+  // A gap candle after a long quiet stretch keeps strictly rising times.
+  const late = buildRenko([{ t: 0, o: 100, h: 100, l: 100, c: 100, v: 1 }, { t: 60000, o: 100, h: 130, l: 100, c: 130, v: 1 }, { t: 61000, o: 130, h: 131, l: 130, c: 131, v: 1 }], 1)
+  ok('renko: times stay strictly increasing past a big gap', late.every((b, i) => i === 0 || b.t > late[i - 1].t), late.map((b) => b.t))
+
+  // Tiny moves: nothing completes; at most a forming brick from the start.
+  const tiny = buildRenko(fromCloses([100, 100.3, 99.8, 100.2, 99.9, 100.4]), 1)
+  eq('renko: sub-box noise lays no whole brick', oc(tiny), [[100, 100.4]])
+  eq('renko: back at the start there is nothing to draw', buildRenko(fromCloses([100, 100.3, 100]), 1).length, 0)
+  const inside = buildRenko(fromCloses([100, 101, 102, 101.5]), 1)
+  eq('renko: inside the last brick there is no forming brick', oc(inside), [[100, 101], [101, 102]])
+
+  // Floating point: 0.1 + 0.2 must still be two whole 0.1 boxes.
+  const fl = buildRenko(fromCloses([0.1, 0.2, 0.30000000000000004]), 0.1)
+  eq('renko: float noise does not lose a brick', fl.length, 2)
+
+  // Volume is conserved across completed and forming bricks.
+  const wave = Array.from({ length: 300 }, (_, i) => {
+    const o = 100 + Math.sin(i / 7) * 12 + i * 0.02
+    const c = o + Math.cos(i / 3) * 1.5
+    return { t: 1_000_000 + i * 60000, o, h: Math.max(o, c) + 0.5, l: Math.min(o, c) - 0.5, c, v: 3 }
+  })
+  const wb = buildRenko(wave, 1.5)
+  ok('renko: builds plenty of bricks', wb.length > 20, wb.length)
+  ok('renko: volume is never invented', wb.reduce((a, b) => a + b.v, 0) <= 300 * 3 + 1e-6)
+  near('renko: volume is conserved into the forming brick', buildRenko(fromCloses([100, 100.4, 101, 102.2, 104.5], 2), 1).reduce((a, b) => a + b.v, 0), 10, 1e-9)
+  ok('renko: each brick opens on an edge of the last one', wb.every((b, i) => i === 0 || Math.abs(b.o - wb[i - 1].c) < 1e-9 || Math.abs(b.o - wb[i - 1].o) < 1e-9))
+  ok('renko: completed bricks are all exactly one box', wb.slice(0, -1).every((b) => Math.abs(Math.abs(b.c - b.o) - 1.5) < 1e-9))
+  ok('renko: wave times strictly increase', wb.every((b, i) => i === 0 || b.t > wb[i - 1].t))
+  ok('renko: no wicks anywhere', noWicks(wb))
+
+  // Live ticks: a new candle never rewrites the completed bricks, and a
+  // forming brick keeps its time when it completes.
+  const done = (bars) => {
+    const lb = bars[bars.length - 1]
+    return lb && Math.abs(Math.abs(lb.c - lb.o) - 1.5) > 1e-9 ? bars.slice(0, -1) : bars
+  }
+  const a = buildRenko(wave.slice(0, 200), 1.5)
+  const b = buildRenko(wave.slice(0, 201), 1.5)
+  const ad = done(a)
+  ok('renko: adding a candle keeps the completed bricks', ad.every((x, i) => JSON.stringify(x) === JSON.stringify(b[i])))
+  const tick = (c) => fromCloses([100, 101, c])
+  const forming = buildRenko(tick(101.6), 1)
+  const grown = buildRenko(tick(101.9), 1)
+  const closed = buildRenko(tick(102.0), 1)
+  eq('renko: a tick grows the forming brick in place', [forming.length, grown.length, grown[1].t === forming[1].t, grown[1].c], [2, 2, true, 101.9])
+  eq('renko: the forming brick completes with the same time', [closed.length, closed[1].t === forming[1].t, closed[1].c], [2, true, 102])
+  eq('renko: a tick back inside removes the forming brick', buildRenko(tick(100.5), 1).length, 1)
+
+  // Shared plumbing: the derived-bar dispatcher and its sizing.
+  eq('derived: renko builds bricks', JSON.stringify(buildDerivedBars('renko', wave, 1.5)), JSON.stringify(wb))
+  eq('derived: range builds range bars', JSON.stringify(buildDerivedBars('range', wave, 1.5)), JSON.stringify(buildRangeBars(wave, 1.5)))
+  const ds = derivedSize(wave, null)
+  eq('derived: auto size is ATR(14)', ds.size, Math.max(autoRangeSize(wave), minSafeRange(wave)))
+  eq('derived: a manual size is used as is', derivedSize(wave, 2).size, Math.max(2, ds.floor))
+  eq('derived: a tiny manual size is raised to the floor', derivedSize(wave, 1e-9).size, ds.floor)
+  ok('derived: the floor keeps renko bounded', buildRenko(wave, ds.floor).length <= MAX_RANGE_BARS * 1.1)
+}
+
+// ------------------------------------------------- line break / kagi / P&F
+// Non-time-based styles built from candles, on the range-bar time scheme.
+{
+  // A candle closing at c (opening at o, else at c), one per minute.
+  const cl = (i, c, o = c) => ({ t: 60000 * (i + 1), o, h: Math.max(o, c), l: Math.min(o, c), c, v: 1 })
+  const series = (closes, first) => closes.map((c, i) => cl(i, c, i === 0 ? first : c))
+  const oc = (bars) => bars.map((b) => [b.o, b.c])
+  const sine = Array.from({ length: 400 }, (_, i) => {
+    const o = 100 + Math.sin(i / 7) * 12 + Math.sin(i / 23) * 6
+    const c = o + Math.sin(i * 1.7) * 1.5
+    return { t: 1_000_000 + i * 60000, o, h: Math.max(o, c) + 0.8, l: Math.min(o, c) - 0.8, c, v: 2 }
+  })
+  const increasing = (bars) => bars.every((b, i) => i === 0 || b.t > bars[i - 1].t)
+  const wholeSeconds = (bars) => bars.every((b, i) => i === 0 || (b.t - bars[i - 1].t) % 1000 === 0)
+  const prefixKept = (a, b) => a.slice(0, -1).every((x, i) => JSON.stringify(x) === JSON.stringify(b[i]))
+  const isUp = (b) => b.c > b.o
+
+  // ---- line break
+  const lbSrc = series([101, 102, 103, 102.5, 99, 104, 98], 100)
+  const lb = buildLineBreak(lbSrc, 3)
+  eq('linebreak: lines and reversals', oc(lb), [[100, 101], [101, 102], [102, 103], [102, 99], [102, 104], [102, 98]])
+  ok('linebreak: no wicks (high/low are the body)', lb.every((b) => b.h === Math.max(b.o, b.c) && b.l === Math.min(b.o, b.c)))
+  eq('linebreak: each line keeps its candle time', lb.map((b) => b.t), [1, 2, 3, 5, 6, 7].map((i) => i * 60000))
+  eq('linebreak: a quiet close carries its volume to the next line', lb.map((b) => b.v), [1, 1, 1, 2, 1, 1])
+  // 100.5 breaks the low of the last 2 lines (101) but not of the last 3 (100).
+  const lbN = series([101, 102, 103, 100.5], 100)
+  eq('linebreak: 2-line break reverses sooner', buildLineBreak(lbN, 2).length, 4)
+  eq('linebreak: 3-line break holds', buildLineBreak(lbN, 3).length, 3)
+  eq('linebreak: default is 3 lines', oc(buildLineBreak(lbN)), oc(buildLineBreak(lbN, 3)))
+  eq('linebreak: a flat open makes no line', buildLineBreak(series([100, 100], 100)).length, 0)
+  eq('linebreak: empty input', buildLineBreak([]).length, 0)
+  const lbs = buildLineBreak(sine)
+  ok('linebreak: builds lines from a real series', lbs.length > 20, lbs.length)
+  ok('linebreak: times strictly increase', increasing(lbs) && wholeSeconds(lbs))
+  ok(
+    'linebreak: every line continues from the close or reverses from the open',
+    lbs.every((b, i) => i === 0 || b.o === lbs[i - 1].c || b.o === lbs[i - 1].o),
+  )
+  ok(
+    'linebreak: a reversal clears the last 3 lines',
+    lbs.every((b, i) => {
+      if (i === 0 || isUp(b) === isUp(lbs[i - 1])) return true
+      const look = lbs.slice(Math.max(0, i - 3), i)
+      return isUp(b) ? b.c > Math.max(...look.map((x) => x.h)) : b.c < Math.min(...look.map((x) => x.l))
+    }),
+  )
+  ok(
+    'linebreak: adding a candle keeps the earlier lines',
+    prefixKept(buildLineBreak(sine.slice(0, 300)), buildLineBreak(sine.slice(0, 301))),
+  )
+  eq(
+    'linebreak: line count is clamped',
+    [clampLineBreak(0), clampLineBreak(99), clampLineBreak('x'), clampLineBreak(4.7)],
+    [1, 10, 3, 4],
+  )
+
+  // ---- kagi
+  const kgSrc = series([101, 103, 104, 102.5, 101, 100, 103, 105, 102, 99, 101.5, 106], 100)
+  const kg = buildKagi(kgSrc, 2)
+  eq('kagi: segments turn on a 2-point reversal', oc(kg), [[100, 104], [104, 100], [100, 105], [105, 99], [99, 106]])
+  eq('kagi: thickness at each start', kg.map((b) => b.aux.yang0), [true, true, true, true, false])
+  eq(
+    'kagi: thin below the prior waist, thick above the prior shoulder',
+    kg.map((b) => b.aux.flip),
+    [null, null, null, 100, 105],
+  )
+  eq('kagi: thickness at each end', kg.map(kagiYangEnd), [true, true, true, false, true])
+  eq('kagi: segment times are the turning candles', kg.map((b) => b.t), [2, 5, 7, 9, 11].map((i) => i * 60000))
+  eq('kagi: volume follows the current segment', kg.map((b) => b.v), [4, 2, 2, 2, 2])
+  ok('kagi: high/low span the segment', kg.every((b) => b.h === Math.max(b.o, b.c) && b.l === Math.min(b.o, b.c)))
+  const kgDown = buildKagi(series([97], 100), 2)
+  eq('kagi: a first move down starts thin', [oc(kgDown), kgDown[0].aux.yang0], [[[100, 97]], false])
+  // Percent: 5% of the turning price. 106 -> 101 is 4.7%, 106 -> 100 is 5.7%.
+  eq('kagi: percent reversal holds under the amount', oc(buildKagi(series([103, 106, 101], 100), 5, true)), [[100, 106]])
+  eq('kagi: percent reversal', oc(buildKagi(series([103, 106, 101, 100], 100), 5, true)), [[100, 106], [106, 100]])
+  eq('kagi: no reversal amount', buildKagi(kgSrc, 0).length, 0)
+  eq('kagi: empty input', buildKagi([], 2).length, 0)
+  const ks = buildKagi(sine, 2)
+  ok('kagi: builds segments from a real series', ks.length > 20, ks.length)
+  ok('kagi: times strictly increase', increasing(ks) && wholeSeconds(ks))
+  ok('kagi: directions alternate', ks.every((b, i) => i === 0 || isUp(b) !== isUp(ks[i - 1])))
+  ok('kagi: each segment starts where the last turned', ks.every((b, i) => i === 0 || b.o === ks[i - 1].c))
+  ok(
+    'kagi: every turn is at least the reversal',
+    ks.every((b, i) => i === ks.length - 1 || Math.abs(b.c - b.o) >= 2 - 1e-9),
+  )
+  ok('kagi: thickness carries across turns', ks.every((b, i) => i === 0 || b.aux.yang0 === kagiYangEnd(ks[i - 1])))
+  ok(
+    'kagi: flips happen inside the segment',
+    ks.every((b) => b.aux.flip == null || (b.aux.flip >= b.l && b.aux.flip <= b.h)),
+  )
+  ok(
+    'kagi: some segments do change thickness',
+    ks.some((b) => b.aux.flip != null),
+  )
+  ok(
+    'kagi: adding a candle keeps the earlier segments',
+    prefixKept(buildKagi(sine.slice(0, 300), 2), buildKagi(sine.slice(0, 301), 2)),
+  )
+  near('kagi: volume is conserved', ks.reduce((a, b) => a + b.v, 0), sine.length * 2)
+
+  // ---- point & figure
+  const pfSrc = series([100.5, 102.2, 104, 102, 101, 100.9, 100, 98.5, 101.9, 102, 103], 100.5)
+  const pf = buildPointFigure(pfSrc, 1, 3)
+  eq('pnf: X, O, X columns on a 3-box reversal', oc(pf), [[100, 104], [103, 99], [100, 103]])
+  eq('pnf: boxes per column', pf.map(pnfBoxes), [4, 4, 3])
+  ok('pnf: the box size travels with each column', pf.every((b) => b.aux.box === 1))
+  eq('pnf: column times are the candles they began in', pf.map((b) => b.t), [2, 7, 11].map((i) => i * 60000))
+  near('pnf: volume is conserved', pf.reduce((a, b) => a + b.v, 0), pfSrc.length)
+  // A single candle 100 -> 95 -> 110 -> 108 walks low first: an O column then an X column.
+  const walk = buildPointFigure([{ t: 60000, o: 100, h: 110, l: 95, c: 108, v: 8 }], 1, 3)
+  eq('pnf: one candle walked O-L-H-C', oc(walk), [[100, 95], [96, 110]])
+  eq('pnf: columns from one candle are a second apart', walk.map((b) => b.t), [60000, 61000])
+  near('pnf: one candle keeps its volume', walk.reduce((a, b) => a + b.v, 0), 8)
+  ok('pnf: 1-box reversal turns sooner', buildPointFigure(sine, 0.5, 1).length > buildPointFigure(sine, 0.5, 3).length)
+  eq('pnf: default is a 3-box reversal', oc(buildPointFigure(pfSrc, 1)), oc(pf))
+  eq('pnf: no box size', buildPointFigure(pfSrc, 0).length, 0)
+  eq('pnf: empty input', buildPointFigure([], 1).length, 0)
+  const ps = buildPointFigure(sine, 0.5, 3)
+  ok('pnf: builds columns from a real series', ps.length > 20, ps.length)
+  ok('pnf: times strictly increase', increasing(ps) && wholeSeconds(ps))
+  ok('pnf: X and O alternate', ps.every((b, i) => i === 0 || isUp(b) !== isUp(ps[i - 1])))
+  ok(
+    'pnf: prices sit on the box grid',
+    ps.every((b) => [b.h, b.l].every((x) => Math.abs(x / 0.5 - Math.round(x / 0.5)) < 1e-6)),
+  )
+  ok('pnf: every reversal column has at least 3 boxes', ps.every((b, i) => i === 0 || pnfBoxes(b) >= 3))
+  ok(
+    'pnf: a new column starts one box from the old extreme',
+    ps.every(
+      (b, i) =>
+        i === 0 ||
+        (isUp(b)
+          ? Math.abs(b.l - (ps[i - 1].l + 0.5)) < 1e-9
+          : Math.abs(b.h - (ps[i - 1].h - 0.5)) < 1e-9),
+    ),
+  )
+  ok(
+    'pnf: adding a candle keeps the earlier columns',
+    prefixKept(buildPointFigure(sine.slice(0, 300), 0.5), buildPointFigure(sine.slice(0, 301), 0.5)),
+  )
+  const tiny = buildPointFigure(
+    sine.map((k) => ({ ...k, o: k.o / 1000, h: k.h / 1000, l: k.l / 1000, c: k.c / 1000 })),
+    0.001,
+  )
+  ok(
+    'pnf: a decimal box stays on the grid',
+    tiny.length > 10 && tiny.every((b) => Math.abs((b.h - b.l) / 0.001 - pnfBoxes(b)) < 1e-6),
+    tiny.length,
+  )
+  eq(
+    'pnf: reversal is clamped',
+    [clampPnfReversal(0), clampPnfReversal(20), clampPnfReversal('x'), clampPnfReversal(2)],
+    [1, 10, 3, 2],
+  )
+}
+
 // -------------------------------------------------------------- rate limits
 {
   const future = Date.now() + 45_000
@@ -311,6 +589,64 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   eq('fmt: non-finite is a dash, never NaN', pfmt(NaN), '—')
   eq('fmt: infinity is a dash', nfmt(Infinity), '—')
   eq('fmtUsd: thousands', fmtUsd(1500), '1.5K')
+}
+
+// ------------------------------------------------------------- heikin ashi
+{
+  const cs = [
+    { t: 0, o: 10, h: 14, l: 9, c: 13, v: 5 },
+    { t: 60000, o: 13, h: 15, l: 12, c: 12, v: 6 },
+    { t: 120000, o: 12, h: 12.5, l: 8, c: 9, v: 7 },
+  ]
+  const ha = heikinAshi(cs)
+  eq('ha: one bar per candle, same times and volumes', ha.map((b) => [b.t, b.v]), cs.map((c) => [c.t, c.v]))
+  near('ha: first open is (O + C) / 2', ha[0].o, 11.5)
+  near('ha: close is (O + H + L + C) / 4', ha[0].c, 11.5)
+  near('ha: next open averages the previous HA bar', ha[1].o, (ha[0].o + ha[0].c) / 2)
+  near('ha: second close', ha[1].c, 13)
+  near('ha: high takes the real high when above', ha[1].h, 15)
+  near('ha: third open', ha[2].o, (ha[1].o + ha[1].c) / 2)
+  near('ha: low takes the real low', ha[2].l, 8)
+  // High/low must enclose the HA body even when the body pokes past the candle.
+  const gap = heikinAshi([
+    { t: 0, o: 100, h: 101, l: 99, c: 100, v: 1 },
+    { t: 60000, o: 50, h: 51, l: 49, c: 50, v: 1 },
+  ])
+  near('ha: high is at least the HA open', gap[1].h, gap[1].o)
+  ok('ha: low is at most the HA close', gap[1].l <= gap[1].c)
+  eq('ha: empty input', heikinAshi([]).length, 0)
+  eq('ha: next() matches the batch', heikinAshiNext(ha[1], cs[2]), ha[2])
+
+  // Live ticks: the memo must equal a full rebuild after the last bar moves
+  // and after a new bar is appended, with the source mutated in place.
+  const live = Array.from({ length: 50 }, (_, i) => {
+    const o = 100 + Math.sin(i / 4) * 5
+    const c = o + ((i % 5) - 2)
+    return { t: i * 60000, o, h: Math.max(o, c) + 1, l: Math.min(o, c) - 1, c, v: 1 }
+  })
+  heikinAshiOf(live, true)
+  const last = live[live.length - 1]
+  const tick = { ...last, c: last.c + 3, h: Math.max(last.h, last.c + 3) }
+  live[live.length - 1] = tick
+  eq('ha: live tick updates the last bar against the previous HA bar', heikinAshiBar(live, tick), heikinAshi(live)[49])
+  eq('ha: memo equals a full rebuild after a tick', heikinAshiOf(live), heikinAshi(live))
+  const next = { t: 50 * 60000, o: tick.c, h: tick.c + 2, l: tick.c - 1, c: tick.c + 1, v: 2 }
+  live.push(next)
+  eq('ha: a new bar opens from the previous HA bar', heikinAshiBar(live, next), heikinAshi(live)[50])
+  eq('ha: memo equals a full rebuild after an append', heikinAshiOf(live), heikinAshi(live))
+  live.shift()
+  eq('ha: dropping the oldest bar rebuilds', heikinAshiOf(live), heikinAshi(live))
+  const outside = { t: 99 * 60000, o: 1, h: 2, l: 0.5, c: 1.5, v: 1 }
+  eq('ha: a candle past the array builds on the last HA bar', heikinAshiBar(live, outside), heikinAshiNext(heikinAshi(live)[live.length - 1], outside))
+}
+
+// ----------------------------------------------------------------- columns
+{
+  eq('columns: up when the close is above the previous close', columnUp(10, 12, 11), true)
+  eq('columns: down when below, whatever the open', columnUp(10, 8, 9), false)
+  eq('columns: an unchanged close counts as up', columnUp(10, 12, 10), true)
+  eq('columns: the first bar compares with its own open', columnUp(null, 10, 9), false)
+  eq('columns: a missing previous close falls back to the open', columnUp(undefined, 9, 10), true)
 }
 
 // ------------------------------------------------------------------ venues
@@ -1206,14 +1542,15 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('panel ind: Pine not on the main chart', S.getIndicators().length, 2)
   c3.removeIndicator(pineUid)
 
-  // Cap per panel.
-  const c5 = P.panelIndicatorStore('c5')
+  // Cap per panel: Market workspace panels keep the tight cap; layout cells
+  // ('c*') hold as many as the main chart, since they swap sets with it.
+  const c5 = P.panelIndicatorStore('mc5')
   for (let i = 0; i < 14; i++) c5.addIndicator('ema')
-  eq('panel ind: capped at 10 per panel', c5.indicatorCount(), P.PANEL_MAX_INDICATORS)
+  eq('panel ind: capped at 10 per workspace panel', c5.indicatorCount(), P.PANEL_MAX_INDICATORS)
   eq('panel ind: cap reported', c5.maxIndicators(), 10)
   c5.resetIndicators()
   eq('panel ind: reset clears only that panel', [c5.indicatorCount(), c2.indicatorCount()], [0, 2])
-  ok('panel ind: empty slots are not stored', !('c5' in JSON.parse(mem.get('lr-panelIndicators-v1'))))
+  ok('panel ind: empty slots are not stored', !('mc5' in JSON.parse(mem.get('lr-panelIndicators-v1'))))
 
   // Market workspace: removing a panel moves the later panels' sets up.
   const mc = [0, 1, 2].map((i) => P.panelIndicatorStore('mc' + i))
@@ -1243,6 +1580,174 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('panel ind: a non-object store loads empty', c2.indicatorCount(), 0)
   eq('panel ind: main storage still untouched', mem.get('lr-chartIndicators'), mainSaved)
 
+  if (prevLS) Object.defineProperty(globalThis, 'localStorage', prevLS)
+  else delete globalThis.localStorage
+}
+
+// ------------------------------- indicator sets moving between charts (replace)
+{
+  const mem = new Map()
+  const prevLS = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    writable: true,
+    value: {
+      getItem: (k) => (mem.has(k) ? mem.get(k) : null),
+      setItem: (k, v) => mem.set(k, String(v)),
+      removeItem: (k) => mem.delete(k),
+    },
+  })
+  const S = await import(src('features/charts/indicators/store.ts'))
+  const P = await import(src('features/charts/indicators/panelStore.ts'))
+  P.reloadPanelIndicators()
+  const snap = (st) => JSON.stringify(st.getIndicators())
+  const uids = (st) => st.getIndicators().map((i) => i.uid)
+
+  // A source chart with every kind of state worth carrying over.
+  let srcSaved = null
+  const from = S.createIndicatorStore({ id: 't-from', max: 50, prefix: 'p', load: () => null, save: (d) => (srcSaved = d) })
+  from.addIndicator('ema')
+  from.addIndicator('rsi')
+  from.addIndicator('sma')
+  const [ema, rsi, sma] = from.getIndicators()
+  from.setParam(ema.uid, 'length', 34)
+  from.toggleIndicator(rsi.uid)
+  const rsiKey = from.sourceOptions(sma.uid).find((o) => o.key.startsWith(rsi.uid + '.')).key
+  from.setSource(sma.uid, rsiKey)
+  const pineUid = from.addPineIndicator('//@version=5\nindicator("Len", overlay=false)\nlen = input.int(14, "Length")\nplot(ta.sma(close, len))', 'Len')
+  from.setPineInput(pineUid, 'Length', 7)
+  const setA = S.serializeIndicators(from.getIndicators())
+  eq('replace: source fixture saved its set', JSON.stringify(srcSaved), JSON.stringify(setA))
+
+  let saved = null
+  let heard = 0
+  let commits = 0
+  let order = ''
+  const to = S.createIndicatorStore({
+    id: 't-to',
+    max: 50,
+    load: () => null,
+    save: (d) => (saved = d),
+    onCommit: () => {
+      commits++
+      order += 'c'
+    },
+  })
+  const offTo = to.subscribe(() => {
+    heard++
+    order += 'l'
+  })
+  to.addIndicator('macd') // something to be replaced
+  heard = 0
+  commits = 0
+  order = ''
+  to.replace(setA)
+  eq('replace: every instance carried over, uids included', snap(to), snap(from))
+  eq('replace: types and order kept', to.getIndicators().map((i) => i.type), ['ema', 'rsi', 'sma', 'pine'])
+  eq('replace: params kept', to.getIndicators()[0].params.length, 34)
+  eq('replace: visibility kept', to.getIndicators().map((i) => i.visible), [true, false, true, true])
+  eq('replace: source reference survives the move', to.getIndicators()[2].source, rsiKey)
+  ok('replace: referenced instance exists in the new store', to.getIndicators().some((i) => i.uid === rsi.uid))
+  const pine = to.getIndicators()[3]
+  eq('replace: pine script, title and inputs kept', [pine.uid, pine.script, pine.title, pine.pineInputs], [pineUid, from.getIndicators()[3].script, 'Len', { Length: 7 }])
+  eq('replace: the new set is persisted', JSON.stringify(saved), JSON.stringify(setA))
+  eq('replace: listeners told once', heard, 1)
+  eq('replace: onCommit fires once', commits, 1)
+  eq('replace: listeners before onCommit', order, 'lc')
+  eq('replace: the source chart is left as it was', JSON.stringify(S.serializeIndicators(from.getIndicators())), JSON.stringify(setA))
+
+  // Garbage in, empty set out — and still a commit (the old set is gone).
+  for (const junk of [null, undefined, 'junk', 42, { a: 1 }, [null, 7, 'x', { type: 'nope' }, { notype: true }]]) {
+    to.replace(setA)
+    to.replace(junk)
+    eq('replace: garbage ' + JSON.stringify(junk) + ' gives an empty set', to.indicatorCount(), 0)
+  }
+  eq('replace: empty set persisted as []', JSON.stringify(saved), '[]')
+  to.replace([{ uid: 'dup1', type: 'ema' }, { uid: 'dup1', type: 'rsi' }])
+  const dupUids = uids(to)
+  ok('replace: duplicate uids are made unique', dupUids.length === 2 && dupUids[0] === 'dup1' && dupUids[1] !== 'dup1', dupUids)
+  offTo()
+
+  // Capped at the target's max: the first `max` kept, in order; a reference to
+  // a dropped instance falls back to close.
+  const small = S.createIndicatorStore({ id: 't-small', max: 3, load: () => null, save: () => {} })
+  const five = [
+    { uid: 'k1', type: 'ema' },
+    { uid: 'k2', type: 'rsi' },
+    { uid: 'k3', type: 'sma', source: 'k5.v' },
+    { uid: 'k4', type: 'bb' },
+    { uid: 'k5', type: 'ema' },
+  ]
+  small.replace(five)
+  eq('replace: capped at the store max', uids(small), ['k1', 'k2', 'k3'])
+  eq('replace: a source past the cap resets to close', small.getIndicators()[2].source, 'close')
+
+  // ---- the activateCell swap: main <-> companion cell (c0 <- main, main <- c2)
+  const main = S.mainIndicatorStore
+  const c0 = P.panelIndicatorStore('c0')
+  const c2 = P.panelIndicatorStore('c2')
+  main.replace(setA)
+  c2.replace([
+    { uid: 'pq1', type: 'rsi', params: { length: 9 }, visible: true },
+    { uid: 'pq2', type: 'macd', visible: false },
+  ])
+  c0.replace([])
+  const before = { main: snap(main), c2: snap(c2) }
+  const all0 = [...uids(main), ...uids(c2)].sort()
+
+  let mainCommits = 0
+  S.onIndicatorsChange(() => mainCommits++)
+  const A = S.serializeIndicators(main.getIndicators())
+  const B = S.serializeIndicators(c2.getIndicators())
+  c2.replace([])
+  c0.replace(A)
+  main.replace(B)
+  eq('swap: the cell left holds nothing', c2.indicatorCount(), 0)
+  eq('swap: main set moved to the cell main vacated', snap(c0), before.main)
+  eq('swap: cell set now on the main chart', snap(main), before.c2)
+  const all1 = [...uids(main), ...uids(c0), ...uids(c2)].sort()
+  eq('swap: no instance lost or duplicated', all1, all0)
+  eq('swap: uids unique across charts', new Set(all1).size, all1.length)
+  eq('swap: main redraw hook fired once', mainCommits, 1)
+  eq('swap: main storage holds the cell set', mem.get('lr-chartIndicators'), JSON.stringify(B))
+  const stored = JSON.parse(mem.get('lr-panelIndicators-v1'))
+  eq('swap: panel storage holds the moved main set in c0 only', [JSON.stringify(stored.c0), 'c2' in stored], [JSON.stringify(A), false])
+  // Reload from storage: the swap survives a page reload.
+  P.reloadPanelIndicators()
+  eq('swap: c0 survives a reload', snap(c0), before.main)
+  eq('swap: c2 stays empty after a reload', c2.indicatorCount(), 0)
+
+  // Swap back (activate cell 2 again from 0): everything returns home.
+  const A2 = S.serializeIndicators(main.getIndicators())
+  const B2 = S.serializeIndicators(c0.getIndicators())
+  c0.replace([])
+  c2.replace(A2)
+  main.replace(B2)
+  eq('swap back: main set restored', snap(main), before.main)
+  eq('swap back: cell set restored', snap(c2), before.c2)
+  eq('swap back: c0 empty', c0.indicatorCount(), 0)
+  S.onIndicatorsChange(() => {})
+
+  // ---- caps: layout cells match the main chart, workspace panels stay small.
+  eq('cap: companion cell c3 holds as many as main', P.panelIndicatorStore('c3').maxIndicators(), 50)
+  eq('cap: c-slot cap equals MAIN_MAX_INDICATORS', P.panelIndicatorStore('c3').maxIndicators(), S.MAIN_MAX_INDICATORS)
+  eq('cap: workspace panel mc1 keeps the panel cap', P.panelIndicatorStore('mc1').maxIndicators(), 10)
+  eq('cap: mc-slot cap equals PANEL_MAX_INDICATORS', P.panelIndicatorStore('mc1').maxIndicators(), P.PANEL_MAX_INDICATORS)
+  // A full main chart swaps into a cell without losing anything.
+  const full = Array.from({ length: 50 }, (_, i) => ({ uid: 'f' + i, type: 'ema', params: { length: 2 + i } }))
+  main.replace(full)
+  eq('cap: main holds a full 50', main.indicatorCount(), 50)
+  const c3 = P.panelIndicatorStore('c3')
+  c3.replace(S.serializeIndicators(main.getIndicators()))
+  eq('cap: a full main set fits in a cell', c3.indicatorCount(), 50)
+  const mc1 = P.panelIndicatorStore('mc1')
+  mc1.replace(S.serializeIndicators(main.getIndicators()))
+  eq('cap: a workspace panel still caps at 10', mc1.indicatorCount(), 10)
+
+  // Leave the shared stores clean for anything after this block.
+  main.replace([])
+  c3.replace([])
+  mc1.replace([])
   if (prevLS) Object.defineProperty(globalThis, 'localStorage', prevLS)
   else delete globalThis.localStorage
 }
@@ -1460,6 +1965,281 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('selflearn: training is deterministic (worker = fallback)', JSON.stringify(a), JSON.stringify(b))
   // What crosses to and from the worker must survive structured cloning unchanged.
   eq('selflearn: result survives structured clone', JSON.stringify(structuredClone(a)), JSON.stringify(a))
+}
+
+// ---- chart styles: the line family (line, markers, step, area, HLC area, baseline) ----
+{
+  const { isLineFamily, withAlpha, closeMidpoint, createLineFamilySeries, themeLineFamilySeries } =
+    await import(src('features/charts/series/lineFamily.ts'))
+  const { hlcAreaView } = await import(src('features/charts/series/hlcArea.ts'))
+
+  const family = ['line', 'linemarkers', 'stepline', 'area', 'hlcarea', 'baseline']
+  ok('line family: members', family.every(isLineFamily))
+  ok('line family: candles are not in it', !['candle', 'bar', 'range', ''].some(isLineFamily))
+
+  eq('withAlpha: #rrggbb', withAlpha('#2962FF', 0.28), 'rgba(41,98,255,0.28)')
+  eq('withAlpha: #rgb', withAlpha('#0f0', 1), 'rgba(0,255,0,1)')
+  eq('withAlpha: #rrggbbaa drops the old alpha', withAlpha('#00E676ff', 0), 'rgba(0,230,118,0)')
+  eq('withAlpha: rgb()', withAlpha('rgb(255, 23, 68)', 0.05), 'rgba(255,23,68,0.05)')
+  eq('withAlpha: space-separated rgb', withAlpha(' rgb(41 98 255) ', 0.5), 'rgba(41,98,255,0.5)')
+  eq('withAlpha: unknown form passes through', withAlpha('var(--primary)', 0.3), 'var(--primary)')
+
+  const closes = [10, 14, 12, 20, 16].map((c, i) => bar(i, c + 1, c - 1, c))
+  eq('midpoint: whole range', closeMidpoint(closes, 0, 4), 15)
+  eq('midpoint: fractional logical ends round outwards', closeMidpoint(closes, 0.4, 1.6), 12)
+  eq('midpoint: range past the data is clamped', closeMidpoint(closes, 3, 40), 18)
+  eq('midpoint: no bar in view falls back to the last close', closeMidpoint(closes, 9, 12), 16)
+  eq('midpoint: no bars at all', closeMidpoint([], 0, 1), null)
+
+  // A chart that records what it was asked to add, so the options can be checked.
+  const chart = {
+    addLineSeries: (o) => ({ kind: 'line', o }),
+    addAreaSeries: (o) => ({ kind: 'area', o }),
+    addBaselineSeries: (o) => ({ kind: 'baseline', o }),
+    addCustomSeries: (view, o) => ({ kind: 'custom', view, o }),
+  }
+  const k = { primary: '#2962FF', up: '#089981', dn: '#F23645', neutral: '#868993', pline: '#999' }
+  const mk = (id) => createLineFamilySeries(chart, id, k, 123)
+  eq('line family: candles are left to the caller', mk('candle'), null)
+
+  const line = mk('line')
+  eq('line: plain line series', line.kind, 'line')
+  eq('line: width 2 (TradingView default)', line.o.lineWidth, 2)
+  eq('line: no markers, no steps', [line.o.pointMarkersVisible, line.o.lineType], [false, 0])
+  eq(
+    'line: primary colour, dashed price line',
+    [line.o.color, line.o.priceLineStyle],
+    [k.primary, 2],
+  )
+  eq('line with markers: a dot per bar', mk('linemarkers').o.pointMarkersVisible, true)
+  eq('step line: LineType.WithSteps', mk('stepline').o.lineType, 1)
+
+  const area = mk('area')
+  eq('area: area series', area.kind, 'area')
+  eq('area: line colour', area.o.lineColor, k.primary)
+  eq('area: gradient from the line colour…', area.o.topColor, 'rgba(41,98,255,0.28)')
+  eq('area: …to transparent', area.o.bottomColor, 'rgba(41,98,255,0)')
+
+  const base = mk('baseline')
+  eq('baseline: starts on the given base', base.o.baseValue, { type: 'price', price: 123 })
+  eq(
+    'baseline: green above',
+    [base.o.topLineColor, base.o.topFillColor1],
+    [k.up, 'rgba(8,153,129,0.28)'],
+  )
+  eq(
+    'baseline: red below',
+    [base.o.bottomLineColor, base.o.bottomFillColor2],
+    [k.dn, 'rgba(242,54,69,0.28)'],
+  )
+
+  const hlc = mk('hlcarea')
+  eq('hlc area: one custom series', hlc.kind, 'custom')
+  eq(
+    'hlc area: high green, low red, close neutral',
+    [hlc.o.highLineColor, hlc.o.lowLineColor, hlc.o.closeLineColor],
+    [k.up, k.dn, k.neutral],
+  )
+  const d = { time: 1, open: 10, high: 12, low: 9, close: 11, volume: 1, session: 'x' }
+  eq(
+    'hlc area: scales over the full bar, close last for the price line',
+    hlc.view.priceValueBuilder(d),
+    [12, 9, 11],
+  )
+  eq(
+    'hlc area: whitespace is a bar without a close',
+    [hlc.view.isWhitespace({ time: 1 }), hlc.view.isWhitespace(d)],
+    [true, false],
+  )
+  const v = hlcAreaView()
+  v.update({ bars: [] }, { lineWidth: 3 })
+  ok('hlc area: defaults are a fresh copy', v.defaultOptions() !== v.defaultOptions())
+  eq('hlc area: default line width', v.defaultOptions().lineWidth, 2)
+
+  // Re-theming only ever changes colours, never the shape options.
+  const applied = []
+  const series = { applyOptions: (o) => applied.push(o) }
+  eq('theme: candles are not re-themed here', themeLineFamilySeries(series, 'candle', k), false)
+  eq('theme: step line is', themeLineFamilySeries(series, 'stepline', k), true)
+  eq('theme: colours only', applied, [{ color: k.primary, priceLineColor: k.pline }])
+  themeLineFamilySeries(series, 'area', { ...k, primary: '#ff0000' })
+  eq('theme: area follows the new palette', applied[1].topColor, 'rgba(255,0,0,0.28)')
+}
+
+// ---- screener: technical rating, filters, presets, sorting -------------------
+{
+  const S = await import(src('features/screener/logic.ts'))
+
+  // Rating thresholds (TradingView's): > .5 strong buy, > .1 buy, ≥ -.1 neutral, ≥ -.5 sell.
+  eq('screener: rating 0.6 is strong buy', S.ratingOf(0.6), 'strong_buy')
+  eq('screener: rating 0.5 is buy (strict >)', S.ratingOf(0.5), 'buy')
+  eq('screener: rating 0.1 is neutral', S.ratingOf(0.1), 'neutral')
+  eq('screener: rating -0.1 is neutral', S.ratingOf(-0.1), 'neutral')
+  eq('screener: rating -0.3 is sell', S.ratingOf(-0.3), 'sell')
+  eq('screener: rating -0.51 is strong sell', S.ratingOf(-0.51), 'strong_sell')
+  eq('screener: no score, no rating', S.ratingOf(null), null)
+  eq('screener: group score (buy − sell) / votes', S.groupScore({ buy: 3, sell: 1, neutral: 4 }), 0.25)
+  eq('screener: an empty group does not score', S.groupScore({ buy: 0, sell: 0, neutral: 0 }), null)
+
+  const mk = (closes) =>
+    closes.map((c, i) => ({ t: i * 86_400_000, o: c, h: c * 1.01, l: c * 0.99, c, v: 1000 }))
+  const upTrend = mk(Array.from({ length: 220 }, (_, i) => 100 * Math.pow(1.01, i)))
+  const downTrend = mk(Array.from({ length: 220 }, (_, i) => 100 * Math.pow(0.99, i)))
+  const up = S.computeTech(upTrend)
+  const dn = S.computeTech(downTrend)
+  eq('screener: steady uptrend — every MA votes buy', up.maVotes, { buy: 12, sell: 0, neutral: 0 })
+  eq('screener: steady downtrend — every MA votes sell', dn.maVotes, { buy: 0, sell: 12, neutral: 0 })
+  ok('screener: uptrend rates buy or strong buy', up.rating === 'buy' || up.rating === 'strong_buy', up.rating)
+  ok('screener: downtrend rates sell or strong sell', dn.rating === 'sell' || dn.rating === 'strong_sell', dn.rating)
+  ok('screener: uptrend RSI is high', up.rsi > 70, up.rsi)
+  eq('screener: uptrend price above EMA200', S.emaRelation(upTrend.at(-1).c, up.ema200), 'above')
+  near('screener: 1W performance is 7 daily bars back', up.perf1W, (Math.pow(1.01, 7) - 1) * 100, 1e-6)
+  near('screener: 1M performance is 30 daily bars back', dn.perf1M, (Math.pow(0.99, 30) - 1) * 100, 1e-6)
+  ok('screener: ATR% is about the bar range', up.atrPct > 1.5 && up.atrPct < 3.5, up.atrPct)
+  eq('screener: oscillator group has 8 voters', S.oscillatorVotes(upTrend).length, 8)
+  // A new listing: too short for the 100/200 MAs, which then do not vote.
+  const young = S.computeTech(upTrend.slice(-60))
+  eq('screener: MAs without enough history do not vote', young.maVotes.buy + young.maVotes.sell + young.maVotes.neutral, 8)
+  eq('screener: no EMA200 on 60 bars', young.ema200, null)
+  eq('screener: no candles, no rating', S.computeTech([]).rating, null)
+
+  near('screener: absolute change from last and %', S.absChange(110, 10), 10, 1e-9)
+  near('screener: absolute change for a loss', S.absChange(90, -10), -10, 1e-9)
+
+  const tech = (rsi, score) => ({ rsi, score, rating: S.ratingOf(score), macd: 1, macdSignal: 0, macdState: 'bull', ema20: null, ema50: null, ema200: null, atrPct: 2, perf1W: 1, perf1M: 2, maVotes: { buy: 0, sell: 0, neutral: 0 }, oscVotes: { buy: 0, sell: 0, neutral: 0 } })
+  const row = (base, name, pct, vol, t = null, mcap = null) => ({ sym: base + 'USDT', base, name, price: 10, pct, chg: 0, vol, mcap, tech: t })
+  const rows = [
+    row('BTC', 'Bitcoin', 2, 5e9, tech(55, 0.7), 1e12),
+    row('ETH', 'Ethereum', -3, 2e9, tech(25, -0.6)),
+    row('SOL', 'Solana', 8, 9e8, tech(75, 0.3)),
+    row('PEPE', 'Pepe', -12, 4e8, null),
+    row('DOGE', 'Dogecoin', 0.5, 6e8, tech(45, 0)),
+  ]
+  const F = S.EMPTY_FILTERS
+  const bases = (rs) => rs.map((r) => r.base).join(',')
+  eq('screener: no filters keep everything', S.filterRows(rows, F).length, 5)
+  eq('screener: search matches ticker or name', bases(S.filterRows(rows, { ...F, q: 'eth' })), 'ETH')
+  eq('screener: search by name', bases(S.filterRows(rows, { ...F, q: 'doge' })), 'DOGE')
+  eq('screener: min volume', bases(S.filterRows(rows, { ...F, minVol: 1e9 })), 'BTC,ETH')
+  eq('screener: change % range', bases(S.filterRows(rows, { ...F, chgMin: 0, chgMax: 5 })), 'BTC,DOGE')
+  eq('screener: RSI range drops rows still computing', bases(S.filterRows(rows, { ...F, rsiMin: 40, rsiMax: 60 })), 'BTC,DOGE')
+  eq('screener: rating filter, exact', bases(S.filterRows(rows, { ...F, rating: 'strong_buy' })), 'BTC')
+  eq('screener: rating filter, buy or better', bases(S.filterRows(rows, { ...F, rating: 'buy_up' })), 'BTC,SOL')
+  eq('screener: rating filter, sell or worse', bases(S.filterRows(rows, { ...F, rating: 'sell_down' })), 'ETH')
+  ok('screener: indicator filters need indicators', S.needsTech({ ...F, rsiMax: 30 }) && !S.needsTech({ ...F, minVol: 1 }))
+
+  eq('screener: sort by change, descending', bases(S.sortRows(rows, { key: 'pct', dir: 'desc' })), 'SOL,BTC,DOGE,ETH,PEPE')
+  eq('screener: sort by change, ascending', bases(S.sortRows(rows, { key: 'pct', dir: 'asc' })), 'PEPE,ETH,DOGE,BTC,SOL')
+  eq('screener: missing RSI sorts last either way (desc)', bases(S.sortRows(rows, { key: 'rsi', dir: 'desc' })), 'SOL,BTC,DOGE,ETH,PEPE')
+  eq('screener: missing RSI sorts last either way (asc)', bases(S.sortRows(rows, { key: 'rsi', dir: 'asc' })), 'ETH,DOGE,BTC,SOL,PEPE')
+  eq('screener: missing market cap sorts last', S.sortRows(rows, { key: 'mcap', dir: 'asc' })[0].base, 'BTC')
+  eq('screener: sort by symbol', bases(S.sortRows(rows, { key: 'sym', dir: 'asc' })), 'BTC,DOGE,ETH,PEPE,SOL')
+  eq('screener: sort by rating', bases(S.sortRows(rows, { key: 'rating', dir: 'desc' })), 'BTC,SOL,DOGE,ETH,PEPE')
+  eq('screener: sorting does not mutate its input', bases(rows), 'BTC,ETH,SOL,PEPE,DOGE')
+  eq('screener: same header flips direction', S.nextSort({ key: 'vol', dir: 'desc' }, 'vol'), { key: 'vol', dir: 'asc' })
+  eq('screener: a new numeric header starts descending', S.nextSort({ key: 'vol', dir: 'asc' }, 'rsi'), { key: 'rsi', dir: 'desc' })
+  eq('screener: the symbol header starts ascending', S.nextSort({ key: 'vol', dir: 'desc' }, 'sym'), { key: 'sym', dir: 'asc' })
+
+  const base = { filters: { ...F, q: 'so', minVol: 1e6 }, sort: S.DEFAULT_SORT, preset: null }
+  const os = S.applyPreset(base, 'oversold')
+  eq('screener: Oversold preset = RSI < 30, lowest first, search kept', [os.filters.rsiMax, os.filters.minVol, os.filters.q, os.sort.key, os.sort.dir, os.preset], [30, 0, 'so', 'rsi', 'asc', 'oversold'])
+  const g = S.applyPreset(base, 'gainers')
+  eq('screener: Top gainers preset sorts change % descending', [g.filters.chgMin, g.sort.key, g.sort.dir], [0, 'pct', 'desc'])
+  const losers = S.applyPreset({ ...base, filters: F }, 'losers')
+  eq('screener: Top losers lists the fallers, worst first', bases(S.sortRows(S.filterRows(rows, losers.filters), losers.sort)), 'PEPE,ETH')
+  const sb = S.applyPreset({ ...base, filters: F }, 'strongbuy')
+  eq('screener: Strong buy preset', bases(S.sortRows(S.filterRows(rows, sb.filters), sb.sort)), 'BTC')
+  eq('screener: every preset id is distinct', new Set(S.PRESETS.map((p) => p.id)).size, 6)
+
+  const clean = S.sanitizePrefs({ filters: { q: 42, minVol: -5, chgMin: '3', rsiMax: 30, rating: 'moon' }, sort: { key: 'nope', dir: 'up' }, preset: 'oversold' })
+  eq('screener: stored prefs are sanitised', clean, { filters: { ...F, rsiMax: 30 }, sort: S.DEFAULT_SORT, preset: 'oversold' })
+  eq('screener: garbage in storage falls back to defaults', S.sanitizePrefs('x'), { filters: F, sort: S.DEFAULT_SORT, preset: null })
+  eq('screener: valid prefs survive a round trip', S.sanitizePrefs(JSON.parse(JSON.stringify(os))), os)
+}
+
+// ---- Price-scale / navigation helpers (features/charts/scaleNavMath) ----
+{
+  const sn = await import(src('features/charts/scaleNavMath.ts'))
+  const { tfMs } = await import(src('services/timeframe.ts'))
+  eq('scale: defaults for junk', sn.cleanScalePrefs(null), { mode: 'normal', invert: false, lock: false })
+  eq('scale: keeps a valid mode', sn.cleanScalePrefs({ mode: 'log', invert: true }).mode, 'log')
+  eq('scale: unknown mode falls back', sn.cleanScalePrefs({ mode: 'cubic' }).mode, 'normal')
+  eq('scale: lock only on the regular scale', sn.cleanScalePrefs({ mode: 'percent', lock: true }).lock, false)
+  eq('scale: lock kept on regular', sn.cleanScalePrefs({ mode: 'normal', lock: true }).lock, true)
+  eq(
+    'scale: lightweight-charts modes',
+    ['normal', 'log', 'percent', 'indexed'].map((m) => sn.LWC_SCALE_MODE[m]),
+    [0, 1, 2, 3],
+  )
+  eq('range: nine presets', sn.RANGE_PRESETS.map((p) => p.id).join(' '), '1D 5D 1M 3M 6M YTD 1Y 5Y All')
+  ok('range: every preset names a catalogue interval', sn.RANGE_PRESETS.every((p) => normalizeTf(p.tf) === p.tf))
+  // Each range fits in one load (~500 bars) on its interval.
+  const now = Date.UTC(2026, 9, 14, 12)
+  sn.RANGE_PRESETS.forEach((p) => {
+    const start = sn.rangeStartMs(p.id, now)
+    if (start == null) return
+    const bars = (now - start) / tfMs(tfDef(p.tf))
+    ok('range: ' + p.id + ' fits one load', bars > 20 && bars <= 500, Math.round(bars))
+  })
+  eq('range: 1D is a day', sn.rangeStartMs('1D', now), now - 86400000)
+  eq('range: All has no start', sn.rangeStartMs('All', now), null)
+  const ytd = new Date(sn.rangeStartMs('YTD', now))
+  ok('range: YTD starts on 1 January', ytd.getMonth() === 0 && ytd.getDate() === 1 && ytd.getFullYear() === 2026)
+  const m1 = (now - sn.rangeStartMs('1M', now)) / 86400000
+  ok('range: 1M is a calendar month', m1 >= 28 && m1 <= 31.1, m1)
+  eq('clock: UTC', sn.utcOffsetLabel(0), 'UTC')
+  eq('clock: east', sn.utcOffsetLabel(120), 'UTC+2')
+  eq('clock: west', sn.utcOffsetLabel(-180), 'UTC-3')
+  eq('clock: half hours', sn.utcOffsetLabel(330), 'UTC+5:30')
+  eq('zoom: in keeps the right edge', sn.zoomLogicalRange({ from: 0, to: 100 }, 2, true), { from: 50, to: 100 })
+  eq('zoom: out about the centre', sn.zoomLogicalRange({ from: 40, to: 60 }, 0.5, false), { from: 30, to: 70 })
+  eq('zoom: never below the minimum', sn.zoomLogicalRange({ from: 0, to: 6 }, 4, true), { from: 1, to: 6 })
+}
+
+// ---------------------------------------------------------------- chart style data
+{
+  const { sessionKey, toCandleData, hollowCandleData, compactVol } = await import(
+    src('features/charts/series/customSeries.ts')
+  )
+  const H = 3_600_000
+  const D = 24 * H
+  const mon = Date.UTC(2024, 0, 1) // a Monday
+  eq('session: intraday bars group by UTC day', sessionKey(mon + 5 * H, H), '2024-01-01')
+  eq('session: 4h bars group by week', sessionKey(mon + 6 * D, 4 * H), sessionKey(mon, 4 * H))
+  ok('session: a new week starts on Monday', sessionKey(mon - 1, 4 * H) !== sessionKey(mon, 4 * H))
+  eq('session: daily bars group by month', sessionKey(mon + 20 * D, D), '2024-01')
+  eq('session: weekly bars group by year', sessionKey(mon + 60 * D, 7 * D), '2024')
+
+  const k = (t, o, c, v = 1) => ({ t, o, h: Math.max(o, c) + 1, l: Math.min(o, c) - 1, c, v })
+  const days = [0, 1, 2].map((i) => k(mon + i * D, 10, 11))
+  eq('toCandleData: daily bars share a month session', toCandleData(days).map((d) => d.session), [
+    '2024-01',
+    '2024-01',
+    '2024-01',
+  ])
+  eq('toCandleData: keeps the bar ms', toCandleData(days)[1].ms, mon + D)
+  // A live update is one bar: without the bar before it, it cannot know its interval.
+  eq('toCandleData: a lone live bar takes its session from prev', toCandleData([days[2]], days[1])[0].session, '2024-01')
+
+  const up = '#0f0'
+  const dn = '#f00'
+  const hc = hollowCandleData(
+    [k(0, 10, 12), k(60e3, 12, 11), k(120e3, 9, 10.5), k(180e3, 12, 11)],
+    up,
+    dn,
+  )
+  eq('hollow: up bar is hollow', hc[0].color, 'rgba(0,0,0,0)')
+  eq('hollow: first bar coloured against its open', hc[0].borderColor, up)
+  eq('hollow: down bar (close<open) is filled', hc[1].color, hc[1].borderColor)
+  eq('hollow: close below previous close is down-coloured', hc[1].borderColor, dn)
+  eq('hollow: rising bar under prev close is hollow but down-coloured', [hc[2].color, hc[2].borderColor], ['rgba(0,0,0,0)', dn])
+  eq('hollow: falling bar above prev close is filled and up-coloured', [hc[3].color, hc[3].borderColor], [up, up])
+  eq('hollow: wick follows the colour', hc[3].wickColor, up)
+  eq('hollow: live bar uses prev close', hollowCandleData([k(0, 12, 11)], up, dn, k(-60e3, 9, 10))[0].borderColor, up)
+
+  eq('compactVol: small', compactVol(0.42), '0.4')
+  eq('compactVol: thousands', compactVol(3400), '3.4K')
+  eq('compactVol: millions', compactVol(1_234_567), '1.2M')
 }
 
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')

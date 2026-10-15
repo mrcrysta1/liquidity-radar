@@ -20,18 +20,18 @@ function useReplay() {
   return replayInfo()
 }
 
-/** Rail button — sits with the chart-style controls on the tool rail. */
+/** Toolbar button — sits at the right of the chart's top toolbar. */
 export function ReplayButton() {
   const r = useReplay()
   return (
     <button
       type="button"
-      className={'cs-rail-btn replay-btn' + (r.on ? ' on' : '')}
+      className={'chart-tool-btn tvb-icon replay-btn' + (r.on ? ' on' : '')}
       aria-pressed={r.on}
       aria-label={r.on ? 'Exit bar replay' : 'Bar replay'}
       onClick={toggleReplay}
     >
-      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
         <path
           d="M11 5 4 12l7 7M20 5l-7 7 7 7"
           fill="none"
@@ -41,7 +41,7 @@ export function ReplayButton() {
           strokeLinejoin="round"
         />
       </svg>
-      <span className="cs-rail-tip">{r.on ? 'Exit replay' : 'Bar replay'}</span>
+      <span className="tvb-tip">{r.on ? 'Exit bar replay' : 'Bar replay'}</span>
     </button>
   )
 }

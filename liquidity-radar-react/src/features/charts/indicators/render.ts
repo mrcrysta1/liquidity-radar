@@ -17,12 +17,13 @@
 // multi-chart panel gets its own renderer over its own store.
 import type { CandleFlat } from '../../../services/market'
 import type { IndicatorInstance } from './store'
-import { getIndicators } from './store'
+import { getIndicators, instanceDef } from './store'
 import { indicatorDef, instanceLabel, sourceSeries, valueOutputs } from './registry'
 import type { IndicatorDef, OutputDef } from './registry'
 import { computeAll } from './graph'
 import type { Computed } from './graph'
 import { cloudView } from './cloud'
+import { volumeColor } from '../chartPalette'
 import { PINE_TYPE, pineLive, pineStatus } from '../pine/indicator'
 
 type Any = any
@@ -210,7 +211,7 @@ export function createIndicatorRenderer(
     i: number,
     c: CandleFlat,
   ): string {
-    if (def.id === 'volume') return c.c >= c.o ? 'rgba(0,230,118,.4)' : 'rgba(255,23,68,.4)'
+    if (def.id === 'volume') return volumeColor(c.c >= c.o)
     const v = values[i] as number
     if (out.colorBy === 'slope') {
       const prev = values[i - 1]
@@ -332,10 +333,17 @@ export function createIndicatorRenderer(
       const parts = valueOutputs(def)
         .map((o) => ({ label: o.label, value: outs[o.key]?.[i] as number, color: o.color, big }))
         .filter((p) => p.value != null && isFinite(p.value))
-      if (parts.length) out.push({ label: instanceLabel(def, inst.params), parts })
+      if (parts.length) out.push({ uid: inst.uid, label: instanceLabel(def, inst.params), parts })
       // A Pine script that failed shows as a badge rather than disappearing.
       else if (inst.type === PINE_TYPE && pineStatus(inst).error)
-        out.push({ label: def.name + ' ⚠ error', parts: [] })
+        out.push({ uid: inst.uid, label: def.name + ' ⚠ error', parts: [] })
+    })
+    // Hidden ones stay listed, greyed out, so the legend's eye can bring them back.
+    getItems().forEach((inst) => {
+      if (inst.visible) return
+      const def = instanceDef(inst)
+      if (def)
+        out.push({ uid: inst.uid, label: instanceLabel(def, inst.params), parts: [], hidden: true })
     })
     return out
   }
@@ -377,7 +385,11 @@ export function createIndicatorRenderer(
 
 /** Values at the last candle, for the chart legend. */
 export interface LegendEntry {
+  /** The instance, for the legend's show/hide and remove actions. */
+  uid: string
   label: string
+  /** Switched off: listed without values. */
+  hidden?: boolean
   /** `big` marks a count-scale value (volume, OBV) that reads better as 1.2M. */
   parts: Array<{ label: string; value: number; color: string; big: boolean }>
 }
