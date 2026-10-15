@@ -57,6 +57,7 @@ import { attachWhaleBubbles, renderWhaleBubbles, watchLiveWhales } from './whale
 import { attachVolumeProfile, renderVolumeProfile } from './volumeProfileOverlay'
 import { onDeltaChange } from '../delta/delta'
 import { onOverlayTogglesChange } from './overlayToggles'
+import { afterChartFit, attachScaleNav } from './scaleNav'
 
 type Any = any
 ;(window as Any).LightweightCharts = LightweightCharts
@@ -359,6 +360,8 @@ export function initChart(): void {
   // replaces the series does not strand it.
   // Range bars do not close on the clock, so there is nothing to count down.
   mountCloseTimer(chart, () => (isRangeMode() ? null : candleSeries))
+  // Price-scale modes, zoom/scroll buttons and the date-range bar (scaleNav).
+  attachScaleNav({ chart, el, getSeries: () => candleSeries, onSeriesChange: onPriceSeriesChange })
   // While the cursor is over a bar the legend shows that bar; live ticks must
   // not overwrite it, and leaving the chart hands it back to the live candle.
   chart.subscribeCrosshairMove((param: Any) => {
@@ -544,6 +547,7 @@ export function updateChartData(fit = false): void {
   renderWhaleBubbles()
   if (fit) {
     ts.fitContent()
+    afterChartFit()
   } else if (keep) {
     // Older candles land in front of index 0, so the same bars now sit that
     // many indices further along — shift the range to stay put.

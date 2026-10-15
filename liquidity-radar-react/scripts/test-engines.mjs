@@ -2157,6 +2157,45 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('screener: valid prefs survive a round trip', S.sanitizePrefs(JSON.parse(JSON.stringify(os))), os)
 }
 
+// ---- Price-scale / navigation helpers (features/charts/scaleNavMath) ----
+{
+  const sn = await import(src('features/charts/scaleNavMath.ts'))
+  const { tfMs } = await import(src('services/timeframe.ts'))
+  eq('scale: defaults for junk', sn.cleanScalePrefs(null), { mode: 'normal', invert: false, lock: false })
+  eq('scale: keeps a valid mode', sn.cleanScalePrefs({ mode: 'log', invert: true }).mode, 'log')
+  eq('scale: unknown mode falls back', sn.cleanScalePrefs({ mode: 'cubic' }).mode, 'normal')
+  eq('scale: lock only on the regular scale', sn.cleanScalePrefs({ mode: 'percent', lock: true }).lock, false)
+  eq('scale: lock kept on regular', sn.cleanScalePrefs({ mode: 'normal', lock: true }).lock, true)
+  eq(
+    'scale: lightweight-charts modes',
+    ['normal', 'log', 'percent', 'indexed'].map((m) => sn.LWC_SCALE_MODE[m]),
+    [0, 1, 2, 3],
+  )
+  eq('range: nine presets', sn.RANGE_PRESETS.map((p) => p.id).join(' '), '1D 5D 1M 3M 6M YTD 1Y 5Y All')
+  ok('range: every preset names a catalogue interval', sn.RANGE_PRESETS.every((p) => normalizeTf(p.tf) === p.tf))
+  // Each range fits in one load (~500 bars) on its interval.
+  const now = Date.UTC(2026, 9, 14, 12)
+  sn.RANGE_PRESETS.forEach((p) => {
+    const start = sn.rangeStartMs(p.id, now)
+    if (start == null) return
+    const bars = (now - start) / tfMs(tfDef(p.tf))
+    ok('range: ' + p.id + ' fits one load', bars > 20 && bars <= 500, Math.round(bars))
+  })
+  eq('range: 1D is a day', sn.rangeStartMs('1D', now), now - 86400000)
+  eq('range: All has no start', sn.rangeStartMs('All', now), null)
+  const ytd = new Date(sn.rangeStartMs('YTD', now))
+  ok('range: YTD starts on 1 January', ytd.getMonth() === 0 && ytd.getDate() === 1 && ytd.getFullYear() === 2026)
+  const m1 = (now - sn.rangeStartMs('1M', now)) / 86400000
+  ok('range: 1M is a calendar month', m1 >= 28 && m1 <= 31.1, m1)
+  eq('clock: UTC', sn.utcOffsetLabel(0), 'UTC')
+  eq('clock: east', sn.utcOffsetLabel(120), 'UTC+2')
+  eq('clock: west', sn.utcOffsetLabel(-180), 'UTC-3')
+  eq('clock: half hours', sn.utcOffsetLabel(330), 'UTC+5:30')
+  eq('zoom: in keeps the right edge', sn.zoomLogicalRange({ from: 0, to: 100 }, 2, true), { from: 50, to: 100 })
+  eq('zoom: out about the centre', sn.zoomLogicalRange({ from: 40, to: 60 }, 0.5, false), { from: 30, to: 70 })
+  eq('zoom: never below the minimum', sn.zoomLogicalRange({ from: 0, to: 6 }, 4, true), { from: 1, to: 6 })
+}
+
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')
 if (fails.length) {
   fails.forEach((f) => console.log('  FAIL  ' + f))

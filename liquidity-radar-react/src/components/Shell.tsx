@@ -12,6 +12,7 @@ import { LogoMark } from './Logo'
 import { BellIcon, MoonIcon, PaletteIcon, SunIcon } from './icons'
 import { WhaleLegend } from './chart/WhaleLegend'
 import { ChartStylePicker } from './chart/ChartStylePicker'
+import { ChartBottomBar, ChartNavOverlay } from './chart/ScaleNav'
 import { lazy, Suspense } from 'react'
 const loadLiqHeatmap = () => import('./analysis/LiqHeatmap')
 const loadCrossExchange = () => import('./analysis/CrossExchangeTable')
@@ -199,6 +200,7 @@ export function Shell() {
                 <div id="chart"></div>
                 <span className="chart-draw-hint" id="drawHint"></span>
                 <Guard name="Whale legend"><WhaleLegend /></Guard>
+                <Guard name="Chart navigation"><ChartNavOverlay /></Guard>
               </div>
             </div>
             <Guard name="Chart side panel">
@@ -215,6 +217,7 @@ export function Shell() {
               />
             </Guard>
           </div>
+          <Guard name="Chart bottom bar"><ChartBottomBar /></Guard>
         </div>
         </div>
         <Guard name="Radar side"><RadarSide /></Guard>
