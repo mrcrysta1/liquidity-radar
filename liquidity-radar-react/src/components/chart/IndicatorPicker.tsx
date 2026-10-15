@@ -113,7 +113,7 @@ function Eye({ on }: { on: boolean }) {
 interface PickerProps {
   /** The chart's indicator set; the main chart's by default. */
   store?: IndicatorStore
-  /** 'rail' is the main chart's side-rail button; 'panel' a panel header's. */
+  /** 'rail' is the main chart's toolbar button; 'panel' a panel header's. */
   variant?: 'rail' | 'panel'
   /** Names the chart in the button's label (panel variant). */
   chartLabel?: string
@@ -475,24 +475,26 @@ export function IndicatorPicker({
         <>
           <button
             type="button"
-            className={'cs-rail-btn ind-open' + (open ? ' on' : '')}
+            className={'chart-tool-btn tvb-text ind-open' + (open ? ' open' : '')}
             aria-haspopup="dialog"
             aria-expanded={open}
             aria-label={'Indicators (' + items.length + ')'}
             onClick={() => setOpen((o) => !o)}
           >
-            <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+            {/* TradingView's "fx": an italic f and an x. */}
+            <svg viewBox="0 0 28 28" width="20" height="20" aria-hidden="true">
               <path
-                d="M3 17.5 9 11l4 4 8-9"
+                d="M8.5 22.5 11 9.2C11.4 7 12.6 6 14.6 6.3M8 12h5.5M14.5 13l5.5 8M20 13l-5.5 8"
                 fill="none"
                 stroke="currentColor"
-                strokeWidth="2.1"
+                strokeWidth="1.5"
                 strokeLinecap="round"
                 strokeLinejoin="round"
               />
             </svg>
+            <span className="tvb-label">Indicators</span>
             {items.length > 0 && <span className="rail-count">{items.length}</span>}
-            <span className="cs-rail-tip">Indicators</span>
+            <span className="tvb-tip">Indicators &amp; strategies</span>
           </button>
         </>
       )}
