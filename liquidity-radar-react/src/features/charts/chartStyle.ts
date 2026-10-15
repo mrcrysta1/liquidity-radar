@@ -24,6 +24,9 @@ export type ChartStyleId =
   | 'sessionvp'
   | 'range'
   | 'renko'
+  | 'linebreak'
+  | 'kagi'
+  | 'pnf'
 
 export interface ChartStyleDef {
   id: ChartStyleId
@@ -40,6 +43,8 @@ export interface ChartStyleDef {
    * series/derivedBars — range bars, renko), with a size per coin.
    */
   rangeBars?: boolean
+  /** Tooltip on the "est" tag, where the default range-bar wording does not fit. */
+  estNote?: string
 }
 
 export const CHART_STYLES: ChartStyleDef[] = [
@@ -113,6 +118,34 @@ export const CHART_STYLES: ChartStyleDef[] = [
     hint: 'A brick every fixed box on the close',
     ohlc: true,
     rangeBars: true,
+  },
+  {
+    id: 'linebreak',
+    name: 'Line break',
+    hint: 'A new line when the close breaks the last N lines',
+    ohlc: true,
+    rangeBars: true,
+    estimate: true,
+    estNote: 'Built from candle closes, not ticks',
+  },
+  {
+    id: 'kagi',
+    name: 'Kagi',
+    hint: 'Thick above the last shoulder, thin below the waist',
+    ohlc: true,
+    custom: true,
+    rangeBars: true,
+    estimate: true,
+    estNote: 'Built from candle closes, not ticks',
+  },
+  {
+    id: 'pnf',
+    name: 'Point & figure',
+    hint: 'X and O columns, N-box reversals',
+    ohlc: true,
+    custom: true,
+    rangeBars: true,
+    estimate: true,
   },
 ]
 

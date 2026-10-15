@@ -37,6 +37,11 @@ const { heikinAshi, heikinAshiNext, heikinAshiOf, heikinAshiBar } = await import
 const { columnUp } = await import(src('features/charts/series/basicSeries.ts'))
 const { buildRenko } = await import(src('features/charts/series/renko.ts'))
 const { buildDerivedBars, derivedSize } = await import(src('features/charts/series/derivedBars.ts'))
+const { buildLineBreak, clampLineBreak } = await import(src('features/charts/series/lineBreak.ts'))
+const { buildKagi, kagiYangEnd } = await import(src('features/charts/series/kagi.ts'))
+const { buildPointFigure, clampPnfReversal, pnfBoxes } = await import(
+  src('features/charts/series/pointFigure.ts')
+)
 const { noteLimitResponse, cooldownLeft, isRateLimited } = await import(src('api/rateLimit.ts'))
 const { pfmt, nfmt, cfmt } = await import(src('utils/format.ts'))
 const { VENUES, isUsdQuoted } = await import(src('features/advanced/venues.ts'))
@@ -400,6 +405,163 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   eq('derived: a manual size is used as is', derivedSize(wave, 2).size, Math.max(2, ds.floor))
   eq('derived: a tiny manual size is raised to the floor', derivedSize(wave, 1e-9).size, ds.floor)
   ok('derived: the floor keeps renko bounded', buildRenko(wave, ds.floor).length <= MAX_RANGE_BARS * 1.1)
+}
+
+// ------------------------------------------------- line break / kagi / P&F
+// Non-time-based styles built from candles, on the range-bar time scheme.
+{
+  // A candle closing at c (opening at o, else at c), one per minute.
+  const cl = (i, c, o = c) => ({ t: 60000 * (i + 1), o, h: Math.max(o, c), l: Math.min(o, c), c, v: 1 })
+  const series = (closes, first) => closes.map((c, i) => cl(i, c, i === 0 ? first : c))
+  const oc = (bars) => bars.map((b) => [b.o, b.c])
+  const sine = Array.from({ length: 400 }, (_, i) => {
+    const o = 100 + Math.sin(i / 7) * 12 + Math.sin(i / 23) * 6
+    const c = o + Math.sin(i * 1.7) * 1.5
+    return { t: 1_000_000 + i * 60000, o, h: Math.max(o, c) + 0.8, l: Math.min(o, c) - 0.8, c, v: 2 }
+  })
+  const increasing = (bars) => bars.every((b, i) => i === 0 || b.t > bars[i - 1].t)
+  const wholeSeconds = (bars) => bars.every((b, i) => i === 0 || (b.t - bars[i - 1].t) % 1000 === 0)
+  const prefixKept = (a, b) => a.slice(0, -1).every((x, i) => JSON.stringify(x) === JSON.stringify(b[i]))
+  const isUp = (b) => b.c > b.o
+
+  // ---- line break
+  const lbSrc = series([101, 102, 103, 102.5, 99, 104, 98], 100)
+  const lb = buildLineBreak(lbSrc, 3)
+  eq('linebreak: lines and reversals', oc(lb), [[100, 101], [101, 102], [102, 103], [102, 99], [102, 104], [102, 98]])
+  ok('linebreak: no wicks (high/low are the body)', lb.every((b) => b.h === Math.max(b.o, b.c) && b.l === Math.min(b.o, b.c)))
+  eq('linebreak: each line keeps its candle time', lb.map((b) => b.t), [1, 2, 3, 5, 6, 7].map((i) => i * 60000))
+  eq('linebreak: a quiet close carries its volume to the next line', lb.map((b) => b.v), [1, 1, 1, 2, 1, 1])
+  // 100.5 breaks the low of the last 2 lines (101) but not of the last 3 (100).
+  const lbN = series([101, 102, 103, 100.5], 100)
+  eq('linebreak: 2-line break reverses sooner', buildLineBreak(lbN, 2).length, 4)
+  eq('linebreak: 3-line break holds', buildLineBreak(lbN, 3).length, 3)
+  eq('linebreak: default is 3 lines', oc(buildLineBreak(lbN)), oc(buildLineBreak(lbN, 3)))
+  eq('linebreak: a flat open makes no line', buildLineBreak(series([100, 100], 100)).length, 0)
+  eq('linebreak: empty input', buildLineBreak([]).length, 0)
+  const lbs = buildLineBreak(sine)
+  ok('linebreak: builds lines from a real series', lbs.length > 20, lbs.length)
+  ok('linebreak: times strictly increase', increasing(lbs) && wholeSeconds(lbs))
+  ok(
+    'linebreak: every line continues from the close or reverses from the open',
+    lbs.every((b, i) => i === 0 || b.o === lbs[i - 1].c || b.o === lbs[i - 1].o),
+  )
+  ok(
+    'linebreak: a reversal clears the last 3 lines',
+    lbs.every((b, i) => {
+      if (i === 0 || isUp(b) === isUp(lbs[i - 1])) return true
+      const look = lbs.slice(Math.max(0, i - 3), i)
+      return isUp(b) ? b.c > Math.max(...look.map((x) => x.h)) : b.c < Math.min(...look.map((x) => x.l))
+    }),
+  )
+  ok(
+    'linebreak: adding a candle keeps the earlier lines',
+    prefixKept(buildLineBreak(sine.slice(0, 300)), buildLineBreak(sine.slice(0, 301))),
+  )
+  eq(
+    'linebreak: line count is clamped',
+    [clampLineBreak(0), clampLineBreak(99), clampLineBreak('x'), clampLineBreak(4.7)],
+    [1, 10, 3, 4],
+  )
+
+  // ---- kagi
+  const kgSrc = series([101, 103, 104, 102.5, 101, 100, 103, 105, 102, 99, 101.5, 106], 100)
+  const kg = buildKagi(kgSrc, 2)
+  eq('kagi: segments turn on a 2-point reversal', oc(kg), [[100, 104], [104, 100], [100, 105], [105, 99], [99, 106]])
+  eq('kagi: thickness at each start', kg.map((b) => b.aux.yang0), [true, true, true, true, false])
+  eq(
+    'kagi: thin below the prior waist, thick above the prior shoulder',
+    kg.map((b) => b.aux.flip),
+    [null, null, null, 100, 105],
+  )
+  eq('kagi: thickness at each end', kg.map(kagiYangEnd), [true, true, true, false, true])
+  eq('kagi: segment times are the turning candles', kg.map((b) => b.t), [2, 5, 7, 9, 11].map((i) => i * 60000))
+  eq('kagi: volume follows the current segment', kg.map((b) => b.v), [4, 2, 2, 2, 2])
+  ok('kagi: high/low span the segment', kg.every((b) => b.h === Math.max(b.o, b.c) && b.l === Math.min(b.o, b.c)))
+  const kgDown = buildKagi(series([97], 100), 2)
+  eq('kagi: a first move down starts thin', [oc(kgDown), kgDown[0].aux.yang0], [[[100, 97]], false])
+  // Percent: 5% of the turning price. 106 -> 101 is 4.7%, 106 -> 100 is 5.7%.
+  eq('kagi: percent reversal holds under the amount', oc(buildKagi(series([103, 106, 101], 100), 5, true)), [[100, 106]])
+  eq('kagi: percent reversal', oc(buildKagi(series([103, 106, 101, 100], 100), 5, true)), [[100, 106], [106, 100]])
+  eq('kagi: no reversal amount', buildKagi(kgSrc, 0).length, 0)
+  eq('kagi: empty input', buildKagi([], 2).length, 0)
+  const ks = buildKagi(sine, 2)
+  ok('kagi: builds segments from a real series', ks.length > 20, ks.length)
+  ok('kagi: times strictly increase', increasing(ks) && wholeSeconds(ks))
+  ok('kagi: directions alternate', ks.every((b, i) => i === 0 || isUp(b) !== isUp(ks[i - 1])))
+  ok('kagi: each segment starts where the last turned', ks.every((b, i) => i === 0 || b.o === ks[i - 1].c))
+  ok(
+    'kagi: every turn is at least the reversal',
+    ks.every((b, i) => i === ks.length - 1 || Math.abs(b.c - b.o) >= 2 - 1e-9),
+  )
+  ok('kagi: thickness carries across turns', ks.every((b, i) => i === 0 || b.aux.yang0 === kagiYangEnd(ks[i - 1])))
+  ok(
+    'kagi: flips happen inside the segment',
+    ks.every((b) => b.aux.flip == null || (b.aux.flip >= b.l && b.aux.flip <= b.h)),
+  )
+  ok(
+    'kagi: some segments do change thickness',
+    ks.some((b) => b.aux.flip != null),
+  )
+  ok(
+    'kagi: adding a candle keeps the earlier segments',
+    prefixKept(buildKagi(sine.slice(0, 300), 2), buildKagi(sine.slice(0, 301), 2)),
+  )
+  near('kagi: volume is conserved', ks.reduce((a, b) => a + b.v, 0), sine.length * 2)
+
+  // ---- point & figure
+  const pfSrc = series([100.5, 102.2, 104, 102, 101, 100.9, 100, 98.5, 101.9, 102, 103], 100.5)
+  const pf = buildPointFigure(pfSrc, 1, 3)
+  eq('pnf: X, O, X columns on a 3-box reversal', oc(pf), [[100, 104], [103, 99], [100, 103]])
+  eq('pnf: boxes per column', pf.map(pnfBoxes), [4, 4, 3])
+  ok('pnf: the box size travels with each column', pf.every((b) => b.aux.box === 1))
+  eq('pnf: column times are the candles they began in', pf.map((b) => b.t), [2, 7, 11].map((i) => i * 60000))
+  near('pnf: volume is conserved', pf.reduce((a, b) => a + b.v, 0), pfSrc.length)
+  // A single candle 100 -> 95 -> 110 -> 108 walks low first: an O column then an X column.
+  const walk = buildPointFigure([{ t: 60000, o: 100, h: 110, l: 95, c: 108, v: 8 }], 1, 3)
+  eq('pnf: one candle walked O-L-H-C', oc(walk), [[100, 95], [96, 110]])
+  eq('pnf: columns from one candle are a second apart', walk.map((b) => b.t), [60000, 61000])
+  near('pnf: one candle keeps its volume', walk.reduce((a, b) => a + b.v, 0), 8)
+  ok('pnf: 1-box reversal turns sooner', buildPointFigure(sine, 0.5, 1).length > buildPointFigure(sine, 0.5, 3).length)
+  eq('pnf: default is a 3-box reversal', oc(buildPointFigure(pfSrc, 1)), oc(pf))
+  eq('pnf: no box size', buildPointFigure(pfSrc, 0).length, 0)
+  eq('pnf: empty input', buildPointFigure([], 1).length, 0)
+  const ps = buildPointFigure(sine, 0.5, 3)
+  ok('pnf: builds columns from a real series', ps.length > 20, ps.length)
+  ok('pnf: times strictly increase', increasing(ps) && wholeSeconds(ps))
+  ok('pnf: X and O alternate', ps.every((b, i) => i === 0 || isUp(b) !== isUp(ps[i - 1])))
+  ok(
+    'pnf: prices sit on the box grid',
+    ps.every((b) => [b.h, b.l].every((x) => Math.abs(x / 0.5 - Math.round(x / 0.5)) < 1e-6)),
+  )
+  ok('pnf: every reversal column has at least 3 boxes', ps.every((b, i) => i === 0 || pnfBoxes(b) >= 3))
+  ok(
+    'pnf: a new column starts one box from the old extreme',
+    ps.every(
+      (b, i) =>
+        i === 0 ||
+        (isUp(b)
+          ? Math.abs(b.l - (ps[i - 1].l + 0.5)) < 1e-9
+          : Math.abs(b.h - (ps[i - 1].h - 0.5)) < 1e-9),
+    ),
+  )
+  ok(
+    'pnf: adding a candle keeps the earlier columns',
+    prefixKept(buildPointFigure(sine.slice(0, 300), 0.5), buildPointFigure(sine.slice(0, 301), 0.5)),
+  )
+  const tiny = buildPointFigure(
+    sine.map((k) => ({ ...k, o: k.o / 1000, h: k.h / 1000, l: k.l / 1000, c: k.c / 1000 })),
+    0.001,
+  )
+  ok(
+    'pnf: a decimal box stays on the grid',
+    tiny.length > 10 && tiny.every((b) => Math.abs((b.h - b.l) / 0.001 - pnfBoxes(b)) < 1e-6),
+    tiny.length,
+  )
+  eq(
+    'pnf: reversal is clamped',
+    [clampPnfReversal(0), clampPnfReversal(20), clampPnfReversal('x'), clampPnfReversal(2)],
+    [1, 10, 3, 2],
+  )
 }
 
 // -------------------------------------------------------------- rate limits

@@ -32,7 +32,8 @@ import {
   themePriceSeries,
 } from './chartRender'
 import { syncBaselineBase } from './series/lineFamily'
-import { buildDerivedBars, derivedSize } from './series/derivedBars'
+import { derivedSize } from './series/derivedBars'
+import { buildStyleBars } from './series/reversalSettings'
 import { LAYOUTS, MAX_CHARTS, cells, layoutSpec, rowCount } from './layouts'
 import { loadCandles } from '../../services/marketData'
 import { mdSym, mdTf } from '../../services/market'
@@ -577,7 +578,7 @@ function barsFor(p: Panel): CandleFlat[] {
     p.rangeKey = key
     p.rangeSize = derivedSize(src, manual).size
   }
-  return buildDerivedBars(p.style, src, p.rangeSize)
+  return buildStyleBars(p.style, src, p.rangeSize)
 }
 
 const volBar = (c: CandleFlat): Any => ({

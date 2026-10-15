@@ -35,6 +35,7 @@ import {
 import type { LineFamilyColors } from './series/lineFamily'
 import { displayCandles, isRangeMode, snapChartTime, timeOnlyCandles } from './series/rangeView'
 import { renkoSeriesOptions } from './series/renko'
+import { subscribeReversalSettings } from './series/reversalSettings'
 import { tfDef } from '../../services/timeframe'
 import { mountCloseTimer, updateCloseTimer } from './closeTimer'
 import {
@@ -156,7 +157,13 @@ export function themePriceSeries(series: Any, id: ChartStyleId): void {
       gridColor: isLightTheme() ? 'rgba(75,85,99,.3)' : 'rgba(143,160,181,.25)',
       priceLineColor: th.pline,
     })
-  } else if (id === 'candle' || id === 'hollow' || id === 'range' || id === 'heikin') {
+  } else if (
+    id === 'candle' ||
+    id === 'hollow' ||
+    id === 'range' ||
+    id === 'heikin' ||
+    id === 'linebreak'
+  ) {
     series.applyOptions({
       upColor: id === 'hollow' ? 'rgba(0,0,0,0)' : th.up,
       downColor: id === 'hollow' ? 'rgba(0,0,0,0)' : th.dn,
@@ -404,6 +411,7 @@ export function initChart(): void {
     // the bars themselves change, so that view is refitted instead.
     const ts = chart.timeScale()
     const keep = ts.getVisibleLogicalRange()
+    // Between two non-time styles (range bars → Kagi, say) the bars change too.
     const refit = wasRange !== derivedKind()
     wasRange = derivedKind()
     applyChartStyle()
@@ -419,6 +427,10 @@ export function initChart(): void {
   })
   // A new range size rebuilds every bar: a new dataset, so refit.
   onRangeSettingsChange(() => updateChartData(true))
+  // Same for the Line break / Kagi / Point & Figure settings, on those styles.
+  subscribeReversalSettings(() => {
+    if (isRangeMode()) updateChartData(true)
+  })
   watchForOlderHistory()
   // Delta bars stream in far faster than the chart should repaint — coalesce
   // to the next frame, same reasoning as the live-tick indicator refresh
@@ -599,11 +611,11 @@ function pushRangeLive(): void {
     (k === prev.length || next[k].t === prev[k].t)
   if (tailOnly) {
     for (let i = Math.max(k, prev.length - 1); i < next.length; i++)
-      candleSeries.update(mapCandle(next[i]))
+      candleSeries.update(priceSeriesPoint(getChartStyle(), next[i]))
   } else {
     const ts = chart.timeScale()
     const keep = ts.getVisibleLogicalRange()
-    candleSeries.setData(next.map(mapCandle))
+    candleSeries.setData(priceSeriesData(getChartStyle(), next))
     if (keep) ts.setVisibleLogicalRange(keep)
   }
   rangeShown = next

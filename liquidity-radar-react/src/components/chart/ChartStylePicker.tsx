@@ -15,6 +15,12 @@ import {
 import type { ChartStyleId } from '../../features/charts/chartStyle'
 import { rangeSizeInfo } from '../../features/charts/series/rangeView'
 import { LineFamilyIcon } from './LineFamilyIcon'
+import {
+  isReversalStyle,
+  rangeSizeLabel,
+  subscribeReversalSettings,
+} from '../../features/charts/series/reversalSettings'
+import { ReversalSettings } from './ReversalSettings'
 import { state } from '../../services/store'
 import { pfmt } from '../../utils/format'
 
@@ -206,6 +212,38 @@ function StyleIcon({ id, size = 16 }: { id: ChartStyleId; size?: number }) {
       </svg>
     )
   }
+  if (id === 'linebreak') {
+    // Wickless boxes: steps up, then a reversal box down.
+    return (
+      <svg {...p}>
+        <rect x="2.5" y="14" width="4.5" height="6" fill={UP} />
+        <rect x="7.5" y="9" width="4.5" height="5" fill={UP} />
+        <rect x="12.5" y="4" width="4.5" height="5" fill={UP} />
+        <rect x="17.5" y="4" width="4.5" height="10" fill={DN} />
+      </svg>
+    )
+  }
+  if (id === 'kagi') {
+    // Thick yang line rising through the shoulder, thin yin falling back.
+    return (
+      <svg {...p} fill="none" strokeLinecap="square">
+        <path d="M3 20V13h5v4h4" stroke={DN} strokeWidth="1.3" />
+        <path d="M12 17V5h5" stroke={UP} strokeWidth="2.8" />
+        <path d="M17 5v4h4v9" stroke={DN} strokeWidth="1.3" />
+      </svg>
+    )
+  }
+  if (id === 'pnf') {
+    return (
+      <svg {...p} fill="none" strokeWidth="1.5" strokeLinecap="round">
+        <path d="M3 13l4 4M7 13l-4 4M3 8l4 4M7 8l-4 4M3 3l4 4M7 3l-4 4" stroke={UP} />
+        <circle cx="12" cy="7" r="2" stroke={DN} />
+        <circle cx="12" cy="12" r="2" stroke={DN} />
+        <circle cx="12" cy="17" r="2" stroke={DN} />
+        <path d="M17 13l4 4M21 13l-4 4M17 8l4 4M21 8l-4 4" stroke={UP} />
+      </svg>
+    )
+  }
   if (id === 'sessionvp') {
     return (
       <svg {...p}>
@@ -252,8 +290,8 @@ function StyleIcon({ id, size = 16 }: { id: ChartStyleId; size?: number }) {
  * for the coin on screen. The manual value is applied on Enter or when the
  * field loses focus, not per keystroke — every change rebuilds every bar.
  */
-function RangeSettings({ id }: { id: ChartStyleId }) {
-  const label = id === 'renko' ? 'Box size' : 'Range size'
+function RangeSettings({ id, label }: { id: ChartStyleId; label?: string }) {
+  label = label ?? (id === 'renko' ? 'Box size' : 'Range size')
   const sym = String(state.symbol || '')
   const rs = getRangeSettings()
   const info = rangeSizeInfo()
@@ -329,6 +367,8 @@ export function ChartStylePicker() {
   const wrapRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => subscribeChartStyle(() => force((n) => n + 1)), [])
+  // Kagi's ATR/percent switch decides whether the size block shows.
+  useEffect(() => subscribeReversalSettings(() => force((n) => n + 1)), [])
 
   useEffect(() => {
     if (!open) return
@@ -379,8 +419,13 @@ export function ChartStylePicker() {
       {open && (
         <div className="style-menu" role="menu" aria-label="Chart style">
           {/* On top, so it is in view the moment range bars are picked. */}
-          {def.rangeBars && (
-            <RangeSettings key={current + '|' + String(state.symbol || '')} id={current} />
+          {isReversalStyle(def.id) && <ReversalSettings id={def.id} />}
+          {def.rangeBars && rangeSizeLabel(def.id) && (
+            <RangeSettings
+              key={current + '|' + String(state.symbol || '')}
+              id={current}
+              label={rangeSizeLabel(def.id)!}
+            />
           )}
           {CHART_STYLES.map((s) => (
             <button
@@ -405,9 +450,10 @@ export function ChartStylePicker() {
                     <i
                       className="style-est"
                       title={
-                        s.rangeBars
+                        s.estNote ??
+                        (s.rangeBars
                           ? 'Built from candles, walking each one open → low → high → close'
-                          : 'Built from a model of where volume traded inside each bar'
+                          : 'Built from a model of where volume traded inside each bar')
                       }
                     >
                       est
