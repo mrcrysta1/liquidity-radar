@@ -24,6 +24,8 @@ import {
 import type { ChartStyleId } from './chartStyle'
 import type { CandleFlat } from '../../services/market'
 import { CUSTOM_VIEWS, toCandleData } from './series/customSeries'
+import { BASIC_VIEWS, basicSeriesOptions } from './series/basicSeries'
+import { heikinAshiBar, heikinAshiOf } from './series/heikinAshi'
 import { displayCandles, isRangeMode, snapChartTime, timeOnlyCandles } from './series/rangeView'
 import { tfDef } from '../../services/timeframe'
 import { mountCloseTimer, updateCloseTimer } from './closeTimer'
@@ -136,7 +138,9 @@ export function applyChartTheme(): void {
 export function themePriceSeries(series: Any, id: ChartStyleId): void {
   const th = chartTheme()
   const pRGB = cv('pRGB') || '41 98 255'
-  if (CUSTOM_VIEWS[id]) {
+  if (BASIC_VIEWS[id]) {
+    series.applyOptions(basicSeriesOptions(th, cv('primary')))
+  } else if (CUSTOM_VIEWS[id]) {
     series.applyOptions({
       upColor: th.up,
       downColor: th.dn,
@@ -145,7 +149,7 @@ export function themePriceSeries(series: Any, id: ChartStyleId): void {
       gridColor: isLightTheme() ? 'rgba(75,85,99,.3)' : 'rgba(143,160,181,.25)',
       priceLineColor: th.pline,
     })
-  } else if (id === 'candle' || id === 'hollow' || id === 'range') {
+  } else if (id === 'candle' || id === 'hollow' || id === 'range' || id === 'heikin') {
     series.applyOptions({
       upColor: id === 'hollow' ? 'rgba(0,0,0,0)' : th.up,
       downColor: id === 'hollow' ? 'rgba(0,0,0,0)' : th.dn,
@@ -156,7 +160,7 @@ export function themePriceSeries(series: Any, id: ChartStyleId): void {
       wickDownColor: th.dn,
       priceLineColor: th.pline,
     })
-  } else if (id === 'bar') {
+  } else if (id === 'bar' || id === 'hlc') {
     series.applyOptions({ upColor: th.up, downColor: th.dn, priceLineColor: th.pline })
   } else if (id === 'area') {
     series.applyOptions({
@@ -182,13 +186,27 @@ export function mapCandle(c: Any): Any {
 /** Series data for style `id`: custom bars, OHLC, or a single closing value. */
 export function priceSeriesData(id: ChartStyleId, candles: CandleFlat[]): Any[] {
   const def = styleDef(id)
+  // Heikin Ashi re-primes its memo here, so live ticks build on these bars.
+  if (id === 'heikin') return heikinAshiOf(candles, true).map(mapCandle)
   if (def.custom) return toCandleData(candles)
   if (def.ohlc) return candles.map(mapCandle)
   return candles.map((c) => ({ time: Math.floor(c.t / 1000), value: c.c }))
 }
-/** One bar of series data for style `id` — what series.update() takes. */
-export function priceSeriesPoint(id: ChartStyleId, c: CandleFlat): Any {
+/**
+ * One bar of series data for style `id` — what series.update() takes.
+ * `src` is the candle array `c` belongs to: Heikin Ashi needs the bars before
+ * it, since each HA open is built from the previous HA bar.
+ */
+export function priceSeriesPoint(id: ChartStyleId, c: CandleFlat, src?: CandleFlat[]): Any {
+  if (id === 'heikin') return mapCandle(heikinAshiBar(src || [c], c))
   return priceSeriesData(id, [c])[0]
+}
+/**
+ * The bars the OHLC legend reports for style `id`: the candles themselves, or
+ * on Heikin Ashi the HA bars actually drawn.
+ */
+export function legendCandles(id: ChartStyleId, candles: CandleFlat[]): CandleFlat[] {
+  return id === 'heikin' ? heikinAshiOf(candles) : candles
 }
 
 /**
@@ -199,8 +217,15 @@ export function priceSeriesPoint(id: ChartStyleId, c: CandleFlat): Any {
 export function createPriceSeries(c: Any, id: ChartStyleId, baseline = 0): Any {
   const th = chartTheme()
   const pRGB = cv('pRGB') || '41 98 255'
+  const basic = BASIC_VIEWS[id]
   const custom = CUSTOM_VIEWS[id]
-  if (custom) {
+  if (basic) {
+    // Columns and High-low (series/basicSeries).
+    return c.addCustomSeries(basic(), {
+      ...basicSeriesOptions(th, cv('primary')),
+      priceLineStyle: 2,
+    })
+  } else if (custom) {
     // Our own pane renderer, drawing inside the chart's price scale.
     return c.addCustomSeries(custom(), {
       upColor: th.up,
@@ -224,11 +249,13 @@ export function createPriceSeries(c: Any, id: ChartStyleId, baseline = 0): Any {
       priceLineColor: th.pline,
       priceLineStyle: 2,
     })
-  } else if (id === 'bar') {
+  } else if (id === 'bar' || id === 'hlc') {
+    // HLC bars are bars without the open tick.
     return c.addBarSeries({
       upColor: th.up,
       downColor: th.dn,
       thinBars: false,
+      openVisible: id !== 'hlc',
       priceLineColor: th.pline,
       priceLineStyle: 2,
     })
@@ -262,7 +289,8 @@ export function createPriceSeries(c: Any, id: ChartStyleId, baseline = 0): Any {
       priceLineStyle: 2,
     })
   }
-  // Candles, and range bars (OHLC bars built off the clock).
+  // Candles, Heikin Ashi (HA bars, see priceSeriesData), and range bars
+  // (OHLC bars built off the clock).
   return c.addCandlestickSeries({
     upColor: th.up,
     downColor: th.dn,
@@ -347,7 +375,9 @@ export function initChart(): void {
   chart.subscribeCrosshairMove((param: Any) => {
     const cp =
       param.time && param.point
-        ? displayCandles().find((c) => Math.floor(c.t / 1000) === param.time)
+        ? legendCandles(getChartStyle(), displayCandles()).find(
+            (c) => Math.floor(c.t / 1000) === param.time,
+          )
         : null
     if (!cp) {
       if (hoverTime != null) {
@@ -428,7 +458,7 @@ export function initChart(): void {
 /** Bar time (seconds) under the crosshair, or null when the cursor is off the chart. */
 let hoverTime: number | null = null
 function renderLiveLegend(): void {
-  const candles = displayCandles()
+  const candles = legendCandles(getChartStyle(), displayCandles())
   const lc = candles[candles.length - 1]
   if (lc) renderLegend(lc.o, lc.h, lc.l, lc.c, lc.v, false)
 }
@@ -531,7 +561,7 @@ export function updateChartData(fit = false): void {
     })
   }
   chartState.firstBarTime = candles[0].t
-  const lc = candles[candles.length - 1]
+  const lc = legendCandles(getChartStyle(), candles)[candles.length - 1]
   refreshIndicatorLegend()
   if (hoverTime == null) renderLegend(lc.o, lc.h, lc.l, lc.c, lc.v, false)
   redrawDrawings()
@@ -642,7 +672,10 @@ export function updateChartLast(c: Any): void {
     const lb = rangeShown[rangeShown.length - 1]
     if (lb) c = lb
   } else {
-    candleSeries.update(priceSeriesPoint(getChartStyle(), c))
+    const shown = displayCandles()
+    candleSeries.update(priceSeriesPoint(getChartStyle(), c, shown))
+    // Heikin Ashi: the legend reports the HA bar just drawn (memoised, so cheap).
+    if (getChartStyle() === 'heikin') c = heikinAshiBar(shown, c)
   }
   // The candle follows the tape frame by frame, but indicators and the legend
   // are recomputed over the whole series — far too much work to repeat on every
@@ -661,7 +694,7 @@ export function updateChartLast(c: Any): void {
         renderIndicators(shown)
         renderDeltaPane(timeOnlyCandles(), indicatorPaneCount())
         refreshIndicatorLegend()
-        const lc = shown[shown.length - 1]
+        const lc = legendCandles(getChartStyle(), shown)[shown.length - 1]
         if (lc && hoverTime == null) renderLegend(lc.o, lc.h, lc.l, lc.c, lc.v, false)
       }
       updateCloseTimer()

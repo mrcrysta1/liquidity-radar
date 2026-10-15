@@ -7,10 +7,14 @@ import { storageGet, storageSet } from '../../services/storage'
 export type ChartStyleId =
   | 'candle'
   | 'hollow'
+  | 'heikin'
   | 'bar'
+  | 'hlc'
   | 'line'
   | 'area'
   | 'baseline'
+  | 'columns'
+  | 'highlow'
   | 'volcandle'
   | 'footprint'
   | 'tpo'
@@ -34,10 +38,26 @@ export interface ChartStyleDef {
 export const CHART_STYLES: ChartStyleDef[] = [
   { id: 'candle', name: 'Candles', hint: 'Filled OHLC candles', ohlc: true },
   { id: 'hollow', name: 'Hollow candles', hint: 'Outlined bodies', ohlc: true },
+  { id: 'heikin', name: 'Heikin Ashi', hint: 'Averaged candles that smooth the trend', ohlc: true },
   { id: 'bar', name: 'Bars', hint: 'Classic OHLC bars', ohlc: true },
+  { id: 'hlc', name: 'HLC bars', hint: 'High-low bars with a close tick', ohlc: true },
   { id: 'line', name: 'Line', hint: 'Closing price', ohlc: false },
   { id: 'area', name: 'Area', hint: 'Closing price, filled', ohlc: false },
   { id: 'baseline', name: 'Baseline', hint: 'Coloured around the first close', ohlc: false },
+  {
+    id: 'columns',
+    name: 'Columns',
+    hint: 'Closing price as columns, vs the previous close',
+    ohlc: true,
+    custom: true,
+  },
+  {
+    id: 'highlow',
+    name: 'High-low',
+    hint: 'Each bar from its high to its low',
+    ohlc: true,
+    custom: true,
+  },
   {
     id: 'volcandle',
     name: 'Volume candles',
