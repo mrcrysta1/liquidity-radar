@@ -31,6 +31,10 @@ const {
 } = await import(src('services/timeframe.ts'))
 const { buildRangeBars, atr, niceRange, autoRangeSize, minSafeRange, MAX_RANGE_BARS } =
   await import(src('features/charts/series/rangeBars.ts'))
+const { heikinAshi, heikinAshiNext, heikinAshiOf, heikinAshiBar } = await import(
+  src('features/charts/series/heikinAshi.ts')
+)
+const { columnUp } = await import(src('features/charts/series/basicSeries.ts'))
 const { noteLimitResponse, cooldownLeft, isRateLimited } = await import(src('api/rateLimit.ts'))
 const { pfmt, nfmt, cfmt } = await import(src('utils/format.ts'))
 const { VENUES, isUsdQuoted } = await import(src('features/advanced/venues.ts'))
@@ -311,6 +315,64 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   eq('fmt: non-finite is a dash, never NaN', pfmt(NaN), '—')
   eq('fmt: infinity is a dash', nfmt(Infinity), '—')
   eq('fmtUsd: thousands', fmtUsd(1500), '1.5K')
+}
+
+// ------------------------------------------------------------- heikin ashi
+{
+  const cs = [
+    { t: 0, o: 10, h: 14, l: 9, c: 13, v: 5 },
+    { t: 60000, o: 13, h: 15, l: 12, c: 12, v: 6 },
+    { t: 120000, o: 12, h: 12.5, l: 8, c: 9, v: 7 },
+  ]
+  const ha = heikinAshi(cs)
+  eq('ha: one bar per candle, same times and volumes', ha.map((b) => [b.t, b.v]), cs.map((c) => [c.t, c.v]))
+  near('ha: first open is (O + C) / 2', ha[0].o, 11.5)
+  near('ha: close is (O + H + L + C) / 4', ha[0].c, 11.5)
+  near('ha: next open averages the previous HA bar', ha[1].o, (ha[0].o + ha[0].c) / 2)
+  near('ha: second close', ha[1].c, 13)
+  near('ha: high takes the real high when above', ha[1].h, 15)
+  near('ha: third open', ha[2].o, (ha[1].o + ha[1].c) / 2)
+  near('ha: low takes the real low', ha[2].l, 8)
+  // High/low must enclose the HA body even when the body pokes past the candle.
+  const gap = heikinAshi([
+    { t: 0, o: 100, h: 101, l: 99, c: 100, v: 1 },
+    { t: 60000, o: 50, h: 51, l: 49, c: 50, v: 1 },
+  ])
+  near('ha: high is at least the HA open', gap[1].h, gap[1].o)
+  ok('ha: low is at most the HA close', gap[1].l <= gap[1].c)
+  eq('ha: empty input', heikinAshi([]).length, 0)
+  eq('ha: next() matches the batch', heikinAshiNext(ha[1], cs[2]), ha[2])
+
+  // Live ticks: the memo must equal a full rebuild after the last bar moves
+  // and after a new bar is appended, with the source mutated in place.
+  const live = Array.from({ length: 50 }, (_, i) => {
+    const o = 100 + Math.sin(i / 4) * 5
+    const c = o + ((i % 5) - 2)
+    return { t: i * 60000, o, h: Math.max(o, c) + 1, l: Math.min(o, c) - 1, c, v: 1 }
+  })
+  heikinAshiOf(live, true)
+  const last = live[live.length - 1]
+  const tick = { ...last, c: last.c + 3, h: Math.max(last.h, last.c + 3) }
+  live[live.length - 1] = tick
+  eq('ha: live tick updates the last bar against the previous HA bar', heikinAshiBar(live, tick), heikinAshi(live)[49])
+  eq('ha: memo equals a full rebuild after a tick', heikinAshiOf(live), heikinAshi(live))
+  const next = { t: 50 * 60000, o: tick.c, h: tick.c + 2, l: tick.c - 1, c: tick.c + 1, v: 2 }
+  live.push(next)
+  eq('ha: a new bar opens from the previous HA bar', heikinAshiBar(live, next), heikinAshi(live)[50])
+  eq('ha: memo equals a full rebuild after an append', heikinAshiOf(live), heikinAshi(live))
+  live.shift()
+  eq('ha: dropping the oldest bar rebuilds', heikinAshiOf(live), heikinAshi(live))
+  const outside = { t: 99 * 60000, o: 1, h: 2, l: 0.5, c: 1.5, v: 1 }
+  eq('ha: a candle past the array builds on the last HA bar', heikinAshiBar(live, outside), heikinAshiNext(heikinAshi(live)[live.length - 1], outside))
+}
+
+// ----------------------------------------------------------------- columns
+{
+  eq('columns: up when the close is above the previous close', columnUp(10, 12, 11), true)
+  eq('columns: down when below, whatever the open', columnUp(10, 8, 9), false)
+  eq('columns: an unchanged close counts as up', columnUp(10, 12, 10), true)
+  eq('columns: the first bar compares with its own open', columnUp(null, 10, 9), false)
+  eq('columns: a missing previous close falls back to the open', columnUp(undefined, 9, 10), true)
 }
 
 // ------------------------------------------------------------------ venues

@@ -665,7 +665,7 @@ function connect(p: Panel, token: number): void {
       if (isRangeCell(p)) pushRangeBars(p)
       else {
         p.shown = arr
-        p.candleSeries.update(priceSeriesPoint(p.style, c))
+        p.candleSeries.update(priceSeriesPoint(p.style, c, arr))
         p.volSeries.update(volBar(c))
       }
       scheduleIndicators(p)

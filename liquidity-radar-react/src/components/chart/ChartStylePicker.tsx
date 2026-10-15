@@ -71,6 +71,45 @@ function StyleIcon({ id, size = 16 }: { id: ChartStyleId; size?: number }) {
       </svg>
     )
   }
+  if (id === 'heikin') {
+    // Three smoothed candles in a run: no lower wick on the up legs.
+    return (
+      <svg {...p}>
+        <path d="M5 9v2M12 5v2" stroke={UP} strokeWidth="1.4" strokeLinecap="round" />
+        <rect x="3" y="11" width="4" height="9" rx=".8" fill={UP} />
+        <rect x="10" y="7" width="4" height="10" rx=".8" fill={UP} />
+        <path d="M19 20v2" stroke={DN} strokeWidth="1.4" strokeLinecap="round" />
+        <rect x="17" y="14" width="4" height="6" rx=".8" fill={DN} />
+      </svg>
+    )
+  }
+  if (id === 'hlc') {
+    return (
+      <svg {...p}>
+        <path d="M7.5 3v18M7.5 10h3.5" stroke={UP} strokeWidth="1.7" strokeLinecap="round" />
+        <path d="M16.5 3v18M16.5 15H20" stroke={DN} strokeWidth="1.7" strokeLinecap="round" />
+      </svg>
+    )
+  }
+  if (id === 'highlow') {
+    return (
+      <svg {...p}>
+        <rect x="3.5" y="9" width="4" height="11" rx=".8" fill={PRI} />
+        <rect x="10" y="4" width="4" height="12" rx=".8" fill={PRI} />
+        <rect x="16.5" y="7" width="4" height="8" rx=".8" fill={PRI} />
+      </svg>
+    )
+  }
+  if (id === 'columns') {
+    return (
+      <svg {...p}>
+        <rect x="3" y="12" width="4" height="9" fill={UP} opacity=".75" />
+        <rect x="8.5" y="7" width="4" height="14" fill={UP} opacity=".75" />
+        <rect x="14" y="10" width="4" height="11" fill={DN} opacity=".75" />
+        <rect x="19.5" y="13" width="2.5" height="8" fill={DN} opacity=".75" />
+      </svg>
+    )
+  }
   if (id === 'line') {
     return (
       <svg {...p}>
