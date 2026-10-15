@@ -1396,6 +1396,89 @@ html.radar-fs .cs-panel{height:100%;max-height:none}
   .replay-meta{order:5;width:100%;justify-content:space-between}
 }
 
+/* Price-scale + navigation controls (components/chart/ScaleNav) — the chart
+   toolbar's look: tf-switch track, tf-btn buttons, tf-menu popups. */
+.sn-overlay{position:absolute;inset:0;z-index:7;pointer-events:none}
+.sn-zoom{
+  position:absolute;transform:translateX(-50%);display:flex;gap:2px;padding:3px;
+  background:var(--sunk-3);border:1px solid var(--border2);border-radius:9px;
+  opacity:0;transition:opacity .16s;pointer-events:none;
+}
+.chart-wrap:hover .sn-zoom,.sn-zoom:focus-within{opacity:1;pointer-events:auto}
+.sn-zoom button,.sn-rt{
+  display:flex;align-items:center;justify-content:center;width:26px;height:24px;
+  background:transparent;border:none;border-radius:6px;color:var(--muted);cursor:pointer;
+  transition:.15s;transition-property:var(--tr-visual);
+}
+.sn-zoom button:hover{color:var(--txt);background:var(--border2)}
+.sn-rt{
+  position:absolute;pointer-events:auto;width:28px;height:26px;
+  background:var(--sunk-3);border:1px solid var(--border2);border-radius:8px;
+  animation:tfMenuIn .14s cubic-bezier(.2,.8,.2,1);
+}
+.sn-rt:hover{color:var(--txt);border-color:var(--primary);box-shadow:0 0 10px rgb(var(--pRGB)/.3)}
+.sn-zoom button:focus-visible,.sn-rt:focus-visible,.sn-btn:focus-visible,.sn-mi:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
+@media(hover:none){.sn-zoom{opacity:1;pointer-events:auto}}
+
+.sn-menu{
+  position:absolute;z-index:90;width:220px;padding:4px;pointer-events:auto;
+  background:var(--card);border:1px solid var(--border2);border-radius:12px;
+  box-shadow:var(--shade-2);animation:tfMenuIn .14s cubic-bezier(.2,.8,.2,1);
+}
+.sn-menu.up{top:auto;bottom:calc(100% + 6px);left:0;animation-name:tfMenuUp}
+.sn-menu.up.right{left:auto;right:0}
+.sn-mi{
+  display:flex;align-items:center;gap:8px;width:100%;padding:6px 8px;border:none;border-radius:7px;
+  background:transparent;color:var(--txt);font-size:12px;text-align:left;cursor:pointer;
+}
+.sn-mi:hover{background:rgb(var(--pRGB)/.12)}
+.sn-mi.on .sn-check{color:var(--primary)}
+.sn-check{width:12px;flex-shrink:0;font-size:11px;font-weight:700}
+.sn-mi-label{flex:1;min-width:0}
+.sn-kbd{font-family:var(--mono);font-size:10px;color:var(--dim)}
+.sn-msep{height:1px;margin:4px 6px;background:var(--border)}
+
+.sn-bar{
+  display:flex;align-items:center;gap:6px;margin-top:8px;min-width:0;
+  font-family:var(--mono);font-size:11px;
+}
+.sn-ranges{display:flex;gap:2px;background:var(--sunk-2);border:1px solid var(--border2);border-radius:8px;padding:3px}
+.sn-btn{
+  display:inline-flex;align-items:center;gap:3px;
+  background:transparent;border:none;color:var(--dim);font-family:var(--mono);font-size:11px;
+  padding:4px 8px;border-radius:6px;cursor:pointer;transition:.15s;transition-property:var(--tr-visual);
+}
+.sn-btn:hover{color:var(--txt);background:var(--border2)}
+.sn-btn.on{background:var(--primary);color:#fff;font-weight:700}
+.sn-bar>.sn-btn,.sn-more>.sn-btn,.sn-range-menu>.sn-btn{border:1px solid var(--border2);padding:3px 8px}
+.sn-bar>.sn-btn.on{border-color:var(--primary)}
+.sn-drop.open{color:#fff;background:var(--purple);border-color:var(--purple)}
+.sn-range-menu,.sn-more{position:relative;display:flex}
+.sn-range-menu{display:none}
+.sn-range-list{width:190px}
+.sn-spacer{flex:1}
+.sn-clock{color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+.sn-clock i{font-style:normal;color:var(--dim)}
+.sn-sep{width:1px;height:16px;background:var(--border2);margin:0 2px}
+html.radar-fs .sn-bar{flex-shrink:0;margin-top:6px}
+[data-theme="light"] .sn-ranges{background:var(--card2)}
+[data-theme="light"] .sn-btn{color:var(--muted)}
+[data-theme="light"] .sn-btn:hover{background:var(--border);color:var(--txt)}
+[data-theme="light"] .sn-btn.on{background:var(--primary);color:#fff}
+[data-theme="light"] .sn-zoom,[data-theme="light"] .sn-rt{background:rgba(255,255,255,.9);border-color:var(--border)}
+[data-theme="light"] .sn-zoom button:hover{background:var(--border)}
+[data-theme="light"] .sn-menu{box-shadow:0 18px 44px rgba(15,23,42,.16)}
+/* Phones: the nine range buttons collapse into one menu. */
+@media(max-width:640px){
+  .sn-ranges{display:none}
+  .sn-range-menu{display:flex}
+}
+@media(max-width:380px){
+  .sn-bar{gap:4px}
+  .sn-clock i{display:none}
+  .sn-bar>.sn-btn{padding:3px 6px}
+}
+
 /* Layout picker — icon button, name on hover, glyph menu */
 .layout-picker{position:relative;display:flex}
 .layout-btn{display:flex;align-items:center;justify-content:center;padding:4px 7px;position:relative}

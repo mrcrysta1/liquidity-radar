@@ -3,6 +3,7 @@
 // search), ? (shortcut cheat-sheet), F (fullscreen) and one-key tab
 // switching. Registered by the engine during init().
 import { isFullScreen, setFullScreen } from '../charts/chartRender'
+import { resetChartView } from '../charts/scaleNav'
 import { $, showToast } from '../../utils/dom'
 import { switchTab } from '../actions/userActions'
 import { toggleDock } from '../chat/dock'
@@ -26,16 +27,24 @@ export function initKeyboard(): void {
       modals.forEach((m) => m.classList.remove('open'))
       return
     }
-    if (e.ctrlKey || e.metaKey || e.altKey) return
     const t = e.target as HTMLElement | null
-    if (
-      t &&
+    const typing =
+      !!t &&
       (t.tagName === 'INPUT' ||
         t.tagName === 'TEXTAREA' ||
         t.tagName === 'SELECT' ||
         t.isContentEditable)
-    )
+    // Alt+R resets the chart view, as on TradingView. e.code, not e.key: on a
+    // Mac Option+R types "®". Only where the price-action chart is showing.
+    if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.code === 'KeyR') {
+      if (typing || !document.querySelector('.tab-section.active .chart-host #radarChartCard'))
+        return
+      e.preventDefault()
+      resetChartView()
       return
+    }
+    if (e.ctrlKey || e.metaKey || e.altKey) return
+    if (typing) return
     if (e.key === '/') {
       e.preventDefault()
       const cs = $('coinSearch') as HTMLInputElement | null
@@ -61,6 +70,7 @@ export function initKeyboard(): void {
         'N News',
         'T Radar AI',
         'F Fullscreen',
+        'Alt+R Reset chart',
         '/ Search',
         'Esc Close',
       ]
