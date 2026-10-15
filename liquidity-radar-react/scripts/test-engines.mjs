@@ -1631,6 +1631,104 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('selflearn: result survives structured clone', JSON.stringify(structuredClone(a)), JSON.stringify(a))
 }
 
+// ---- chart styles: the line family (line, markers, step, area, HLC area, baseline) ----
+{
+  const { isLineFamily, withAlpha, closeMidpoint, createLineFamilySeries, themeLineFamilySeries } =
+    await import(src('features/charts/series/lineFamily.ts'))
+  const { hlcAreaView } = await import(src('features/charts/series/hlcArea.ts'))
+
+  const family = ['line', 'linemarkers', 'stepline', 'area', 'hlcarea', 'baseline']
+  ok('line family: members', family.every(isLineFamily))
+  ok('line family: candles are not in it', !['candle', 'bar', 'range', ''].some(isLineFamily))
+
+  eq('withAlpha: #rrggbb', withAlpha('#2962FF', 0.28), 'rgba(41,98,255,0.28)')
+  eq('withAlpha: #rgb', withAlpha('#0f0', 1), 'rgba(0,255,0,1)')
+  eq('withAlpha: #rrggbbaa drops the old alpha', withAlpha('#00E676ff', 0), 'rgba(0,230,118,0)')
+  eq('withAlpha: rgb()', withAlpha('rgb(255, 23, 68)', 0.05), 'rgba(255,23,68,0.05)')
+  eq('withAlpha: space-separated rgb', withAlpha(' rgb(41 98 255) ', 0.5), 'rgba(41,98,255,0.5)')
+  eq('withAlpha: unknown form passes through', withAlpha('var(--primary)', 0.3), 'var(--primary)')
+
+  const closes = [10, 14, 12, 20, 16].map((c, i) => bar(i, c + 1, c - 1, c))
+  eq('midpoint: whole range', closeMidpoint(closes, 0, 4), 15)
+  eq('midpoint: fractional logical ends round outwards', closeMidpoint(closes, 0.4, 1.6), 12)
+  eq('midpoint: range past the data is clamped', closeMidpoint(closes, 3, 40), 18)
+  eq('midpoint: no bar in view falls back to the last close', closeMidpoint(closes, 9, 12), 16)
+  eq('midpoint: no bars at all', closeMidpoint([], 0, 1), null)
+
+  // A chart that records what it was asked to add, so the options can be checked.
+  const chart = {
+    addLineSeries: (o) => ({ kind: 'line', o }),
+    addAreaSeries: (o) => ({ kind: 'area', o }),
+    addBaselineSeries: (o) => ({ kind: 'baseline', o }),
+    addCustomSeries: (view, o) => ({ kind: 'custom', view, o }),
+  }
+  const k = { primary: '#2962FF', up: '#089981', dn: '#F23645', neutral: '#868993', pline: '#999' }
+  const mk = (id) => createLineFamilySeries(chart, id, k, 123)
+  eq('line family: candles are left to the caller', mk('candle'), null)
+
+  const line = mk('line')
+  eq('line: plain line series', line.kind, 'line')
+  eq('line: width 2 (TradingView default)', line.o.lineWidth, 2)
+  eq('line: no markers, no steps', [line.o.pointMarkersVisible, line.o.lineType], [false, 0])
+  eq(
+    'line: primary colour, dashed price line',
+    [line.o.color, line.o.priceLineStyle],
+    [k.primary, 2],
+  )
+  eq('line with markers: a dot per bar', mk('linemarkers').o.pointMarkersVisible, true)
+  eq('step line: LineType.WithSteps', mk('stepline').o.lineType, 1)
+
+  const area = mk('area')
+  eq('area: area series', area.kind, 'area')
+  eq('area: line colour', area.o.lineColor, k.primary)
+  eq('area: gradient from the line colour…', area.o.topColor, 'rgba(41,98,255,0.28)')
+  eq('area: …to transparent', area.o.bottomColor, 'rgba(41,98,255,0)')
+
+  const base = mk('baseline')
+  eq('baseline: starts on the given base', base.o.baseValue, { type: 'price', price: 123 })
+  eq(
+    'baseline: green above',
+    [base.o.topLineColor, base.o.topFillColor1],
+    [k.up, 'rgba(8,153,129,0.28)'],
+  )
+  eq(
+    'baseline: red below',
+    [base.o.bottomLineColor, base.o.bottomFillColor2],
+    [k.dn, 'rgba(242,54,69,0.28)'],
+  )
+
+  const hlc = mk('hlcarea')
+  eq('hlc area: one custom series', hlc.kind, 'custom')
+  eq(
+    'hlc area: high green, low red, close neutral',
+    [hlc.o.highLineColor, hlc.o.lowLineColor, hlc.o.closeLineColor],
+    [k.up, k.dn, k.neutral],
+  )
+  const d = { time: 1, open: 10, high: 12, low: 9, close: 11, volume: 1, session: 'x' }
+  eq(
+    'hlc area: scales over the full bar, close last for the price line',
+    hlc.view.priceValueBuilder(d),
+    [12, 9, 11],
+  )
+  eq(
+    'hlc area: whitespace is a bar without a close',
+    [hlc.view.isWhitespace({ time: 1 }), hlc.view.isWhitespace(d)],
+    [true, false],
+  )
+  const v = hlcAreaView()
+  v.update({ bars: [] }, { lineWidth: 3 })
+  ok('hlc area: defaults are a fresh copy', v.defaultOptions() !== v.defaultOptions())
+  eq('hlc area: default line width', v.defaultOptions().lineWidth, 2)
+
+  // Re-theming only ever changes colours, never the shape options.
+  const applied = []
+  const series = { applyOptions: (o) => applied.push(o) }
+  eq('theme: candles are not re-themed here', themeLineFamilySeries(series, 'candle', k), false)
+  eq('theme: step line is', themeLineFamilySeries(series, 'stepline', k), true)
+  eq('theme: colours only', applied, [{ color: k.primary, priceLineColor: k.pline }])
+  themeLineFamilySeries(series, 'area', { ...k, primary: '#ff0000' })
+  eq('theme: area follows the new palette', applied[1].topColor, 'rgba(255,0,0,0.28)')
+}
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')
 if (fails.length) {
   fails.forEach((f) => console.log('  FAIL  ' + f))

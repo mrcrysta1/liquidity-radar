@@ -9,7 +9,10 @@ export type ChartStyleId =
   | 'hollow'
   | 'bar'
   | 'line'
+  | 'linemarkers'
+  | 'stepline'
   | 'area'
+  | 'hlcarea'
   | 'baseline'
   | 'volcandle'
   | 'footprint'
@@ -36,8 +39,12 @@ export const CHART_STYLES: ChartStyleDef[] = [
   { id: 'hollow', name: 'Hollow candles', hint: 'Outlined bodies', ohlc: true },
   { id: 'bar', name: 'Bars', hint: 'Classic OHLC bars', ohlc: true },
   { id: 'line', name: 'Line', hint: 'Closing price', ohlc: false },
+  { id: 'linemarkers', name: 'Line with markers', hint: 'Closing price, a dot per bar', ohlc: false },
+  { id: 'stepline', name: 'Step line', hint: 'Closing price, in steps', ohlc: false },
   { id: 'area', name: 'Area', hint: 'Closing price, filled', ohlc: false },
-  { id: 'baseline', name: 'Baseline', hint: 'Coloured around the first close', ohlc: false },
+  // Drawn by series/hlcArea from the full bar, so it takes the custom-series data.
+  { id: 'hlcarea', name: 'HLC area', hint: 'Close line, high–low range shaded', ohlc: true, custom: true },
+  { id: 'baseline', name: 'Baseline', hint: 'Green above, red below the mid of the view', ohlc: false },
   {
     id: 'volcandle',
     name: 'Volume candles',

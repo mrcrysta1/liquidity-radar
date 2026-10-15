@@ -24,6 +24,13 @@ import {
 import type { ChartStyleId } from './chartStyle'
 import type { CandleFlat } from '../../services/market'
 import { CUSTOM_VIEWS, toCandleData } from './series/customSeries'
+import {
+  createLineFamilySeries,
+  stopBaselineBase,
+  syncBaselineBase,
+  themeLineFamilySeries,
+} from './series/lineFamily'
+import type { LineFamilyColors } from './series/lineFamily'
 import { displayCandles, isRangeMode, snapChartTime, timeOnlyCandles } from './series/rangeView'
 import { tfDef } from '../../services/timeframe'
 import { mountCloseTimer, updateCloseTimer } from './closeTimer'
@@ -135,7 +142,6 @@ export function applyChartTheme(): void {
  */
 export function themePriceSeries(series: Any, id: ChartStyleId): void {
   const th = chartTheme()
-  const pRGB = cv('pRGB') || '41 98 255'
   if (CUSTOM_VIEWS[id]) {
     series.applyOptions({
       upColor: th.up,
@@ -158,22 +164,14 @@ export function themePriceSeries(series: Any, id: ChartStyleId): void {
     })
   } else if (id === 'bar') {
     series.applyOptions({ upColor: th.up, downColor: th.dn, priceLineColor: th.pline })
-  } else if (id === 'area') {
-    series.applyOptions({
-      lineColor: cv('primary'),
-      topColor: 'rgb(' + pRGB + ' / .34)',
-      bottomColor: 'rgb(' + pRGB + ' / 0)',
-      priceLineColor: th.pline,
-    })
-  } else if (id === 'baseline') {
-    series.applyOptions({
-      topLineColor: th.up,
-      bottomLineColor: th.dn,
-      priceLineColor: th.pline,
-    })
   } else {
-    series.applyOptions({ color: cv('primary'), priceLineColor: th.pline })
+    themeLineFamilySeries(series, id, lineFamilyColors())
   }
+}
+/** The palette the line-family styles (series/lineFamily) are drawn in. */
+function lineFamilyColors(): LineFamilyColors {
+  const th = chartTheme()
+  return { primary: cv('primary'), up: th.up, dn: th.dn, neutral: th.txt, pline: th.pline }
 }
 export function mapCandle(c: Any): Any {
   return { time: Math.floor(c.t / 1000), open: c.o, high: c.h, low: c.l, close: c.c }
@@ -194,11 +192,10 @@ export function priceSeriesPoint(id: ChartStyleId, c: CandleFlat): Any {
 /**
  * Add the price series for style `id` to chart `c`. The main chart and the
  * multi-chart companions share it, so a style looks the same in every cell.
- * `baseline` is the Baseline style's base price (its first close).
+ * `baseline` is the Baseline style's starting base price (see syncBaselineBase).
  */
 export function createPriceSeries(c: Any, id: ChartStyleId, baseline = 0): Any {
   const th = chartTheme()
-  const pRGB = cv('pRGB') || '41 98 255'
   const custom = CUSTOM_VIEWS[id]
   if (custom) {
     // Our own pane renderer, drawing inside the chart's price scale.
@@ -232,36 +229,10 @@ export function createPriceSeries(c: Any, id: ChartStyleId, baseline = 0): Any {
       priceLineColor: th.pline,
       priceLineStyle: 2,
     })
-  } else if (id === 'area') {
-    return c.addAreaSeries({
-      lineColor: cv('primary'),
-      lineWidth: 2,
-      topColor: 'rgb(' + pRGB + ' / .34)',
-      bottomColor: 'rgb(' + pRGB + ' / 0)',
-      priceLineColor: th.pline,
-      priceLineStyle: 2,
-    })
-  } else if (id === 'line') {
-    return c.addLineSeries({
-      color: cv('primary'),
-      lineWidth: 2,
-      priceLineColor: th.pline,
-      priceLineStyle: 2,
-    })
-  } else if (id === 'baseline') {
-    return c.addBaselineSeries({
-      baseValue: { type: 'price', price: baseline },
-      topLineColor: th.up,
-      topFillColor1: 'rgba(0,230,118,.28)',
-      topFillColor2: 'rgba(0,230,118,.02)',
-      bottomLineColor: th.dn,
-      bottomFillColor1: 'rgba(255,23,68,.02)',
-      bottomFillColor2: 'rgba(255,23,68,.28)',
-      lineWidth: 2,
-      priceLineColor: th.pline,
-      priceLineStyle: 2,
-    })
   }
+  // Line, line with markers, step line, area, HLC area and baseline.
+  const line = createLineFamilySeries(c, id, lineFamilyColors(), baseline)
+  if (line) return line
   // Candles, and range bars (OHLC bars built off the clock).
   return c.addCandlestickSeries({
     upColor: th.up,
@@ -285,6 +256,7 @@ export function createPriceSeries(c: Any, id: ChartStyleId, baseline = 0): Any {
 function applyChartStyle(): void {
   if (!chart) return
   if (chartState.styleSeries) {
+    stopBaselineBase(chartState.styleSeries)
     try {
       chart.removeSeries(chartState.styleSeries)
     } catch (e) {
@@ -510,6 +482,7 @@ export function updateChartData(fit = false): void {
   const keep = fit ? null : ts.getVisibleLogicalRange()
   const prevFirst = chartState.firstBarTime as number | undefined
   candleSeries.setData(priceSeriesData(getChartStyle(), candles))
+  if (getChartStyle() === 'baseline') syncBaselineBase(chart, candleSeries, displayCandles)
   rangeShown = isRangeMode() ? candles : []
   renderIndicators(candles)
   renderDeltaPane(timeOnlyCandles(), indicatorPaneCount())
@@ -643,6 +616,7 @@ export function updateChartLast(c: Any): void {
     if (lb) c = lb
   } else {
     candleSeries.update(priceSeriesPoint(getChartStyle(), c))
+    if (getChartStyle() === 'baseline') syncBaselineBase(chart, candleSeries, displayCandles)
   }
   // The candle follows the tape frame by frame, but indicators and the legend
   // are recomputed over the whole series — far too much work to repeat on every
