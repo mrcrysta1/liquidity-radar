@@ -1631,6 +1631,52 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('selflearn: result survives structured clone', JSON.stringify(structuredClone(a)), JSON.stringify(a))
 }
 
+// ---------------------------------------------------------------- chart style data
+{
+  const { sessionKey, toCandleData, hollowCandleData, compactVol } = await import(
+    src('features/charts/series/customSeries.ts')
+  )
+  const H = 3_600_000
+  const D = 24 * H
+  const mon = Date.UTC(2024, 0, 1) // a Monday
+  eq('session: intraday bars group by UTC day', sessionKey(mon + 5 * H, H), '2024-01-01')
+  eq('session: 4h bars group by week', sessionKey(mon + 6 * D, 4 * H), sessionKey(mon, 4 * H))
+  ok('session: a new week starts on Monday', sessionKey(mon - 1, 4 * H) !== sessionKey(mon, 4 * H))
+  eq('session: daily bars group by month', sessionKey(mon + 20 * D, D), '2024-01')
+  eq('session: weekly bars group by year', sessionKey(mon + 60 * D, 7 * D), '2024')
+
+  const k = (t, o, c, v = 1) => ({ t, o, h: Math.max(o, c) + 1, l: Math.min(o, c) - 1, c, v })
+  const days = [0, 1, 2].map((i) => k(mon + i * D, 10, 11))
+  eq('toCandleData: daily bars share a month session', toCandleData(days).map((d) => d.session), [
+    '2024-01',
+    '2024-01',
+    '2024-01',
+  ])
+  eq('toCandleData: keeps the bar ms', toCandleData(days)[1].ms, mon + D)
+  // A live update is one bar: without the bar before it, it cannot know its interval.
+  eq('toCandleData: a lone live bar takes its session from prev', toCandleData([days[2]], days[1])[0].session, '2024-01')
+
+  const up = '#0f0'
+  const dn = '#f00'
+  const hc = hollowCandleData(
+    [k(0, 10, 12), k(60e3, 12, 11), k(120e3, 9, 10.5), k(180e3, 12, 11)],
+    up,
+    dn,
+  )
+  eq('hollow: up bar is hollow', hc[0].color, 'rgba(0,0,0,0)')
+  eq('hollow: first bar coloured against its open', hc[0].borderColor, up)
+  eq('hollow: down bar (close<open) is filled', hc[1].color, hc[1].borderColor)
+  eq('hollow: close below previous close is down-coloured', hc[1].borderColor, dn)
+  eq('hollow: rising bar under prev close is hollow but down-coloured', [hc[2].color, hc[2].borderColor], ['rgba(0,0,0,0)', dn])
+  eq('hollow: falling bar above prev close is filled and up-coloured', [hc[3].color, hc[3].borderColor], [up, up])
+  eq('hollow: wick follows the colour', hc[3].wickColor, up)
+  eq('hollow: live bar uses prev close', hollowCandleData([k(0, 12, 11)], up, dn, k(-60e3, 9, 10))[0].borderColor, up)
+
+  eq('compactVol: small', compactVol(0.42), '0.4')
+  eq('compactVol: thousands', compactVol(3400), '3.4K')
+  eq('compactVol: millions', compactVol(1_234_567), '1.2M')
+}
+
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')
 if (fails.length) {
   fails.forEach((f) => console.log('  FAIL  ' + f))

@@ -25,6 +25,7 @@ import { baseOf, coinMeta } from '../../utils/coins'
 import { pfmt } from '../../utils/format'
 import { $ } from '../../utils/dom'
 import {
+  barBefore,
   chartTheme,
   createPriceSeries,
   priceSeriesData,
@@ -90,6 +91,8 @@ interface Panel {
   indOff: (() => void) | null
   indTimer: ReturnType<typeof setTimeout> | null
   indAt: number
+  /** The crosshair is on a bar: its OHLC owns the legend, not live ticks. */
+  hover: boolean
 }
 
 /** Live ticks redraw a panel's indicators at most this often. */
@@ -351,6 +354,7 @@ function addPanel(pos: number): void {
     indOff: null,
     indTimer: null,
     indAt: 0,
+    hover: false,
   }
   // No controls of its own: the toolbar drives whichever chart is active,
   // and clicking this one (or Enter/Space on it) makes it the active chart.
@@ -492,9 +496,9 @@ function initChart(p: Panel): void {
   p.indOff = store.subscribe(() => drawIndicators(p))
   const legend = p.el?.querySelector('.rc-legend') as HTMLElement | null
   chart.subscribeCrosshairMove((param: Any) => {
-    if (!legend || !param.time || !param.seriesData) return
-    const d = param.seriesData.get(p.candleSeries)
-    if (!d) return
+    const d = legend && param.time && param.seriesData ? param.seriesData.get(p.candleSeries) : null
+    p.hover = !!d
+    if (!legend || !d) return
     if (d.open == null) {
       // Line, area and baseline carry the close alone.
       legend.innerHTML = '<span>C ' + pfmt(d.value) + '</span>'
@@ -605,7 +609,7 @@ function pushRangeBars(p: Panel): void {
     (k === prev.length || next[k].t === prev[k].t)
   if (tailOnly) {
     for (let i = Math.max(k, prev.length - 1); i < next.length; i++) {
-      p.candleSeries.update(priceSeriesPoint(p.style, next[i]))
+      p.candleSeries.update(priceSeriesPoint(p.style, next[i], next[i - 1]))
       p.volSeries.update(volBar(next[i]))
     }
   } else {
@@ -665,12 +669,13 @@ function connect(p: Panel, token: number): void {
       if (isRangeCell(p)) pushRangeBars(p)
       else {
         p.shown = arr
-        p.candleSeries.update(priceSeriesPoint(p.style, c))
+        p.candleSeries.update(priceSeriesPoint(p.style, c, barBefore(arr, c.t)))
         p.volSeries.update(volBar(c))
       }
       scheduleIndicators(p)
+      // While a bar is hovered its OHLC stays in the legend (as on the main chart).
       const legend = p.el?.querySelector('.rc-legend') as HTMLElement | null
-      if (legend)
+      if (legend && !p.hover)
         legend.innerHTML =
           '<span style="color:' +
           (c.c >= c.o ? 'var(--green)' : 'var(--red)') +
@@ -738,6 +743,9 @@ export function applyCompanionTheme(): void {
       timeScale: { borderColor: th.border },
     })
     if (p.candleSeries) themePriceSeries(p.candleSeries, p.style)
+    // Hollow candles carry their colours per bar: re-colour the data too.
+    if (p.candleSeries && p.style === 'hollow' && p.shown.length)
+      p.candleSeries.setData(priceSeriesData(p.style, p.shown))
     p.ind?.refreshColors()
   })
 }

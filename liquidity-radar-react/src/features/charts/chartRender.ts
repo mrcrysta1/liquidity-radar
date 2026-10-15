@@ -23,7 +23,7 @@ import {
 } from './chartStyle'
 import type { ChartStyleId } from './chartStyle'
 import type { CandleFlat } from '../../services/market'
-import { CUSTOM_VIEWS, toCandleData } from './series/customSeries'
+import { CUSTOM_VIEWS, hollowCandleData, toCandleData } from './series/customSeries'
 import { displayCandles, isRangeMode, snapChartTime, timeOnlyCandles } from './series/rangeView'
 import { tfDef } from '../../services/timeframe'
 import { mountCloseTimer, updateCloseTimer } from './closeTimer'
@@ -125,6 +125,9 @@ export function applyChartTheme(): void {
     timeScale: { borderColor: th.border },
   })
   if (candleSeries) themePriceSeries(candleSeries, getChartStyle())
+  // Hollow candles carry their colours per bar: re-colour the data too.
+  if (candleSeries && getChartStyle() === 'hollow' && displayCandles().length)
+    candleSeries.setData(priceSeriesData('hollow', displayCandles()))
   refreshIndicatorColors()
 }
 
@@ -179,16 +182,33 @@ export function mapCandle(c: Any): Any {
   return { time: Math.floor(c.t / 1000), open: c.o, high: c.h, low: c.l, close: c.c }
 }
 
-/** Series data for style `id`: custom bars, OHLC, or a single closing value. */
-export function priceSeriesData(id: ChartStyleId, candles: CandleFlat[]): Any[] {
+/**
+ * Series data for style `id`: custom bars, OHLC, or a single closing value.
+ * `prev` is the bar before `candles[0]`, which hollow candles (coloured by
+ * the previous close) and the custom styles (sessions) need for a live bar.
+ */
+export function priceSeriesData(
+  id: ChartStyleId,
+  candles: CandleFlat[],
+  prev?: CandleFlat | null,
+): Any[] {
   const def = styleDef(id)
-  if (def.custom) return toCandleData(candles)
+  if (def.custom) return toCandleData(candles, prev)
+  if (id === 'hollow') {
+    const th = chartTheme()
+    return hollowCandleData(candles, th.up, th.dn, prev)
+  }
   if (def.ohlc) return candles.map(mapCandle)
   return candles.map((c) => ({ time: Math.floor(c.t / 1000), value: c.c }))
 }
 /** One bar of series data for style `id` — what series.update() takes. */
-export function priceSeriesPoint(id: ChartStyleId, c: CandleFlat): Any {
-  return priceSeriesData(id, [c])[0]
+export function priceSeriesPoint(id: ChartStyleId, c: CandleFlat, prev?: CandleFlat | null): Any {
+  return priceSeriesData(id, [c], prev)[0]
+}
+/** The bar before the one starting at `t` in `bars` (searched from the end). */
+export function barBefore(bars: CandleFlat[], t: number): CandleFlat | null {
+  for (let i = bars.length - 1; i >= 0; i--) if (bars[i].t < t) return bars[i]
+  return null
 }
 
 /**
@@ -228,7 +248,8 @@ export function createPriceSeries(c: Any, id: ChartStyleId, baseline = 0): Any {
     return c.addBarSeries({
       upColor: th.up,
       downColor: th.dn,
-      thinBars: false,
+      // TradingView's bars are thin OHLC ticks, not body-width blocks.
+      thinBars: true,
       priceLineColor: th.pline,
       priceLineStyle: 2,
     })
@@ -509,6 +530,11 @@ export function updateChartData(fit = false): void {
   syncSecondsVisible()
   const keep = fit ? null : ts.getVisibleLogicalRange()
   const prevFirst = chartState.firstBarTime as number | undefined
+  // Baseline sits on the first close of the data on screen. It was only set
+  // when the series was built, so a new coin or interval kept the old one —
+  // BTC's base under an ETH chart, all of it drawn in one colour.
+  if (getChartStyle() === 'baseline')
+    candleSeries.applyOptions({ baseValue: { type: 'price', price: candles[0].c } })
   candleSeries.setData(priceSeriesData(getChartStyle(), candles))
   rangeShown = isRangeMode() ? candles : []
   renderIndicators(candles)
@@ -642,7 +668,7 @@ export function updateChartLast(c: Any): void {
     const lb = rangeShown[rangeShown.length - 1]
     if (lb) c = lb
   } else {
-    candleSeries.update(priceSeriesPoint(getChartStyle(), c))
+    candleSeries.update(priceSeriesPoint(getChartStyle(), c, barBefore(displayCandles(), c.t)))
   }
   // The candle follows the tape frame by frame, but indicators and the legend
   // are recomputed over the whole series — far too much work to repeat on every
