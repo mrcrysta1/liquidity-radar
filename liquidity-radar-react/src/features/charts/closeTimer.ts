@@ -9,6 +9,7 @@ import { state } from '../../services/store'
 import { bucketEnd, tfDef } from '../../services/timeframe'
 import { getTimeframe } from './timeframes'
 import { isReplayOn } from './replay'
+import { chartPalette } from './chartPalette'
 
 type Any = any
 
@@ -76,6 +77,9 @@ export function updateCloseTimer(): void {
   const left = bucketEnd(last.t, def) - Date.now()
 
   el.style.display = 'block'
+  // Same colour as the last-price label it hangs under (see tvLastPrice).
+  const pal = chartPalette()
+  el.style.setProperty('--ct-bg', last.c >= last.o ? pal.up : pal.dn)
   el.style.width = width + 'px'
   // Sit just under the price label, which is centred on the price itself.
   el.style.top = Math.max(0, Math.min(maxY, y + 10)) + 'px'

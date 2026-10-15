@@ -25,12 +25,21 @@ import { baseOf, coinMeta } from '../../utils/coins'
 import { pfmt } from '../../utils/format'
 import { $ } from '../../utils/dom'
 import {
-  chartTheme,
   createPriceSeries,
+  legendExchange,
+  legendSymbol,
   priceSeriesData,
   priceSeriesPoint,
   themePriceSeries,
 } from './chartRender'
+import {
+  chartPalette,
+  resetTvLastPrice,
+  tvChartOptions,
+  tvLastPrice,
+  tvWatermark,
+  volumeColor,
+} from './chartPalette'
 import { autoRangeSize, buildRangeBars, minSafeRange } from './series/rangeBars'
 import { LAYOUTS, MAX_CHARTS, cells, layoutSpec, rowCount } from './layouts'
 import { loadCandles } from '../../services/marketData'
@@ -89,6 +98,8 @@ interface Panel {
   ind: IndicatorRenderer | null
   indOff: (() => void) | null
   indTimer: ReturnType<typeof setTimeout> | null
+  /** The crosshair is on a bar, so live ticks leave the legend alone. */
+  hover?: boolean
   indAt: number
 }
 
@@ -442,39 +453,36 @@ function closeWs(p: Panel): void {
 function initChart(p: Panel): void {
   const body = p.el?.querySelector('.rc-body') as HTMLElement | null
   if (!body) return
-  const th = chartTheme()
+  // The main chart's TradingView look (./chartPalette), a size smaller.
+  const tv: Any = tvChartOptions()
   const chart: Any = LightweightCharts.createChart(body, {
     // Same reason as the main chart: let the library measure its own box so it
     // never writes inline sizes that outlive the layout that caused them.
     autoSize: true,
-    layout: {
-      background: { type: 'solid', color: th.bg },
-      textColor: th.txt,
-      fontSize: 10,
-      fontFamily: "'JetBrains Mono', monospace",
-    },
-    grid: { vertLines: { color: th.grid }, horzLines: { color: th.grid } },
-    rightPriceScale: { borderColor: th.border },
+    ...tv,
+    ...tvWatermark(watermarkOf(p), 32),
+    layout: { ...tv.layout, fontSize: 11 },
     // Range bars are spaced by the second (see series/rangeBars), like the main chart.
     timeScale: {
-      borderColor: th.border,
+      ...tv.timeScale,
       timeVisible: true,
       secondsVisible: isRangeCell(p),
-      rightOffset: 4,
+      rightOffset: 5,
     },
-    crosshair: {
-      mode: 0,
-      vertLine: { color: th.pline, labelBackgroundColor: th.pline },
-      horzLine: { color: th.pline, labelBackgroundColor: th.pline },
-    },
+    crosshair: { ...tv.crosshair, mode: 0 },
     localization: { priceFormatter: (v: number) => pfmt(v) },
   } as Any)
   p.chart = chart
   // The same series the main chart builds for this style, so a cell keeps its
   // look whether or not it is the active one.
   p.candleSeries = createPriceSeries(chart, p.style)
-  p.volSeries = chart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: 'vol' })
-  p.volSeries.priceScale().applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } })
+  p.volSeries = chart.addHistogramSeries({
+    priceFormat: { type: 'volume' },
+    priceScaleId: 'vol',
+    lastValueVisible: false,
+    priceLineVisible: false,
+  })
+  p.volSeries.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } })
   const store = panelIndicatorStore(p.slot)
   p.ind = createIndicatorRenderer(store.getIndicators, {
     // Candles and volume make room for the panes; with none, the panel looks
@@ -484,34 +492,27 @@ function initChart(p: Panel): void {
         scaleMargins: bottom ? { top: 0.08, bottom: bottom + 0.1 } : { top: 0.2, bottom: 0.1 },
       })
       c.priceScale('vol').applyOptions({
-        scaleMargins: bottom ? { top: 1 - bottom - 0.1, bottom } : { top: 0.85, bottom: 0 },
+        scaleMargins: bottom ? { top: 1 - bottom - 0.1, bottom } : { top: 0.8, bottom: 0 },
       })
     },
   })
   p.ind.attach(chart)
   p.indOff = store.subscribe(() => drawIndicators(p))
   const legend = p.el?.querySelector('.rc-legend') as HTMLElement | null
+  // The bar under the crosshair, else the live one — read from the panel's own
+  // bars so every style (line, footprint, ...) gets the full OHLC readout.
   chart.subscribeCrosshairMove((param: Any) => {
-    if (!legend || !param.time || !param.seriesData) return
-    const d = param.seriesData.get(p.candleSeries)
-    if (!d) return
-    if (d.open == null) {
-      // Line, area and baseline carry the close alone.
-      legend.innerHTML = '<span>C ' + pfmt(d.value) + '</span>'
-      return
+    if (!legend) return
+    const bars = p.shown
+    const i =
+      param.time && param.point ? bars.findIndex((c) => Math.floor(c.t / 1000) === param.time) : -1
+    if (i >= 0) {
+      p.hover = true
+      legend.innerHTML = legendHtml(p, bars[i], bars[i - 1])
+    } else if (p.hover) {
+      p.hover = false
+      liveLegend(p)
     }
-    legend.innerHTML =
-      '<span style="color:' +
-      (d.close >= d.open ? 'var(--green)' : 'var(--red)') +
-      '">O ' +
-      pfmt(d.open) +
-      ' H ' +
-      pfmt(d.high) +
-      ' L ' +
-      pfmt(d.low) +
-      ' C ' +
-      pfmt(d.close) +
-      '</span>'
   })
   p.ro = null
   reload(p)
@@ -582,7 +583,7 @@ function barsFor(p: Panel): CandleFlat[] {
 const volBar = (c: CandleFlat): Any => ({
   time: Math.floor(c.t / 1000),
   value: c.v,
-  color: c.c >= c.o ? 'rgba(0,230,118,.35)' : 'rgba(255,23,68,.35)',
+  color: volumeColor(c.c >= c.o),
 })
 
 const sameBar = (a: CandleFlat, b: CandleFlat): boolean =>
@@ -628,15 +629,55 @@ function draw(p: Panel, candles: CandleFlat[]): void {
   p.volSeries.setData(p.shown.map(volBar))
   drawIndicators(p)
   p.chart.timeScale().fitContent()
-  const last = candles[candles.length - 1]
+  p.chart.applyOptions(tvWatermark(watermarkOf(p), 32))
+  const last = p.shown[p.shown.length - 1]
+  if (last) tvLastPrice(p.candleSeries, last.c >= last.o)
+  liveLegend(p)
+}
+
+/** "BTCUSDT, 1h" behind the bars, as on the main chart. */
+function watermarkOf(p: Panel): string {
+  return legendSymbol(p.sym) + ', ' + (TIMEFRAMES.find((t) => t.id === p.tf)?.label || p.tf)
+}
+/** TradingView legend for a cell: symbol · interval · exchange, O H L C, change. */
+function legendHtml(p: Panel, c: CandleFlat, prev?: CandleFlat): string {
+  const pal = chartPalette()
+  const col = c.c >= c.o ? pal.up : pal.dn
+  const ref = prev && prev.c > 0 ? prev.c : c.o
+  const d = c.c - ref
+  const pct = ref ? (d / ref) * 100 : 0
+  const sign = (x: number) => (x >= 0 ? '+' : '\u2212')
+  const val = (k: string, x: number) =>
+    '<span class="leg-k">' + k + '</span><b style="color:' + col + '">' + pfmt(x) + '</b>'
+  return (
+    '<span class="leg-sym">' +
+    legendSymbol(p.sym) +
+    '<i>\u00b7</i>' +
+    (TIMEFRAMES.find((t) => t.id === p.tf)?.label || p.tf) +
+    '<i>\u00b7</i>' +
+    legendExchange(p.sym) +
+    '</span>' +
+    val('O', c.o) +
+    val('H', c.h) +
+    val('L', c.l) +
+    val('C', c.c) +
+    '<b style="color:' +
+    col +
+    '">' +
+    sign(d) +
+    pfmt(Math.abs(d)) +
+    ' (' +
+    sign(pct) +
+    Math.abs(pct).toFixed(2) +
+    '%)</b>'
+  )
+}
+function liveLegend(p: Panel): void {
+  if (p.hover) return
   const legend = p.el?.querySelector('.rc-legend') as HTMLElement | null
-  if (legend && last)
-    legend.innerHTML =
-      '<span style="color:' +
-      (last.c >= last.o ? 'var(--green)' : 'var(--red)') +
-      '">' +
-      pfmt(last.c) +
-      '</span>'
+  const bars = p.shown
+  const last = bars[bars.length - 1]
+  if (legend && last) legend.innerHTML = legendHtml(p, last, bars[bars.length - 2])
 }
 
 function connect(p: Panel, token: number): void {
@@ -669,14 +710,9 @@ function connect(p: Panel, token: number): void {
         p.volSeries.update(volBar(c))
       }
       scheduleIndicators(p)
-      const legend = p.el?.querySelector('.rc-legend') as HTMLElement | null
-      if (legend)
-        legend.innerHTML =
-          '<span style="color:' +
-          (c.c >= c.o ? 'var(--green)' : 'var(--red)') +
-          '">' +
-          pfmt(c.c) +
-          '</span>'
+      const lb = p.shown[p.shown.length - 1]
+      if (lb) tvLastPrice(p.candleSeries, lb.c >= lb.o)
+      liveLegend(p)
     })
   } catch (e) {
     /* stream cap reached: the panel keeps its REST snapshot */
@@ -728,16 +764,23 @@ export function watchStageHeight(): void {
 
 /** Re-theme companions when the palette or light/dark mode changes. */
 export function applyCompanionTheme(): void {
-  const th = chartTheme()
+  const tv: Any = tvChartOptions()
   panels.forEach((p) => {
     if (!p.chart) return
     p.chart.applyOptions({
-      layout: { background: { type: 'solid', color: th.bg }, textColor: th.txt },
-      grid: { vertLines: { color: th.grid }, horzLines: { color: th.grid } },
-      rightPriceScale: { borderColor: th.border },
-      timeScale: { borderColor: th.border },
+      ...tv,
+      ...tvWatermark(watermarkOf(p), 32),
+      layout: { ...tv.layout, fontSize: 11 },
     })
-    if (p.candleSeries) themePriceSeries(p.candleSeries, p.style)
+    if (p.candleSeries) {
+      themePriceSeries(p.candleSeries, p.style)
+      resetTvLastPrice(p.candleSeries)
+      const last = p.shown[p.shown.length - 1]
+      if (last) tvLastPrice(p.candleSeries, last.c >= last.o)
+    }
+    // Volume colours are baked into each bar.
+    if (p.volSeries && p.shown.length) p.volSeries.setData(p.shown.map(volBar))
     p.ind?.refreshColors()
+    liveLegend(p)
   })
 }
