@@ -8,8 +8,9 @@
 import { state } from '../../../services/store'
 import type { CandleFlat } from '../../../services/market'
 import { visibleCandles } from '../replay'
-import { isRangeStyle, manualRangeFor } from '../chartStyle'
-import { autoRangeSize, buildRangeBars, minSafeRange } from './rangeBars'
+import { getChartStyle, isRangeStyle, manualRangeFor } from '../chartStyle'
+import { autoRangeSize, minSafeRange } from './rangeBars'
+import { buildStyleBars, reversalKey } from './reversalSettings'
 
 export function isRangeMode(): boolean {
   return isRangeStyle()
@@ -48,11 +49,13 @@ function buildFor(src: CandleFlat[]): CandleFlat[] {
   if (!n) return []
   const size = rangeSizeInfo(src).size
   const last = src[n - 1]
-  const key = [n, src[0].t, last.t, last.o, last.h, last.l, last.c, last.v, size].join('|')
+  const id = getChartStyle()
+  const tail = [last.t, last.o, last.h, last.l, last.c, last.v]
+  const key = [n, src[0].t, ...tail, size, id, reversalKey(id)].join('|')
   if (src !== barsSrc || key !== barsKey) {
     barsSrc = src
     barsKey = key
-    barsMemo = buildRangeBars(src, size)
+    barsMemo = buildStyleBars(id, src, size)
   }
   return barsMemo
 }

@@ -12,6 +12,7 @@
 // standard approximation when tick data is not available — the UI labels these
 // as estimates rather than passing them off as exchange data.
 import type { CandleFlat } from '../../../services/market'
+import { kagiView, pointFigureView } from './reversalViews'
 
 type Any = any
 
@@ -24,6 +25,8 @@ export interface CandleData {
   volume: number
   /** UTC day, precomputed. See toCandleData for why it is not derived later. */
   session: string
+  /** Per-bar extras some builders attach (Kagi thickness, P&F box size). */
+  aux?: unknown
 }
 
 export interface CustomStyleOptions {
@@ -60,6 +63,7 @@ export function toCandleData(c: CandleFlat[]): CandleData[] {
     close: k.c,
     volume: k.v,
     session: new Date(k.t).toISOString().slice(0, 10),
+    ...('aux' in k ? { aux: (k as CandleFlat & { aux: unknown }).aux } : {}),
   }))
 }
 
@@ -111,14 +115,14 @@ function groupSessions(bars: Any, from: number, to: number): Map<string, number[
   return out
 }
 
-interface RenderCtx {
+export interface RenderCtx {
   ctx: CanvasRenderingContext2D
   hRatio: number
   vRatio: number
 }
 
 /** Shared scaffolding: every view below only differs in how it paints a bar. */
-function makeView(
+export function makeView(
   paint: (
     r: RenderCtx,
     data: Any,
@@ -388,4 +392,6 @@ export const CUSTOM_VIEWS: Record<string, () => Any> = {
   footprint: footprintView,
   tpo: tpoView,
   sessionvp: sessionProfileView,
+  kagi: kagiView,
+  pnf: pointFigureView,
 }

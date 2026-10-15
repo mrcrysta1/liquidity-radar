@@ -16,6 +16,9 @@ export type ChartStyleId =
   | 'tpo'
   | 'sessionvp'
   | 'range'
+  | 'linebreak'
+  | 'kagi'
+  | 'pnf'
 
 export interface ChartStyleDef {
   id: ChartStyleId
@@ -29,6 +32,8 @@ export interface ChartStyleDef {
   estimate?: boolean
   /** Bars are not time-based: built from price movement (see series/rangeBars). */
   rangeBars?: boolean
+  /** Tooltip on the "est" tag, where the default range-bar wording does not fit. */
+  estNote?: string
 }
 
 export const CHART_STYLES: ChartStyleDef[] = [
@@ -73,6 +78,34 @@ export const CHART_STYLES: ChartStyleDef[] = [
     name: 'Range bars',
     hint: 'A new bar every fixed price range',
     ohlc: true,
+    rangeBars: true,
+    estimate: true,
+  },
+  {
+    id: 'linebreak',
+    name: 'Line break',
+    hint: 'A new line when the close breaks the last N lines',
+    ohlc: true,
+    rangeBars: true,
+    estimate: true,
+    estNote: 'Built from candle closes, not ticks',
+  },
+  {
+    id: 'kagi',
+    name: 'Kagi',
+    hint: 'Thick above the last shoulder, thin below the waist',
+    ohlc: true,
+    custom: true,
+    rangeBars: true,
+    estimate: true,
+    estNote: 'Built from candle closes, not ticks',
+  },
+  {
+    id: 'pnf',
+    name: 'Point & figure',
+    hint: 'X and O columns, N-box reversals',
+    ohlc: true,
+    custom: true,
     rangeBars: true,
     estimate: true,
   },

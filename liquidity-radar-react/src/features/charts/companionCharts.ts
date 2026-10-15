@@ -31,7 +31,8 @@ import {
   priceSeriesPoint,
   themePriceSeries,
 } from './chartRender'
-import { autoRangeSize, buildRangeBars, minSafeRange } from './series/rangeBars'
+import { autoRangeSize, minSafeRange } from './series/rangeBars'
+import { buildStyleBars } from './series/reversalSettings'
 import { LAYOUTS, MAX_CHARTS, cells, layoutSpec, rowCount } from './layouts'
 import { loadCandles } from '../../services/marketData'
 import { mdSym, mdTf } from '../../services/market'
@@ -576,7 +577,7 @@ function barsFor(p: Panel): CandleFlat[] {
     p.rangeKey = key
     p.rangeSize = Math.max(manual ?? autoRangeSize(src), minSafeRange(src))
   }
-  return buildRangeBars(src, p.rangeSize)
+  return buildStyleBars(p.style, src, p.rangeSize)
 }
 
 const volBar = (c: CandleFlat): Any => ({
