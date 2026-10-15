@@ -14,6 +14,8 @@
 //
 //   npm run build && npm run smoke:styles
 //   STYLE_SHOTS=<dir> also saves a screenshot of each style.
+//   STYLE_IDS=renko,kagi   only these styles (for re-running a failure).
+//   STYLE_PHASES=main,light,layout   only these passes (default: all).
 //
 // Server and Chrome discovery mirror scripts/smoke.mjs.
 import http from 'node:http'
@@ -100,7 +102,11 @@ function readStyles() {
   if (!out.length) throw new Error('no styles parsed from ' + STYLE_SRC)
   return out
 }
-const STYLES = readStyles().sort((a, b) => (b.id === 'candle') - (a.id === 'candle'))
+const ONLY = (process.env.STYLE_IDS || '').split(',').filter(Boolean)
+const PHASES = (process.env.STYLE_PHASES || 'main,light,layout').split(',')
+const STYLES = readStyles()
+  .filter((s) => !ONLY.length || ONLY.includes(s.id))
+  .sort((a, b) => (b.id === 'candle') - (a.id === 'candle'))
 console.log('styles under test (' + STYLES.length + '): ' + STYLES.map((s) => s.id).join(', '))
 /**
  * A far zoom-out pages in older history and redraws every bar. The longest
@@ -148,7 +154,17 @@ function recordError(msg) {
 
 /** Per style: { [column]: { ok, notes[] } } */
 const table = {}
-const COLUMNS = ['render', 'legend', 'tf 1m/1h/1D', 'live 10s', 'zoom-out', 'back to Candles', 'layout dark', 'layout light', 'light theme']
+const COLUMNS = [
+  'render',
+  'legend',
+  'tf 1m/1h/1D',
+  'live 10s',
+  'zoom-out',
+  'back to Candles',
+  'layout dark',
+  'layout light',
+  'light theme',
+]
 function mark(style, col, ok, note) {
   table[style] = table[style] || {}
   const cell = (table[style][col] = table[style][col] || { ok: true, notes: [] })
@@ -299,7 +315,10 @@ async function menuMatches() {
   await sleep(300)
   const want = STYLES.map((s) => s.name)
   const ok = shown.length === want.length && want.every((n, i) => shown[i] === n)
-  if (!ok) console.log('  picker shows: ' + JSON.stringify(shown) + '\n  CHART_STYLES: ' + JSON.stringify(want))
+  if (!ok)
+    console.log(
+      '  picker shows: ' + JSON.stringify(shown) + '\n  CHART_STYLES: ' + JSON.stringify(want),
+    )
   return ok
 }
 
@@ -367,7 +386,16 @@ async function legendFollows() {
   const a = await read()
   await page.mouse.move(r.x + r.w * 0.6, r.y + r.h * 0.45)
   await sleep(250)
-  const b = await read()
+  let b = await read()
+  if (a === b) {
+    // Few, wide bars (Point & figure): look for a second bar nearer the live edge.
+    for (const fx of [0.8, 0.9, 0.95]) {
+      await page.mouse.move(r.x + r.w * fx, r.y + r.h * 0.45)
+      await sleep(250)
+      b = await read()
+      if (b !== a) break
+    }
+  }
   await page.mouse.move(2, 2)
   await sleep(200)
   const ohlc = (s) => /O\s*[\d.,]+/.test(s) && /H\s*[\d.,]+/.test(s) && /C\s*[\d.,]+/.test(s)
@@ -462,7 +490,13 @@ async function mainChartPass({ id, name, heavy }) {
       id,
       'zoom-out',
       perf.maxLongTask < limit,
-      'long task ' + perf.maxLongTask + 'ms (limit ' + limit + 'ms, Candles ' + candleLongTask + 'ms)',
+      'long task ' +
+        perf.maxLongTask +
+        'ms (limit ' +
+        limit +
+        'ms, Candles ' +
+        candleLongTask +
+        'ms)',
     )
     console.log('    ' + id + (heavy ? ' (custom)' : '') + ' zoom-out: ' + JSON.stringify(perf))
     await shot('dark-' + id + '-zoomout')
@@ -474,7 +508,12 @@ async function mainChartPass({ id, name, heavy }) {
   await sleep(800)
   s = await snap()
   k = await ink('#chart')
-  mark(id, 'back to Candles', s.style === 'candle' && inked(k), JSON.stringify({ style: s.style, k }))
+  mark(
+    id,
+    'back to Candles',
+    s.style === 'candle' && inked(k),
+    JSON.stringify({ style: s.style, k }),
+  )
   errs(id, 'back to Candles')
 }
 
@@ -485,7 +524,12 @@ async function lightPass({ id, name }) {
   await sleep(1200)
   const s = await snap()
   const k = await ink('#chart')
-  mark(id, 'light theme', s.theme === 'light' && s.style === id && inked(k), JSON.stringify({ theme: s.theme, style: s.style, k }))
+  mark(
+    id,
+    'light theme',
+    s.theme === 'light' && s.style === id && inked(k),
+    JSON.stringify({ theme: s.theme, style: s.style, k }),
+  )
   const lg = await legendFollows()
   mark(id, 'light theme', lg.ok, 'legend ' + JSON.stringify(lg))
   await shot('light-' + id)
@@ -509,6 +553,18 @@ async function layoutPass(ids, theme) {
   if (theme === 'light') seed['lr-theme'] = 'light'
   await freshLoad(seed)
   await sleep(2500)
+  // Each load queues a dozen paced kline requests; give the companions time
+  // to get theirs before judging them.
+  await waitFor(
+    () =>
+      page.evaluate((n) => {
+        const ls = [...document.querySelectorAll('#chartLayout .rc-legend')]
+        return ls.length >= n && ls.every((l) => !/Loading/.test(l.textContent || ''))
+      }, ids.length),
+    20000,
+    300,
+  )
+  await sleep(800)
   for (let i = 0; i < ids.length; i++) {
     const id = ids[i]
     const pos = i + 1
@@ -520,10 +576,14 @@ async function layoutPass(ids, theme) {
       await page.mouse.move(r.x + r.w * 0.4, r.y + r.h * 0.5)
       await sleep(300)
       const leg = await page.evaluate(
-        (sel) => (document.querySelector(sel)?.querySelector('.rc-legend')?.textContent || '').trim(),
+        (sel) =>
+          (document.querySelector(sel)?.querySelector('.rc-legend')?.textContent || '').trim(),
         sel,
       )
-      const ok = /O [\d.,]+ H [\d.,]+ L [\d.,]+ C [\d.,]+/.test(leg) || /^C [\d.,]+$/.test(leg)
+      // The TradingView legend puts each label and value in its own span.
+      const ok =
+        /O\s*[\d.,]+\s*H\s*[\d.,]+\s*L\s*[\d.,]+\s*C\s*[\d.,]+/.test(leg) ||
+        /^C\s*[\d.,]+$/.test(leg)
       mark(id, col, ok, 'companion legend "' + leg.slice(0, 60) + '"')
       await page.mouse.move(2, 2)
     } else mark(id, col, false, 'no companion ' + pos)
@@ -534,10 +594,13 @@ async function layoutPass(ids, theme) {
     const k = await ink('#chartLayout > .rc-cell[style*="order: ' + (i + 1) + '"] .rc-body')
     mark(ids[i], col, inked(k), 'companion blank after live ' + JSON.stringify(k))
   }
-  if (SHOTS) await page.screenshot({ path: join(SHOTS, 'layout-' + theme + '-' + ids.join('-') + '.png') })
+  if (SHOTS)
+    await page.screenshot({ path: join(SHOTS, 'layout-' + theme + '-' + ids.join('-') + '.png') })
   const e = stepErrors.slice()
   stepErrors = []
-  ids.forEach((id) => mark(id, col, e.length === 0, e.length ? 'errors: ' + e.slice(0, 2).join(' | ') : ''))
+  ids.forEach((id) =>
+    mark(id, col, e.length === 0, e.length ? 'errors: ' + e.slice(0, 2).join(' | ') : ''),
+  )
 }
 
 // ---------- run ----------
@@ -574,20 +637,21 @@ server.listen(PORT, async () => {
     await freshLoad({ 'lr-tf': '1h', 'lr-chartPrefs': { style: 'candle' } })
     menuOk = await menuMatches()
     console.log('picker lists CHART_STYLES: ' + (menuOk ? 'pass' : 'FAIL'))
-    for (const s of STYLES) {
+    for (const s of PHASES.includes('main') ? STYLES : []) {
       console.log('\n[main/dark] ' + s.name)
       await mainChartPass(s)
     }
 
     // Light: each style draws on the main chart.
-    await freshLoad({ 'lr-tf': '1h', 'lr-chartPrefs': { style: 'candle' }, 'lr-theme': 'light' })
-    for (const s of STYLES) {
+    if (PHASES.includes('light'))
+      await freshLoad({ 'lr-tf': '1h', 'lr-chartPrefs': { style: 'candle' }, 'lr-theme': 'light' })
+    for (const s of PHASES.includes('light') ? STYLES : []) {
       console.log('[main/light] ' + s.name)
       await lightPass(s)
     }
 
     // Companions, three styles at a time, in both themes.
-    const ids = STYLES.map((s) => s.id)
+    const ids = PHASES.includes('layout') ? STYLES.map((s) => s.id) : []
     for (const theme of ['dark', 'light'])
       for (let i = 0; i < ids.length; i += 3) {
         const group = ids.slice(i, i + 3)
@@ -604,18 +668,21 @@ server.listen(PORT, async () => {
   console.log('\n--- chart styles (network: ' + network + ') ---')
   const short = ['render', 'legend', 'tf', 'live', 'zoom', 'candles', 'L-dark', 'L-light', 'light']
   console.log('style'.padEnd(12) + short.map((s) => s.padEnd(8)).join(''))
-  let ok = !fatal && menuOk
+  const menuChecked = PHASES.includes('main') && !ONLY.length
+  let ok = !fatal && (menuOk || !menuChecked)
   for (const { id } of STYLES) {
     const row = table[id] || {}
     const cells = COLUMNS.map((c) => (row[c] ? (row[c].ok ? 'pass' : 'FAIL') : '-'))
-    if (cells.includes('FAIL') || cells.every((c) => c === '-')) ok = false
+    const partial = ONLY.length > 0 || PHASES.length < 3
+    if (cells.includes('FAIL') || (!partial && cells.every((c) => c === '-'))) ok = false
     console.log(id.padEnd(12) + cells.map((c) => c.padEnd(8)).join(''))
   }
-  if (!menuOk) console.log('  FAIL picker menu does not list CHART_STYLES exactly')
+  if (!menuOk && menuChecked) console.log('  FAIL picker menu does not list CHART_STYLES exactly')
   for (const { id } of STYLES)
     for (const c of COLUMNS) {
       const cell = table[id]?.[c]
-      if (cell && !cell.ok) console.log('  FAIL ' + id + ' / ' + c + ': ' + cell.notes.join(' ; ').slice(0, 500))
+      if (cell && !cell.ok)
+        console.log('  FAIL ' + id + ' / ' + c + ': ' + cell.notes.join(' ; ').slice(0, 500))
     }
   console.log('--- app errors (' + allErrors.length + '), filtered noise: ' + noiseCount + ' ---')
   allErrors.slice(0, 20).forEach((e) => console.log('  ' + e))
