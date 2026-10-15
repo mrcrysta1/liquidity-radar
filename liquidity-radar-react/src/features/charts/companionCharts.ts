@@ -31,7 +31,7 @@ import {
   priceSeriesPoint,
   themePriceSeries,
 } from './chartRender'
-import { autoRangeSize, buildRangeBars, minSafeRange } from './series/rangeBars'
+import { buildDerivedBars, derivedSize } from './series/derivedBars'
 import { LAYOUTS, MAX_CHARTS, cells, layoutSpec, rowCount } from './layouts'
 import { loadCandles } from '../../services/marketData'
 import { mdSym, mdTf } from '../../services/market'
@@ -81,7 +81,7 @@ interface Panel {
   slot: string
   /** Candles on the chart, kept for the panel's indicators. */
   candles: CandleFlat[]
-  /** Bars on the chart: the candles, or range bars built from them. */
+  /** Bars on the chart: the candles, or range bars / renko built from them. */
   shown: CandleFlat[]
   /** Range-bar size and the closed-candle key it was sized on. */
   rangeSize: number
@@ -570,13 +570,13 @@ function barsFor(p: Panel): CandleFlat[] {
   const src = p.candles
   if (!isRangeCell(p) || !src.length) return src
   const n = src.length
-  const manual = manualRangeFor(p.sym)
-  const key = [p.sym, n, src[0].t, n > 1 ? src[n - 2].t : 0, manual ?? 'a'].join('|')
+  const manual = manualRangeFor(p.sym, p.style)
+  const key = [p.style, p.sym, n, src[0].t, n > 1 ? src[n - 2].t : 0, manual ?? 'a'].join('|')
   if (key !== p.rangeKey) {
     p.rangeKey = key
-    p.rangeSize = Math.max(manual ?? autoRangeSize(src), minSafeRange(src))
+    p.rangeSize = derivedSize(src, manual).size
   }
-  return buildRangeBars(src, p.rangeSize)
+  return buildDerivedBars(p.style, src, p.rangeSize)
 }
 
 const volBar = (c: CandleFlat): Any => ({

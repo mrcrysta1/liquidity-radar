@@ -31,6 +31,8 @@ const {
 } = await import(src('services/timeframe.ts'))
 const { buildRangeBars, atr, niceRange, autoRangeSize, minSafeRange, MAX_RANGE_BARS } =
   await import(src('features/charts/series/rangeBars.ts'))
+const { buildRenko } = await import(src('features/charts/series/renko.ts'))
+const { buildDerivedBars, derivedSize } = await import(src('features/charts/series/derivedBars.ts'))
 const { noteLimitResponse, cooldownLeft, isRateLimited } = await import(src('api/rateLimit.ts'))
 const { pfmt, nfmt, cfmt } = await import(src('utils/format.ts'))
 const { VENUES, isUsdQuoted } = await import(src('features/advanced/venues.ts'))
@@ -284,6 +286,116 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   ok('auto: the live candle does not move it', autoRangeSize(flat.concat([{ t: 31 * 60000, o: 100, h: 200, l: 1, c: 150, v: 1 }])) === 4)
   const floor = minSafeRange(srcBars)
   ok('floor: a tiny range is raised', floor > 0 && buildRangeBars(srcBars, floor).length <= MAX_RANGE_BARS * 1.1, floor)
+}
+
+// ------------------------------------------------------------------ renko
+// Traditional renko on the close: a brick per full box, two boxes to reverse,
+// and the last element may be the forming (partial) brick.
+{
+  // Candles from closes, one minute apart; each opens on the previous close.
+  const fromCloses = (cs, v = 1) =>
+    cs.map((c, i) => {
+      const o = i ? cs[i - 1] : c
+      return { t: i * 60000, o, h: Math.max(o, c) + 0.05, l: Math.min(o, c) - 0.05, c, v }
+    })
+  const oc = (bars) => bars.map((b) => [b.o, b.c])
+  const noWicks = (bars) => bars.every((b) => b.h === Math.max(b.o, b.c) && b.l === Math.min(b.o, b.c))
+
+  eq('renko: empty input', buildRenko([], 1).length, 0)
+  eq('renko: non-positive box', buildRenko(fromCloses([100, 105]), 0).length, 0)
+  eq('renko: non-finite box', buildRenko(fromCloses([100, 105]), Infinity).length, 0)
+
+  // Trend: one box per brick, each opening where the last closed.
+  const up = buildRenko(fromCloses([100, 101, 102, 103.5]), 1)
+  eq('renko: trend lays one brick per box, plus the forming one', oc(up), [[100, 101], [101, 102], [102, 103], [103, 103.5]])
+  ok('renko: bricks have no wicks', noWicks(up))
+  ok('renko: times strictly increase', up.every((b, i) => i === 0 || b.t > up[i - 1].t))
+  ok('renko: times are whole seconds', up.every((b) => b.t % 1000 === 0))
+  // The first brick's move began in candle 0; each later one in the candle
+  // after the previous brick; the forming one in the candle that just closed a brick.
+  eq('renko: each brick takes the candle its move began in', up.map((b) => b.t), [0, 120000, 180000, 181000])
+  eq('renko: exactly on the box edge is a whole brick, no forming one', buildRenko(fromCloses([100, 101, 102]), 1).length, 2)
+
+  // Reversal needs two boxes from the top of the last brick.
+  const pull = buildRenko(fromCloses([100, 101, 102, 103, 102.2, 101.01]), 1)
+  eq('renko: a pullback short of two boxes lays no brick', oc(pull.slice(0, 3)), [[100, 101], [101, 102], [102, 103]])
+  eq('renko: only a forming reversal brick follows it', [pull.length, pull[3].o, pull[3].c], [4, 102, 101.01])
+  const rev = buildRenko(fromCloses([100, 101, 102, 103, 102.2, 101]), 1)
+  eq('renko: two boxes down reverses, from the bottom of the last brick', oc(rev).slice(-1), [[102, 101]])
+  ok('renko: the reversal brick is a down brick', rev[rev.length - 1].c < rev[rev.length - 1].o)
+  const cont = buildRenko(fromCloses([100, 101, 102, 103, 101, 100]), 1)
+  eq('renko: after a reversal one box continues the new trend', oc(cont).slice(-2), [[102, 101], [101, 100]])
+  const back = buildRenko(fromCloses([100, 101, 102, 103, 101, 102.5]), 1)
+  eq('renko: going back up needs two boxes again', oc(back).slice(-2), [[102, 101], [102, 102.5]])
+  const back2 = buildRenko(fromCloses([100, 101, 102, 103, 101, 103]), 1)
+  eq('renko: two boxes up reverses back from the top of the down brick', oc(back2).slice(-1), [[102, 103]])
+  // First move from the start can go either way with one box.
+  eq('renko: the first brick can be down', oc(buildRenko(fromCloses([100, 99]), 1)), [[100, 99]])
+
+  // Gaps: one close several boxes away lays several bricks, a second apart.
+  const gap = buildRenko(fromCloses([100, 104.7]), 1)
+  eq('renko: a 4.7-box jump lays four bricks and a forming one', oc(gap), [[100, 101], [101, 102], [102, 103], [103, 104], [104, 104.7]])
+  eq('renko: bricks from one candle are a second apart', gap.map((b) => b.t), [0, 60000, 61000, 62000, 63000])
+  const gapDown = buildRenko(fromCloses([100, 101, 102, 103, 98.5]), 1)
+  eq('renko: a gap down reverses through several boxes', oc(gapDown).slice(3), [[102, 101], [101, 100], [100, 99], [99, 98.5]])
+  ok('renko: completed bricks span exactly one box', gapDown.slice(0, -1).every((b) => Math.abs(b.h - b.l - 1) < 1e-9))
+  ok('renko: gap bricks have no wicks', noWicks(gapDown))
+  // A gap candle after a long quiet stretch keeps strictly rising times.
+  const late = buildRenko([{ t: 0, o: 100, h: 100, l: 100, c: 100, v: 1 }, { t: 60000, o: 100, h: 130, l: 100, c: 130, v: 1 }, { t: 61000, o: 130, h: 131, l: 130, c: 131, v: 1 }], 1)
+  ok('renko: times stay strictly increasing past a big gap', late.every((b, i) => i === 0 || b.t > late[i - 1].t), late.map((b) => b.t))
+
+  // Tiny moves: nothing completes; at most a forming brick from the start.
+  const tiny = buildRenko(fromCloses([100, 100.3, 99.8, 100.2, 99.9, 100.4]), 1)
+  eq('renko: sub-box noise lays no whole brick', oc(tiny), [[100, 100.4]])
+  eq('renko: back at the start there is nothing to draw', buildRenko(fromCloses([100, 100.3, 100]), 1).length, 0)
+  const inside = buildRenko(fromCloses([100, 101, 102, 101.5]), 1)
+  eq('renko: inside the last brick there is no forming brick', oc(inside), [[100, 101], [101, 102]])
+
+  // Floating point: 0.1 + 0.2 must still be two whole 0.1 boxes.
+  const fl = buildRenko(fromCloses([0.1, 0.2, 0.30000000000000004]), 0.1)
+  eq('renko: float noise does not lose a brick', fl.length, 2)
+
+  // Volume is conserved across completed and forming bricks.
+  const wave = Array.from({ length: 300 }, (_, i) => {
+    const o = 100 + Math.sin(i / 7) * 12 + i * 0.02
+    const c = o + Math.cos(i / 3) * 1.5
+    return { t: 1_000_000 + i * 60000, o, h: Math.max(o, c) + 0.5, l: Math.min(o, c) - 0.5, c, v: 3 }
+  })
+  const wb = buildRenko(wave, 1.5)
+  ok('renko: builds plenty of bricks', wb.length > 20, wb.length)
+  ok('renko: volume is never invented', wb.reduce((a, b) => a + b.v, 0) <= 300 * 3 + 1e-6)
+  near('renko: volume is conserved into the forming brick', buildRenko(fromCloses([100, 100.4, 101, 102.2, 104.5], 2), 1).reduce((a, b) => a + b.v, 0), 10, 1e-9)
+  ok('renko: each brick opens on an edge of the last one', wb.every((b, i) => i === 0 || Math.abs(b.o - wb[i - 1].c) < 1e-9 || Math.abs(b.o - wb[i - 1].o) < 1e-9))
+  ok('renko: completed bricks are all exactly one box', wb.slice(0, -1).every((b) => Math.abs(Math.abs(b.c - b.o) - 1.5) < 1e-9))
+  ok('renko: wave times strictly increase', wb.every((b, i) => i === 0 || b.t > wb[i - 1].t))
+  ok('renko: no wicks anywhere', noWicks(wb))
+
+  // Live ticks: a new candle never rewrites the completed bricks, and a
+  // forming brick keeps its time when it completes.
+  const done = (bars) => {
+    const lb = bars[bars.length - 1]
+    return lb && Math.abs(Math.abs(lb.c - lb.o) - 1.5) > 1e-9 ? bars.slice(0, -1) : bars
+  }
+  const a = buildRenko(wave.slice(0, 200), 1.5)
+  const b = buildRenko(wave.slice(0, 201), 1.5)
+  const ad = done(a)
+  ok('renko: adding a candle keeps the completed bricks', ad.every((x, i) => JSON.stringify(x) === JSON.stringify(b[i])))
+  const tick = (c) => fromCloses([100, 101, c])
+  const forming = buildRenko(tick(101.6), 1)
+  const grown = buildRenko(tick(101.9), 1)
+  const closed = buildRenko(tick(102.0), 1)
+  eq('renko: a tick grows the forming brick in place', [forming.length, grown.length, grown[1].t === forming[1].t, grown[1].c], [2, 2, true, 101.9])
+  eq('renko: the forming brick completes with the same time', [closed.length, closed[1].t === forming[1].t, closed[1].c], [2, true, 102])
+  eq('renko: a tick back inside removes the forming brick', buildRenko(tick(100.5), 1).length, 1)
+
+  // Shared plumbing: the derived-bar dispatcher and its sizing.
+  eq('derived: renko builds bricks', JSON.stringify(buildDerivedBars('renko', wave, 1.5)), JSON.stringify(wb))
+  eq('derived: range builds range bars', JSON.stringify(buildDerivedBars('range', wave, 1.5)), JSON.stringify(buildRangeBars(wave, 1.5)))
+  const ds = derivedSize(wave, null)
+  eq('derived: auto size is ATR(14)', ds.size, Math.max(autoRangeSize(wave), minSafeRange(wave)))
+  eq('derived: a manual size is used as is', derivedSize(wave, 2).size, Math.max(2, ds.floor))
+  eq('derived: a tiny manual size is raised to the floor', derivedSize(wave, 1e-9).size, ds.floor)
+  ok('derived: the floor keeps renko bounded', buildRenko(wave, ds.floor).length <= MAX_RANGE_BARS * 1.1)
 }
 
 // -------------------------------------------------------------- rate limits
