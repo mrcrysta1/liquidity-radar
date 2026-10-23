@@ -13,7 +13,7 @@
     "smoke:layout": "node scripts/smoke-layout.mjs",
     "smoke:styles": "node scripts/smoke-styles.mjs",
     "preview": "vite preview",
-    "test": "node scripts/test-engines.mjs",
+    "test": "node scripts/test-engines.mjs && node scripts/test-api.mjs",
     "verify": "npm run lint && tsc --noEmit && npm test && npm run build && npm run smoke"
   },
   "dependencies": {
