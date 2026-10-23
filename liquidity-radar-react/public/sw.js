@@ -113,6 +113,23 @@ async function networkFirst(req) {
   }
 }
 
+// Alert notifications are shown through the registration (Android Chrome
+// rejects `new Notification()`); tapping one brings the app forward, or opens
+// it when no window is left.
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close()
+  e.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+      const own = list.find((c) => {
+        const u = new URL(c.url)
+        return u.origin === self.location.origin && !u.pathname.startsWith('/pro') && 'focus' in c
+      })
+      if (own) return own.focus()
+      return self.clients.openWindow ? self.clients.openWindow('/') : undefined
+    }),
+  )
+})
+
 self.addEventListener('fetch', (e) => {
   const req = e.request
   if (req.method !== 'GET') return

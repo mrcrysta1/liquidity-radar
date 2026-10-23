@@ -41,7 +41,7 @@ const ZOOM_STEP = 1.25
 const RANGE_PAD = 3
 /** Context-menu box, for keeping it inside the chart (matches .sn-menu in index.css). */
 const MENU_W = 220
-const MENU_H = 330
+const MENU_H = 370
 
 let deps: ScaleNavDeps | null = null
 /** Layout cell the main chart is in; prefs are stored under it. */
@@ -67,8 +67,11 @@ let lockRatio = 0
 let rangeSel: string | null = null
 /** A date range waiting for the reload its interval switch started. */
 let pending: { id: string; tf: string; until: number } | null = null
-/** Price-scale context menu position (inside #chartWrap), or null when closed. */
-let menu: { x: number; y: number } | null = null
+/**
+ * Price-scale context menu position (inside #chartWrap) and the price under
+ * the right-click (null when there is none), or null when closed.
+ */
+let menu: { x: number; y: number; price: number | null } | null = null
 let psW = 56
 let tsH = 26
 
@@ -81,7 +84,7 @@ export interface ScaleNavState {
   auto: boolean
   away: boolean
   range: string | null
-  menu: { x: number; y: number } | null
+  menu: { x: number; y: number; price: number | null } | null
   /** Right price-scale width and time-axis height, for placing overlay buttons. */
   psW: number
   tsH: number
@@ -361,9 +364,20 @@ export function afterChartFit(): void {
 }
 
 // ---- Price-scale context menu ----
-export function openScaleMenu(x: number, y: number): void {
-  menu = { x, y }
+export function openScaleMenu(x: number, y: number, price: number | null = null): void {
+  menu = { x, y, price }
   emit()
+}
+
+/** Price at a y offset inside the chart element (series coordinates, so it is a real price in % / indexed modes too). */
+function priceAtY(y: number): number | null {
+  try {
+    const s = deps && deps.getSeries()
+    const p = s ? Number(s.coordinateToPrice(y)) : NaN
+    return Number.isFinite(p) && p > 0 ? p : null
+  } catch {
+    return null
+  }
 }
 export function closeScaleMenu(): void {
   if (!menu) return
@@ -486,6 +500,7 @@ export function attachScaleNav(d: ScaleNavDeps): void {
     openScaleMenu(
       Math.max(4, Math.min(x, r.width - MENU_W - 4)),
       Math.max(4, Math.min(y, r.height - MENU_H - 4)),
+      priceAtY(e.clientY - el.getBoundingClientRect().top),
     )
   })
   syncView()

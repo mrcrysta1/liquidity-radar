@@ -991,6 +991,22 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
 }
 
 // ---------------------------------------------------------------- alerts
+// "Add alert at {price}" from the price axis, and the notification route.
+{
+  const { ruleForPriceClick, notifyVia, alertDecimals } = alerts
+  eq('alerts: level decimals follow the axis, then 6 significant digits', [83653.16, 1.5, 0.5, 0.00001, 1e-8].map(alertDecimals), [2, 5, 6, 10, 13])
+  eq('alerts: axis click above last crosses above', ruleForPriceClick(70500, 70000), { condition: 'crosses_above', value: 70500 })
+  eq('alerts: axis click below last crosses below (cents kept)', ruleForPriceClick(69000.123456789, 70000), { condition: 'crosses_below', value: 69000.12 })
+  eq('alerts: axis click at last price crosses below', ruleForPriceClick(70000, 70000).condition, 'crosses_below')
+  eq('alerts: tiny coin keeps its precision', ruleForPriceClick(0.0000123456789, 0.0000120001), { condition: 'crosses_above', value: 0.0000123457 })
+  eq('alerts: 1e-8 coin below', ruleForPriceClick(1.23456789e-8, 2e-8), { condition: 'crosses_below', value: 1.23457e-8 })
+  ok('alerts: no last price, no rule', ruleForPriceClick(100, NaN) === null && ruleForPriceClick(100, 0) === null)
+  ok('alerts: unusable click price, no rule', ruleForPriceClick(NaN, 100) === null && ruleForPriceClick(-1, 100) === null && ruleForPriceClick(0, 100) === null)
+  eq('alerts: notify via the worker when there is one', notifyVia({ granted: true, worker: true, ctor: true }), 'worker')
+  eq('alerts: notify via the constructor without a worker', notifyVia({ granted: true, worker: false, ctor: true }), 'ctor')
+  eq('alerts: no permission, toast only', notifyVia({ granted: false, worker: true, ctor: true }), 'none')
+  eq('alerts: no notification API at all', notifyVia({ granted: true, worker: false, ctor: false }), 'none')
+}
 {
   const { evalPrice, evalTechnical, evalWatchlist, stepRule, normalizeRules, rearm, ALERT_LIMITS } = alerts
   const r = (o) => ({ id: 'x', kind: 'price', sym: 'BTCUSDT', enabled: true, created: 0, condition: 'above', value: 0, once: false, triggerCount: 0, ...o })

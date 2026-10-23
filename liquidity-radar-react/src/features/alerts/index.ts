@@ -1,5 +1,6 @@
 export {
   addAlert,
+  addPriceRule,
   addRule,
   checkAlerts,
   clearAlertLog,

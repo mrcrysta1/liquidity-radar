@@ -13,7 +13,7 @@
 //     state.candles, everything else loads a 200-bar window, refreshed at most
 //     every minute (longer for slow intervals), capped per pass.
 // Nothing is fetched while Binance has us in a rate-limit cooldown.
-import { esc, pfmt } from '../../utils/format'
+import { esc, fmt, pfmt } from '../../utils/format'
 import { $, showToast } from '../../utils/dom'
 import { storageGet, storageSet } from '../../services/storage'
 import { state } from '../../services/store'
@@ -28,13 +28,16 @@ import { symOf, watchList } from '../favorites/favorites'
 import {
   ALERT_LIMITS,
   DEFAULT_COOLDOWN_MIN,
+  alertDecimals,
   MIN_TECH_CANDLES,
   condLabel,
   evalPrice,
   evalTechnical,
   evalWatchlist,
   normalizeRules,
+  notifyVia,
   rearm,
+  ruleForPriceClick,
   ruleName,
   stepRule,
 } from './rules'
@@ -161,11 +164,28 @@ async function refreshData(rules: AlertRule[]): Promise<void> {
 
 // ---------------------------------------------------------------- evaluation
 
+function notifyCtor(title: string, opts: NotificationOptions): void {
+  try {
+    new Notification(title, opts)
+  } catch {
+    /* Android Chrome: the constructor is not allowed — the toast still shows */
+  }
+}
+
 function notify(title: string, body: string): void {
   try {
-    if (notifOk && window.Notification && Notification.permission === 'granted') {
-      new Notification(title, { body: body, tag: 'lr-alert' })
-    }
+    const opts: NotificationOptions = { body: body, tag: 'lr-alert', icon: '/icon-192.png' }
+    const sw = 'serviceWorker' in navigator ? navigator.serviceWorker : null
+    // ready only settles once a worker controls the page (never in dev), so
+    // the worker route is taken only when one does.
+    const how = notifyVia({
+      granted: notifOk && !!window.Notification && Notification.permission === 'granted',
+      worker: !!(sw && sw.controller),
+      ctor: typeof window.Notification === 'function',
+    })
+    if (how === 'worker' && sw) {
+      sw.ready.then((reg) => reg.showNotification(title, opts)).catch(() => notifyCtor(title, opts))
+    } else if (how === 'ctor') notifyCtor(title, opts)
     showToast(title + ' — ' + body)
   } catch (e) {
     /* ignore */
@@ -317,6 +337,39 @@ export function addAlert(sym: string, dir: string, price: string): void {
     once: true,
   })
   showToast(err || 'Alert set for ' + normSym(sym) + ' ' + (dir || 'above') + ' $' + pfmt(parseFloat(price)))
+}
+
+/** The latest price known for `sym`: its ticker, else the charted candles. */
+function lastPriceOf(sym: string): number {
+  const t = tickerOf(sym)
+  if (t) return t.last
+  const c = sym === state.symbol ? state.candles : null
+  return c && c.length ? +c[c.length - 1].c : NaN
+}
+
+/** An alert level as text, with every decimal the level keeps (tiny coins included). */
+export function alertPriceText(p: number): string {
+  return fmt(p, alertDecimals(p))
+}
+
+/**
+ * "Add alert at {price}" from the chart's price axis: a repeating crosses
+ * rule (default cooldown) toward `price` from the last price. Returns whether
+ * it was saved; either way a toast says what happened.
+ */
+export function addPriceRule(sym: string, price: number): boolean {
+  const s = normSym(sym)
+  const pick = ruleForPriceClick(price, lastPriceOf(s))
+  if (!pick) {
+    showToast('No price for ' + (s || 'this chart') + ' yet — try again in a moment')
+    return false
+  }
+  const err = addRule({ kind: 'price', sym: s, condition: pick.condition, value: pick.value, once: false })
+  showToast(
+    err ||
+      'Alert set: ' + s + ' ' + (pick.condition === 'crosses_above' ? 'crosses above' : 'crosses below') + ' $' + alertPriceText(pick.value),
+  )
+  return !err
 }
 
 /** Remove a rule by id (or, for old callers, by list index). */

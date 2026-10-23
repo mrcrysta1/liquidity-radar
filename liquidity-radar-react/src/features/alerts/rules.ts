@@ -328,3 +328,41 @@ export function stepRule(rule: AlertRule, hit: boolean, now: number, matched?: s
 export function rearm(rule: AlertRule): AlertRule {
   return { ...rule, enabled: true, lastState: undefined, lastMatched: undefined }
 }
+
+/**
+ * Decimals an alert level keeps: at least what the price axis shows (pfmt's
+ * steps) and at least six significant digits, so tiny-priced coins (1e-8)
+ * keep their precision while the pixel noise of a click is dropped.
+ */
+export function alertDecimals(p: number): number {
+  if (!Number.isFinite(p) || !(p > 0)) return 2
+  const axis = p >= 100 ? 2 : p >= 1 ? 4 : p >= 0.01 ? 5 : p >= 0.0001 ? 6 : 8
+  return Math.min(20, Math.max(axis, 5 - Math.floor(Math.log10(p))))
+}
+
+/**
+ * A price picked on the chart's price axis ("Add alert at …"): a crosses rule
+ * in the direction the market has to travel to reach it — above the last
+ * price it must cross up, at or below it cross down. The level is rounded to
+ * alertDecimals. Null when either price is unusable.
+ */
+export function ruleForPriceClick(
+  price: number,
+  last: number,
+): { condition: 'crosses_above' | 'crosses_below'; value: number } | null {
+  if (!Number.isFinite(price) || !(price > 0) || !Number.isFinite(last) || !(last > 0)) return null
+  const value = Number(price.toFixed(alertDecimals(price)))
+  return { condition: value > last ? 'crosses_above' : 'crosses_below', value }
+}
+
+/**
+ * How to show a system notification. Android Chrome throws on
+ * `new Notification()` — only a service-worker registration may show one — so
+ * the worker is preferred whenever there is one; the constructor is the
+ * fallback; without permission there is only the in-app toast.
+ */
+export function notifyVia(o: { granted: boolean; worker: boolean; ctor: boolean }): 'worker' | 'ctor' | 'none' {
+  if (!o.granted) return 'none'
+  if (o.worker) return 'worker'
+  return o.ctor ? 'ctor' : 'none'
+}

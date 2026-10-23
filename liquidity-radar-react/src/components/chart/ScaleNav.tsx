@@ -26,6 +26,8 @@ import {
 import { RANGE_PRESETS, utcOffsetLabel } from '../../features/charts/scaleNavMath'
 import type { ScaleMode } from '../../features/charts/scaleNavMath'
 import { getActiveCell, subscribeLayout } from '../../features/charts/companionCharts'
+import { addPriceRule, alertPriceText } from '../../features/alerts/alerts'
+import { state } from '../../services/store'
 
 function useScaleNav() {
   const [, force] = useState(0)
@@ -196,6 +198,20 @@ export function ChartNavOverlay() {
           ref={menuRef}
           style={{ left: s.menu.x, top: s.menu.y }}
         >
+          {s.menu.price != null ? (
+            <>
+              <MenuItem
+                onPick={() => {
+                  const p = s.menu ? s.menu.price : null
+                  closeScaleMenu()
+                  if (p != null) addPriceRule(state.symbol, p)
+                }}
+              >
+                Add alert at {alertPriceText(s.menu.price)}
+              </MenuItem>
+              <div className="sn-msep" role="separator" />
+            </>
+          ) : null}
           <ScaleMenuItems done={closeScaleMenu} />
         </div>
       ) : null}
