@@ -7,6 +7,7 @@ import { LAYOUTS, cells, rowCount } from '../../features/charts/layouts'
 import type { LayoutSpec } from '../../features/charts/layouts'
 import { getLayout, setLayout, subscribeLayout } from '../../features/charts/companionCharts'
 import { isCrosshairSyncOn, setCrosshairSync } from '../../features/charts/crosshairSync'
+import { SavedLayouts } from './SavedLayouts'
 
 const GLYPH = 26
 const GAP = 1.6
@@ -37,6 +38,8 @@ export function LayoutPicker() {
   const [open, setOpen] = useState(false)
   const [syncOn, setSyncOn] = useState(isCrosshairSyncOn)
   const wrapRef = useRef<HTMLDivElement>(null)
+  /** Cancels a name edit in the saved-layouts list; true when there was one. */
+  const cancelEditRef = useRef<(() => boolean) | null>(null)
 
   useEffect(() => subscribeLayout(() => force((n) => n + 1)), [])
 
@@ -50,6 +53,8 @@ export function LayoutPicker() {
       // Capture phase, so the engine's global Escape (which exits full screen)
       // does not also fire: closing the menu is the whole gesture here.
       e.stopPropagation()
+      // Escape while naming a layout cancels the name, not the menu.
+      if (cancelEditRef.current?.()) return
       setOpen(false)
     }
     document.addEventListener('keydown', onEsc, true)
@@ -122,6 +127,13 @@ export function LayoutPicker() {
             />
             <span>Sync crosshair</span>
           </label>
+          <SavedLayouts
+            cancelRef={cancelEditRef}
+            onLoaded={() => {
+              setOpen(false)
+              wrapRef.current?.querySelector<HTMLElement>('.layout-btn')?.focus()
+            }}
+          />
         </div>
       )}
     </div>

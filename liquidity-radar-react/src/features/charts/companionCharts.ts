@@ -336,6 +336,65 @@ export function activateCell(pos: number): void {
   emit()
 }
 
+/** A layout as data: what every cell shows and which one is active. */
+export interface LayoutState {
+  n: number
+  active: number
+  /** By grid position (the active cell's read live from the main chart). */
+  cells: Array<CellCfg | null>
+}
+
+/** The layout on screen, for saving it under a name (see ./savedLayouts). */
+export function captureLayout(): LayoutState {
+  const cellsNow = saved.slice(0, MAX_CHARTS).map((c) => (c ? { ...c } : null))
+  panels.forEach((p) => {
+    cellsNow[p.pos] = { sym: p.sym, tf: p.tf, style: p.style }
+  })
+  cellsNow[active] = mainCfg()
+  for (let i = 0; i < cellsNow.length; i++) if (cellsNow[i] === undefined) cellsNow[i] = null
+  return { n: layout, active, cells: cellsNow }
+}
+
+/**
+ * Put a whole layout on screen: cell count, every companion's coin, timeframe
+ * and style, and the active cell — whose setup goes to the main chart through
+ * the toolbar's own setters. `cellSets` are the indicator sets by slot
+ * ('c<pos>'; the active cell's goes to the main chart).
+ */
+export function restoreLayout(
+  next: LayoutState,
+  sets?: { main: unknown[]; cells: Record<string, unknown[]> },
+): void {
+  const spec = layoutSpec(next.n)
+  const a = Number.isInteger(next.active) && next.active >= 0 && next.active < spec.n ? next.active : 0
+  const cellsNext = next.cells.slice(0, MAX_CHARTS).map((c) => cleanCfg(c))
+  // Every companion is rebuilt from the new setup.
+  for (let i = panels.length - 1; i >= 0; i--) destroyPanel(i)
+  if (sets) {
+    for (let pos = 0; pos < MAX_CHARTS; pos++) {
+      const slot = 'c' + pos
+      const want = pos === a ? [] : sets.cells[slot] || []
+      const store = panelIndicatorStore(slot)
+      if (want.length || store.indicatorCount()) store.replace(want)
+    }
+    mainIndicatorStore.replace(sets.main)
+  }
+  // The active cell's own setup lives in the main chart, not in `saved`.
+  const incoming = cellsNext[a] || mainCfg()
+  saved = cellsNext
+  layout = spec.n
+  active = a
+  applyGrid()
+
+  if (incoming.style !== getChartStyle()) setChartStyle(incoming.style)
+  // One load of the new pair, as in activateCell.
+  const symChange = !!incoming.sym && incoming.sym !== state.symbol
+  if (incoming.tf !== getTimeframe()) setTimeframe(incoming.tf, { reload: !symChange })
+  if (symChange) void setSymbol(incoming.sym, { keepTab: true })
+  persist()
+  emit()
+}
+
 function defaultFor(pos: number): CellCfg {
   const s = saved[pos]
   if (s) return s

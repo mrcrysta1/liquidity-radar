@@ -31,6 +31,7 @@ import { isInstrument } from '../../constants/instruments'
 import { createIndicatorRenderer } from './indicators/render'
 import type { IndicatorRenderer } from './indicators/render'
 import { panelIndicatorStore, prunePanelSlots, shiftPanelSlots } from './indicators/panelStore'
+import { parseMcPanels } from './savedLayoutsMath'
 
 type Any = any
 
@@ -88,6 +89,27 @@ export function mcSetColumns(n: number): void {
   changed()
 }
 
+/**
+ * Each panel's coin and interval, in order, so the workspace reopens as it
+ * was left. Missing or bad entries fall back to the four majors on the hour.
+ */
+const PANELS_KEY = 'lr-mc-panels-v1'
+const DEFAULT_PANELS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'DOGEUSDT'].map((sym) => ({ sym, interval: '1h' }))
+function storedPanels(): Array<{ sym: string; interval: string }> {
+  let raw: unknown = null
+  try {
+    raw = JSON.parse(storageGetRaw(PANELS_KEY) || 'null')
+  } catch (e) {
+    /* corrupt: defaults */
+  }
+  return parseMcPanels(raw, DEFAULT_PANELS, MC_INTERVALS, MAX_PANELS)
+}
+function persistPanels(): void {
+  const v = JSON.stringify(mcPanels.map((p) => ({ sym: p.sym, interval: p.interval })))
+  // Only real changes: every write is also a settings sync for signed-in users.
+  if (storageGetRaw(PANELS_KEY) !== v) storageSetRaw(PANELS_KEY, v)
+}
+
 /** What the grid renders: one entry per panel, in order. */
 export interface McPanelView {
   id: number
@@ -109,6 +131,7 @@ export const mcSnapshot = (): McSnapshot => snap
 
 /** Panel list, a symbol, an interval or the columns changed: new snapshot, tell listeners. */
 function changed(): void {
+  if (ready) persistPanels()
   snap = {
     ready,
     cols: mcColumns(),
@@ -129,12 +152,11 @@ export function mcGridRendered(): void {
 export function initMultiCharts(): void {
   mcPanels.forEach(mcTearDown)
   mcPanels = []
-  // Four majors on the hour, as the workspace opens.
-  ;['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'DOGEUSDT'].forEach((sym) => {
-    mcPanels.push(blankPanel(sym, '1h'))
+  // The panels as they were left (else four majors on the hour).
+  storedPanels().forEach((c) => {
+    mcPanels.push(blankPanel(c.sym, c.interval))
   })
-  // The workspace always reopens with these four, so indicator sets saved
-  // for panels beyond them belong to charts that are gone.
+  // Indicator sets saved for panels beyond these belong to charts that are gone.
   prunePanelSlots('mc', mcPanels.length)
   ready = true
   changed() // the grid mounts the panels; each body creates its chart
