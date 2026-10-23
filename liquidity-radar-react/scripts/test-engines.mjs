@@ -2219,6 +2219,109 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('xsync: sub-second bar times', barAtOrBefore([{ t: t0 * 1000 + 500, c: 1 }], t0), 0)
 }
 
+// ---- Saved chart layouts + workspace panels (features/charts/savedLayoutsMath) ----
+{
+  const L = await import(src('features/charts/savedLayoutsMath.ts'))
+  const NS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16]
+  const snap4 = {
+    n: 4,
+    active: 1,
+    cells: [
+      { sym: 'BTCUSDT', tf: '15m', style: 'candle' },
+      { sym: 'ETHUSDT', tf: '1h', style: 'line' },
+      { sym: 'SOLUSDT', tf: '4h', style: 'bar' },
+      { sym: 'XAUUSD', tf: '1d', style: 'candle' },
+    ],
+    mainIndicators: [{ uid: 'iabc', type: 'ema', params: { length: 21 }, source: 'close', visible: true }],
+    panelIndicators: { c2: [{ uid: 'pabc', type: 'rsi', params: {}, source: 'close', visible: true }] },
+    scale: { mode: 'log', invert: true, lock: false },
+  }
+  // names
+  eq('saved: name trimmed and folded', L.cleanLayoutName('  My   setup \n'), 'My setup')
+  eq('saved: name capped at 32', L.cleanLayoutName('x'.repeat(50)).length, 32)
+  eq('saved: control chars dropped', L.cleanLayoutName('a\u0000b\u0007c'), 'abc')
+  eq('saved: junk name is empty', L.cleanLayoutName(null), '')
+  // validation
+  ok('saved: USDT pair valid', L.validSymbol('BTCUSDT'))
+  ok('saved: instrument valid', L.validSymbol('XAUUSD'))
+  ok('saved: junk symbol invalid', !L.validSymbol('btc<script>') && !L.validSymbol('') && !L.validSymbol(42))
+  ok('saved: catalogue tf valid', L.validTimeframe('4h') && L.validTimeframe('1M'))
+  ok('saved: junk tf invalid', !L.validTimeframe('7x') && !L.validTimeframe(null))
+  eq('saved: bad symbol drops the cell', L.cleanSnapCell({ sym: 'nope', tf: '1h' }), null)
+  eq('saved: bad tf drops only the tf', L.cleanSnapCell({ sym: 'ETHUSDT', tf: 'bogus', style: 'line' }), { sym: 'ETHUSDT', style: 'line' })
+  eq('saved: unknown cell fields ignored', L.cleanSnapCell({ sym: 'ETHUSDT', tf: '1h', extra: 1 }), { sym: 'ETHUSDT', tf: '1h' })
+  // snapshot
+  const cs = L.cleanSnapshot(snap4, NS)
+  eq('saved: snapshot round-trips', cs, snap4)
+  eq('saved: unknown layout count rejected', L.cleanSnapshot({ ...snap4, n: 11 }, NS), null)
+  eq('saved: active outside the layout resets to 0', L.cleanSnapshot({ ...snap4, active: 9 }, NS).active, 0)
+  eq('saved: bad scale mode falls back', L.cleanSnapshot({ ...snap4, scale: { mode: 'cubic' } }, NS).scale, { mode: 'normal', invert: false, lock: false })
+  eq(
+    'saved: panel slots only c0..c15',
+    Object.keys(L.cleanSnapshot({ ...snap4, panelIndicators: { c2: [{}], mc1: [{}], c99: [{}], c3: 'x' } }, NS).panelIndicators),
+    ['c2'],
+  )
+  eq('saved: missing indicators are empty', L.cleanSnapshot({ n: 2, active: 0, cells: [] }, NS).mainIndicators, [])
+  // list: parse / migrate / serialize
+  const entry = { id: 'a1', name: 'Test', savedAt: 5, snapshot: snap4 }
+  eq('saved: corrupt storage is an empty list', L.parseSavedLayouts('{oops', NS), [])
+  eq('saved: null storage is an empty list', L.parseSavedLayouts(null, NS), [])
+  eq('saved: v1 shape parses', L.parseSavedLayouts({ v: 1, items: [entry] }, NS).map((e) => e.name), ['Test'])
+  eq('saved: bare array (unversioned) migrates', L.parseSavedLayouts([entry], NS).map((e) => e.id), ['a1'])
+  eq('saved: newer version keeps parseable items', L.parseSavedLayouts({ v: 9, items: [entry], future: true }, NS).length, 1)
+  const mixed = L.parseSavedLayouts(
+    [entry, { ...entry, id: 'a2', name: 'test' }, { id: 'a3', name: '', snapshot: snap4 }, { id: 'a4', name: 'X', snapshot: { n: 99 } }, 7, { ...entry, id: 'a1', name: 'Other' }],
+    NS,
+  )
+  eq('saved: duplicate names, empty names, bad snapshots dropped', mixed.map((e) => e.name), ['Test', 'Other'])
+  ok('saved: duplicate id replaced', mixed[1].id !== 'a1', mixed[1].id)
+  eq('saved: at most 20 kept', L.parseSavedLayouts(Array.from({ length: 30 }, (_, i) => ({ ...entry, id: 'x' + i, name: 'n' + i })), NS).length, 20)
+  const ser = L.serializeSavedLayouts([entry])
+  eq('saved: serialized with version', ser.v, 1)
+  eq('saved: serialize/parse round-trip', L.parseSavedLayouts(JSON.parse(JSON.stringify(ser)), NS), [entry])
+  // list edits
+  let r = L.addSavedLayout([], '  Test ', snap4, 10, 'id1')
+  eq('saved: add', [r.error, r.list.map((e) => [e.id, e.name, e.savedAt])], [null, [['id1', 'Test', 10]]])
+  r = L.addSavedLayout(r.list, 'Second', snap4, 11, 'id2')
+  eq('saved: newest first', r.list.map((e) => e.name), ['Second', 'Test'])
+  r = L.addSavedLayout(r.list, 'TEST', { ...snap4, n: 2 }, 12, 'id3')
+  eq('saved: same name overwrites in place', r.list.map((e) => [e.id, e.name, e.snapshot.n]), [['id2', 'Second', 4], ['id1', 'TEST', 2]])
+  eq('saved: add refuses an empty name', L.addSavedLayout(r.list, '   ', snap4, 1, 'z').error !== null, true)
+  const full = Array.from({ length: 20 }, (_, i) => ({ ...entry, id: 'f' + i, name: 'n' + i }))
+  const rf = L.addSavedLayout(full, 'one more', snap4, 1, 'z')
+  ok('saved: full list refuses a new name', rf.error && rf.list === full, rf.error)
+  ok('saved: full list still overwrites', !L.addSavedLayout(full, 'n3', snap4, 1, 'z').error)
+  let rn = L.renameSavedLayout(r.list, 'id1', ' Renamed ')
+  eq('saved: rename', rn.list.map((e) => e.name), ['Second', 'Renamed'])
+  rn = L.renameSavedLayout(r.list, 'id1', 'second')
+  ok('saved: rename refuses a taken name', rn.error && rn.list === r.list, rn.error)
+  ok('saved: rename refuses empty', L.renameSavedLayout(r.list, 'id1', '').error)
+  ok('saved: rename of a missing id refused', L.renameSavedLayout(r.list, 'nope', 'x').error)
+  ok('saved: rename to own name in another case', !L.renameSavedLayout(r.list, 'id1', 'test').error)
+  eq('saved: delete', L.deleteSavedLayout(r.list, 'id2').map((e) => e.id), ['id1'])
+  eq('saved: delete of a missing id is a no-op', L.deleteSavedLayout(r.list, 'nope').length, 2)
+
+  // Charts-tab workspace panels
+  const DEF = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'DOGEUSDT'].map((sym) => ({ sym, interval: '1h' }))
+  const IVS = ['1m', '5m', '15m', '1h', '4h', '1d']
+  eq('mc panels: nothing stored gives the defaults', L.parseMcPanels(null, DEF, IVS, 8), DEF)
+  eq('mc panels: empty list gives the defaults', L.parseMcPanels([], DEF, IVS, 8), DEF)
+  eq('mc panels: junk gives the defaults', L.parseMcPanels('x', DEF, IVS, 8), DEF)
+  eq(
+    'mc panels: stored panels restored in order',
+    L.parseMcPanels([{ sym: 'XRPUSDT', interval: '5m' }, { sym: 'ADAUSDT', interval: '1d' }], DEF, IVS, 8),
+    [{ sym: 'XRPUSDT', interval: '5m' }, { sym: 'ADAUSDT', interval: '1d' }],
+  )
+  eq(
+    'mc panels: bad parts fall back per position',
+    L.parseMcPanels([{ sym: '???', interval: '5m' }, { sym: 'ADAUSDT', interval: '7h' }, null], DEF, IVS, 8),
+    [{ sym: 'BTCUSDT', interval: '5m' }, { sym: 'ADAUSDT', interval: '1h' }, { sym: 'SOLUSDT', interval: '1h' }],
+  )
+  eq('mc panels: beyond the defaults falls back to the first', L.parseMcPanels(Array(6).fill({ sym: 1 }), DEF, IVS, 8)[5], DEF[0])
+  eq('mc panels: capped', L.parseMcPanels(Array(12).fill({ sym: 'BTCUSDT', interval: '1h' }), DEF, IVS, 8).length, 8)
+  ok('mc panels: defaults are copies', L.parseMcPanels(null, DEF, IVS, 8)[0] !== DEF[0])
+}
+
 // ---------------------------------------------------------------- chart style data
 {
   const { sessionKey, toCandleData, hollowCandleData, compactVol } = await import(

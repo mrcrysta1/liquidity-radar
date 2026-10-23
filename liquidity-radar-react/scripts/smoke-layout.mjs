@@ -1007,6 +1007,127 @@ server.listen(PORT, async () => {
       await page.click('.layout-menu .layout-sync input')
       await page.evaluate(() => document.querySelector('#radarChartCard .layout-btn')?.click())
     })
+
+    // 12 ------------------------------------------------------------------
+    await scenario(12, 'Save a named layout, change everything, load it back', async (check) => {
+      await freshLoad({
+        'lr-tf': '15m',
+        'lr-chartPrefs': { style: 'candle' },
+        'lr-chartLayout': {
+          n: 4,
+          active: 0,
+          cells: [
+            null,
+            { sym: 'ETHUSDT', tf: '1h', style: 'candle' },
+            { sym: 'SOLUSDT', tf: '4h', style: 'line' },
+            { sym: 'BNBUSDT', tf: '5m', style: 'bar' },
+          ],
+        },
+      })
+      await gotoCharts()
+      await sleep(800)
+      // An indicator on the main chart.
+      await page.evaluate(() => document.querySelector('#radarChartCard .ind-open')?.click())
+      await page.waitForSelector('.ind-menu .ind-add', { timeout: 5000 })
+      await page.evaluate(() => document.querySelector('.ind-menu .ind-add')?.click())
+      await sleep(400)
+      await page.evaluate(() => {
+        if (document.querySelector('.ind-menu'))
+          document.querySelector('#radarChartCard .ind-open')?.click()
+      })
+      await sleep(300)
+      const want = await snap()
+      const cellsOf = (s) => s.cells.map((c) => [c.pos, symOfTitle(c.title), c.meta])
+      const wantCells = cellsOf(want)
+      const wantInd = (want.mainInd || []).map((i) => i.type)
+      check('setup: 4 cells, distinct coins', want.cells.length === 3 && new Set(wantCells.map((c) => c[1]).concat(want.sym)).size === 4, wantCells)
+      check('setup: main chart has an indicator', wantInd.length === 1, want.mainInd)
+
+      const openMenu = async () => {
+        if (!(await page.$('.layout-menu'))) await page.click('#radarChartCard .layout-btn')
+        await page.waitForSelector('.layout-menu .sl-save', { timeout: 4000 })
+      }
+      await openMenu()
+      await page.click('.layout-menu .sl-save')
+      await page.waitForSelector('.layout-menu .sl-input', { timeout: 3000 })
+      await page.type('.layout-menu .sl-input', 'Test')
+      await page.keyboard.press('Enter')
+      await sleep(300)
+      const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('lr-savedLayouts-v1') || 'null'))
+      check('saved under lr-savedLayouts-v1 (v1)', stored?.v === 1 && stored.items?.[0]?.name === 'Test', stored)
+      check('snapshot holds the 4-cell layout', stored?.items?.[0]?.snapshot?.n === 4, stored?.items?.[0]?.snapshot)
+      const listed = await page.$$eval('.layout-menu .sl-name', (b) => b.map((x) => x.getAttribute('aria-label')))
+      check('listed as "Load layout Test"', listed.includes('Load layout Test'), listed)
+      await page.click('#radarChartCard .layout-btn') // close
+      await sleep(200)
+
+      // Change layout, active cell, coin and indicators.
+      await setLayoutN(2)
+      await clickCell(1, { settle: 1500 })
+      await pickCoin('XRP', 'XRPUSDT')
+      await sleep(800)
+      const changedS = await snap()
+      check(
+        'precondition: setup changed',
+        changedS.cells.length === 1 && changedS.sym === 'XRPUSDT' && indCount(changedS.mainInd) === 0,
+        { cells: changedS.cells.length, sym: changedS.sym, ind: changedS.mainInd },
+      )
+
+      await openMenu()
+      await page.click('.layout-menu .sl-name[aria-label="Load layout Test"]')
+      await waitFor(async () => (await snap()).cells.length === 3, 6000)
+      await sleep(2000)
+      const s = await snap()
+      check('menu closed after loading', !(await page.$('.layout-menu')))
+      check('4 cells again', s.cells.length === 3 && s.layout?.n === 4, { cells: s.cells.length, n: s.layout?.n })
+      check('active cell 0 again', s.wrapOrder === '0' && s.layout?.active === 0, s.wrapOrder)
+      check('active chart coin restored (' + want.sym + ')', s.sym === want.sym, s.sym)
+      check('active chart timeframe restored (' + want.lsTf + ')', s.lsTf === want.lsTf, s.lsTf)
+      check('every companion coin + timeframe restored', JSON.stringify(cellsOf(s)) === JSON.stringify(wantCells), {
+        want: wantCells,
+        got: cellsOf(s),
+      })
+      check(
+        'main indicator restored',
+        JSON.stringify((s.mainInd || []).map((i) => i.type)) === JSON.stringify(wantInd),
+        s.mainInd,
+      )
+      check('no stray c0 indicator slot', indCount(s.panelInd?.c0) === 0, s.panelInd)
+
+      // Reload: the saved list persists.
+      await page.reload({ waitUntil: 'domcontentloaded' })
+      await waitFor(() => page.evaluate(() => !!document.getElementById('chartWrap')))
+      await sleep(2500)
+      await gotoCharts()
+      await openMenu()
+      const after = await page.$$eval('.layout-menu .sl-name', (b) => b.map((x) => x.getAttribute('aria-label')))
+      check('saved list persists across reload', after.includes('Load layout Test'), after)
+
+      // Rename, then delete with confirm (keyboard-free paths are covered above).
+      await page.click('.layout-menu [aria-label="Rename layout Test"]')
+      await page.waitForSelector('.layout-menu .sl-input', { timeout: 3000 })
+      await page.evaluate(() => {
+        const i = document.querySelector('.layout-menu .sl-input')
+        i.select()
+      })
+      await page.type('.layout-menu .sl-input', 'Test 2')
+      await page.keyboard.press('Enter')
+      await sleep(200)
+      const renamed = await page.$$eval('.layout-menu .sl-name', (b) => b.map((x) => x.getAttribute('aria-label')))
+      check('rename', renamed.join() === 'Load layout Test 2', renamed)
+      await page.click('.layout-menu [aria-label="Delete layout Test 2"]')
+      await sleep(150)
+      const asking = await page.evaluate(() => ({
+        text: (document.querySelector('.layout-menu .sl-confirm')?.textContent || '').trim(),
+        stored: JSON.parse(localStorage.getItem('lr-savedLayouts-v1') || 'null')?.items?.length,
+      }))
+      check('delete asks first', /Test 2/.test(asking.text) && asking.stored === 1, asking)
+      await page.click('.layout-menu .sl-btn.danger.pri')
+      await sleep(200)
+      const left = await page.evaluate(() => JSON.parse(localStorage.getItem('lr-savedLayouts-v1') || 'null'))
+      check('deleted', (await page.$$('.layout-menu .sl-name')).length === 0 && left?.items?.length === 0, left)
+      await page.click('#radarChartCard .layout-btn')
+    })
   } catch (e) {
     console.log('FATAL harness error: ' + ((e && e.stack) || e))
     results.push({ id: '-', name: 'harness', ok: false, checks: [], fatal: String(e), errors: [] })
