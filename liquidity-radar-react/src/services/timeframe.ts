@@ -265,6 +265,48 @@ export function resample(base: CandleFlat[], def: TimeframeDef): CandleFlat[] {
 }
 
 /**
+ * Prepend an older, already-resampled page to the candles on screen.
+ *
+ * A resampled bucket is stamped with its first member's time, and the loaded
+ * series usually starts part-way through a bucket — so the older page ends
+ * with the rest of that same bucket. Folding the two halves into one candle
+ * keeps every bucket single and the times strictly ascending (lightweight-
+ * charts throws on a duplicate or out-of-order time) without dropping data.
+ * `room` caps how many new candles may be added; `added` counts only those,
+ * never the merged bucket, which replaces the one already shown.
+ */
+export function mergeOlderPage(
+  older: CandleFlat[],
+  current: CandleFlat[],
+  def: TimeframeDef,
+  room = Infinity,
+): { candles: CandleFlat[]; added: number; merged: boolean } {
+  const first = current[0]
+  const page: CandleFlat[] = []
+  for (const c of older) {
+    if (first && c.t >= first.t) continue
+    if (page.length && c.t <= page[page.length - 1].t) continue
+    page.push(c)
+  }
+  let head: CandleFlat | null = null
+  const tail = page[page.length - 1]
+  if (first && tail && bucketIndex(tail.t, def) === bucketIndex(first.t, def)) {
+    page.pop()
+    head = {
+      t: tail.t,
+      o: tail.o,
+      h: Math.max(tail.h, first.h),
+      l: Math.min(tail.l, first.l),
+      c: first.c,
+      v: tail.v + first.v,
+    }
+  }
+  const add = page.length > room ? page.slice(page.length - Math.max(0, room)) : page
+  const rest = head ? [head].concat(current.slice(1)) : current
+  return { candles: add.concat(rest), added: add.length, merged: !!head }
+}
+
+/**
  * When the bucket a candle opened at closes. Calendar-aware for the monthly
  * intervals, where a fixed duration would drift.
  */

@@ -22,7 +22,7 @@ import {
   mdTf,
 } from './market'
 import type { CandleFlat } from './market'
-import { DEFAULT_TF, createFolder, mainFolder, resample, tfDef } from './timeframe'
+import { DEFAULT_TF, createFolder, mainFolder, mergeOlderPage, resample, tfDef } from './timeframe'
 import type { Folder } from './timeframe'
 import {
   fetchKlinesChain,
@@ -202,8 +202,9 @@ export async function fetchOlderKlines(): Promise<number> {
   try {
     const tf = mdTf(state.tf || DEFAULT_TF)
     const def = tfDef(tf)
-    // Strictly before the oldest bucket's open, so the older page resamples
-    // into whole buckets of its own and cannot half-fill the one we hold.
+    // Strictly before the oldest candle we hold. On a resampled interval that
+    // candle usually opens mid-bucket, so the page's last bucket is the rest
+    // of it — mergeOlderPage folds the two rather than drawing it twice.
     const { rows, source } = await fetchBase(
       state.symbol,
       def.base,
@@ -214,22 +215,19 @@ export async function fetchOlderKlines(): Promise<number> {
     // Every provider failed and this is a cached copy: not proof the history
     // has ended, so leave it retryable rather than marking it done.
     if (source && (source.freshness === 'STALE' || source.freshness === 'OFFLINE')) return 0
-    const older = resample(rows, def).filter((c) => c.t < oldest.t)
-    if (!older.length) {
-      historyDone = true
-      return 0
-    }
-    // Trim the page rather than the array, so the count reported back is
+    // The page is trimmed rather than the array, so the count reported back is
     // exactly what was prepended and the viewport shift stays correct.
     const room = MAX_KEEP - state.candles.length
-    const add = older.length > room ? older.slice(-room) : older
-    if (!add.length) {
+    const { candles, added, merged } = mergeOlderPage(resample(rows, def), state.candles, def, room)
+    if (!added && !merged) {
       historyDone = true
       return 0
     }
-    state.candles = add.concat(state.candles)
+    // A page holding only the rest of our oldest bucket still merges, and
+    // leaves history open so the next drag keeps paging.
+    state.candles = candles
     mdStoreCandles(state.symbol, tf, state.candles)
-    return add.length
+    return added
   } catch (e) {
     mdDebug.log('klines', 'older page failed')
     return 0

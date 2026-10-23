@@ -28,6 +28,7 @@ const {
   customTfDef,
   isTf,
   createFolder,
+  mergeOlderPage,
 } = await import(src('services/timeframe.ts'))
 const { buildRangeBars, atr, niceRange, autoRangeSize, minSafeRange, MAX_RANGE_BARS } =
   await import(src('features/charts/series/rangeBars.ts'))
@@ -188,6 +189,47 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   const jan = Date.UTC(2026, 0, 1)
   eq('bucketEnd: January rolls to February', bucketEnd(jan, tfDef('1M')), Date.UTC(2026, 1, 1))
   ok('bucketIndex: monotonic', bucketIndex(t0 + 1e6, d) > bucketIndex(t0, d))
+}
+
+// ------------------------------------------- older-history paging (resampled)
+// The loaded series usually starts mid-bucket, and a resampled bucket is
+// stamped with its first member's time — so the older page ends with the rest
+// of that same bucket. It must fold into one candle, not draw twice.
+{
+  const def45 = tfDef('45m')
+  const step = 15 * 60000
+  const t0 = Date.UTC(2026, 0, 1)
+  const all = []
+  for (let i = 0; i < 300; i++) all.push({ t: t0 + i * step, o: i, h: i + 1, l: i - 1, c: i + 0.5, v: 1 })
+  // First page from row 100: 100 % 3 = 1, so it opens one bar into a bucket.
+  const shown = resample(all.slice(100), def45)
+  const page = resample(all.filter((r) => r.t < shown[0].t), def45)
+  const naive = page.concat(shown).map((c) => bucketIndex(c.t, def45))
+  ok('paging: the naive prepend repeats a bucket (the bug)', naive.some((b, i) => i > 0 && b === naive[i - 1]))
+  const { candles, added, merged } = mergeOlderPage(page, shown, def45)
+  const ids = candles.map((c) => bucketIndex(c.t, def45))
+  ok('paging: no bucket appears twice', ids.every((b, i) => i === 0 || b !== ids[i - 1]))
+  ok('paging: times strictly ascending', candles.every((c, i) => i === 0 || c.t > candles[i - 1].t))
+  ok('paging: the split bucket was merged', merged)
+  eq('paging: added counts only new buckets', added, page.length - 1)
+  eq('paging: one candle per bucket overall', candles.length, resample(all, def45).length)
+  near('paging: volume preserved', candles.reduce((a, c) => a + c.v, 0), 300)
+  const whole = resample(all, def45)
+  eq('paging: merged bucket equals a clean resample', candles[added], whole[added])
+  eq('paging: merged bucket keeps the shown close', candles[added].c, shown[0].c)
+  eq('paging: newer candles untouched', candles.slice(added + 1), shown.slice(1))
+  // Native interval: nothing to merge, everything older is added.
+  const d15 = tfDef('15m')
+  const n = mergeOlderPage(all.slice(0, 100), all.slice(100), d15)
+  eq('paging: native interval prepends as-is', [n.added, n.merged, n.candles.length], [100, false, 300])
+  // Room cap trims the oldest new candles, never the merge.
+  const capped = mergeOlderPage(page, shown, def45, 5)
+  eq('paging: room caps what is added', [capped.added, capped.merged], [5, true])
+  ok('paging: capped result still ascending', capped.candles.every((c, i) => i === 0 || c.t > capped.candles[i - 1].t))
+  // Overlap and disorder from a provider never leak into the series.
+  const messy = mergeOlderPage([page[2], page[1], page[3], shown[0], shown[1]], shown, def45)
+  ok('paging: overlapping or unsorted page stays strictly ascending', messy.candles.every((c, i) => i === 0 || c.t > messy.candles[i - 1].t))
+  eq('paging: an empty page adds nothing', mergeOlderPage([], shown, def45), { candles: shown, added: 0, merged: false })
 }
 
 // ------------------------------------------------------- custom timeframes
