@@ -9,6 +9,7 @@ import { pfmt } from '../../utils/format'
 import { loadCandleWindow } from '../../services/marketData'
 import { getActiveTab } from '../../features/actions/userActions'
 import { signalData } from '../../features/signals/signals'
+import { avgScore100, sentimentWord } from '../../features/signals/sentiment'
 import { series } from '../../features/selflearn/features'
 import { insights } from '../../features/selflearn/patterns'
 import { getFeed, labelBars, NN_TFS, setFeedTf, useFeed } from '../../features/selflearn/pageFeed'
@@ -94,7 +95,7 @@ export function NnHeader() {
         ))}
       </div>
       <div className="card nn-trend">
-        <span><small>Market trend</small><b className={trendUp == null ? '' : trendUp ? 'up' : 'dn'}>{trendUp == null ? '—' : trendUp ? 'BULLISH' : 'BEARISH'}</b><em>EMA 20 vs 50, {feed.tf}</em></span>
+        <span><small>EMA trend</small><b className={trendUp == null ? '' : trendUp ? 'up' : 'dn'}>{trendUp == null ? '—' : trendUp ? 'BULLISH' : 'BEARISH'}</b><em>EMA 20 vs 50, {feed.tf}</em></span>
         <span><small>Volatility</small><b>{vr == null ? '—' : vr > 0.7 ? 'High' : vr > 0.3 ? 'Medium' : 'Low'}</b><em>{vr == null ? '' : 'ATR in the ' + Math.round(vr * 100) + 'th pct'}</em></span>
         <span><small>Liquidity</small><b>{liq}</b><em>{qv ? '$' + (qv / 1e6).toFixed(0) + 'M 24h' : ''}</em></span>
         <Spark closes={cs.slice(-40).map((k) => k.c)} />
@@ -164,7 +165,7 @@ export function PredictionCard() {
         <dl className="nn-pred-kv">
           <div><dt>Confidence</dt><dd>{conf == null ? '—' : Math.round(conf * 100) + '%'}</dd></div>
           <div title={fc ? `${fc.holdout} bars it never trained on` : ''}><dt>Model accuracy</dt><dd>{fc ? Math.round(fc.acc4 * 100) + '%' : '—'}</dd></div>
-          <div><dt>Trend direction</dt><dd className={dirUp == null ? '' : dirUp ? 'up' : 'dn'}>{dirUp == null ? '—' : dirUp ? 'LONG' : 'SHORT'}</dd></div>
+          <div title={`Direction of the ${labelBars(4, feed.tf)} forecast, not the EMA trend`}><dt>Forecast {labelBars(4, feed.tf)}</dt><dd className={dirUp == null ? '' : dirUp ? 'up' : 'dn'}>{dirUp == null ? '—' : dirUp ? 'LONG' : 'SHORT'}</dd></div>
           <div><dt>Risk level</dt><dd className={vr == null ? '' : vr > 0.7 ? 'dn' : vr > 0.3 ? 'a' : 'up'}>{vr == null ? '—' : vr > 0.7 ? 'High' : vr > 0.3 ? 'Medium' : 'Low'}</dd></div>
         </dl>
       </div>
@@ -185,22 +186,27 @@ export function AiSentiment() {
   const bull = sig.filter((s) => s.master.type === 'BUY').length
   const bear = sig.filter((s) => s.master.type === 'SELL').length
   const neu = n - bull - bear
-  const score = n ? sig.reduce((a, s) => a + (s.score + 100) / 2, 0) / n : null
+  const score = avgScore100(sig.map((s) => s.score))
   const fg = state.fg as { value?: string | number; value_classification?: string } | null
   const fgv = fg?.value != null ? Number(fg.value) : null
   const r = 38
   const c = 2 * Math.PI * r
-  const col = score == null ? 'var(--dim)' : score >= 55 ? 'var(--green)' : score <= 45 ? 'var(--red)' : 'var(--amber)'
-  const word = score == null ? 'Scanning' : score >= 55 ? 'Bullish' : score <= 45 ? 'Bearish' : 'Neutral'
+  // The ring is the average scanner score, not a share of markets — that is
+  // what the bars show — so it reads "45/100", and its word uses the
+  // scanner's own BUY / SELL cut-offs.
+  const word = sentimentWord(score)
+  const col = word === 'Scanning' ? 'var(--dim)' : word === 'Bullish' ? 'var(--green)' : word === 'Bearish' ? 'var(--red)' : 'var(--amber)'
   return (
     <NnCard title="AI Market Sentiment" icon={NI.gauge} className="nn-sent">
       <div className="nn-sent-top">
-        <svg width="100" height="100" viewBox="0 0 100 100" aria-hidden="true" className="nn-ring">
+        <svg width="100" height="100" viewBox="0 0 100 100" role="img" className="nn-ring"
+          aria-label={score == null ? 'Average scanner score: scanning' : `Average scanner score ${Math.round(score)} out of 100, ${word}`}>
           <circle cx="50" cy="50" r={r} fill="none" stroke="var(--hair-2)" strokeWidth="9" />
           <circle cx="50" cy="50" r={r} fill="none" stroke={col} strokeWidth="9" strokeLinecap="round"
             strokeDasharray={`${(c * (score ?? 0)) / 100} ${c}`} transform="rotate(-90 50 50)" />
-          <text x="50" y="50" textAnchor="middle" className="nn-ring-v" fill={col}>{score == null ? '—' : Math.round(score) + '%'}</text>
-          <text x="50" y="65" textAnchor="middle" className="nn-ring-l">{word}</text>
+          <text x="50" y="36" textAnchor="middle" className="nn-ring-l" style={{ fontSize: 9 }}>Avg score</text>
+          <text x="50" y="54" textAnchor="middle" className="nn-ring-v" fill={col} style={{ fontSize: 16 }}>{score == null ? '—' : Math.round(score) + '/100'}</text>
+          <text x="50" y="69" textAnchor="middle" className="nn-ring-l">{word}</text>
         </svg>
         <div className="nn-sent-bars">
           {([['Bullish', bull, 'g'], ['Neutral', neu, 'a'], ['Bearish', bear, 'r']] as const).map(([l, v, cl]) => (
@@ -225,7 +231,7 @@ export function AiSentiment() {
         <span><small>Fear &amp; Greed index</small><b className={fgv == null ? '' : fgv >= 55 ? 'up' : fgv <= 45 ? 'dn' : 'a'}>{fg?.value_classification ?? '—'}</b></span>
         <em>{fgv ?? '—'}</em>
       </div>
-      <p className="nn-note">Ring: average signal-scanner score across {n || '—'} markets.</p>
+      <p className="nn-note">Ring: average signal-scanner score (0–100) across {n || '—'} markets. Bars: share of markets the scanner calls Buy, Watch or Sell.</p>
     </NnCard>
   )
 }

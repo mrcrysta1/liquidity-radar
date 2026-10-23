@@ -105,8 +105,8 @@ function ModelCard({ m, open, now }: { m: SLModel; open?: SLTrade; now: number }
       <small className="lab-mm">v{m.version} · trained {ago(m.trainedAt, now)} on {m.rows.toLocaleString()} {st.tf} bars · {m.updates} live updates</small>
       <div className="lab-mk">
         <span><small>Unseen test</small><b>{m.holdout.n} trades</b></span>
-        <span><small>Win rate</small><b>{Math.round(m.holdout.winRate * 100)}%</b></span>
-        <span><small>Avg R</small><b className={m.holdout.avgR >= 0 ? 'up' : 'dn'}>{sgn(m.holdout.avgR)}</b></span>
+        <span><small>Win rate</small><b>{m.holdout.n ? Math.round(m.holdout.winRate * 100) + '%' : '—'}</b></span>
+        <span><small>Avg R</small><b className={m.holdout.n ? (m.holdout.avgR >= 0 ? 'up' : 'dn') : ''}>{m.holdout.n ? sgn(m.holdout.avgR) : '—'}</b></span>
       </div>
       {l ? (
         <div className="lab-read">
