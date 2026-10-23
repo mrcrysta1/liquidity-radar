@@ -12,8 +12,25 @@ import {
   scanFurther,
   setWhaleMult,
 } from '../../features/whales/whaleFlow'
-import { bubbleRadius } from '../../features/whales/whaleMath'
+import { bubbleRadius, whaleLegendCompact } from '../../features/whales/whaleMath'
 import { getShowWhaleBubbles, onOverlayTogglesChange } from '../../features/charts/overlayToggles'
+
+// Narrow charts: sit above the zoom/reset buttons (time axis + 8px + button row).
+const LIFTED = { bottom: 74 } as const
+const CHIP_BTN = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 5,
+  minHeight: 24,
+  padding: '0 4px',
+  background: 'transparent',
+  border: 'none',
+  color: 'var(--txt)',
+  font: 'inherit',
+  fontWeight: 700,
+  whiteSpace: 'nowrap',
+  cursor: 'pointer',
+} as const
 
 function since(t: number): string {
   const d = new Date(t)
@@ -41,6 +58,19 @@ export function WhaleLegend() {
     }
   }, [])
 
+  // On a narrow chart the full legend covers the zoom/reset buttons: it
+  // collapses to a one-line chip above them that expands on tap.
+  const [chartW, setChartW] = useState(0)
+  const [open, setOpen] = useState(false)
+  useEffect(() => {
+    const wrap = document.getElementById('chartWrap')
+    if (!wrap || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => setChartW(wrap.clientWidth))
+    ro.observe(wrap)
+    return () => ro.disconnect()
+  }, [])
+  const compact = whaleLegendCompact(chartW)
+
   const v = getWhaleView()
   if (!getShowWhaleBubbles() || !v.auto) return null
 
@@ -54,9 +84,48 @@ export function WhaleLegend() {
   // The collector writes a heartbeat every ~10s; two minutes of silence means it stopped.
   const stale = v.server && Math.max(now, v.serverUpdated) - v.serverUpdated > 120_000
 
+  if (compact && !open)
+    return (
+      <div
+        className="whale-legend"
+        role="group"
+        aria-label="Whale orders legend"
+        style={{ ...LIFTED, padding: '2px 4px', maxWidth: 'calc(100% - 90px)' }}
+      >
+        <button
+          type="button"
+          style={CHIP_BTN}
+          aria-expanded={false}
+          title="Show the whale orders legend"
+          onClick={() => setOpen(true)}
+        >
+          {v.loading ? <i className="wl-spin" aria-hidden="true" /> : null}
+          <span>Whales ≥ {cfmt(v.min)}</span>
+          <span style={{ color: 'var(--dim)' }}>· {shown} orders</span>
+        </button>
+      </div>
+    )
+
   return (
-    <div className="whale-legend" role="group" aria-label="Whale orders legend">
+    <div
+      className="whale-legend"
+      role="group"
+      aria-label="Whale orders legend"
+      style={compact ? LIFTED : undefined}
+    >
       <div className="wl-row">
+        {compact && (
+          <button
+            type="button"
+            style={{ ...CHIP_BTN, padding: '0 4px', marginLeft: 'auto', order: 9 }}
+            aria-expanded={true}
+            aria-label="Collapse the whale orders legend"
+            title="Collapse"
+            onClick={() => setOpen(false)}
+          >
+            ×
+          </button>
+        )}
         <b className="wl-title">Whale orders</b>
         <span className="wl-key buy">Buy</span>
         <span className="wl-key sell">Sell</span>

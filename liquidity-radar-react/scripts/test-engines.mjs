@@ -45,7 +45,7 @@ const { buildPointFigure, clampPnfReversal, pnfBoxes } = await import(
 const { noteLimitResponse, cooldownLeft, isRateLimited } = await import(src('api/rateLimit.ts'))
 const { pfmt, nfmt, cfmt } = await import(src('utils/format.ts'))
 const { VENUES, isUsdQuoted } = await import(src('features/advanced/venues.ts'))
-const { groupAggTrades, autoThreshold, bubbleRadius } = await import(
+const { groupAggTrades, autoThreshold, bubbleRadius, gapLabelSpot, whaleLegendCompact } = await import(
   src('features/whales/whaleMath.ts')
 )
 const alerts = await import(src('features/alerts/rules.ts'))
@@ -706,6 +706,21 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   near('whales: threshold order draws at the minimum radius', bubbleRadius(1e5, 1e5), 3.5)
   near('whales: 4x the dollars is 2x the radius (area ∝ notional)', bubbleRadius(4e5, 1e5), 7)
   eq('whales: radius is capped', bubbleRadius(1e12, 1e5), 36)
+
+  // The unscanned-gap label: never while the scan is running, never on the
+  // centred watermark, against the scan boundary when it is in view.
+  const gap = { left: 0, width: 400, edge: true, paneH: 400, loading: false }
+  eq('whales: no gap label while the backfill is still scanning', gapLabelSpot({ ...gap, loading: true }), null)
+  eq('whales: no gap label on a sliver of unscanned time', gapLabelSpot({ ...gap, width: 100 }), null)
+  const spot = gapLabelSpot(gap)
+  ok('whales: gap label clears the centred watermark band', spot && Math.abs(spot.y - 200) >= 30, spot)
+  eq('whales: gap label hugs the scan boundary when it is in view', [spot?.x, spot?.align], [392, 'right'])
+  eq('whales: gap label centres in a stretch that fills the pane', gapLabelSpot({ ...gap, edge: false })?.align, 'center')
+  const short = gapLabelSpot({ ...gap, paneH: 280 })
+  ok('whales: a short pane puts the label above the watermark', short && short.y < 140 &&short.y >= 64, short)
+  eq('whales: no room clear of the watermark and legends: no label', gapLabelSpot({ ...gap, paneH: 200 }), null)
+  eq('whales: legend collapses to a chip under 520px', [whaleLegendCompact(390), whaleLegendCompact(519)], [true, true])
+  eq('whales: legend stays full width at 520px+ and before measuring', [whaleLegendCompact(520), whaleLegendCompact(0)], [false, false])
 }
 
 // ---------------------------------------------------------------- failover chain

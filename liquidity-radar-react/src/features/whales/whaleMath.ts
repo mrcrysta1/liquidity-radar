@@ -69,3 +69,54 @@ const MAX_R = 36
 export function bubbleRadius(usd: number, min: number): number {
   return Math.min(MAX_R, Math.max(MIN_R, MIN_R * Math.sqrt(usd / Math.max(1, min))))
 }
+
+// ---- unscanned-gap label and legend layout ---------------------------------
+
+/** Where to draw the label of an unscanned stretch, in pane pixels. */
+export interface GapLabelSpot {
+  x: number
+  y: number
+  align: 'center' | 'right'
+}
+
+const GAP_LABEL_MIN_W = 130
+// Clear of the OHLC legend at the top and of the whale legend and the
+// zoom/reset buttons at the bottom of the pane.
+const GAP_LABEL_TOP = 64
+const GAP_LABEL_BOTTOM = 100
+
+/**
+ * The "no whale data scanned" label for one unscanned stretch of the pane, or
+ * null to leave it shaded but unlabelled.
+ *
+ * - While the backfill is still running the stretch is being scanned, not
+ *   missing: the legend already shows that progress ("Scanned from …" with a
+ *   spinner), so a label claiming there is no data would contradict it.
+ * - The symbol watermark is centred in the pane, so the label sits just below
+ *   (or, in a short pane, above) its band rather than on top of it.
+ * - When the stretch ends inside the pane, the label is right-aligned against
+ *   that edge — the dashed line where scanning starts.
+ */
+export function gapLabelSpot(g: {
+  left: number
+  width: number
+  /** The stretch ends inside the pane (its right edge is drawn). */
+  edge: boolean
+  paneH: number
+  loading: boolean
+}): GapLabelSpot | null {
+  if (g.loading || !(g.width >= GAP_LABEL_MIN_W)) return null
+  const mid = g.paneH / 2
+  const y = [mid + 36, mid - 48].find((v) => v >= GAP_LABEL_TOP && v + 12 <= g.paneH - GAP_LABEL_BOTTOM)
+  if (y === undefined) return null
+  return g.edge
+    ? { x: g.left + g.width - 8, y, align: 'right' }
+    : { x: g.left + g.width / 2, y, align: 'center' }
+}
+
+/** Chart widths under this collapse the whale legend into a one-line chip. */
+export const WHALE_LEGEND_COMPACT_W = 520
+
+export function whaleLegendCompact(chartWidth: number): boolean {
+  return chartWidth > 0 && chartWidth < WHALE_LEGEND_COMPACT_W
+}

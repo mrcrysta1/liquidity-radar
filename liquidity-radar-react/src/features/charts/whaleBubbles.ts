@@ -17,7 +17,7 @@ import { getShowWhaleBubbles } from './overlayToggles'
 import { displayCandles } from './series/rangeView'
 import { getWhaleView, onWhaleFlowChange, syncWhaleSymbol } from '../whales/whaleFlow'
 import type { WhaleOrder } from '../whales/whaleFlow'
-import { bubbleRadius } from '../whales/whaleMath'
+import { bubbleRadius, gapLabelSpot } from '../whales/whaleMath'
 
 
 type Any = any
@@ -117,7 +117,7 @@ function paint(): void {
     return x + ((t - c.t) / span - 0.5) * spacing * 0.8
   }
 
-  paintCoverage(ctx, v.coverage, candles[0].t, endT, xOf, paneW, paneH)
+  paintCoverage(ctx, v.coverage, candles[0].t, endT, xOf, paneW, paneH, v.loading)
 
   const list = v.orders
     .filter((o) => o.usd >= v.min && o.t >= candles[0].t && o.t < endT)
@@ -161,6 +161,7 @@ function paintCoverage(
   xOf: (t: number) => number | null,
   paneW: number,
   paneH: number,
+  loading: boolean,
 ): void {
   const now = Date.now()
   const gaps: Array<[number, number]> = []
@@ -194,10 +195,15 @@ function paintCoverage(
       ctx.stroke()
       ctx.setLineDash([])
     }
-    if (w > 130) {
+    const spot = gapLabelSpot({ left: l, width: w, edge: x1 < paneW, paneH, loading })
+    if (spot) {
       ctx.fillStyle = 'rgba(143,163,191,.75)'
-      ctx.textAlign = 'center'
-      ctx.fillText('no whale data scanned', l + w / 2, paneH * 0.5)
+      ctx.textAlign = spot.align
+      ctx.fillText(
+        spot.align === 'right' ? '◂ no whale data scanned' : 'no whale data scanned',
+        spot.x,
+        spot.y,
+      )
     }
   }
   ctx.restore()
