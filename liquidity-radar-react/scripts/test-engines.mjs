@@ -591,6 +591,19 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   eq('fmtUsd: thousands', fmtUsd(1500), '1.5K')
 }
 
+// ---------------------------------------------------- modal focus trap (utils/dom)
+{
+  const { nextFocusIndex } = await import(src('utils/dom.ts'))
+  eq('focus trap: Tab moves forward', nextFocusIndex(0, 3, false), 1)
+  eq('focus trap: Tab on the last wraps to the first', nextFocusIndex(2, 3, false), 0)
+  eq('focus trap: Shift+Tab on the first wraps to the last', nextFocusIndex(0, 3, true), 2)
+  eq('focus trap: Shift+Tab moves back', nextFocusIndex(2, 3, true), 1)
+  eq('focus trap: focus outside, Tab goes to the first', nextFocusIndex(-1, 3, false), 0)
+  eq('focus trap: focus outside, Shift+Tab goes to the last', nextFocusIndex(-1, 3, true), 2)
+  eq('focus trap: a single element keeps focus', nextFocusIndex(0, 1, false), 0)
+  eq('focus trap: nothing focusable', nextFocusIndex(-1, 0, false), -1)
+}
+
 // ------------------------------------------------------------- heikin ashi
 {
   const cs = [
@@ -1802,6 +1815,21 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   const f15 = forecastFrom(cl), f60 = forecastFrom(cl, 60)
   ok('forecast: 1H on 1h candles is one bar ahead (a quarter of the 15m step count)',
     Math.abs((f60.rows[0].pred - cl.at(-1)) * 4 - (f15.rows[0].pred - cl.at(-1))) < 1e-9)
+}
+
+// ---- signal scanner: market-wide sentiment word (Neural Net ring) ------------------
+{
+  const { avgScore100, sentimentWord, toScale100, SIGNAL_CUTOFF } = await import(src('features/signals/sentiment.ts'))
+  eq('sentiment: no markets is no average', avgScore100([]), null)
+  eq('sentiment: no average reads Scanning', sentimentWord(null), 'Scanning')
+  eq('sentiment: -100..100 maps onto 0..100', avgScore100([-100, 100, 0]), 50)
+  // The audit case: an average of 45 while no market is a SELL must not read Bearish.
+  const flat = [-10, -10, -10]
+  ok('sentiment: scores inside the dead zone are all WAIT', flat.every((v) => Math.abs(v) <= SIGNAL_CUTOFF))
+  eq('sentiment: average 45 of WAIT calls reads Neutral', sentimentWord(avgScore100(flat)), 'Neutral')
+  eq('sentiment: just past the BUY cut-off reads Bullish', sentimentWord(toScale100(SIGNAL_CUTOFF + 1)), 'Bullish')
+  eq('sentiment: just past the SELL cut-off reads Bearish', sentimentWord(toScale100(-SIGNAL_CUTOFF - 1)), 'Bearish')
+  eq('sentiment: exactly on the cut-off is still Neutral', sentimentWord(toScale100(SIGNAL_CUTOFF)), 'Neutral')
 }
 
 // ---- assistant: actions it can take in the app --------------------------------------
