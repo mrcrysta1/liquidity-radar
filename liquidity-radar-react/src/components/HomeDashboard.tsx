@@ -12,7 +12,7 @@ import { state } from '../services/store'
 import { signalData } from '../features/signals'
 import { bookMetrics, fmtUsd, liquidityScore } from '../features/charts/sidePanels/metrics'
 import type { CrossExRow } from '../features/advanced/advancedData'
-import { latestNews } from '../features/news/newsFeed'
+import { latestNews, newsLoadPhase, retryNews } from '../features/news/newsFeed'
 import { COINS } from '../constants/market'
 import { baseOf, coinMeta } from '../utils/coins'
 import { cfmt, pfmt } from '../utils/format'
@@ -363,6 +363,23 @@ function SentimentTile() {
 
 function NewsTile({ now }: { now: number }) {
   const items = latestNews()
+  const phase = newsLoadPhase()
+  if (!items.length && phase === 'error')
+    return (
+      <Empty>
+        News unavailable —{' '}
+        <button
+          type="button"
+          className="dt-cta"
+          style={{ display: 'inline-flex', verticalAlign: 'middle' }}
+          onClick={retryNews}
+        >
+          Retry
+        </button>
+      </Empty>
+    )
+  if (!items.length && phase === 'empty')
+    return <Empty>No headlines in the feeds right now.</Empty>
   if (!items.length)
     return (
       <TileSkeleton shape="news" rows={4}>

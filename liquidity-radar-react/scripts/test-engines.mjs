@@ -46,6 +46,7 @@ const { noteLimitResponse, cooldownLeft, isRateLimited } = await import(src('api
 const { pfmt, nfmt, cfmt } = await import(src('utils/format.ts'))
 const { safeUrl } = await import(src('utils/url.ts'))
 const { newsSimplify } = await import(src('features/news/newsItem.ts'))
+const { mergeNewsFeeds, loadNewsProgressive, hedge, newsDedup } = await import(src('features/news/newsLoad.ts'))
 const { VENUES, isUsdQuoted } = await import(src('features/advanced/venues.ts'))
 const { groupAggTrades, autoThreshold, bubbleRadius } = await import(
   src('features/whales/whaleMath.ts')
@@ -625,6 +626,90 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   eq('newsSimplify: missing link becomes #', simp({ title: 'x' }).url, '#')
   eq('newsSimplify: data: enclosure dropped', simp({ title: 'x', enclosure: { link: 'data:image/svg+xml,<svg onload=alert(1)>' } }).img, null)
   eq('newsSimplify: empty title skipped', simp({ title: '  ', link: 'https://a.example' }), null)
+}
+
+// ------------------------------------------------- news progressive loading
+// The wire renders as feeds land rather than after the slowest one, shows the
+// lr_news_cache copy first, and ends the loading state at a deadline.
+{
+  const item = (title, time, src = 'A') => ({ title, url: '#', time, src, color: '#fff', img: null, coins: [], sent: 'neu' })
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+  const later = (ms, v) => sleep(ms).then(() => v)
+  const fail = (ms) => sleep(ms).then(() => { throw new Error('down') })
+  const titles = (u) => u.items.map((n) => n.title)
+
+  eq('newsDedup: same words reordered', newsDedup('Bitcoin price hits record high today', 'Today bitcoin price hits record high'), true)
+  eq('newsDedup: different stories', newsDedup('Bitcoin hits record', 'Solana network outage'), false)
+  const m = mergeNewsFeeds([
+    [item('Old story', 1), item('Bitcoin price hits record high today', 5)],
+    null,
+    [item('Bitcoin price hits record high, today!', 9, 'B'), item('Fresh one', 10, 'B')],
+  ])
+  eq('merge: newest first, near-dupes dropped, first feed wins', m.map((n) => [n.title, n.src]), [['Fresh one', 'B'], ['Bitcoin price hits record high today', 'A'], ['Old story', 'A']])
+  eq('merge: order of arrival does not matter', mergeNewsFeeds([[item('x one', 1)], [item('y two', 2)]]).map((n) => n.title), ['y two', 'x one'])
+  eq('merge: empty titles skipped', mergeNewsFeeds([[item('', 1), item('!!!', 2)]]).length, 0)
+
+  // Partial results before the deadline: one feed hangs, the others land.
+  {
+    const ups = []
+    const t0 = Date.now()
+    const feeds = [() => later(10, [item('Alpha story', 3)]), () => new Promise(() => {}), () => later(20, [item('Beta story', 4)])]
+    loadNewsProgressive({ total: 3, fetchFeed: (i) => feeds[i](), onUpdate: (u) => ups.push({ ...u, at: Date.now() - t0 }), deadlineMs: 400 })
+    await sleep(450)
+    const ready = ups.filter((u) => u.phase === 'ready')
+    eq('progressive: first feed shown before the others', titles(ready[0]), ['Alpha story'])
+    ok('progressive: shown well before the deadline', ready[0].at < 300, ready[0].at)
+    eq('progressive: second feed merges in', titles(ready[ready.length - 1]), ['Beta story', 'Alpha story'])
+    ok('progressive: a hung feed never puts it back to loading', !ups.slice(1).some((u) => u.phase !== 'ready'), ups.map((u) => u.phase))
+  }
+
+  // Cache first: on screen at once, kept until the deadline, then live.
+  {
+    const ups = []
+    const cached = [item('Cached story', 1)]
+    const feeds = [() => later(10, [item('Live story', 5)]), () => new Promise(() => {})]
+    loadNewsProgressive({ total: 2, fetchFeed: (i) => feeds[i](), onUpdate: (u) => ups.push(u), cached, deadlineMs: 250 })
+    eq('cache-first: cached wire published synchronously', [ups.length, ups[0] && ups[0].cached, ups[0] && titles(ups[0])], [1, true, ['Cached story']])
+    await sleep(60)
+    eq('cache-first: one feed does not replace the cached list before the deadline', ups.length, 1)
+    await sleep(300)
+    const lastU = ups[ups.length - 1]
+    eq('cache-first: live wire takes over at the deadline', [lastU.cached, titles(lastU)], [false, ['Live story']])
+  }
+
+  // All feeds fail: error, not an endless spinner; with a cache the cache stays.
+  {
+    const ups = []
+    const fin = await loadNewsProgressive({ total: 3, fetchFeed: () => fail(5), onUpdate: (u) => ups.push(u), deadlineMs: 1000 })
+    eq('all-fail: error phase', [fin.phase, fin.items.length, fin.ok], ['error', 0, 0])
+    eq('all-fail: loading then error', ups.map((u) => u.phase), ['loading', 'error'])
+    const withCache = await loadNewsProgressive({ total: 2, fetchFeed: () => fail(5), onUpdate: () => {}, cached: [item('Kept', 1)], deadlineMs: 1000 })
+    eq('all-fail: a cached wire stays up', [withCache.phase, withCache.cached, titles(withCache)], ['ready', true, ['Kept']])
+    const empty = await loadNewsProgressive({ total: 2, fetchFeed: () => later(5, []), onUpdate: () => {}, deadlineMs: 1000 })
+    eq('empty: feeds answered with no stories', empty.phase, 'empty')
+    const ups2 = []
+    loadNewsProgressive({ total: 2, fetchFeed: () => new Promise(() => {}), onUpdate: (u) => ups2.push(u.phase), deadlineMs: 20 })
+    await sleep(40)
+    eq('deadline: nothing arrived means error, not loading', ups2, ['loading', 'error'])
+    const ups3 = []
+    let current = true
+    loadNewsProgressive({ total: 1, fetchFeed: () => later(20, [item('Stale run', 1)]), onUpdate: (u) => ups3.push(u.phase), deadlineMs: 1000, isCurrent: () => current })
+    current = false
+    await sleep(40)
+    eq('superseded run publishes nothing more', ups3, ['loading'])
+  }
+
+  // Source hedging: fallback asked on failure or after the head start.
+  {
+    eq('hedge: primary wins', await hedge(() => later(5, 'p'), () => later(1, 'f'), 50), 'p')
+    eq('hedge: failure goes straight to fallback', await hedge(() => fail(1), () => later(1, 'f'), 1000), 'f')
+    const t0 = Date.now()
+    const v = await hedge(() => new Promise(() => {}), () => later(1, 'f'), 20)
+    ok('hedge: slow primary hedged after the head start', v === 'f' && Date.now() - t0 < 500, [v, Date.now() - t0])
+    let err = null
+    await hedge(() => fail(1), () => fail(2), 1000).catch((e) => (err = e))
+    ok('hedge: rejects only when both fail', err instanceof Error)
+  }
 }
 
 // ------------------------------------------------------------- heikin ashi
