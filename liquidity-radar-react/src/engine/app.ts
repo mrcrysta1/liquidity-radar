@@ -43,6 +43,7 @@ import {
   fetchOI,
   fetchFG,
   fetchWhales,
+  resetCandles,
   wireMarketHooks,
 } from '../services/marketData'
 import { noteKlineLive, renderKlineBadge, tickerFeed } from '../services/failover'
@@ -139,6 +140,7 @@ $('symSelect').addEventListener('change',e=>setSymbol(e.target.value));
 // The <TimeframePicker/> component owns the toolbar UI and state.tf; the
 // engine only supplies the reload when the interval changes.
 onTimeframeChange(()=>{
+  resetCandles(); // the previous interval's bars must not stand in for this one's
   fetchKlines(state.symbol);
   connectStreams(streamCb); // restart live kline stream at the new, consistent interval
 });

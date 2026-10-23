@@ -19,6 +19,7 @@ import { storageGet, storageSet } from '../../services/storage'
 import { state } from '../../services/store'
 import { loadCandleWindow } from '../../services/marketData'
 import { BASE_MS, tfDef } from '../../services/timeframe'
+import { mdTf } from '../../services/market'
 import type { CandleFlat } from '../../services/market'
 import { jget } from '../../api/client'
 import { isRateLimited } from '../../api/rateLimit'
@@ -29,6 +30,7 @@ import {
   ALERT_LIMITS,
   DEFAULT_COOLDOWN_MIN,
   MIN_TECH_CANDLES,
+  chartedCandlesFit,
   condLabel,
   evalPrice,
   evalTechnical,
@@ -89,7 +91,17 @@ function tickerOf(sym: string): { last: number; pct: number } | null {
 const watchSymbols = (): string[] => watchList().map(symOf)
 const techKey = (r: AlertRule) => r.sym + '|' + (r.tf || '15m')
 function isChartedKey(sym: string, tf: string): boolean {
-  return sym === state.symbol && tf === state.tf && state.candles.length >= MIN_TECH_CANDLES
+  return chartedCandlesFit(
+    {
+      symbol: state.symbol,
+      tf: state.tf,
+      tfKey: mdTf(state.tf),
+      candlesKey: state.candlesKey,
+      bars: state.candles.length,
+    },
+    sym,
+    tf,
+  )
 }
 function candlesFor(r: AlertRule): CandleFlat[] | null {
   if (r.sym && isChartedKey(r.sym, r.tf || '15m')) return state.candles

@@ -677,6 +677,77 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   ok('venues: USD-quoted ones are flagged', isUsdQuoted('gemini') && !isUsdQuoted('binance'))
 }
 
+// ------------------------------------------------- futures symbols + stale guard
+// Funding/OI/books are fetched for "the current symbol": the 1000-unit
+// memecoin perps must map, and a response for a coin the user has left must
+// never land in the new coin's state.
+{
+  const S = await import(src('services/symbolScope.ts'))
+  eq('futsym: BTC trades under its spot name', S.futuresSymbolOf('BTCUSDT'), { sym: 'BTCUSDT', mult: 1 })
+  eq('futsym: PEPE is a 1000-unit contract', S.futuresSymbolOf('PEPEUSDT'), { sym: '1000PEPEUSDT', mult: 1000 })
+  eq('futsym: SHIB too', S.futuresSymbolOf('SHIBUSDT').sym, '1000SHIBUSDT')
+  eq('futsym: BONK / FLOKI', [S.futuresSymbolOf('BONKUSDT').sym, S.futuresSymbolOf('FLOKIUSDT').sym], ['1000BONKUSDT', '1000FLOKIUSDT'])
+  eq('futsym: case-insensitive', S.futuresSymbolOf('pepeusdt').sym, '1000PEPEUSDT')
+  eq('futsym: already-1000 base is not doubled', S.futuresSymbolOf('1000SATSUSDT').sym, '1000SATSUSDT')
+  eq('futsym: gold goes through the instrument table', S.futuresSymbolOf('XAUUSD'), { sym: 'XAUUSDT', mult: 1 })
+  eq('futsym: an instrument with no perp has none', S.futuresSymbolOf('EURUSD'), null)
+  eq('futsym: empty has none', S.futuresSymbolOf(''), null)
+  ok('futsym: the list stays small', S.FUTURES_1000X.size > 0 && S.FUTURES_1000X.size <= 12, S.FUTURES_1000X.size)
+
+  const pr = S.perUnitPremium({ symbol: '1000PEPEUSDT', markPrice: '0.0125', indexPrice: '0.0124', lastFundingRate: '0.0001' }, 1000)
+  near('futsym: mark price restated per token', +pr.markPrice, 0.0000125, 1e-12)
+  near('futsym: index price restated per token', +pr.indexPrice, 0.0000124, 1e-12)
+  eq('futsym: funding is a ratio, untouched', pr.lastFundingRate, '0.0001')
+  eq('futsym: OI restated in tokens', +S.perUnitOi({ openInterest: '2.5' }, 1000).openInterest, 2500)
+  const raw = { markPrice: '100' }
+  ok('futsym: mult 1 is a no-op', S.perUnitPremium(raw, 1) === raw)
+
+  // A mocked await whose symbol changes underneath it.
+  let cur = 'BTCUSDT'
+  const deferred = () => {
+    let res, rej
+    const p = new Promise((a, b) => ((res = a), (rej = b)))
+    return { p, res, rej }
+  }
+  const store = { fr: 'BTC funding' }
+  let d = deferred()
+  let asked = ''
+  let run = S.symbolScoped(() => cur, (sym) => ((asked = sym), d.p), (v) => (store.fr = v), () => (store.fr = null))
+  cur = 'PEPEUSDT' // user switches while BTC's request is in flight
+  d.res('BTC late')
+  eq('stale guard: asked for the symbol current at call time', asked, 'BTCUSDT')
+  eq('stale guard: late answer reports stale', await run, 'stale')
+  eq('stale guard: late answer does not overwrite', store.fr, 'BTC funding')
+
+  d = deferred()
+  run = S.symbolScoped(() => cur, () => d.p, (v) => (store.fr = v), () => (store.fr = null))
+  d.res('PEPE funding')
+  eq('stale guard: current answer applies', [await run, store.fr], ['applied', 'PEPE funding'])
+
+  d = deferred()
+  run = S.symbolScoped(() => cur, () => d.p, (v) => (store.fr = v), () => (store.fr = null))
+  d.rej(new Error('HTTP 400'))
+  eq('stale guard: failure for current symbol clears', [await run, store.fr], ['failed', null])
+
+  store.fr = 'PEPE funding'
+  d = deferred()
+  run = S.symbolScoped(() => cur, () => d.p, (v) => (store.fr = v), () => (store.fr = null))
+  cur = 'ETHUSDT'
+  d.rej(new Error('timeout'))
+  eq('stale guard: failure for a left symbol is ignored', [await run, store.fr], ['stale', 'PEPE funding'])
+
+  d = deferred()
+  run = S.symbolScoped(() => cur, () => d.p, () => { throw new Error('bad shape') }, () => (store.fr = null))
+  d.res({})
+  eq('stale guard: a throwing apply counts as a failure', [await run, store.fr], ['failed', null])
+
+  eq('candles tag: symbol|tf', S.candlesTag('BTCUSDT', '15m'), 'BTCUSDT|15m')
+  ok('candles tag: matches its own market', S.candlesMatch('BTCUSDT|15m', 'BTCUSDT', '15m'))
+  ok('candles tag: another symbol does not match', !S.candlesMatch('BTCUSDT|15m', 'PEPEUSDT', '15m'))
+  ok('candles tag: another interval does not match', !S.candlesMatch('BTCUSDT|15m', 'BTCUSDT', '1h'))
+  ok('candles tag: empty (loading) matches nothing', !S.candlesMatch('', 'BTCUSDT', '15m'))
+}
+
 // ---------------------------------------------------------------- whale orders
 {
   const ag = (a, p, q, T, m) => ({ a, p: String(p), q: String(q), T, m })
@@ -998,6 +1069,18 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   const ramp = (n, f) => Array.from({ length: n }, (_, i) => f(i))
 
   eq('alerts: limits', ALERT_LIMITS, { price: 1000, technical: 1000, watchlist: 15 })
+
+  // The charted candles only stand in for a rule when they are that market's.
+  {
+    const { chartedCandlesFit, MIN_TECH_CANDLES } = alerts
+    const view = { symbol: 'PEPEUSDT', tf: '15m', tfKey: '15m', candlesKey: 'PEPEUSDT|15m', bars: 500 }
+    ok('alerts: charted candles fit their own market', chartedCandlesFit(view, 'PEPEUSDT', '15m'))
+    ok("alerts: previous coin's candles (mismatched tag) are not used", !chartedCandlesFit({ ...view, candlesKey: 'BTCUSDT|15m' }, 'PEPEUSDT', '15m'))
+    ok("alerts: previous interval's candles are not used", !chartedCandlesFit({ ...view, candlesKey: 'PEPEUSDT|1h' }, 'PEPEUSDT', '15m'))
+    ok('alerts: untagged (loading) candles are not used', !chartedCandlesFit({ ...view, candlesKey: '' }, 'PEPEUSDT', '15m'))
+    ok("alerts: another coin's rule never reads the chart", !chartedCandlesFit(view, 'BTCUSDT', '15m'))
+    ok('alerts: too few bars are not used', !chartedCandlesFit({ ...view, bars: MIN_TECH_CANDLES - 1 }, 'PEPEUSDT', '15m'))
+  }
   // crosses need a previous value on the other side (ported from Pro's engine.test.ts)
   ok('alerts: crosses above fires on the cross', evalPrice(r({ condition: 'crosses_above', value: 100 }), 101, 99, 0))
   ok('alerts: crosses above needs a previous price', !evalPrice(r({ condition: 'crosses_above', value: 100 }), 101, undefined, 0))
