@@ -601,6 +601,16 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
 // ----------------------------------------------------------------- format
 {
   eq('fmt: price keeps cents above 100', pfmt(80123.456), '80,123.46')
+  // Pinned outputs that were already right must not move.
+  eq('fmt: pfmt pins', [0, 0.5, 1, 99.99, 1234.5, 65000, 0.00012345, 0.00000401].map(pfmt),
+    ['0.00000000', '0.50000', '1.0000', '99.9900', '1,234.50', '65,000.00', '0.000123', '0.00000401'])
+  // Below a millionth, about four significant digits instead of zeros.
+  eq('fmt: nano prices are not zero', pfmt(3.2e-9), '0.000000003200')
+  eq('fmt: sub-millionth keeps 4 significant digits', pfmt(7.123e-7), '0.0000007123')
+  // Negatives take their decimals from the magnitude.
+  eq('fmt: negative thousands keep cents', pfmt(-1234.5), '-1,234.50')
+  eq('fmt: negative fractions match positives', pfmt(-0.5), '-0.50000')
+  eq('fmt: negative small price', pfmt(-0.00012345), '-0.000123')
   ok('fmt: sub-cent prices keep precision', pfmt(0.00000401).length > 6, pfmt(0.00000401))
   eq('fmt: compact millions', nfmt(2_400_000), '2.40M')
   eq('fmt: money compacts with a symbol', cfmt(2_400_000_000), '$2.40B')
