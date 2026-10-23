@@ -932,18 +932,35 @@ server.listen(PORT, async () => {
         const r = document.getElementById('chart').getBoundingClientRect()
         return { x: r.left, y: r.top, w: r.width, h: r.height }
       })
+      // The whale-orders legend sits over the lower left of the main chart and
+      // grows as the trade scan fills in (in a 4-chart layout its top reaches
+      // ~40% of the chart's height), and over it the chart sees no mouse at
+      // all. So hover at a height where the plot itself is under the pointer.
+      const plotY = (x) =>
+        page.evaluate(
+          (x, top, h) => {
+            for (const fy of [0.4, 0.3, 0.2, 0.5]) {
+              const el = document.elementFromPoint(x, top + h * fy)
+              if (el && el.tagName === 'CANVAS' && el.closest('#chart')) return top + h * fy
+            }
+            return top + h * 0.4
+          },
+          x,
+          box.y,
+          box.h,
+        )
       // Hover, nudging the mouse a pixel at a time until `until` holds (the
       // chart may still be settling its first fit), up to ~3s.
       const hoverAt = async (fx, until = () => true) => {
         const x = box.x + box.w * fx
-        const y = box.y + box.h * 0.4
-        await page.mouse.move(x, y, { steps: 4 })
+        await page.mouse.move(x, await plotY(x), { steps: 4 })
         let l = []
         for (let k = 0; k < 8; k++) {
           await sleep(350)
           l = await legends()
           if (until(l)) break
-          await page.mouse.move(x + (k % 2 ? 0 : 1), y)
+          const nx = x + (k % 2 ? 0 : 1)
+          await page.mouse.move(nx, await plotY(nx))
         }
         return l
       }
@@ -968,20 +985,37 @@ server.listen(PORT, async () => {
         back.every((t, i) => t !== a[i] || t === live[i]),
         { hovered: a, after: back },
       )
-      // Hover a companion: the main chart's legend follows.
+      // Hover a companion: the main chart's legend follows. The first cell is
+      // ETH 1h, ~500 bars (about three weeks) fitted to its width, while the
+      // main BTC 15m holds ~500 bars (about five days), so only the right end
+      // of the cell lies inside the main chart's history. A time before the
+      // main chart's first bar rightly leaves it on its live bar. The legend
+      // text alone cannot tell the two apart (a live tick changes it too), so
+      // read the crosshair mode the legend renders in (.leg-cross).
+      const mainCross = () =>
+        page.evaluate(() => !!document.querySelector('#legendOHLC .leg-cross'))
       const mainLive = (await snap()).legend
+      check('main legend is live before hovering a companion', !(await mainCross()), mainLive)
       const cell = await page.evaluate(() => {
         const el = document.querySelector('#chartLayout > .rc-cell .rc-body')
         const r = el.getBoundingClientRect()
         return { x: r.left, y: r.top, w: r.width, h: r.height }
       })
-      await page.mouse.move(cell.x + cell.w * 0.35, cell.y + cell.h * 0.5, { steps: 4 })
-      await sleep(400)
-      const mainHovered = (await snap()).legend
-      check('hovering a companion moves the main legend off the live bar', mainHovered !== mainLive, {
-        mainLive,
-        mainHovered,
-      })
+      // Near the right of the plot (left of the price axis): a recent time.
+      let mainHovered = ''
+      let crossed = false
+      for (const fx of [0.72, 0.68, 0.64]) {
+        await page.mouse.move(cell.x + cell.w * fx, cell.y + cell.h * 0.5, { steps: 4 })
+        await sleep(400)
+        crossed = await mainCross()
+        mainHovered = (await snap()).legend
+        if (crossed) break
+      }
+      check(
+        'hovering a companion moves the main legend off the live bar',
+        crossed && mainHovered !== mainLive,
+        { crossed, mainLive, mainHovered },
+      )
       await page.mouse.move(5, 5)
       await sleep(400)
       // Switched off from the layout menu: hovering leaves the others alone.
@@ -992,7 +1026,10 @@ server.listen(PORT, async () => {
       const stored = await page.evaluate(() => localStorage.getItem('lr-crosshairSync'))
       check('toggle persists off', stored === 'false', stored)
       await page.evaluate(() => document.querySelector('#radarChartCard .layout-btn')?.click())
-      await sleep(200)
+      // The mouse is still where the menu's checkbox was: park it off the
+      // charts so no cell reads its own hover as its live bar.
+      await page.mouse.move(5, 5)
+      await sleep(300)
       const liveOff = await legends()
       const off = await hoverAt(0.72)
       check(
