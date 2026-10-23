@@ -165,7 +165,7 @@
 [data-theme="light"] .tab-btn.active{text-shadow:none;color:var(--txt);border-bottom-color:var(--primary)}
 [data-theme="light"] .theme-btn{background:var(--card);border-color:var(--border);color:var(--txt)}
 [data-theme="light"] .theme-btn:hover{border-color:var(--primary);box-shadow:0 0 10px rgb(var(--pRGB)/.15)}
-[data-theme="light"] footer{color:var(--border2)}
+[data-theme="light"] footer{color:var(--muted)}
 [data-theme="light"] .chart-toolbar select{background:var(--card);border-color:var(--border);color:var(--txt)}
 [data-theme="light"] .whale-item{border-bottom-color:var(--hair-2)}
 [data-theme="light"] .ni-title{color:var(--txt)}
@@ -182,7 +182,7 @@
 [data-theme="light"] .multi-chart-cell{background:var(--card);border-color:var(--border)}
 [data-theme="light"] .multi-chart-cell .mc-head{background:var(--card2);border-color:var(--border)}
 [data-theme="light"] .multi-chart-cell .mc-controls select{background:var(--card);border-color:var(--border);color:var(--txt)}
-[data-theme="light"] .mc-add{border-color:var(--border);color:var(--border2)}
+[data-theme="light"] .mc-add{border-color:var(--border);color:var(--muted)}
 [data-theme="light"] .mc-add:hover{border-color:var(--primary);color:var(--primary)}
 [data-theme="light"] .sig-verdict{background:var(--card2);border-color:var(--border)}
 [data-theme="light"] .sig-analysis{background:var(--card);border-color:var(--border)}
@@ -193,11 +193,11 @@
 [data-theme="light"] .sig-mode-tab{background:var(--card);border-color:var(--border);color:var(--muted)}
 [data-theme="light"] .sig-mode-tab.active{background:var(--primary);color:var(--card);border-color:var(--primary)}
 [data-theme="light"] #chatInput{color:var(--txt)}
-[data-theme="light"] #chatInput::placeholder{color:var(--border2)}
+[data-theme="light"] #chatInput::placeholder{color:var(--dim)}
 [data-theme="light"] .send-btn{background:var(--primary);color:var(--card)}
 [data-theme="light"] #gauge{filter:none}
 [data-theme="light"] .fc-note{color:var(--muted)}
-[data-theme="light"] .disclaimer{color:var(--border2)}
+[data-theme="light"] .disclaimer{color:var(--muted)}
 *{margin:0;padding:0;box-sizing:border-box}
 html{scroll-behavior:smooth}
 body{
@@ -1973,7 +1973,7 @@ html.radar-fs #radarChartCard #fsBtn::before{
   .mk-head{flex-wrap:wrap}
   .mk-right{margin-left:0;width:100%}
   .mk-page .sg-title{min-width:0}
-  .mk-jump{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin-right:-16px;padding-right:16px}
+  .mk-jump{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;max-width:100%}
   .mk-jump::-webkit-scrollbar{display:none}
   .mk-jump button{flex-shrink:0}
 }
@@ -2490,7 +2490,8 @@ footer{border-top:1px solid var(--border);margin-top:26px;padding:18px 14px;text
   :root{--ch:360px}
   .desktop-grid{grid-template-columns:repeat(3,1fr)}
   .hero-stats{grid-template-columns:repeat(5,1fr)}
-  .container{padding:0 18px 44px}
+  /* 96px: room under the last row so it scrolls clear of the floating AI button. */
+  .container{padding:0 18px 96px}
   .top-inner,.nav.tabs{padding-left:18px;padding-right:18px}
 }
 
@@ -3195,7 +3196,13 @@ header.top,.container{margin-left:var(--nav-w);transition:margin-left .22s cubic
 
   /* Nothing should hide behind the bar. */
   .container{padding-bottom:calc(140px + env(safe-area-inset-bottom,0px))}
+  /* Docked just above the tab bar (63px tall), tucked into the right edge and
+     smaller, so it sits in the page gutter rather than on the content. */
   .ai-dock-root{bottom:calc(74px + env(safe-area-inset-bottom,0px))}
+  .ai-dock-root:not(.open){right:6px}
+  .ai-dock-root:not(.open) .ai-fab{width:40px;height:40px;border-radius:13px}
+  .ai-dock-root:not(.open) .ai-fab svg{width:18px;height:18px}
+  .ai-dock-root:not(.open) .ai-fab-dot{top:6px;right:6px;width:8px;height:8px}
   .toast{bottom:calc(80px + env(safe-area-inset-bottom,0px))}
   footer{margin-bottom:6px}
 }
@@ -3273,11 +3280,10 @@ header.top,.container{margin-left:var(--nav-w);transition:margin-left .22s cubic
 }
 
 /* The assistant button floats over the page, and on a phone it landed square
-   on the price column of the market tables. Get it out of the way while the
-   page is actually moving; it comes back as soon as scrolling settles. */
-@media(max-width:900px){
-  .ai-dock-root.scrolled-away{opacity:.16;pointer-events:none;transform:translateY(8px)}
-}
+   on the price column of the market tables (and on desktop it sits over the
+   right column's controls). Get it out of the way while the page is actually
+   moving; it comes back as soon as scrolling settles. */
+.ai-dock-root.scrolled-away{opacity:.16;pointer-events:none;transform:translateY(8px)}
 
 /* Narrow phones cannot hold three comfortable columns. */
 @media(max-width:360px){
@@ -3511,7 +3517,15 @@ html[data-palette="ember"] .rail-count,
 html[data-palette="ember"] .draw-count,
 html[data-palette="ember"] .tb-btn,
 html[data-palette="ember"] .send-btn,
-html[data-palette="ember"] .sc-action-btn{color:var(--on-primary)}
+html[data-palette="ember"] .sc-action-btn,
+html[data-palette="ember"] .sn-btn.on,
+html[data-palette="ember"] .sig-mode-tab.active,
+html[data-palette="ember"] .sig-chip.on,
+html[data-palette="ember"] .liqhm-seg button.on,
+html[data-palette="ember"] .ec-seg button.on,
+html[data-palette="ember"] .range-mode.on,
+html[data-palette="ember"] .al-enable-btn,
+html[data-palette="ember"] .pine-btn.primary{color:var(--on-primary)}
 html[data-palette="ember"] .tb-btn,
 html[data-palette="ember"] .send-btn,
 html[data-palette="ember"] .sc-action-btn,
@@ -3664,7 +3678,11 @@ html[data-palette="navy"][data-theme="light"] .card:hover{box-shadow:0 12px 28px
 html[data-palette="navy"] .tf-btn.active,html[data-palette="navy"] .tv-chip.on,
 html[data-palette="navy"] .layout-btn.open,html[data-palette="navy"] .rail-count,
 html[data-palette="navy"] .draw-count,html[data-palette="navy"] .tb-btn,
-html[data-palette="navy"] .send-btn,html[data-palette="navy"] .sc-action-btn{color:var(--on-primary)}
+html[data-palette="navy"] .send-btn,html[data-palette="navy"] .sc-action-btn,
+html[data-palette="navy"] .sn-btn.on,html[data-palette="navy"] .sig-mode-tab.active,
+html[data-palette="navy"] .sig-chip.on,html[data-palette="navy"] .liqhm-seg button.on,
+html[data-palette="navy"] .ec-seg button.on,html[data-palette="navy"] .range-mode.on,
+html[data-palette="navy"] .al-enable-btn,html[data-palette="navy"] .pine-btn.primary{color:var(--on-primary)}
 html[data-palette="navy"] .ai-fab,html[data-palette="navy"] .tb-btn,html[data-palette="navy"] .send-btn{
   background:linear-gradient(135deg,#FF8A2A,var(--primary) 55%,#E85D04);
   box-shadow:0 8px 24px rgb(var(--pRGB)/.35);
@@ -3777,7 +3795,7 @@ body.nav-collapsed .sidenav-promo,body.nav-collapsed .sidenav-foot{display:none}
 
 .dt-head{display:flex;align-items:center;gap:10px;margin-bottom:12px}
 .dt-ico{display:grid;place-items:center;flex-shrink:0}
-.dt-title{margin:0;flex:1;min-width:0;font-size:13px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dt-title{margin:0;flex:1;min-width:0;font-size:13px;font-weight:800;letter-spacing:.07em;line-height:1.25;text-transform:uppercase;color:var(--txt);overflow-wrap:anywhere}
 .dt-cta{
   display:inline-flex;align-items:center;gap:5px;flex-shrink:0;padding:4px 10px;border-radius:9px;cursor:pointer;
   background:var(--sunk-2);border:1px solid var(--edge);color:var(--txt);font-size:11.5px;font-weight:600;transition:.15s;transition-property:var(--tr-visual);
@@ -3958,7 +3976,7 @@ td .sk,b .sk{display:inline-block;vertical-align:middle}
 
 /* market overview */
 .mo{display:flex;flex-direction:column;gap:10px;flex:1}
-.mo-ranges{display:flex;gap:4px;align-self:flex-end;margin-top:-44px;margin-bottom:12px;padding:3px;border-radius:10px;background:var(--sunk-2);border:1px solid var(--hair-2)}
+.mo-ranges{display:flex;gap:4px;align-self:flex-end;margin-top:-4px;margin-bottom:8px;padding:3px;border-radius:10px;background:var(--sunk-2);border:1px solid var(--hair-2)}
 .mo-ranges button{padding:3px 10px;border-radius:7px;border:none;background:none;color:var(--muted);font-family:var(--mono);font-size:11px;font-weight:700;cursor:pointer}
 .mo-ranges button.on{background:rgb(var(--cRGB)/.15);color:var(--cyan);box-shadow:inset 0 0 0 1px rgb(var(--cRGB)/.45)}
 .mo-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
@@ -4382,7 +4400,7 @@ td .sk,b .sk{display:inline-block;vertical-align:middle}
 .sg-stat:nth-child(3) .sg-stat-ico{color:var(--purple);background:rgb(160 110 255/.12)}
 .sg-stat small{font-size:11.5px;color:var(--muted)}
 .sg-stat b{font-size:16px;font-weight:800;color:var(--txt);white-space:nowrap}
-.sg-stat em{font-style:normal;font-size:var(--text-xs);color:var(--dim);white-space:nowrap}
+.sg-stat em{font-style:normal;font-size:var(--text-xs);color:var(--dim);line-height:1.3}
 
 .sg-body{display:grid;grid-template-columns:minmax(0,1fr) 290px;gap:14px;align-items:start}
 .sg-main{min-width:0;display:flex;flex-direction:column;gap:14px}
@@ -4459,7 +4477,7 @@ td .sk,b .sk{display:inline-block;vertical-align:middle}
 .sg-go{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:140px;height:34px;padding:0 14px;border-radius:10px;border:none;cursor:pointer;font-size:12px;font-weight:800;white-space:nowrap;transition:filter .15s}
 .sg-go:hover{filter:brightness(1.12)}
 .sg-go.long{background:linear-gradient(135deg,#1fd48a,#0fae6c);color:#04130b}
-.sg-go.short{background:linear-gradient(135deg,#ff4d6d,#d92b4b);color:#fff}
+.sg-go.short{background:linear-gradient(135deg,#e0304f,#b81d39);color:#fff}
 .sg-go.watch{background:linear-gradient(135deg,#ffb020,#d98a0b);color:#1b1206}
 .sg-empty{grid-column:1/-1;display:flex;flex-direction:column;align-items:center;gap:10px;padding:40px 12px;text-align:center;color:var(--muted);font-size:13px;border:1.5px dashed var(--hair-2);border-radius:16px}
 .sg-empty button{padding:7px 16px;border-radius:9px;border:1px solid var(--green);background:none;color:var(--green);font-weight:700;cursor:pointer}
@@ -4482,7 +4500,7 @@ td .sk,b .sk{display:inline-block;vertical-align:middle}
 .sg-chips-side button{padding:6px 11px;font-size:11.5px}
 .sg-sel{width:100%;padding:9px 10px;border-radius:10px;border:1px solid var(--edge,var(--border2));background:var(--sunk-2);color:var(--txt);font-size:12.5px;cursor:pointer}
 .sg-sel option{background:var(--card);color:var(--txt)}
-.sg-apply{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:6px;padding:11px;border-radius:11px;border:none;cursor:pointer;font-weight:800;font-size:13px;color:#fff;
+.sg-apply{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:6px;padding:11px;border-radius:11px;border:none;cursor:pointer;font-weight:800;font-size:13px;color:#04130b;
   background:linear-gradient(90deg,#10c98a,#1f8fff);box-shadow:0 6px 20px rgb(31 143 255/.25)}
 .sg-apply:hover{filter:brightness(1.1)}
 .sg-sent{display:flex;align-items:center;justify-content:space-between;gap:10px}
@@ -4769,7 +4787,7 @@ footer{text-align:center}
 }
 [data-theme="light"] .an-insight{background:linear-gradient(135deg,rgba(120,60,255,.1),rgba(120,60,255,.04))}
 [data-theme="light"] .an-insight b,[data-theme="light"] .an-bot{color:#6a3fe0}
-[data-theme="light"] .an-brand p,[data-theme="light"] .an-sub.g,[data-theme="light"] .an-ico{color:#0FA57F}
+[data-theme="light"] .an-brand p,[data-theme="light"] .an-sub.g,[data-theme="light"] .an-ico{color:var(--green)}
 [data-theme="light"] .an-lll li i.l{border-right-color:var(--hair-2)}
 
 
@@ -4803,7 +4821,7 @@ span.nn-live.on::before{content:'';display:inline-block;width:6px;height:6px;bor
 .nn-link{align-self:flex-start;display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:9px;border:1px solid rgba(94,231,255,.4);background:rgba(94,231,255,.06);color:var(--nn-c);font-size:12px;font-weight:700;cursor:pointer}
 .nn-link:hover{background:rgba(94,231,255,.12)}
 .nn-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:9px 16px;border-radius:10px;border:none;cursor:pointer;font-weight:800;font-size:12.5px;color:#fff;
-  background:linear-gradient(90deg,#3d7bff,#9b5cff);box-shadow:0 6px 18px rgba(110,90,255,.3)}
+  background:linear-gradient(90deg,#2f66e8,#7f45e6);box-shadow:0 6px 18px rgba(110,90,255,.3)}
 .nn-btn:disabled{opacity:.6;cursor:progress}
 .nn-seg{display:flex;gap:3px;padding:3px;border-radius:10px;background:var(--sunk-2);border:1px solid var(--hair-2);flex-wrap:wrap}
 .nn-seg button{padding:5px 11px;border-radius:7px;border:none;background:none;color:var(--muted);font-size:11.5px;font-weight:700;cursor:pointer;font-family:var(--mono)}
@@ -4848,7 +4866,7 @@ span.nn-live.on::before{content:'';display:inline-block;width:6px;height:6px;bor
 .nn-auto.on b{color:var(--green)}
 .nn-tfs{display:flex;align-items:center;gap:4px;padding:6px;border-radius:14px;background:var(--card);border:1px solid var(--edge,var(--border))}
 .nn-tfs button{padding:7px 10px;border-radius:9px;border:1px solid transparent;background:none;color:var(--muted);font-family:var(--mono);font-size:12.5px;font-weight:700;cursor:pointer}
-.nn-tfs button.on{color:#fff;background:linear-gradient(135deg,#3d7bff,#7c5cff);box-shadow:0 0 16px rgba(90,110,255,.45)}
+.nn-tfs button.on{color:#fff;background:linear-gradient(135deg,#2f66e8,#6a48e8);box-shadow:0 0 16px rgba(90,110,255,.45)}
 .nn-trend{margin:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) 90px;gap:10px;align-items:center;padding:10px 14px;border-radius:16px}
 .nn-trend>span{display:flex;flex-direction:column;gap:1px;min-width:0}
 .nn-trend small{font-size:var(--text-xs);color:var(--muted)}
@@ -5916,3 +5934,38 @@ html[data-palette="glass"] .acct-card{background:linear-gradient(145deg,rgba(255
   border-radius:0 0 2px 2px;box-shadow:none;
 }
 [data-theme="light"] .close-timer{box-shadow:none}
+
+/* ---- light theme: hard-coded neon accents --------------------------------
+   These were tuned for a navy page; on white they fell to 1.3-2:1. Each maps
+   to the theme token that carries the same hue at >= 4.5:1 on a light card. */
+[data-theme="light"] .an-tfs button.on,[data-theme="light"] .an-secs button.on{color:var(--green);border-color:rgb(var(--gRGB)/.6);background:var(--card);box-shadow:none}
+[data-theme="light"] .an-zlist li.g .an-tag,[data-theme="light"] .an-tfc.g .an-tag{background:rgb(var(--gRGB)/.05)}
+[data-theme="light"] .an-zlist li.r .an-tag,[data-theme="light"] .an-tfc.r .an-tag{background:rgb(var(--rRGB)/.05)}
+[data-theme="light"] .an-zlist li.a .an-tag,[data-theme="light"] .an-tfc.a .an-tag{background:rgb(var(--aRGB)/.05)}
+[data-theme="light"] .liqhm-views button.on{color:var(--green);background:rgb(var(--gRGB)/.07);box-shadow:inset 0 0 0 1px rgb(var(--gRGB)/.5)}
+[data-theme="light"] .liqhm-icon.on,[data-theme="light"] .an-zi,[data-theme="light"] .an-si{color:var(--green)}
+[data-theme="light"] .an-zlist li.p .an-tag{color:var(--purple);border-color:rgb(var(--uRGB)/.45);background:rgb(var(--uRGB)/.07)}
+[data-theme="light"] .liqhm-lev button.on{color:var(--purple);border-color:var(--purple);background:rgb(var(--uRGB)/.07)}
+[data-theme="light"] .nn-page{--nn-c:var(--cyan);--nn-p:var(--purple)}
+[data-theme="light"] .nn-link,[data-theme="light"] .nn-chip-btn{border-color:rgb(var(--cRGB)/.45);background:rgb(var(--cRGB)/.05)}
+[data-theme="light"] .nn-tabs button.on{color:#fff;border-color:transparent;background:linear-gradient(135deg,#2f66e8,#6a48e8);box-shadow:0 4px 12px rgba(60,80,220,.22)}
+[data-theme="light"] .mo-ranges button.on{background:rgb(var(--cRGB)/.07)}
+/* Solid green fills: light mode's deeper green carries white (5.5:1); the
+   near-black label that suits dark mode's neon green was 3.5:1 here. */
+[data-theme="light"] .sg-chips button.on,[data-theme="light"] .sg-chips button.on i,
+[data-theme="light"] .an-lll li.px span,[data-theme="light"] .nn-vpl li.px span,
+[data-theme="light"] .nn-goall li.done .nn-goalc{color:#fff}
+[data-theme="light"] .sg-chips button.on i{opacity:.85}
+
+/* ---- touch: 40px minimum targets ----------------------------------------
+   Header icons were 36px, dashboard tile links 24px, range buttons and filter
+   chips 20-33px, the sidebar collapse 26px. Only coarse pointers get the bigger
+   boxes; a mouse keeps the compact desktop layout. */
+@media(pointer:coarse){
+  .theme-btn.icon-btn{min-width:40px;min-height:40px}
+  .dt-cta{min-height:40px;padding-inline:12px}
+  .mo-ranges button{min-width:40px;min-height:40px}
+  .sg-chips button,.sig-chip,.sc-chip{min-height:40px}
+  .an-tfs button,.an-secs button,.nn-tfs button,.liqhm-views button{min-height:40px}
+  .sidenav-collapse{width:40px;height:40px}
+}
