@@ -49,6 +49,7 @@ const { groupAggTrades, autoThreshold, bubbleRadius } = await import(
   src('features/whales/whaleMath.ts')
 )
 const alerts = await import(src('features/alerts/rules.ts'))
+const wls = await import(src('features/favorites/watchlists.ts'))
 const { buildVolumeProfile, computeVolumeProfile, clampRows, clampValueArea } = await import(
   src('features/charts/volumeProfile.ts')
 )
@@ -1067,6 +1068,83 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   eq('alerts: migrated ids are stable', normalizeRules([{ sym: 'BTCUSDT', dir: 'above', price: 1, created: 5 }])[0].id, mig[0].id)
   eq('alerts: new rules default their timeframe', mig[2].tf, '15m')
   eq('alerts: junk storage is empty', normalizeRules({ a: 1 }), [])
+}
+
+// ------------------------------------------------------- watchlists (favourites)
+{
+  const { FAV_ID, FAV_NAME, MAX_LISTS, MAX_SYMBOLS, normalizeWatchlists, initialWatchlists, createList, renameList,
+    deleteList, setActive, addSymbol, addSymbolFirst, removeSymbol, moveSymbol, togglePin, orderedSymbols, activeList,
+    getList } = wls
+  const fav = (st) => getList(st, FAV_ID)
+
+  // migration from the old single list (lr-favCoins) — nothing lost
+  const m0 = normalizeWatchlists(null, ['BTC', 'ETH', 'SOL'])
+  eq('watchlists: old favourites become the Favourites list', [m0.lists.length, m0.lists[0].id, m0.lists[0].name, m0.lists[0].symbols], [1, FAV_ID, FAV_NAME, ['BTC', 'ETH', 'SOL']])
+  eq('watchlists: migrated state is active on Favourites', m0.active, FAV_ID)
+  eq('watchlists: nothing saved at all is an empty Favourites', normalizeWatchlists(null, null), initialWatchlists())
+  eq('watchlists: migration drops junk, keeps order', normalizeWatchlists(undefined, ['BTC', 7, null, '', ' ETH ', 'BTC']).lists[0].symbols, ['BTC', 'ETH'])
+  eq('watchlists: migration caps at the old 50', normalizeWatchlists(null, Array.from({ length: 70 }, (_, i) => 'C' + i)).lists[0].symbols.length, MAX_SYMBOLS)
+  // corrupt JSON in storage reads back as null (storageGet's fallback) or junk
+  eq('watchlists: corrupt saved lists keep the old favourites', normalizeWatchlists('{not json', ['DOGE']).lists[0].symbols, ['DOGE'])
+  eq('watchlists: corrupt lists and favourites is a fresh state', normalizeWatchlists(42, 'oops'), initialWatchlists())
+  const saved = { active: 'b', lists: [{ id: FAV_ID, name: 'Mine', symbols: ['BTC'], pinned: ['BTC', 'XRP'] }, { id: 'b', name: '  Alts  ', symbols: ['SOL', 'SOL', 'ADA'], pinned: ['ADA'] }, { id: 'b', name: 'dupe' }, null, { name: 'no id' }] }
+  const r0 = normalizeWatchlists(saved, null)
+  eq('watchlists: saved lists survive, junk is dropped', r0.lists.map((l) => [l.id, l.name, l.symbols, l.pinned]), [[FAV_ID, 'Mine', ['BTC'], ['BTC']], ['b', 'Alts', ['SOL', 'ADA'], ['ADA']]])
+  eq('watchlists: saved active list is kept', r0.active, 'b')
+  eq('watchlists: the old key wins for the Favourites contents', fav(normalizeWatchlists(saved, ['ETH'])).symbols, ['ETH'])
+  eq('watchlists: pins outside the list are dropped on read', fav(normalizeWatchlists(saved, ['ETH'])).pinned, [])
+  eq('watchlists: an unknown active id falls back to Favourites', normalizeWatchlists({ ...saved, active: 'gone' }, null).active, FAV_ID)
+  eq('watchlists: Favourites is restored first when missing', normalizeWatchlists({ lists: [{ id: 'x', name: 'X', symbols: [] }] }, ['BTC']).lists.map((l) => l.id), [FAV_ID, 'x'])
+
+  // create / rename / delete / switch
+  const s0 = initialWatchlists(['BTC'])
+  const s1 = createList(s0, '  Swing   trades ', 'w1')
+  eq('watchlists: create adds and activates', [s1.lists.length, s1.active, activeList(s1).name], [2, 'w1', 'Swing trades'])
+  eq('watchlists: create with a blank name gets a default', createList(s0, '   ', 'w2').lists[1].name, 'Watchlist 2')
+  ok('watchlists: create refuses a duplicate id', createList(s1, 'Again', 'w1') === s1)
+  let full = s0
+  for (let i = 0; i < MAX_LISTS + 3; i++) full = createList(full, 'L' + i, 'id' + i)
+  eq('watchlists: list count is capped', full.lists.length, MAX_LISTS)
+  eq('watchlists: rename', getList(renameList(s1, 'w1', 'Scalps'), 'w1').name, 'Scalps')
+  ok('watchlists: rename to blank is a no-op', renameList(s1, 'w1', '  ') === s1)
+  ok('watchlists: rename unknown list is a no-op', renameList(s1, 'nope', 'X') === s1)
+  ok('watchlists: rename caps the length', getList(renameList(s1, 'w1', 'x'.repeat(80)), 'w1').name.length <= 32)
+  const d1 = deleteList(s1, 'w1')
+  eq('watchlists: delete removes and re-activates a neighbour', [d1.lists.length, d1.active], [1, FAV_ID])
+  ok('watchlists: the last list is never deleted', deleteList(s0, FAV_ID) === s0)
+  ok('watchlists: Favourites is never deleted', deleteList(s1, FAV_ID) === s1)
+  const s3 = createList(createList(s1, 'B', 'w2'), 'C', 'w3')
+  eq('watchlists: deleting a middle active list activates the next', deleteList(setActive(s3, 'w2'), 'w2').active, 'w3')
+  eq('watchlists: deleting an inactive list keeps the active one', deleteList(s3, 'w1').active, 'w3')
+  eq('watchlists: switch list', setActive(s3, 'w1').active, 'w1')
+  ok('watchlists: switching to an unknown list is a no-op', setActive(s3, 'zzz') === s3)
+
+  // symbols: add / remove / move / pin
+  let a = addSymbol(addSymbol(addSymbol(s1, 'w1', 'BTC'), 'w1', 'ETH'), 'w1', 'SOL')
+  eq('watchlists: add appends in order', getList(a, 'w1').symbols, ['BTC', 'ETH', 'SOL'])
+  ok('watchlists: add is idempotent', addSymbol(a, 'w1', 'ETH') === a)
+  ok('watchlists: add ignores blanks', addSymbol(a, 'w1', ' ') === a)
+  eq('watchlists: add leaves other lists alone', fav(a).symbols, ['BTC'])
+  eq('watchlists: addSymbolFirst puts it on top', getList(addSymbolFirst(a, 'w1', 'XRP'), 'w1').symbols, ['XRP', 'BTC', 'ETH', 'SOL'])
+  eq('watchlists: move down', getList(moveSymbol(a, 'w1', 'BTC', 1), 'w1').symbols, ['ETH', 'BTC', 'SOL'])
+  eq('watchlists: move up', getList(moveSymbol(a, 'w1', 'SOL', -1), 'w1').symbols, ['BTC', 'SOL', 'ETH'])
+  ok('watchlists: move past the top is a no-op', moveSymbol(a, 'w1', 'BTC', -1) === a)
+  ok('watchlists: move past the end is a no-op', moveSymbol(a, 'w1', 'SOL', 1) === a)
+  const p = togglePin(a, 'w1', 'SOL')
+  eq('watchlists: pin puts the symbol on top', orderedSymbols(getList(p, 'w1')), ['SOL', 'BTC', 'ETH'])
+  ok('watchlists: pinning a symbol not in the list is a no-op', togglePin(a, 'w1', 'DOGE') === a)
+  eq('watchlists: unpin', getList(togglePin(p, 'w1', 'SOL'), 'w1').pinned, [])
+  eq('watchlists: unpinned moves skip the pinned row', orderedSymbols(getList(moveSymbol(p, 'w1', 'BTC', 1), 'w1')), ['SOL', 'ETH', 'BTC'])
+  ok('watchlists: the first unpinned row cannot move into the pins', moveSymbol(p, 'w1', 'BTC', -1) === p)
+  const pp = togglePin(p, 'w1', 'BTC')
+  eq('watchlists: pinned rows reorder among themselves', orderedSymbols(getList(moveSymbol(pp, 'w1', 'BTC', -1), 'w1')), ['BTC', 'SOL', 'ETH'])
+  const rm = removeSymbol(p, 'w1', 'SOL')
+  eq('watchlists: remove drops the symbol and its pin', [getList(rm, 'w1').symbols, getList(rm, 'w1').pinned], [['BTC', 'ETH'], []])
+  ok('watchlists: removing a missing symbol is a no-op', removeSymbol(a, 'w1', 'DOGE') === a)
+  for (let i = 0; i < MAX_SYMBOLS + 5; i++) a = addSymbol(a, 'w1', 'Z' + i)
+  eq('watchlists: symbols per list are capped', getList(a, 'w1').symbols.length, MAX_SYMBOLS)
+  // round trip through JSON, as storage does
+  eq('watchlists: a saved state reads back unchanged', normalizeWatchlists(JSON.parse(JSON.stringify(pp)), fav(pp).symbols), pp)
 }
 
 // ---------------------------------------------------------- volume profile
