@@ -13,10 +13,15 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 // Resolved from this file, not the cwd, so it works from any directory.
-const ASSETS = fileURLToPath(new URL('../dist/assets', import.meta.url))
-if (!existsSync(ASSETS)) {
-  console.error(`No build output at ${ASSETS} — run \`npm run build\` first.`)
-  process.exit(1)
+// `npm run build` emits two apps: the main app (dist/assets) and the Pro
+// Terminal (scripts/build-pro.mjs copies it to dist/pro/assets). Both ship
+// from the same deployment, so both are held to the same budgets.
+const ASSET_DIRS = ['../dist/assets', '../dist/pro/assets'].map((p) => fileURLToPath(new URL(p, import.meta.url)))
+for (const dir of ASSET_DIRS) {
+  if (!existsSync(dir)) {
+    console.error(`No build output at ${dir} — run \`npm run build\` first.`)
+    process.exit(1)
+  }
 }
 
 // name-fragment -> max gzip size in KB. The first matching fragment wins.
@@ -38,23 +43,26 @@ const CSS_KB = 80
 
 const gzKb = (buf) => Math.ceil(gzipSync(buf).length / 1024)
 let failed = false
-let checked = 0
 
-for (const f of readdirSync(ASSETS)) {
-  if (!/\.(js|css)$/.test(f)) continue
-  checked++
-  const size = gzKb(readFileSync(join(ASSETS, f))) // gzip, what goes over the wire
-  const isCss = f.endsWith('.css')
-  const budget = isCss ? CSS_KB : (BUDGETS.find((b) => b.match.test(f)) || BUDGETS.at(-1)).kb
-  const ok = size <= budget
-  if (!ok) failed = true
-  console.log(`${ok ? '✓' : '✗'} ${f} ${size}KB / ${budget}KB gz`)
+for (const dir of ASSET_DIRS) {
+  let checked = 0
+  console.log(`\n${dir}`)
+  for (const f of readdirSync(dir)) {
+    if (!/\.(js|css)$/.test(f)) continue
+    checked++
+    const size = gzKb(readFileSync(join(dir, f))) // gzip, what goes over the wire
+    const isCss = f.endsWith('.css')
+    const budget = isCss ? CSS_KB : (BUDGETS.find((b) => b.match.test(f)) || BUDGETS.at(-1)).kb
+    const ok = size <= budget
+    if (!ok) failed = true
+    console.log(`${ok ? '✓' : '✗'} ${f} ${size}KB / ${budget}KB gz`)
+  }
+  if (checked === 0) {
+    console.error(`No .js/.css files found in ${dir} — nothing was checked.`)
+    process.exit(1)
+  }
 }
 
-if (checked === 0) {
-  console.error(`No .js/.css files found in ${ASSETS} — nothing was checked.`)
-  process.exit(1)
-}
 if (failed) {
   console.error('\nBundle budget exceeded — trim the import or raise the budget consciously (with a comment saying why).')
   process.exit(1)
