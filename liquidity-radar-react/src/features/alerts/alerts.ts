@@ -101,6 +101,44 @@ function candleTtl(tf: string): number {
   return Math.min(10 * 60000, Math.max(60000, ms / 3))
 }
 
+/** 24h tickers for symbols state.tickers lacks: a few per pass, each at most once a minute. */
+async function topUpTickers(syms: Iterable<string>, now: number): Promise<boolean> {
+  let got = false
+  const tk = [...syms]
+    .filter((s) => !(state.tickers && state.tickers[s]) && !badSymbols.has(s) && !isInstrument(s))
+    .filter((s) => !extraTickers[s] || now - extraTickers[s].ts > 60000)
+    .slice(0, 6)
+  for (const s of tk) {
+    if (isRateLimited()) break
+    try {
+      const d = (await jget(
+        'https://api.binance.com/api/v3/ticker/24hr?symbol=' + encodeURIComponent(s),
+      )) as Record<string, unknown>
+      extraTickers[s] = { last: Number(d.lastPrice), pct: Number(d.priceChangePercent), ts: Date.now() }
+      got = true
+    } catch (e) {
+      // A 400 means Binance has no such pair — stop asking.
+      if (/HTTP 400/.test(String(e))) badSymbols.add(s)
+    }
+  }
+  return got
+}
+
+/** A symbol's last price and 24h %: the tracked universe first, else a fetched extra ticker. */
+export const liveTicker = tickerOf
+
+/**
+ * Fetch prices for symbols outside the tracked universe (the chart's
+ * Watchlist panel), through the same paced top-up the alert rules use.
+ */
+export function ensureTickers(syms: string[]): void {
+  if (refreshing || isRateLimited()) return
+  refreshing = true
+  void topUpTickers(syms, Date.now()).finally(() => {
+    refreshing = false
+  })
+}
+
 /** Background top-up of whatever the rules need that state.tickers lacks. */
 async function refreshData(rules: AlertRule[]): Promise<void> {
   if (refreshing || isRateLimited()) return
@@ -113,23 +151,7 @@ async function refreshData(rules: AlertRule[]): Promise<void> {
       if (r.kind === 'watchlist') watchSymbols().forEach((s) => needT.add(s))
       else if (r.kind === 'price' && r.sym) needT.add(r.sym)
     })
-    const tk = [...needT]
-      .filter((s) => !(state.tickers && state.tickers[s]) && !badSymbols.has(s) && !isInstrument(s))
-      .filter((s) => !extraTickers[s] || now - extraTickers[s].ts > 60000)
-      .slice(0, 6)
-    for (const s of tk) {
-      if (isRateLimited()) break
-      try {
-        const d = (await jget(
-          'https://api.binance.com/api/v3/ticker/24hr?symbol=' + encodeURIComponent(s),
-        )) as Record<string, unknown>
-        extraTickers[s] = { last: Number(d.lastPrice), pct: Number(d.priceChangePercent), ts: Date.now() }
-        got = true
-      } catch (e) {
-        // A 400 means Binance has no such pair — stop asking.
-        if (/HTTP 400/.test(String(e))) badSymbols.add(s)
-      }
-    }
+    if (await topUpTickers(needT, now)) got = true
     const keys = [...new Set(rules.filter((r) => r.kind === 'technical').map(techKey))]
     const stale = keys
       .filter((k) => {

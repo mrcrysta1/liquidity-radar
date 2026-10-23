@@ -829,6 +829,40 @@ html.radar-fs #chart{height:100% !important}
 .cs-ev-tag.bull{color:var(--green);background:rgb(var(--gRGB)/.15)}
 .cs-ev-tag.bear{color:var(--red);background:rgb(var(--rRGB)/.15)}
 .cs-ev small{margin-left:auto;color:var(--dim);font-family:var(--mono);font-size:var(--text-xs)}
+
+/* Watchlist */
+.cs-wl{display:flex;flex-direction:column;gap:8px}
+.cs-wl-bar{display:flex;align-items:center;gap:4px}
+.cs-wl-select,.cs-wl-input{
+  flex:1;min-width:0;background:var(--bg);color:var(--txt);border:1px solid var(--border2);border-radius:8px;
+  padding:5px 8px;font-size:12px;font-family:var(--mono);outline:none;
+}
+.cs-wl-select:focus-visible,.cs-wl-input:focus{border-color:var(--primary)}
+.cs-wl .chart-tool-btn{padding:4px 6px 5px;font-size:12px;min-width:26px}
+.cs-wl .chart-tool-btn:disabled{opacity:.35;cursor:not-allowed;box-shadow:none;border-color:var(--border2)}
+.cs-wl .chart-tool-btn.on{color:var(--txt);border-color:var(--primary);background:rgb(var(--pRGB)/.16)}
+.cs-wl-add{align-self:stretch}
+.cs-wl-add .cp-trigger{width:100%}
+.cs-wl-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+.cs-wl-row{
+  display:flex;align-items:center;gap:4px;padding:2px;border-radius:8px;border:1px solid transparent;
+}
+.cs-wl-row:hover{background:rgb(var(--pRGB)/.07)}
+.cs-wl-row.on{background:rgb(var(--pRGB)/.13);border-color:rgb(var(--pRGB)/.4)}
+.cs-wl-row.pinned .cs-wl-id b::after{content:' 📌';font-size:9px}
+.cs-wl-main{
+  flex:1;min-width:0;display:flex;align-items:center;gap:7px;padding:4px 4px;
+  background:none;border:none;color:var(--txt);cursor:pointer;text-align:left;border-radius:6px;font:inherit;
+}
+.cs-wl-main:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
+.cs-wl-id{display:flex;flex-direction:column;min-width:0;flex:1}
+.cs-wl-id b{font-size:12px;font-family:var(--mono);white-space:nowrap}
+.cs-wl-id small{font-size:var(--text-2xs);color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cs-wl-q{display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex-shrink:0}
+.cs-wl-px{font-family:var(--mono);font-size:var(--text-xs);font-weight:700}
+.cs-wl .cmc-pill{min-width:0;padding:1px 6px;font-size:10px}
+.cs-wl-acts{display:flex;gap:2px;flex-shrink:0}
+.cs-wl-acts .chart-tool-btn{min-width:22px;padding:3px 4px 4px;font-size:10px}
 .cs-body .up{color:var(--green)}
 .cs-body .dn{color:var(--red)}
 
