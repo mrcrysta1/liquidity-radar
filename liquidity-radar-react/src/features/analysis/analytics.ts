@@ -7,8 +7,9 @@
 import { $ } from '../../utils/dom'
 import { pfmt, cfmt, nfmt } from '../../utils/format'
 import { baseOf } from '../../utils/coins'
-import { aiComposite, calcATR, forecastFrom, supportResistance } from '../../utils/indicators'
+import { aiComposite, calcATR, dailyVolPct, forecastFrom, supportResistance } from '../../utils/indicators'
 import { state } from '../../services/store'
+import { tfDef, tfMs } from '../../services/timeframe'
 import type { AIScore, Forecast, SupportResistance } from '../../types/market'
 
 interface FrLike { markPrice: string; lastFundingRate: string; nextFundingTime?: number }
@@ -52,6 +53,8 @@ export interface AnalyticsSnapshot {
   badge: string
   mkPos: number
   dv: number
+  /** Which candles the volatility was measured on, for the metric's caption. */
+  dvNote: string
   fc: Forecast
   mark: number
   liq: LiqCalc | null
@@ -74,13 +77,14 @@ export function computeAnalytics(): AnalyticsSnapshot | null {
   const vtc = a.vt === 'RISING' ? ['RISING ↑', 'b-green'] : a.vt === 'FALLING' ? ['FALLING ↓', 'b-red'] : ['FLAT →', 'b-gray']
   const mkPos = 50 + a.score / 2
 
-  const rets: number[] = []
-  for (let i = 1; i < closes.length; i++) rets.push(closes[i] / closes[i - 1] - 1)
-  const mr = rets.reduce((x, y) => x + y, 0) / rets.length
-  const sd = Math.sqrt(rets.reduce((x, y) => x + (y - mr) * (y - mr), 0) / rets.length)
-  const dv = sd * Math.sqrt(96) * 100
+  // The candles are on the chart's timeframe, not always 15m: scale the daily
+  // volatility and the forecast horizons by the real bar size.
+  const tfd = tfDef(state.tf)
+  const barMinutes = tfMs(tfd) / 60000
+  const dv = dailyVolPct(closes, barMinutes)
+  const dvNote = 'realized · ' + tfd.label + ' bars'
 
-  const fc = forecastFrom(closes)
+  const fc = forecastFrom(closes, barMinutes)
   const sr = supportResistance(state.candles)
   if (sr) state._sr = sr
   state._atr = calcATR(state.candles)
@@ -166,6 +170,7 @@ export function computeAnalytics(): AnalyticsSnapshot | null {
     badge: a.badge,
     mkPos,
     dv,
+    dvNote,
     fc,
     mark,
     liq,
@@ -206,6 +211,8 @@ export function renderAnalysis(s: AnalyticsSnapshot): void {
 
   $('mVol')!.textContent = s.dv.toFixed(2) + '%'
   $('mVol')!.style.color = s.dv > 4 ? 'var(--red)' : s.dv > 1.5 ? 'var(--amber)' : 'var(--green)'
+  const volNote = $('mVol')!.nextElementSibling
+  if (volNote) volNote.textContent = s.dvNote
 
   $('fcBias')!.textContent = s.fc.bias
   $('fcBias')!.style.color = s.fc.bias.indexOf('UP') === 0 ? 'var(--green)' : 'var(--red)'

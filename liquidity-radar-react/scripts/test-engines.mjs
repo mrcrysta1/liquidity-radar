@@ -1831,6 +1831,30 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   const f15 = forecastFrom(cl), f60 = forecastFrom(cl, 60)
   ok('forecast: 1H on 1h candles is one bar ahead (a quarter of the 15m step count)',
     Math.abs((f60.rows[0].pred - cl.at(-1)) * 4 - (f15.rows[0].pred - cl.at(-1))) < 1e-9)
+  // On daily candles 1H is 1/24 of a bar, not 4 bars (4 days) ahead.
+  const f1d = forecastFrom(cl, 1440)
+  ok('forecast: 1H on 1D candles is a 24th of the 24H move',
+    Math.abs((f1d.rows[0].pred - cl.at(-1)) * 24 - (f1d.rows[3].pred - cl.at(-1))) < 1e-9)
+  ok('forecast: 24H on 1D candles is one bar ahead (same drift as 1H on 1h)',
+    Math.abs((f1d.rows[3].pred - cl.at(-1)) - (f60.rows[0].pred - cl.at(-1))) < 1e-9)
+  ok('forecast: a sub-bar horizon has a narrower band than a whole bar',
+    f1d.rows[0].hi - f1d.rows[0].lo < f1d.rows[3].hi - f1d.rows[3].lo)
+  const bad = forecastFrom(cl, 0)
+  ok('forecast: a bad bar size falls back to 15m, never NaN', bad.rows.every((r) => Number.isFinite(r.pred)) &&
+    bad.rows[0].pred === f15.rows[0].pred)
+}
+
+// ---- utils/indicators: daily volatility by timeframe -----------------
+{
+  const { dailyVolPct } = await import(src('utils/indicators.ts'))
+  // Alternating +1% / -1%: per-bar sd is 1%, whatever the timeframe.
+  const alt = Array.from({ length: 41 }, (_, i) => (i % 2 ? 101 : 100))
+  const sd15 = dailyVolPct(alt) / Math.sqrt(96)
+  near('vol: 15m default keeps the 96-bar day', dailyVolPct(alt, 15), sd15 * Math.sqrt(96), 1e-9)
+  near('vol: 1h candles scale by sqrt(24)', dailyVolPct(alt, 60), sd15 * Math.sqrt(24), 1e-9)
+  near('vol: 1D candles are already daily', dailyVolPct(alt, 1440), sd15, 1e-9)
+  near('vol: 1W candles scale down by sqrt(7)', dailyVolPct(alt, 10080), sd15 / Math.sqrt(7), 1e-9)
+  eq('vol: no returns is zero, not NaN', dailyVolPct([100]), 0)
 }
 
 // ---- assistant: actions it can take in the app --------------------------------------

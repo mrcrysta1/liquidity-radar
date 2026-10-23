@@ -161,6 +161,8 @@ export function aiComposite(candles: CandleLike[], closes: number[], vols: numbe
  * real 1H/24H horizons instead of 4x / 96x too far.
  */
 export function forecastFrom(closes: number[], barMinutes = 15): Forecast {
+  // A bad bar size would turn every horizon into NaN or Infinity bars.
+  if (!(barMinutes > 0) || !isFinite(barMinutes)) barMinutes = 15
   const win = closes.slice(-20)
   const last = closes[closes.length - 1]
   const lr = linReg(win)
@@ -173,6 +175,9 @@ export function forecastFrom(closes: number[], barMinutes = 15): Forecast {
   const sd =
     Math.sqrt(rets.reduce((a, b) => a + (b - meanR) * (b - meanR), 0) / rets.length) || 0.001
   const damp = 0.55
+  // Horizons shorter than one bar (1H on daily candles) come out as a fraction
+  // of a bar: drift scales linearly and the band by sqrt(time), so the label
+  // stays the real clock horizon instead of being stretched to a whole bar.
   const steps = (hours: number) => (hours * 60) / barMinutes
   const defs: Array<[number, string, number]> = [
     [1, '1H', steps(1)],
@@ -192,6 +197,21 @@ export function forecastFrom(closes: number[], barMinutes = 15): Forecast {
   })
   const bias = rows[3].dp >= 0 ? 'UP ▲' : 'DOWN ▼'
   return { rows: rows, bias: bias }
+}
+
+/**
+ * Realized volatility of `closes` as a 24-hour percentage: the per-bar
+ * standard deviation of returns scaled by sqrt(bars per day). `barMinutes` is
+ * the candle size (15m → 96 bars a day, 1D → 1, 1W → 1/7).
+ */
+export function dailyVolPct(closes: number[], barMinutes = 15): number {
+  if (!(barMinutes > 0) || !isFinite(barMinutes)) barMinutes = 15
+  const rets: number[] = []
+  for (let i = 1; i < closes.length; i++) rets.push(closes[i] / closes[i - 1] - 1)
+  if (!rets.length) return 0
+  const mr = rets.reduce((x, y) => x + y, 0) / rets.length
+  const sd = Math.sqrt(rets.reduce((x, y) => x + (y - mr) * (y - mr), 0) / rets.length)
+  return sd * Math.sqrt(1440 / barMinutes) * 100
 }
 
 export function supportResistance(candles: CandleLike[]): SupportResistance | null {
