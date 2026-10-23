@@ -57,6 +57,7 @@ const { ProviderChain, klineFreshness, createPacer, toKlineRows } = await import
   src('services/providerChain.ts')
 )
 const { KlineHub, MAX_HUB_STREAMS } = await import(src('services/klineHub.ts'))
+const { StreamMux } = await import(src('services/streamMux.ts'))
 
 let pass = 0
 const fails = []
@@ -985,6 +986,163 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
     }
     ok('hub: enforces the stream cap', capped)
     ok('hub: an existing stream can always gain a subscriber', !!capHub.subscribe('S0USDT', '1m', () => {}))
+  } finally {
+    globalThis.WebSocket = prevWS
+  }
+}
+
+// ---------------------------------------------------------------- stream mux (main chart sockets)
+{
+  const sockets = []
+  class FakeWS {
+    constructor(url) {
+      this.url = url
+      this.sent = []
+      this.closed = 0
+      this.onopen = this.onmessage = this.onclose = this.onerror = null
+      sockets.push(this)
+    }
+    send(m) {
+      this.sent.push(JSON.parse(m))
+    }
+    close() {
+      this.closed++
+      if (this.onclose) this.onclose()
+    }
+    accept() {
+      if (this.onopen) this.onopen()
+    }
+    drop() {
+      if (this.onclose) this.onclose()
+    }
+    push(stream, data) {
+      if (this.onmessage) this.onmessage({ data: JSON.stringify({ stream, data }) })
+    }
+  }
+  const prevWS = globalThis.WebSocket
+  globalThis.WebSocket = FakeWS
+  const tick = (ms = 5) => new Promise((r) => setTimeout(r, ms))
+  const params = (ws, method) => ws.sent.filter((m) => m.method === method).flatMap((m) => m.params)
+  try {
+    const live = []
+    let drops = 0
+    const mux = new StreamMux({
+      base: 'wss://test/stream',
+      flushMs: 0,
+      minGapMs: 0,
+      idleCloseMs: 20,
+      onLive: (k, up, dropped) => live.push([k, up, dropped]),
+      onDrop: () => drops++,
+    })
+    const got = []
+    const set = (sym, tag) => ({
+      [sym + '@ticker']: (d) => got.push([tag, 'tk', d.c]),
+      [sym + '@aggTrade']: () => {},
+      [sym + '@kline_15m']: () => {},
+      [sym + '@depth20@100ms']: () => {},
+    })
+    mux.want(set('btcusdt', 'btc'))
+    eq('mux: one socket for the four streams', sockets.length, 1)
+    const ws = sockets[0]
+    eq(
+      'mux: streams ride on the URL',
+      ws.url,
+      'wss://test/stream?streams=btcusdt@ticker/btcusdt@aggTrade/btcusdt@kline_15m/btcusdt@depth20@100ms',
+    )
+    eq('mux: not live while connecting', mux.liveCount, 0)
+    ws.accept()
+    eq('mux: four live streams once open', mux.liveCount, 4)
+    eq('mux: opening sends no frame', ws.sent.length, 0)
+    ws.push('btcusdt@ticker', { c: '1' })
+    eq('mux: routes a frame to its stream', got, [['btc', 'tk', '1']])
+
+    // Coin switch: the stop then the new set, as setSymbol does it.
+    mux.want({})
+    mux.want(set('ethusdt', 'eth'))
+    await tick()
+    eq('mux: a switch keeps the socket', [sockets.length, ws.closed], [1, 0])
+    eq('mux: one UNSUBSCRIBE for the old coin', params(ws, 'UNSUBSCRIBE').sort(), [
+      'btcusdt@aggTrade',
+      'btcusdt@depth20@100ms',
+      'btcusdt@kline_15m',
+      'btcusdt@ticker',
+    ])
+    eq('mux: one SUBSCRIBE for the new coin', params(ws, 'SUBSCRIBE').length, 4)
+    eq('mux: two frames for the whole switch', ws.sent.length, 2)
+    ok('mux: unsubscribing is not reported as a drop', live.every(([, up, dropped]) => up || !dropped))
+    ws.push('btcusdt@ticker', { c: '2' }) // old coin, still in flight
+    eq('mux: frames for an unsubscribed stream go nowhere', got.length, 1)
+    ws.push('ethusdt@ticker', { c: '3' })
+    eq('mux: the new coin streams', got[got.length - 1], ['eth', 'tk', '3'])
+
+    // Timeframe switch: only the kline stream changes; the rest keep flowing
+    // to the new handlers.
+    const n = ws.sent.length
+    const tf1h = set('ethusdt', 'eth2')
+    delete tf1h['ethusdt@kline_15m']
+    tf1h['ethusdt@kline_1h'] = () => {}
+    mux.want(tf1h)
+    await tick()
+    eq('mux: a timeframe switch swaps only the kline', [params(ws, 'SUBSCRIBE').pop(), ws.sent.length - n], [
+      'ethusdt@kline_1h',
+      2,
+    ])
+    ws.push('ethusdt@ticker', { c: '4' })
+    eq('mux: an unchanged stream reaches the new handler', got[got.length - 1], ['eth2', 'tk', '4'])
+
+    // An unexpected drop reconnects with what is wanted; a replaced socket is inert.
+    const rnd = Math.random
+    Math.random = () => 0
+    const d0 = drops
+    ws.drop()
+    eq('mux: a lost socket is reported once', drops - d0, 1)
+    ok('mux: and its streams as dropped', live.some(([k, up, dropped]) => k === 'ethusdt@ticker' && !up && dropped))
+    await tick(1300) // first backoff step is 1.2s
+    Math.random = rnd
+    eq('mux: reconnects after a drop', sockets.length, 2)
+    sockets[1].accept()
+    eq('mux: back to four live streams', mux.liveCount, 4)
+    const before = got.length
+    ws.push('ethusdt@ticker', { c: '5' })
+    eq('mux: the old socket can no longer deliver', got.length, before)
+
+    // Nothing wanted: the socket closes after the idle delay, handlers first,
+    // and no reconnect follows.
+    const ws2 = sockets[1]
+    mux.want({})
+    await tick(60)
+    eq('mux: idle socket closes once', ws2.closed, 1)
+    ok('mux: closed with its handlers detached', !ws2.onclose && !ws2.onmessage && !ws2.onopen)
+    await tick(1300)
+    eq('mux: and does not reconnect', sockets.length, 2)
+    eq('mux: no live streams', mux.liveCount, 0)
+
+    // A switch while the socket is still connecting neither closes it nor
+    // opens a second one; the change is sent once it opens.
+    mux.want(set('solusdt', 'sol'))
+    mux.want({})
+    mux.want(set('adausdt', 'ada'))
+    eq('mux: no second socket while connecting', sockets.length, 3)
+    const ws3 = sockets[2]
+    eq('mux: the connecting socket is not closed', ws3.closed, 0)
+    ws3.accept()
+    await tick()
+    eq('mux: the change is flushed on open', params(ws3, 'SUBSCRIBE').length, 4)
+    eq('mux: live set is the latest coin', mux.liveCount, 4)
+
+    // A stall replaces the socket; dispose stops everything for good.
+    const stall = new StreamMux({ base: 'wss://test/stream', flushMs: 0, minGapMs: 0, stallMs: () => 10 })
+    stall.want({ 'x@ticker': () => {} })
+    const sw = sockets[sockets.length - 1]
+    sw.accept()
+    ok('mux: fresh stream is not stalled', !stall.check(Date.now()))
+    ok('mux: silent stream is stalled', stall.check(Date.now() + 50))
+    eq('mux: the stalled socket is closed, handlers detached', [sw.closed, sw.onclose], [1, null])
+    stall.dispose()
+    mux.dispose()
+    const count = sockets.length
+    await tick(1300)
+    eq('mux: nothing reconnects after dispose', sockets.length, count)
   } finally {
     globalThis.WebSocket = prevWS
   }
