@@ -16,6 +16,7 @@ import { CALL_TTL, advanceCall, learnedWeights, termStats, winRate } from './out
 import type { GradedCall, SigCall, WinRate } from './outcomes'
 import { baseOf } from '../../utils/coins'
 import { $ } from '../../utils/dom'
+import { createLatest } from '../../utils/latest'
 import { jget } from '../../api/client'
 import { fetchKlineRows } from '../../services/failover'
 import { resolveMarketText } from '../markets/catalog'
@@ -548,6 +549,25 @@ function renderSignals(): void {
 let sigSearchTimer: Any = null
 let sigAnaChart: Any = null
 let sigAnaCandleSeries: Any = null
+let sigAnaObserver: ResizeObserver | null = null
+// Only the newest analysis may paint: analysing BTC then ETH must not let a
+// slow BTC answer land under ETH.
+const sigAnaRun = createLatest()
+
+/** Drop the analysis chart and its resize observer, if one is up. */
+function disposeSigAnaChart(): void {
+  if (sigAnaObserver) sigAnaObserver.disconnect()
+  if (sigAnaChart) {
+    try {
+      sigAnaChart.remove()
+    } catch (e) {
+      /* already detached */
+    }
+  }
+  sigAnaObserver = null
+  sigAnaChart = null
+  sigAnaCandleSeries = null
+}
 
 export function switchSigMode(mode: string): void {
   document.querySelectorAll<HTMLElement>('.sig-mode-tab').forEach((t) => { t.classList.toggle('active', t.dataset.sigmode === mode) })
@@ -568,6 +588,9 @@ export function analyzeSigCoin(input: string): void {
   const sym = resolveSigSym(input)
   if (!sym || sym === 'USDT') return
   const el = $('sigAnalysisResult')!
+  const run = sigAnaRun.start()
+  // The result area is about to be replaced; the old chart goes with it.
+  disposeSigAnaChart()
   el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--dim)">Analyzing ' + marketLabel(sym) + '...</div>'
   const tfs = ['1h', '4h', '1d']
   const tfLabels = ['1H', '4H', '1D']
@@ -600,6 +623,7 @@ export function analyzeSigCoin(input: string): void {
   })
   const whalePromise = getWhaleFlow(sym)
   Promise.all(tfPromises.concat([newsPromise, whalePromise])).then(function (results) {
+    if (!sigAnaRun.isCurrent(run)) return
     const tfData = results.slice(0, 3)
     const newsResult = results[3]
     const whale = results[4]
@@ -663,8 +687,11 @@ export function analyzeSigCoin(input: string): void {
       + '<div class="disclaimer" style="margin-top:14px">Analysis from multi-indicator confluence across multiple timeframes. Not financial advice.</div>'
       + '</div>'
     el.innerHTML = html
-    setTimeout(() => renderSigAnaChart(tfData[0].candles, sym), 100)
+    setTimeout(() => {
+      if (sigAnaRun.isCurrent(run)) renderSigAnaChart(tfData[0].candles, sym)
+    }, 100)
   }).catch(function (e) {
+    if (!sigAnaRun.isCurrent(run)) return
     console.warn('Analysis failed:', e)
     el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--dim)"><b style="color:var(--red)">Analysis Failed</b><br><span style="font-size:12px;margin-top:6px;display:block">Could not load data for ' + marketLabel(sym) + '. Check the symbol and try again.</span></div>'
   })
@@ -673,6 +700,7 @@ export function analyzeSigCoin(input: string): void {
 function renderSigAnaChart(candles: Any[], sym: string): void {
   const el = $('sigAnaChartWrap')
   if (!el || !(window as Any).LightweightCharts || !candles.length) return
+  disposeSigAnaChart()
   try {
     const th = chartTheme()
     const c = LightweightCharts.createChart(el, {
@@ -687,7 +715,8 @@ function renderSigAnaChart(candles: Any[], sym: string): void {
     const cs = c.addCandlestickSeries({ upColor: th.up, downColor: th.dn, borderVisible: false, wickUpColor: th.up, wickDownColor: th.dn })
     cs.setData(candles.map(mapCandle))
     c.timeScale().fitContent()
-    new ResizeObserver(() => { if (el.clientWidth) c.applyOptions({ width: el.clientWidth }) }).observe(el)
+    sigAnaObserver = new ResizeObserver(() => { if (el.clientWidth) c.applyOptions({ width: el.clientWidth }) })
+    sigAnaObserver.observe(el)
     sigAnaChart = c
     sigAnaCandleSeries = cs
   } catch (e) {

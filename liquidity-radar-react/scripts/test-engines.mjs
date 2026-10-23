@@ -1752,6 +1752,23 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   else delete globalThis.localStorage
 }
 
+// ---- signal analysis: only the newest request may paint ---------------------------
+{
+  const { createLatest } = await import(src('utils/latest.ts'))
+  const run = createLatest()
+  const btc = run.start()
+  const eth = run.start()
+  ok('latest: a superseded run is stale', !run.isCurrent(btc))
+  ok('latest: the newest run is current', run.isCurrent(eth))
+  // BTC resolving after ETH must be dropped.
+  let painted = null
+  const paint = (token, sym) => { if (run.isCurrent(token)) painted = sym }
+  paint(eth, 'ETH')
+  paint(btc, 'BTC')
+  eq('latest: a late answer for an old run does not overwrite', painted, 'ETH')
+  ok('latest: runs are independent', createLatest().isCurrent(1) === false)
+}
+
 // ---- signal scanner: per-timeframe scoring ------------------------------------------
 {
   const { scoreTimeframe, closedOnly } = await import(src('features/signals/scoring.ts'))
