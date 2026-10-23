@@ -66,6 +66,7 @@ import { attachVolumeProfile, renderVolumeProfile } from './volumeProfileOverlay
 import { onDeltaChange } from '../delta/delta'
 import { onOverlayTogglesChange } from './overlayToggles'
 import { afterChartFit, attachScaleNav } from './scaleNav'
+import { registerCrosshairSync } from './crosshairSync'
 
 type Any = any
 ;(window as Any).LightweightCharts = LightweightCharts
@@ -410,21 +411,16 @@ export function initChart(): void {
   attachScaleNav({ chart, el, getSeries: () => candleSeries, onSeriesChange: onPriceSeriesChange })
   // While the cursor is over a bar the legend shows that bar; live ticks must
   // not overwrite it, and leaving the chart hands it back to the live candle.
-  chart.subscribeCrosshairMove((param: Any) => {
-    // Heikin Ashi: the legend reads the HA bars, as drawn.
-    const shown =
-      param.time && param.point ? legendCandles(getChartStyle(), displayCandles()) : null
-    const i = shown ? shown.findIndex((c) => Math.floor(c.t / 1000) === param.time) : -1
-    const cp = shown && i >= 0 ? shown[i] : null
-    if (!shown || !cp) {
-      if (hoverTime != null) {
-        hoverTime = null
-        renderLiveLegend()
-      }
-      return
-    }
-    hoverTime = param.time as number
-    renderLegend(cp.o, cp.h, cp.l, cp.c, cp.v, true, shown[i - 1]?.c)
+  chart.subscribeCrosshairMove((param: Any) =>
+    hoverLegend(param.time && param.point ? param.time : null),
+  )
+  // Crosshair sync with the layout's other cells (./crosshairSync); a synced
+  // crosshair drives the legend too.
+  registerCrosshairSync({
+    chart,
+    series: () => candleSeries,
+    bars: () => legendCandles(getChartStyle(), displayCandles()),
+    onSync: hoverLegend,
   })
   chart.timeScale().subscribeVisibleTimeRangeChange(function () {
     redrawDrawings()
@@ -503,6 +499,22 @@ export function initChart(): void {
 }
 /** Bar time (seconds) under the crosshair, or null when the cursor is off the chart. */
 let hoverTime: number | null = null
+/** The legend for the bar at `time` (seconds), or the live bar when null / no bar there. */
+function hoverLegend(time: Any): void {
+  // Heikin Ashi: the legend reads the HA bars, as drawn.
+  const shown = time ? legendCandles(getChartStyle(), displayCandles()) : null
+  const i = shown ? shown.findIndex((c) => Math.floor(c.t / 1000) === time) : -1
+  const cp = shown && i >= 0 ? shown[i] : null
+  if (!shown || !cp) {
+    if (hoverTime != null) {
+      hoverTime = null
+      renderLiveLegend()
+    }
+    return
+  }
+  hoverTime = time as number
+  renderLegend(cp.o, cp.h, cp.l, cp.c, cp.v, true, shown[i - 1]?.c)
+}
 function renderLiveLegend(): void {
   const candles = legendCandles(getChartStyle(), displayCandles())
   const lc = candles[candles.length - 1]

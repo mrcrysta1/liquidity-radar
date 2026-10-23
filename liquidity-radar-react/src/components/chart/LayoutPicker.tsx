@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react'
 import { LAYOUTS, cells, rowCount } from '../../features/charts/layouts'
 import type { LayoutSpec } from '../../features/charts/layouts'
 import { getLayout, setLayout, subscribeLayout } from '../../features/charts/companionCharts'
+import { isCrosshairSyncOn, setCrosshairSync } from '../../features/charts/crosshairSync'
 
 const GLYPH = 26
 const GAP = 1.6
@@ -34,6 +35,7 @@ function Glyph({ spec }: { spec: LayoutSpec }) {
 export function LayoutPicker() {
   const [, force] = useState(0)
   const [open, setOpen] = useState(false)
+  const [syncOn, setSyncOn] = useState(isCrosshairSyncOn)
   const wrapRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => subscribeLayout(() => force((n) => n + 1)), [])
@@ -109,6 +111,17 @@ export function LayoutPicker() {
               </button>
             ))}
           </div>
+          <label className="layout-sync" title="Move the crosshair on every chart together">
+            <input
+              type="checkbox"
+              checked={syncOn}
+              onChange={(e) => {
+                setCrosshairSync(e.target.checked)
+                setSyncOn(e.target.checked)
+              }}
+            />
+            <span>Sync crosshair</span>
+          </label>
         </div>
       )}
     </div>

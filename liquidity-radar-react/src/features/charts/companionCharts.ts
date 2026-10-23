@@ -64,6 +64,7 @@ import { createIndicatorRenderer } from './indicators/render'
 import type { IndicatorRenderer } from './indicators/render'
 import { panelIndicatorStore } from './indicators/panelStore'
 import { unmountCoinPickers } from '../../components/chart/mountCoinPicker'
+import { registerCrosshairSync } from './crosshairSync'
 
 type Any = any
 
@@ -106,6 +107,8 @@ interface Panel {
   indAt: number
   /** The crosshair is on a bar: its OHLC owns the legend, not live ticks. */
   hover: boolean
+  /** Leave the crosshair-sync hub. */
+  syncOff: (() => void) | null
 }
 
 /** Live ticks redraw a panel's indicators at most this often. */
@@ -368,6 +371,7 @@ function addPanel(pos: number): void {
     indTimer: null,
     indAt: 0,
     hover: false,
+    syncOff: null,
   }
   // No controls of its own: the toolbar drives whichever chart is active,
   // and clicking this one (or Enter/Space on it) makes it the active chart.
@@ -438,6 +442,8 @@ function destroyPanel(i: number): void {
   p.indTimer = null
   p.ind = null
   if (p.ro) p.ro.disconnect()
+  p.syncOff?.()
+  p.syncOff = null
   if (p.chart) {
     try {
       p.chart.remove()
@@ -504,24 +510,37 @@ function initChart(p: Panel): void {
   })
   p.ind.attach(chart)
   p.indOff = store.subscribe(() => drawIndicators(p))
-  const legend = p.el?.querySelector('.rc-legend') as HTMLElement | null
-  // The bar under the crosshair, else the live one — read from the panel's own
-  // bars so every style (line, footprint, ...) gets the full OHLC readout.
-  chart.subscribeCrosshairMove((param: Any) => {
-    if (!legend) return
-    const bars = legendCandles(p.style, p.shown)
-    const i =
-      param.time && param.point ? bars.findIndex((c) => Math.floor(c.t / 1000) === param.time) : -1
-    if (i >= 0) {
-      p.hover = true
-      legend.innerHTML = legendHtml(p, bars[i], bars[i - 1])
-    } else if (p.hover) {
-      p.hover = false
-      liveLegend(p)
-    }
+  chart.subscribeCrosshairMove((param: Any) =>
+    hoverLegend(p, param.time && param.point ? param.time : null),
+  )
+  // Crosshair sync with the other cells: a synced crosshair drives the legend too.
+  p.syncOff = registerCrosshairSync({
+    chart,
+    series: () => p.candleSeries,
+    bars: () => legendCandles(p.style, p.shown),
+    onSync: (t) => hoverLegend(p, t),
   })
   p.ro = null
   reload(p)
+}
+
+/**
+ * The bar under the crosshair (time in seconds), else the live one — read from
+ * the panel's own bars so every style (line, footprint, ...) gets the full
+ * OHLC readout.
+ */
+function hoverLegend(p: Panel, time: Any): void {
+  const legend = p.el?.querySelector('.rc-legend') as HTMLElement | null
+  if (!legend) return
+  const bars = legendCandles(p.style, p.shown)
+  const i = time ? bars.findIndex((c) => Math.floor(c.t / 1000) === time) : -1
+  if (i >= 0) {
+    p.hover = true
+    legend.innerHTML = legendHtml(p, bars[i], bars[i - 1])
+  } else if (p.hover) {
+    p.hover = false
+    liveLegend(p)
+  }
 }
 
 function reload(p: Panel): void {
