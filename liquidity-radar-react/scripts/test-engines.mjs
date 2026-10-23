@@ -2196,6 +2196,29 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('zoom: never below the minimum', sn.zoomLogicalRange({ from: 0, to: 6 }, 4, true), { from: 1, to: 6 })
 }
 
+// ---- Crosshair sync across layout cells (features/charts/crosshairSyncMath) ----
+{
+  const { barAtOrBefore } = await import(src('features/charts/crosshairSyncMath.ts'))
+  // 1h bars from 10:00 UTC; times handed over by the charts are in seconds.
+  const H = 3600
+  const t0 = Date.UTC(2026, 9, 14, 10) / 1000
+  const hourly = [0, 1, 2, 3].map((i) => ({ t: (t0 + i * H) * 1000, c: 100 + i }))
+  eq('xsync: exact bar time', barAtOrBefore(hourly, t0 + 2 * H), 2)
+  eq('xsync: inside a bar maps to the bar that opened before', barAtOrBefore(hourly, t0 + 2 * H + 59 * 60), 2)
+  eq('xsync: after the last bar holds the last bar', barAtOrBefore(hourly, t0 + 10 * H), 3)
+  eq('xsync: before the first bar has no bar', barAtOrBefore(hourly, t0 - 1), -1)
+  eq('xsync: first bar', barAtOrBefore(hourly, t0), 0)
+  eq('xsync: no bars', barAtOrBefore([], t0), -1)
+  eq('xsync: junk time', barAtOrBefore(hourly, NaN), -1)
+  // A 15m cell hovered at 11:45 lands on the 1h cell's 11:00 bar; a 1h cell
+  // hovered at 11:00 lands on the 15m cell's 11:00 bar.
+  const q = Array.from({ length: 16 }, (_, i) => ({ t: (t0 + i * 900) * 1000, c: 1 }))
+  eq('xsync: lower timeframe to higher', barAtOrBefore(hourly, q[7].t / 1000), 1)
+  eq('xsync: higher timeframe to lower', barAtOrBefore(q, hourly[1].t / 1000), 4)
+  // Millisecond remainders (range bars spaced by the second) still match.
+  eq('xsync: sub-second bar times', barAtOrBefore([{ t: t0 * 1000 + 500, c: 1 }], t0), 0)
+}
+
 // ---------------------------------------------------------------- chart style data
 {
   const { sessionKey, toCandleData, hollowCandleData, compactVol } = await import(

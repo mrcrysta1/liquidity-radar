@@ -895,6 +895,118 @@ server.listen(PORT, async () => {
       })
       check('mobile: stays on Charts tab', s.tab === 'tab-multichart', s.tab)
     })
+
+    // 11 ------------------------------------------------------------------
+    await scenario(11, 'Crosshair sync: hovering one cell moves the others', async (check) => {
+      await page.setViewport({ width: 1400, height: 1000, isMobile: false, hasTouch: false })
+      // A known layout: main BTC 15m beside
+      // ETH 1h, SOL 4h and BNB 5m (~40h of bars). Hovering near the right edge
+      // keeps the hovered time inside every cell; a time before a cell's first
+      // bar leaves that cell on its live bar.
+      await freshLoad({
+        'lr-tf': '15m',
+        'lr-chartPrefs': { style: 'candle' },
+        'lr-chartLayout': { n: 4, active: 0, cells: SEED_CELLS },
+      })
+      await gotoCharts()
+      const legends = () =>
+        page.evaluate(() =>
+          [...document.querySelectorAll('#chartLayout > .rc-cell')]
+            .sort((a, b) => Number(a.style.order) - Number(b.style.order))
+            .map((el) => (el.querySelector('.rc-legend')?.textContent || '').trim()),
+        )
+      const loaded = await waitFor(async () => {
+        const l = await legends()
+        return l.length === 3 && l.every((t) => /O.*H.*L.*C/.test(t)) ? l : null
+      }, 15000)
+      check('3 companion legends show OHLC', !!loaded, await legends())
+      if (!loaded) return
+      const mainLoaded = await waitFor(async () => /O.*H.*L.*C/.test((await snap()).legend), 15000)
+      check('main legend shows OHLC', !!mainLoaded, (await snap()).legend)
+      await sleep(1000)
+      // Park the mouse off the charts, then read the live legends.
+      await page.mouse.move(5, 5)
+      await sleep(400)
+      const live = await legends()
+      const box = await page.evaluate(() => {
+        const r = document.getElementById('chart').getBoundingClientRect()
+        return { x: r.left, y: r.top, w: r.width, h: r.height }
+      })
+      // Hover, nudging the mouse a pixel at a time until `until` holds (the
+      // chart may still be settling its first fit), up to ~3s.
+      const hoverAt = async (fx, until = () => true) => {
+        const x = box.x + box.w * fx
+        const y = box.y + box.h * 0.4
+        await page.mouse.move(x, y, { steps: 4 })
+        let l = []
+        for (let k = 0; k < 8; k++) {
+          await sleep(350)
+          l = await legends()
+          if (until(l)) break
+          await page.mouse.move(x + (k % 2 ? 0 : 1), y)
+        }
+        return l
+      }
+      const synced = (l) => l.every((t, i) => /O.*H.*L.*C/.test(t) && t !== live[i])
+      const a = await hoverAt(0.72, synced)
+      check(
+        'hovering the main chart switches every companion legend to a past bar',
+        synced(a),
+        { live, hovered: a },
+      )
+      const b = await hoverAt(0.6, (l) => l.some((t, i) => t !== a[i]))
+      check(
+        'a different hovered time shows a different bar',
+        b.some((t, i) => t !== a[i]),
+        { first: a, second: b },
+      )
+      await page.mouse.move(5, 5)
+      await sleep(500)
+      const back = await legends()
+      check(
+        'leaving the chart hands companions back to the live bar',
+        back.every((t, i) => t !== a[i] || t === live[i]),
+        { hovered: a, after: back },
+      )
+      // Hover a companion: the main chart's legend follows.
+      const mainLive = (await snap()).legend
+      const cell = await page.evaluate(() => {
+        const el = document.querySelector('#chartLayout > .rc-cell .rc-body')
+        const r = el.getBoundingClientRect()
+        return { x: r.left, y: r.top, w: r.width, h: r.height }
+      })
+      await page.mouse.move(cell.x + cell.w * 0.35, cell.y + cell.h * 0.5, { steps: 4 })
+      await sleep(400)
+      const mainHovered = (await snap()).legend
+      check('hovering a companion moves the main legend off the live bar', mainHovered !== mainLive, {
+        mainLive,
+        mainHovered,
+      })
+      await page.mouse.move(5, 5)
+      await sleep(400)
+      // Switched off from the layout menu: hovering leaves the others alone.
+      await page.click('#radarChartCard .layout-btn')
+      await page.waitForSelector('.layout-menu .layout-sync input', { timeout: 4000 })
+      await page.click('.layout-menu .layout-sync input')
+      await sleep(200)
+      const stored = await page.evaluate(() => localStorage.getItem('lr-crosshairSync'))
+      check('toggle persists off', stored === 'false', stored)
+      await page.evaluate(() => document.querySelector('#radarChartCard .layout-btn')?.click())
+      await sleep(200)
+      const liveOff = await legends()
+      const off = await hoverAt(0.72)
+      check(
+        'sync off: companion legends stay live',
+        off.every((t, i) => t === liveOff[i] || !a.includes(t)),
+        { liveOff, hovered: off },
+      )
+      await page.mouse.move(5, 5)
+      // Back on, for whoever runs next.
+      await page.click('#radarChartCard .layout-btn')
+      await page.waitForSelector('.layout-menu .layout-sync input', { timeout: 4000 })
+      await page.click('.layout-menu .layout-sync input')
+      await page.evaluate(() => document.querySelector('#radarChartCard .layout-btn')?.click())
+    })
   } catch (e) {
     console.log('FATAL harness error: ' + ((e && e.stack) || e))
     results.push({ id: '-', name: 'harness', ok: false, checks: [], fatal: String(e), errors: [] })
