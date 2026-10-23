@@ -8,6 +8,7 @@ import { VolumeProfilePrimitive } from '@/core/chart/volumeProfilePrimitive';
 import { buildRangeBars } from '@/core/chart/rangeBars';
 import { atr } from '@/core/indicators';
 import { isSubMinute } from '@/core/timeframes';
+import { barsLabel } from '@/core/uiEnv';
 import { IndicatorMenu } from './IndicatorMenu';
 import { Badge } from './Badge';
 
@@ -110,7 +111,7 @@ export function ChartInstance({ cfg, active, compact }: { cfg: ChartConfig; acti
         <button onClick={() => setMenu(m => !m)}>{compact ? `Ind. ${cfg.indicators.length}` : `Indicators (${cfg.indicators.length})`}</button>
         {!compact && <button className={replay.on ? 'on' : ''} onClick={() => setReplay(r => ({ ...r, on: !r.on, idx: r.on ? 0 : Math.max(50, Math.floor(series.length * 0.6)), playing: false }))}>Replay</button>}
         <span className="spacer" />
-        {!compact && <span className="muted" title="Loaded bars / maximum">{bars.toLocaleString()} / {maxBars.toLocaleString()} bars{loadingMore ? ' …' : exhausted ? ' (end)' : ''}</span>}
+        {!compact && <span className="muted" title="Loaded bars / maximum">{barsLabel(bars, maxBars, !!env, loadingMore, exhausted)}</span>}
         <Badge env={env} />
       </header>
       {replay.on && (
@@ -125,7 +126,9 @@ export function ChartInstance({ cfg, active, compact }: { cfg: ChartConfig; acti
       )}
       <div className="chart-body">
         <div ref={ref} style={{ position: 'absolute', inset: 0 }} />
-        {source.length === 0 && <div className="empty" style={{ position: 'absolute', top: 8, left: 12 }}>{env?.error ? `Candles unavailable: ${env.error}` : 'Loading candles…'}</div>}
+        {source.length === 0 && (env?.error
+          ? <div className="empty chart-loading" role="alert">Candles unavailable: {env.error}</div>
+          : <div className="chart-loading" role="status" aria-live="polite"><i className="spinner" aria-hidden="true" /><span>{env ? 'No candles yet…' : `Loading ${cfg.symbol} · ${cfg.timeframe} history…`}</span><i className="progress" aria-hidden="true" /></div>)}
         {vp && <div className="vp-legend">POC {vp.poc.toLocaleString(undefined, { maximumFractionDigits: 4 })} · VA {vp.val.toLocaleString(undefined, { maximumFractionDigits: 4 })}–{vp.vah.toLocaleString(undefined, { maximumFractionDigits: 4 })}</div>}
         {menu && <IndicatorMenu chartId={cfg.id} instances={cfg.indicators} computed={computed} onClose={() => setMenu(false)} />}
       </div>

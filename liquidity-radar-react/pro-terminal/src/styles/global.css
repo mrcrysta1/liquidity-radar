@@ -160,3 +160,27 @@ section[aria-label$="Liquidation Heatmap"] > .body { display: flex; flex-directi
 .heat-tip { position: absolute; background: rgba(21,26,33,.96); border: 1px solid var(--line-2); border-radius: var(--r-s); padding: 6px 9px; font-size: 11px; pointer-events: none; box-shadow: 0 8px 24px rgba(0,0,0,.4); min-width: 150px; }
 .heat-levels { display: flex; gap: 12px; flex-wrap: wrap; padding: 6px 12px; border-top: 1px solid var(--line); font-size: 12px; font-weight: 600; }
 .cmaps { display: inline-flex; gap: 4px; } .cmaps .cmap { width: 22px; height: 18px; padding: 0; border-radius: 4px; border: 2px solid transparent; } .cmaps .cmap.on { border-color: #fff; }
+
+/* ---- first-load and connection states ---- */
+.dot.pending { background: var(--warn); animation: pt-pulse 1.2s ease-in-out infinite; }
+.chart-loading { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 16px; text-align: center; color: var(--ink-2); background: var(--surface); pointer-events: none; }
+.chart-loading .spinner { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--line-2); border-top-color: var(--accent); animation: pt-spin .8s linear infinite; }
+.chart-loading .progress { position: relative; width: min(180px, 60%); height: 3px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.chart-loading .progress::after { content: ''; position: absolute; inset: 0 auto 0 0; width: 40%; border-radius: 3px; background: var(--accent); animation: pt-indeterminate 1.3s ease-in-out infinite; }
+.chart-loading.empty { color: var(--bear); }
+@keyframes pt-spin { to { transform: rotate(360deg); } }
+@keyframes pt-pulse { 50% { opacity: .35; } }
+@keyframes pt-indeterminate { 0% { transform: translateX(-100%); } 100% { transform: translateX(250%); } }
+
+/* ---- embedded in the Liquidity Radar host (Pro tab iframe) on a narrow screen ----
+   The host already has a bottom tab bar, so the terminal's own nav becomes a
+   compact segmented bar at the top instead of a second bottom bar. */
+@media (max-width: 900px) {
+  html.embedded .shell { grid-template-rows: auto 1fr; }
+  html.embedded .main { grid-row: 2; }
+  html.embedded .rail { grid-row: 1; gap: 2px; margin: 6px 8px 0; padding: 3px; border: 1px solid var(--line); border-radius: var(--r); background: var(--bg); }
+  html.embedded .rail button { flex-direction: row; justify-content: center; gap: 5px; padding: 4px 2px; min-height: 30px; }
+  html.embedded .rail button svg { width: 15px; height: 15px; flex-shrink: 0; }
+  html.embedded .rail button span { font-size: 11px; }
+}
+@media (max-width: 420px) { html.embedded .rail button svg { display: none; } }
