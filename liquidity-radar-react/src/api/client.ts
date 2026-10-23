@@ -1,6 +1,6 @@
 import { mdRestErr, mdRestOk } from '../services/market'
 import { noteCall } from '../services/dataSources'
-import { RateLimitedError, cooldownLeft, isRateLimited, noteLimitResponse } from './rateLimit'
+import { RateLimitedError, cooldownLeft, isBinanceUrl, isRateLimited, noteLimitResponse } from './rateLimit'
 
 // --- REST adapter: dedup + throttling + retry/backoff -------
 
@@ -25,9 +25,11 @@ async function rawFetch(url: string, to?: number): Promise<unknown> {
     const r = await fetch(url, { signal: c.signal })
     noteCall(url, r.ok, r.status, Date.now() - started)
     if (!r.ok) {
-      // 429/418 mean slow down or you are banned. Read the cooldown out of the
-      // response and record it, so nothing retries into a longer ban.
-      if (r.status === 429 || r.status === 418) {
+      // 429/418 from Binance mean slow down or you are banned. Read the
+      // cooldown out of the response and record it, so nothing retries into a
+      // longer ban. Another host's 429 is that host's problem: it must not
+      // freeze Binance REST, so it falls through to a plain HTTP error.
+      if ((r.status === 429 || r.status === 418) && isBinanceUrl(url)) {
         let body = ''
         try {
           body = await r.text()

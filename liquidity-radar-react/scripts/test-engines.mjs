@@ -42,7 +42,9 @@ const { buildKagi, kagiYangEnd } = await import(src('features/charts/series/kagi
 const { buildPointFigure, clampPnfReversal, pnfBoxes } = await import(
   src('features/charts/series/pointFigure.ts')
 )
-const { noteLimitResponse, cooldownLeft, isRateLimited } = await import(src('api/rateLimit.ts'))
+const { noteLimitResponse, cooldownLeft, isRateLimited, isBinanceUrl } = await import(
+  src('api/rateLimit.ts')
+)
 const { pfmt, nfmt, cfmt } = await import(src('utils/format.ts'))
 const { VENUES, isUsdQuoted } = await import(src('features/advanced/venues.ts'))
 const { groupAggTrades, autoThreshold, bubbleRadius } = await import(
@@ -577,6 +579,23 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   ok('ratelimit: a healthy response changes nothing', isRateLimited())
   noteLimitResponse(418, null, 'IP banned until 1000000000000') // long past
   ok('ratelimit: an expired ban is ignored', cooldownLeft() > 0)
+  // Only Binance's own 429/418 may freeze Binance REST (api/client rawFetch).
+  for (const u of [
+    'https://api.binance.com/api/v3/klines?symbol=BTCUSDT',
+    'https://fapi.binance.com/fapi/v1/openInterest?symbol=BTCUSDT',
+    'https://data-api.binance.vision/api/v3/aggTrades?symbol=BTCUSDT',
+  ]) ok('ratelimit: Binance host trips the guard — ' + new URL(u).host, isBinanceUrl(u))
+  for (const u of [
+    'https://api.coingecko.com/api/v3/global',
+    'https://api.bybit.com/v5/market/kline',
+    'https://www.okx.com/api/v5/market/candles',
+    'https://query1.finance.yahoo.com/v8/finance/chart/GC=F',
+    'https://nfs.faireconomy.media/ff_calendar_thisweek.json',
+    'https://testnet.binancefuture.com/fapi/v1/klines',
+    'https://evil.example/?u=https://api.binance.com',
+    'https://notbinance.com/api',
+    'not a url',
+  ]) ok('ratelimit: non-Binance host never trips the guard — ' + u, !isBinanceUrl(u))
 }
 
 // ----------------------------------------------------------------- format
