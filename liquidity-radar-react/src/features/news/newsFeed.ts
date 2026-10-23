@@ -4,25 +4,10 @@ import { esc, pfmt, timeAgo } from '../../utils/format'
 import { $ } from '../../utils/dom'
 import { mdVal } from '../../services/market'
 import { state } from '../../services/store'
+import { safeUrl } from '../../utils/url'
+import { newsSimplify, type NewsItem, type RssItem } from './newsItem'
 
-export interface NewsItem {
-  title: string
-  url: string
-  time: number
-  src: string
-  color: string
-  img: string | null
-  coins: string[]
-  sent: 'pos' | 'neg' | 'neu'
-}
-
-interface RssItem {
-  title?: unknown
-  link?: string
-  pubDate?: string
-  thumbnail?: unknown
-  enclosure?: { link?: string }
-}
+export type { NewsItem }
 
 interface RssResponse {
   status?: string
@@ -58,167 +43,6 @@ interface NewsState {
   src: string
   coin: string
   shown: number
-}
-
-function newsCoinsFor(title: string): string[] {
-  const coins: string[] = []
-  const t = (title || '').toUpperCase()
-  for (const k in COINS) {
-    const c = COINS[k]
-    if (!c || !c.sym) continue
-    const names = [k, c.name.toUpperCase()].filter(Boolean)
-    if (names.some((n) => n.length >= 3 && t.indexOf(n) > -1)) coins.push(k)
-  }
-  const alt: Record<string, string> = {
-    ETHEREUM: 'ETH',
-    BITCOIN: 'BTC',
-    SOLANA: 'SOL',
-    BINANCE: 'BNB',
-    'BNB COIN': 'BNB',
-    XRP: 'XRP',
-    DOGECOIN: 'DOGE',
-    DOGE: 'DOGE',
-    'SHIBA INU': 'SHIB',
-    PEPE: 'PEPE',
-    CARDANO: 'ADA',
-    AVALANCHE: 'AVAX',
-    POLKADOT: 'DOT',
-    CHAINLINK: 'LINK',
-    UNISWAP: 'UNI',
-    ARBITRUM: 'ARB',
-    OPTIMISM: 'OP',
-    POLYGON: 'POL',
-    SUI: 'SUI',
-    APTOS: 'APT',
-    NEAR: 'NEAR',
-    INJECTIVE: 'INJ',
-    CELESTIA: 'TIA',
-    SEI: 'SEI',
-    MAKER: 'MKR',
-    AAVE: 'AAVE',
-    FILECOIN: 'FIL',
-    BONK: 'BONK',
-    FLOKI: 'FLOKI',
-    ONDO: '',
-    RENDER: '',
-  }
-  Object.keys(alt).forEach((name) => {
-    const cn = alt[name]
-    if (cn && t.indexOf(name) > -1 && coins.indexOf(cn) < 0) coins.push(cn)
-  })
-  return coins
-}
-
-function newsSentiment(title: string): 'pos' | 'neg' | 'neu' {
-  const pos = [
-    'surge',
-    'rallies',
-    'soars',
-    'hits all-time',
-    'record high',
-    'gain',
-    'gains',
-    'bullish',
-    'breakout',
-    'breaks out',
-    'adopts',
-    'approval',
-    'approved',
-    'launch',
-    'partnership',
-    'institutional',
-    'inflow',
-    'accumulat',
-    'recovery',
-    'rebound',
-    'upgrade',
-    'milestone',
-    'outperform',
-    'beats',
-    'beats earnings',
-    'positive',
-    'boost',
-    'win',
-    'wins',
-    'green',
-    'new high',
-    'all-time high',
-    'etf approves',
-    'cleared',
-    'mainnet',
-    'integration',
-    'investment',
-    'demand surge',
-    'adoption',
-  ]
-  const neg = [
-    'crash',
-    'plunges',
-    'tanks',
-    'slumps',
-    'drops',
-    'sell-off',
-    'selloff',
-    'decline',
-    'bearish',
-    'hack',
-    'exploit',
-    'fraud',
-    'scam',
-    'lawsuit',
-    'sues',
-    'banned',
-    'ban',
-    'freeze',
-    'seized',
-    'arrest',
-    'insolvenc',
-    'bankrupt',
-    'delist',
-    'collapse',
-    'dip',
-    'warning',
-    'crackdown',
-    'regulatory risk',
-    'fine',
-    'penal',
-    'loss',
-    'outflow',
-    'withdrawal halt',
-    'pump and dump',
-    'ponzi',
-    'rug pull',
-    'vulnerability',
-    'security breach',
-    'data breach',
-    'deficit',
-    'downgrade',
-    'fail',
-    'fails',
-    'unemploy',
-    'recession',
-    'inflation fears',
-    'repeats',
-    'resign',
-    'step down',
-    'suspension',
-  ]
-  let s = 0
-  const text = (title || '').toLowerCase()
-  pos.forEach((w) => {
-    if (text.indexOf(w) > -1) s += 1
-  })
-  neg.forEach((w) => {
-    if (text.indexOf(w) > -1) s -= 1
-  })
-  if (
-    text.indexOf('not ') > -1 &&
-    (text.indexOf('not approve') > -1 ||
-      text.indexOf('not fixing') > -1 ||
-      text.indexOf('no gains') > -1)
-  )
-    s -= 1
-  return s > 0 ? 'pos' : s < 0 ? 'neg' : 'neu'
 }
 
 function newsDedup(a: string, b: string): boolean {
@@ -264,7 +88,13 @@ function newsCacheLoad(): NewsItem[] | null {
     const d = JSON.parse(raw)
     if (!d || !d.news || !d.news.length) return null
     if (Date.now() - d.t > 6 * 60 * 60 * 1000) return null
-    return d.news
+    // A cache written before links were sanitised can still hold a
+    // javascript: URL, and latestNews() hands these items to other views.
+    return (d.news as NewsItem[]).filter((n) => n && typeof n === 'object').map((n) => ({
+      ...n,
+      url: safeUrl(n.url),
+      img: n.img && safeUrl(n.img) !== '#' ? n.img : null,
+    }))
   } catch (e) {
     return null
   }
@@ -328,57 +158,11 @@ async function rawNewsFetchProxy(i: number, to?: number): Promise<RssResponse> {
   }
 }
 
-async function rawNewsFetchFallback(i: number, to?: number): Promise<RssResponse> {
-  const c = new AbortController()
-  const h = setTimeout(() => c.abort(), to || 15000)
-  const url = NEWS_RSS[i][1]
-  try {
-    const t0 = Date.now()
-    // Through our own proxy, not straight at allorigins. A direct call is
-    // cross-origin and allorigins sends no CORS header for it, so in
-    // production this branch could only ever fail — it produced a blocked
-    // request and a console error every time the two feeds above did not
-    // answer. The host is already on the proxy allow-list.
-    const relay = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url)
-    const r = await fetch('/api/fetch?url=' + encodeURIComponent(relay), { signal: c.signal })
-    noteCall('https://api.allorigins.win/raw', r.ok, r.status, Date.now() - t0)
-    if (!r.ok) throw new Error('http ' + r.status)
-    return parseRssXml(await r.text())
-  } catch (e) {
-    throw new Error('allorigins fail', { cause: e })
-  } finally {
-    clearTimeout(h)
-  }
-}
-
 function rawNewsFetchAny(i: number): Promise<RssResponse> {
-  // rss2json (CORS-enabled) -> same-origin /api/fetch proxy -> allorigins
+  // rss2json (CORS-enabled) -> same-origin /api/fetch proxy
   return rawNewsFetch(i, 13000).catch(function () {
-    return rawNewsFetchProxy(i, 15000).catch(function () {
-      return rawNewsFetchFallback(i, 15000)
-    })
+    return rawNewsFetchProxy(i, 15000)
   })
-}
-
-function newsSimplify(
-  src: string,
-  color: string,
-): (it: RssItem | null | undefined) => NewsItem | null {
-  return function (it) {
-    if (!it || !it.title || typeof it.title !== 'string' || !it.title.trim()) return null
-    const title = it.title.trim()
-    const p = it.pubDate ? new Date(it.pubDate.replace(' ', 'T')).getTime() : Date.now()
-    return {
-      title,
-      url: it.link || '#',
-      time: p,
-      src,
-      color,
-      img: (it.thumbnail as string | undefined) || (it.enclosure && it.enclosure.link) || null,
-      coins: newsCoinsFor(title),
-      sent: newsSentiment(title),
-    }
-  }
 }
 
 export async function fetchNews(): Promise<void> {
@@ -578,8 +362,8 @@ function renderNewsList(): void {
         '<a class="news-item ' +
         sentCls +
         '" href="' +
-        esc(n.url) +
-        '" target="_blank" rel="noopener">' +
+        esc(safeUrl(n.url)) +
+        '" target="_blank" rel="noopener noreferrer">' +
         '<div class="news-item-body">' +
         '<div class="ni-meta">' +
         sentTag +
@@ -595,9 +379,9 @@ function renderNewsList(): void {
         '</div>' +
         coinTags +
         '</div>' +
-        (n.img && !/logo|placeholder|\.svg/i.test(n.img)
+        (n.img && !/logo|placeholder|\.svg/i.test(n.img) && safeUrl(n.img) !== '#'
           ? '<img class="news-thumb" src="' +
-            esc(n.img) +
+            esc(safeUrl(n.img)) +
             '" alt="" loading="lazy" onerror="this.style.display=\'none\'">'
           : '') +
         '</a>'
@@ -793,8 +577,8 @@ export async function fetchBreaking(): Promise<void> {
     .map((n) => {
       return (
         '<div class="bb-item"><span class="bb-live">BREAKING</span><a href="' +
-        esc(n.url) +
-        '" target="_blank" rel="noopener" style="color:var(--txt);font-weight:600;font-size:13px">' +
+        esc(safeUrl(n.url)) +
+        '" target="_blank" rel="noopener noreferrer" style="color:var(--txt);font-weight:600;font-size:13px">' +
         esc(n.title) +
         '</a><span class="ni-time">' +
         esc(n.src) +

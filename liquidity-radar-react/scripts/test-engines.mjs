@@ -44,6 +44,8 @@ const { buildPointFigure, clampPnfReversal, pnfBoxes } = await import(
 )
 const { noteLimitResponse, cooldownLeft, isRateLimited } = await import(src('api/rateLimit.ts'))
 const { pfmt, nfmt, cfmt } = await import(src('utils/format.ts'))
+const { safeUrl } = await import(src('utils/url.ts'))
+const { newsSimplify } = await import(src('features/news/newsItem.ts'))
 const { VENUES, isUsdQuoted } = await import(src('features/advanced/venues.ts'))
 const { groupAggTrades, autoThreshold, bubbleRadius } = await import(
   src('features/whales/whaleMath.ts')
@@ -589,6 +591,40 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   eq('fmt: non-finite is a dash, never NaN', pfmt(NaN), '—')
   eq('fmt: infinity is a dash', nfmt(Infinity), '—')
   eq('fmtUsd: thousands', fmtUsd(1500), '1.5K')
+}
+
+// --------------------------------------------------------- news links (XSS)
+// Feed links land in href/src via innerHTML and in the lr_news_cache copy, so
+// only absolute http(s) may survive; everything else collapses to '#'.
+{
+  eq('safeUrl: https kept', safeUrl('https://example.com/a?b=1#c'), 'https://example.com/a?b=1#c')
+  eq('safeUrl: http kept', safeUrl('http://example.com/x'), 'http://example.com/x')
+  eq('safeUrl: javascript blocked', safeUrl('javascript:alert(1)'), '#')
+  eq('safeUrl: upper-case scheme blocked', safeUrl('JAVASCRIPT:alert(1)'), '#')
+  eq('safeUrl: leading space + control chars blocked', safeUrl(' \u0001\tJaVaScRiPt:alert(1)'), '#')
+  eq('safeUrl: newline/tab inside scheme blocked', safeUrl('java\nscr\tipt:alert(1)'), '#')
+  eq('safeUrl: data blocked', safeUrl('data:text/html,<script>alert(1)</script>'), '#')
+  eq('safeUrl: vbscript blocked', safeUrl('vbscript:msgbox(1)'), '#')
+  eq('safeUrl: relative rejected', safeUrl('/news/1'), '#')
+  eq('safeUrl: protocol-relative rejected', safeUrl('//evil.example/x'), '#')
+  eq('safeUrl: empty', safeUrl(''), '#')
+  eq('safeUrl: whitespace only', safeUrl('   '), '#')
+  eq('safeUrl: non-string', safeUrl(undefined), '#')
+  eq('safeUrl: malformed', safeUrl('http://'), '#')
+  eq('safeUrl: garbage', safeUrl('not a url'), '#')
+  eq('safeUrl: attribute breakout is encoded', safeUrl('https://a.example/"><x>').includes('"'), false)
+
+  const simp = newsSimplify('Src', '#fff')
+  const good = simp({ title: ' Bitcoin surges ', link: 'https://news.example/btc', pubDate: '2026-01-01 00:00:00', thumbnail: 'https://img.example/t.jpg' })
+  eq('newsSimplify: https link kept', good.url, 'https://news.example/btc')
+  eq('newsSimplify: https thumbnail kept', good.img, 'https://img.example/t.jpg')
+  eq('newsSimplify: title trimmed + tagged', [good.title, good.coins.includes('BTC'), good.sent], ['Bitcoin surges', true, 'pos'])
+  const bad = simp({ title: 'x', link: ' JavaScript:alert(document.cookie)', thumbnail: 'javascript:alert(1)' })
+  eq('newsSimplify: javascript link becomes #', bad.url, '#')
+  eq('newsSimplify: javascript thumbnail dropped', bad.img, null)
+  eq('newsSimplify: missing link becomes #', simp({ title: 'x' }).url, '#')
+  eq('newsSimplify: data: enclosure dropped', simp({ title: 'x', enclosure: { link: 'data:image/svg+xml,<svg onload=alert(1)>' } }).img, null)
+  eq('newsSimplify: empty title skipped', simp({ title: '  ', link: 'https://a.example' }), null)
 }
 
 // ------------------------------------------------------------- heikin ashi

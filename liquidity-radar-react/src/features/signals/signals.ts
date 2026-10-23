@@ -10,6 +10,7 @@ import { instrumentOf, isInstrument } from '../../constants/instruments'
 import { loadCandleWindow } from '../../services/marketData'
 import { COINS } from '../../constants/market'
 import { esc, pfmt, cfmt, chgHtml } from '../../utils/format'
+import { safeUrl } from '../../utils/url'
 import { aiComposite, calcATR, forecastFrom } from '../../utils/indicators'
 import { TF_MINUTES, closedOnly, scoreTimeframe as scoreTF } from './scoring'
 import { CALL_TTL, advanceCall, learnedWeights, termStats, winRate } from './outcomes'
@@ -641,7 +642,7 @@ export function analyzeSigCoin(input: string): void {
     const chg = t ? chgHtml(t.pct) : ''
     const newsItems = (newsResult && newsResult.articles) ? newsResult.articles.slice(0, 5) : []
     const newsHtml = newsItems.map((n: Any) => {
-      return '<div class="sig-news-item"><a class="snb" href="' + esc(n.link || n.url || '#') + '" target="_blank" rel="noopener" style="cursor:pointer">' + esc(n.title || '') + '</a><br><span style="color:var(--dim);font-size:11px">' + esc(n.source || '') + ' · ' + esc(n.timeAgo || n.pubDate || '') + '</span></div>'
+      return '<div class="sig-news-item"><a class="snb" href="' + esc(safeUrl(n.link || n.url)) + '" target="_blank" rel="noopener noreferrer" style="cursor:pointer">' + esc(n.title || '') + '</a><br><span style="color:var(--dim);font-size:11px">' + esc(n.source || '') + ' · ' + esc(n.timeAgo || n.pubDate || '') + '</span></div>'
     }).join('')
     let whaleHtml = ''
     if (whale && whale.buyUsd) {
