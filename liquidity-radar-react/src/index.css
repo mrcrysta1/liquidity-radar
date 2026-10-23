@@ -1459,6 +1459,11 @@ html.radar-fs .cs-panel{height:100%;max-height:none}
 .sn-spacer{flex:1}
 .sn-clock{color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
 .sn-clock i{font-style:normal;color:var(--dim)}
+/* The clock opens the chart time-zone menu (features/charts/timezone). */
+.sn-tz{position:relative;display:flex}
+.sn-btn.sn-clock{color:var(--muted)}
+.sn-btn.sn-clock.open{color:var(--txt);background:var(--border2)}
+.sn-tz-list{width:260px;max-height:min(60vh,440px);overflow-y:auto}
 .sn-sep{width:1px;height:16px;background:var(--border2);margin:0 2px}
 html.radar-fs .sn-bar{flex-shrink:0;margin-top:6px}
 [data-theme="light"] .sn-ranges{background:var(--card2)}

@@ -16,6 +16,7 @@ import { pfmt } from '../../utils/format'
 import { state } from '../../services/store'
 import { storageGetRaw, storageSetRaw } from '../../services/storage'
 import { chartTheme, mapCandle } from './chartRender'
+import { chartTzOptions, isDailyTf } from './timezone'
 import {
   mdCacheGet,
   mdCachePut,
@@ -328,9 +329,12 @@ function mcInitChart(p: McPanel): void {
   const w = el.clientWidth,
     h = el.clientHeight || 260
   const th = chartTheme()
+  // Times print in the chart zone (./timezone); the bars stay in UTC.
+  const tz = chartTzOptions(() => isDailyTf(p.interval))
   const c: Any = LightweightCharts.createChart(el, {
     width: w,
     height: h,
+    localization: tz.localization,
     layout: {
       background: { type: 'solid', color: th.bg },
       textColor: th.txt,
@@ -339,7 +343,13 @@ function mcInitChart(p: McPanel): void {
     },
     grid: { vertLines: { color: th.grid }, horzLines: { color: th.grid } },
     rightPriceScale: { borderColor: th.border },
-    timeScale: { borderColor: th.border, timeVisible: true, secondsVisible: false, rightOffset: 4 },
+    timeScale: {
+      ...tz.timeScale,
+      borderColor: th.border,
+      timeVisible: true,
+      secondsVisible: false,
+      rightOffset: 4,
+    },
     crosshair: {
       mode: 0,
       vertLine: { color: th.pline, labelBackgroundColor: th.pline },
@@ -573,11 +583,13 @@ export function mcApplyTheme(): void {
   mcPanels.forEach(function (p) {
     if (p.chart) {
       const th = chartTheme()
+      const tz = chartTzOptions(() => isDailyTf(p.interval))
       p.chart.applyOptions({
+        localization: tz.localization,
         layout: { background: { type: 'solid', color: th.bg }, textColor: th.txt },
         grid: { vertLines: { color: th.grid }, horzLines: { color: th.grid } },
         rightPriceScale: { borderColor: th.border },
-        timeScale: { borderColor: th.border },
+        timeScale: { ...tz.timeScale, borderColor: th.border },
       })
       if (p.candleSeries)
         p.candleSeries.applyOptions({

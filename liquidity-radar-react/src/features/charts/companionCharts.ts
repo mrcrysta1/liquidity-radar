@@ -47,6 +47,7 @@ import {
   volumeColor,
 } from './chartPalette'
 import { LAYOUTS, MAX_CHARTS, cells, layoutSpec, rowCount } from './layouts'
+import { isDailyTf } from './timezone'
 import { loadCandles } from '../../services/marketData'
 import { mdSym, mdTf } from '../../services/market'
 import { klineHub } from '../../services/failover'
@@ -460,7 +461,7 @@ function initChart(p: Panel): void {
   const body = p.el?.querySelector('.rc-body') as HTMLElement | null
   if (!body) return
   // The main chart's TradingView look (./chartPalette), a size smaller.
-  const tv: Any = tvChartOptions()
+  const tv: Any = tvChartOptions(undefined, () => isDailyTf(p.tf))
   const chart: Any = LightweightCharts.createChart(body, {
     // Same reason as the main chart: let the library measure its own box so it
     // never writes inline sizes that outlive the layout that caused them.
@@ -476,7 +477,7 @@ function initChart(p: Panel): void {
       rightOffset: 5,
     },
     crosshair: { ...tv.crosshair, mode: 0 },
-    localization: { priceFormatter: (v: number) => pfmt(v) },
+    localization: { ...tv.localization, priceFormatter: (v: number) => pfmt(v) },
   } as Any)
   p.chart = chart
   // The same series the main chart builds for this style, so a cell keeps its
@@ -770,9 +771,10 @@ export function watchStageHeight(): void {
 
 /** Re-theme companions when the palette or light/dark mode changes. */
 export function applyCompanionTheme(): void {
-  const tv: Any = tvChartOptions()
+  const pal = chartPalette()
   panels.forEach((p) => {
     if (!p.chart) return
+    const tv: Any = tvChartOptions(pal, () => isDailyTf(p.tf))
     p.chart.applyOptions({
       ...tv,
       ...tvWatermark(watermarkOf(p), 32),

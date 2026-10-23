@@ -14,14 +14,13 @@ import {
 } from '../../features/whales/whaleFlow'
 import { bubbleRadius } from '../../features/whales/whaleMath'
 import { getShowWhaleBubbles, onOverlayTogglesChange } from '../../features/charts/overlayToggles'
+import { chartDayKey, fmtChartDate } from '../../features/charts/timezone'
 
 function since(t: number): string {
-  const d = new Date(t)
-  const today = new Date()
-  const hm = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  return d.toDateString() === today.toDateString()
+  const hm = fmtChartDate(t, { hour: '2-digit', minute: '2-digit' })
+  return chartDayKey(t) === chartDayKey(Date.now())
     ? hm
-    : d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + hm
+    : fmtChartDate(t, { month: 'short', day: 'numeric' }) + ' ' + hm
 }
 
 export function WhaleLegend() {

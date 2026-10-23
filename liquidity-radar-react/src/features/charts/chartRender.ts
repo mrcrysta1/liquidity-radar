@@ -39,6 +39,7 @@ import { subscribeReversalSettings } from './series/reversalSettings'
 import { tfDef } from '../../services/timeframe'
 import { mountCloseTimer, updateCloseTimer } from './closeTimer'
 import { getTimeframe, tfLabel } from './timeframes'
+import { fmtChartDate, isDailyTf } from './timezone'
 import {
   chartPalette,
   resetTvLastPrice,
@@ -123,7 +124,7 @@ export function chartTheme(): Any {
 }
 export function applyChartTheme(): void {
   if (!chart) return
-  chart.applyOptions({ ...tvChartOptions(), ...tvWatermark(watermarkText()) })
+  chart.applyOptions({ ...tvChartOptions(undefined, mainIsDaily), ...tvWatermark(watermarkText()) })
   if (candleSeries) {
     themePriceSeries(candleSeries, getChartStyle())
     resetTvLastPrice(candleSeries)
@@ -136,6 +137,9 @@ export function applyChartTheme(): void {
   refreshIndicatorColors()
   renderLiveLegend()
 }
+
+/** Daily-or-longer bars on the main chart: dated by UTC session (./timezone). */
+const mainIsDaily = (): boolean => !isRangeMode() && isDailyTf(getTimeframe())
 
 /** "BTCUSDT, 15m" — the watermark TradingView prints behind the bars. */
 function watermarkText(): string {
@@ -372,7 +376,7 @@ export function initChart(): void {
   const el = $('chart')!
   // TradingView's canvas: palette colours, fonts, dashed grey crosshair and a
   // faint symbol watermark (see ./chartPalette).
-  const tv: Any = tvChartOptions()
+  const tv: Any = tvChartOptions(undefined, mainIsDaily)
   watermarkShown = watermarkText()
   chart = LightweightCharts.createChart(el, {
     // autoSize lets the library watch the container itself. Passing explicit
@@ -392,6 +396,7 @@ export function initChart(): void {
     // Normal (free) crosshair, as before; magnet snapping is the drawing tools'.
     crosshair: { ...tv.crosshair, mode: 0 },
     localization: {
+      ...tv.localization,
       priceFormatter: function (p: number) {
         return pfmt(p)
       },
@@ -1309,7 +1314,7 @@ function mapCtx(cw: number, ch: number): MapCtx {
       return displayCandles().filter((k) => k.t >= lo && k.t <= hi).length
     },
     timeLabel(t: number) {
-      return new Date(t * 1000).toLocaleString(undefined, {
+      return fmtChartDate(t * 1000, {
         month: 'short',
         day: 'numeric',
         hour: '2-digit',

@@ -18,6 +18,7 @@ import { displayCandles } from './series/rangeView'
 import { getWhaleView, onWhaleFlowChange, syncWhaleSymbol } from '../whales/whaleFlow'
 import type { WhaleOrder } from '../whales/whaleFlow'
 import { bubbleRadius } from '../whales/whaleMath'
+import { fmtChartDate } from './timezone'
 
 
 type Any = any
@@ -224,7 +225,7 @@ function onHover(param: Any): void {
   const o = hit.o
   const buy = o.side === 'buy'
   const base = state.symbol.replace(/USDT$/, '')
-  const time = new Date(o.t).toLocaleString([], {
+  const time = fmtChartDate(o.t, {
     month: 'short',
     day: 'numeric',
     hour: '2-digit',

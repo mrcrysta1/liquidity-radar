@@ -1,6 +1,7 @@
 // Bar-replay transport for the price-action chart. The toolbar button arms
 // replay; the bar below the chart scrubs it.
 import { useEffect, useState } from 'react'
+import { fmtChartDate } from '../../features/charts/timezone'
 import {
   SPEEDS,
   exitReplay,
@@ -70,7 +71,7 @@ export function ReplayBar() {
   if (!r.on) return null
   const at = r.at
   const stamp = at
-    ? new Date(at.t).toLocaleString(undefined, {
+    ? fmtChartDate(at.t, {
         month: 'short',
         day: 'numeric',
         hour: '2-digit',

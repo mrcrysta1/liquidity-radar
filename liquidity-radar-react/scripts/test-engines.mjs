@@ -2196,6 +2196,90 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('zoom: never below the minimum', sn.zoomLogicalRange({ from: 0, to: 6 }, 4, true), { from: 1, to: 6 })
 }
 
+// ---- Chart time zone: formatter-only (features/charts/timezone) ----
+{
+  const tz = await import(src('features/charts/timezone.ts'))
+  const { TICK } = tz
+  // 2026-10-23 09:30:05 UTC, a Friday.
+  const t = Date.UTC(2026, 9, 23, 9, 30, 5)
+  eq('tz: UTC time tick', tz.formatTick(t, TICK.Time, 'UTC'), '09:30')
+  eq('tz: UTC time-with-seconds tick', tz.formatTick(t, TICK.TimeWithSeconds, 'UTC'), '09:30:05')
+  eq('tz: UTC day tick', tz.formatTick(t, TICK.DayOfMonth, 'UTC'), '23')
+  eq('tz: UTC month tick', tz.formatTick(t, TICK.Month, 'UTC'), 'Oct')
+  eq('tz: UTC year tick', tz.formatTick(t, TICK.Year, 'UTC'), '2026')
+  eq('tz: Karachi is UTC+5', tz.formatTick(t, TICK.Time, 'Asia/Karachi'), '14:30')
+  eq('tz: Karachi offset', tz.tzOffsetLabel('Asia/Karachi', t), 'UTC+5')
+  eq('tz: Kolkata half hour', tz.tzOffsetLabel('Asia/Kolkata', t), 'UTC+5:30')
+  // Late UTC evening is already tomorrow in Karachi: day/month/year roll over.
+  const nye = Date.UTC(2026, 11, 31, 20, 0)
+  eq('tz: Karachi crosses midnight', tz.formatTick(nye, TICK.DayOfMonth, 'Asia/Karachi'), '1')
+  eq('tz: Karachi crosses the month', tz.formatTick(nye, TICK.Month, 'Asia/Karachi'), 'Jan')
+  eq('tz: Karachi crosses the year', tz.formatTick(nye, TICK.Year, 'Asia/Karachi'), '2027')
+  eq('tz: New York on summer time (EDT)', tz.formatTick(t, TICK.Time, 'America/New_York'), '05:30')
+  eq('tz: New York EDT offset', tz.tzOffsetLabel('America/New_York', t), 'UTC-4')
+  // US DST ended 2026-11-01 at 02:00 EDT (06:00 UTC): one hour later is EST.
+  const before = Date.UTC(2026, 10, 1, 5, 59)
+  const after = Date.UTC(2026, 10, 1, 6, 0)
+  eq('tz: NY just before the DST change', tz.formatTick(before, TICK.Time, 'America/New_York'), '01:59')
+  eq('tz: NY just after the DST change', tz.formatTick(after, TICK.Time, 'America/New_York'), '01:00')
+  eq('tz: NY offset before', tz.tzOffsetMinutes('America/New_York', before), -240)
+  eq('tz: NY offset after', tz.tzOffsetMinutes('America/New_York', after), -300)
+  // Spring forward: 2026-03-08 02:00 EST (07:00 UTC) jumps to 03:00 EDT.
+  eq('tz: NY spring forward skips 02:00', tz.formatTick(Date.UTC(2026, 2, 8, 7, 0), TICK.Time, 'America/New_York'), '03:00')
+  eq('tz: UTC never shifts', tz.formatTick(after, TICK.Time, 'UTC'), '06:00')
+  // The cached-offset fast path agrees with Intl across a year, DST included.
+  {
+    const bad = []
+    for (const z of ['America/New_York', 'Australia/Sydney', 'Asia/Kolkata', 'Europe/London']) {
+      const ref = new Intl.DateTimeFormat('en-GB', { timeZone: z, hourCycle: 'h23', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      for (let i = 0; i < 400; i++) {
+        const ms = Date.UTC(2026, 0, 1) + i * 79_013_000 // ~22h steps, odd seconds
+        const got = tz.formatTick(ms, TICK.DayOfMonth, z) + ' ' + tz.formatTick(ms, TICK.TimeWithSeconds, z)
+        const want = ref.format(ms).replace(',', '')
+        if (got !== want) bad.push(z + ' ' + ms + ' ' + got + ' vs ' + want)
+      }
+    }
+    eq('tz: fast path matches Intl', bad.slice(0, 3), [])
+  }
+
+  eq('tz: crosshair, UTC', tz.formatCrosshair(Date.UTC(2026, 9, 23, 9, 30), 'UTC'), "Fri 23 Oct '26  09:30")
+  eq('tz: crosshair shows seconds when present', tz.formatCrosshair(t, 'UTC'), "Fri 23 Oct '26  09:30:05")
+  eq('tz: crosshair, Karachi', tz.formatCrosshair(nye, 'Asia/Karachi'), "Fri 1 Jan '27  01:00")
+  eq('tz: crosshair, date only', tz.formatCrosshair(Date.UTC(2026, 9, 23), 'America/New_York', true), "Fri 23 Oct '26")
+
+  // The lightweight-charts formatters: UTC seconds in, zone text out.
+  const ny = tz.chartTzOptions(() => false, 'America/New_York')
+  const sec = Math.floor(t / 1000)
+  eq('tz: timeFormatter takes UTC seconds', ny.localization.timeFormatter(sec), "Fri 23 Oct '26  05:30:05")
+  eq('tz: tickMarkFormatter takes UTC seconds', ny.timeScale.tickMarkFormatter(sec, TICK.Time), '05:30')
+  // Daily bars keep their UTC session date in any zone (no "22 Oct 20:00").
+  const nyDaily = tz.chartTzOptions(() => true, 'America/New_York')
+  const day = Date.UTC(2026, 9, 23) / 1000
+  eq('tz: daily bar crosshair is the UTC date', nyDaily.localization.timeFormatter(day), "Fri 23 Oct '26")
+  eq('tz: daily day tick is the UTC date', nyDaily.timeScale.tickMarkFormatter(day, TICK.DayOfMonth), '23')
+  eq('tz: intraday day tick is the zone date', ny.timeScale.tickMarkFormatter(day, TICK.DayOfMonth), '22')
+  eq('tz: business-day times are dates', ny.localization.timeFormatter({ year: 2026, month: 10, day: 23 }), "Fri 23 Oct '26")
+  eq('tz: string times are dates', ny.timeScale.tickMarkFormatter('2026-10-23', TICK.DayOfMonth), '23')
+
+  eq('tz: daily timeframes', ['1m', '4h', '1d', '1w', '1M'].map((x) => tz.isDailyTf(x)), [false, false, true, true, true])
+  eq('tz: junk setting falls back to the browser zone', tz.cleanTzSetting('Mars/Olympus'), 'local')
+  eq('tz: a valid zone is kept', tz.cleanTzSetting('Asia/Dubai'), 'Asia/Dubai')
+  eq('tz: local resolves to the browser zone', tz.resolveZone('local'), Intl.DateTimeFormat().resolvedOptions().timeZone)
+  ok('tz: every menu zone is valid', tz.TZ_OPTIONS.every((o) => o.id === 'local' || tz.isValidZone(o.id)))
+  for (const z of ['America/New_York', 'Europe/London', 'Asia/Karachi', 'Asia/Dubai', 'Asia/Singapore', 'Asia/Tokyo', 'Australia/Sydney', 'UTC'])
+    ok('tz: menu offers ' + z, tz.TZ_OPTIONS.some((o) => o.id === z))
+  // The change is announced; without localStorage it still holds in memory.
+  let heard = 0
+  const off = tz.subscribeChartTz(() => heard++)
+  tz.setChartTz('Asia/Tokyo')
+  eq('tz: set + notify', [tz.getChartTzSetting(), tz.chartZone(), heard], ['Asia/Tokyo', 'Asia/Tokyo', 1])
+  tz.setChartTz('Asia/Tokyo')
+  eq('tz: same zone does not notify', heard, 1)
+  off()
+  tz.setChartTz('local')
+  eq('tz: unsubscribed', heard, 1)
+}
+
 // ---------------------------------------------------------------- chart style data
 {
   const { sessionKey, toCandleData, hollowCandleData, compactVol } = await import(
