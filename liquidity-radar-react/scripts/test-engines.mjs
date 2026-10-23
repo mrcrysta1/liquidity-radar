@@ -872,6 +872,28 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   eq('fresh: nothing at all is OFFLINE', klineFreshness(null, 0, 10_000), 'OFFLINE')
 }
 
+// ---------------------------------------------------------------- LRU caches
+// md.candles and mdCache.data (services/market.ts) are capped this way — the
+// same delete-and-reinsert order as memoryStore above.
+{
+  const { lruSet, lruTouch } = await import(src('utils/lru.ts'))
+  const rec = {}
+  for (let i = 0; i < 5; i++) lruSet(rec, 'S' + i + '|15m', i, 3)
+  eq('lru: keeps the newest max entries', Object.keys(rec), ['S2|15m', 'S3|15m', 'S4|15m'])
+  lruTouch(rec, 'S2|15m')
+  lruSet(rec, 'S5|15m', 5, 3)
+  eq('lru: a touched entry survives over an older one', Object.keys(rec), ['S4|15m', 'S2|15m', 'S5|15m'])
+  lruSet(rec, 'S4|15m', 44, 3)
+  eq('lru: re-setting a key refreshes it without growing', [Object.keys(rec).length, rec['S4|15m']], [3, 44])
+  const keep = (k) => k === 'S2|15m'
+  lruSet(rec, 'S6|15m', 6, 3, keep)
+  lruSet(rec, 'S7|15m', 7, 3, keep)
+  ok('lru: the protected (on-screen) key is never evicted', 'S2|15m' in rec, Object.keys(rec))
+  eq('lru: still capped with a protected key', Object.keys(rec).length, 3)
+  lruTouch(rec, 'missing')
+  ok('lru: touching a missing key adds nothing', !('missing' in rec))
+}
+
 // ---------------------------------------------------------------- pacer + kline rows
 {
   let clock = 1000

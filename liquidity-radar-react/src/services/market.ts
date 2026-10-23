@@ -3,6 +3,7 @@ import { isInstrument } from '../constants/instruments'
 import { state } from './store'
 import { $ } from '../utils/dom'
 import { DEFAULT_TF, TF_IDS, isTf, normalizeTf } from './timeframe'
+import { lruSet, lruTouch } from '../utils/lru'
 
 // --- Symbol / timeframe normalization -----------------------
 
@@ -159,12 +160,23 @@ export function mdStoreTicker(sym: unknown, t: unknown): boolean {
   return true
 }
 
+/**
+ * How many symbol|interval series the candle store and the history cache each
+ * keep. Every symbol and interval visited used to stay in memory for the whole
+ * session; the least recently used now go, never the series on screen.
+ */
+export const MD_MAX_SERIES = 32
+
+function isShownSeries(key: string): boolean {
+  return key === String(state.symbol) + '|' + mdTf(state.tf)
+}
+
 export function mdStoreCandles(sym: unknown, tf: unknown, arr: unknown): boolean {
   if (!mdVal.sym(sym) || !mdTf(tf) || !Array.isArray(arr) || !arr.length) return false
   const ok = (arr as unknown[]).filter((x) => mdVal.candle(x)) as CandleFlat[]
   if (ok.length < Math.min(2, arr.length)) return false
   const key = String(sym) + '|' + mdTf(tf)
-  md.candles[key] = ok
+  lruSet(md.candles, key, ok, MD_MAX_SERIES, isShownSeries)
   md.lastUpdate.candles = Date.now()
   return true
 }
@@ -236,13 +248,17 @@ export const mdCache: { data: Record<string, MdCacheEntry>; ttl: number } = { da
 export function mdCacheGet(sym: unknown, tf: unknown): CandleFlat[] | null {
   const k = String(sym) + '|' + mdTf(tf)
   const e = mdCache.data[k]
-  if (e && Date.now() - e.ts < mdCache.ttl) return e.candles
+  if (e && Date.now() - e.ts < mdCache.ttl) {
+    lruTouch(mdCache.data, k)
+    return e.candles
+  }
   return null
 }
 
 export function mdCachePut(sym: unknown, tf: unknown, arr: unknown): void {
   if (!Array.isArray(arr) || !arr.length) return
-  mdCache.data[String(sym) + '|' + mdTf(tf)] = { ts: Date.now(), candles: arr as CandleFlat[] }
+  const key = String(sym) + '|' + mdTf(tf)
+  lruSet(mdCache.data, key, { ts: Date.now(), candles: arr as CandleFlat[] }, MD_MAX_SERIES, isShownSeries)
 }
 
 // --- Health monitor -----------------------------------------
