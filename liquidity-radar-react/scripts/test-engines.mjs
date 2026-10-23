@@ -1256,10 +1256,32 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
     return { t: i * 60000, o: p, h: p + 1, l: p - 1, c: p, v: 1 + (i % 7) }
   })
   const many = Array.from({ length: 50 }, (_, i) => inst('m' + i, i % 2 ? 'rsi' : 'sma', i ? 'm' + (i - 1) + '.v' : 'close'))
-  const t0 = Date.now()
-  computeAll(many, long, defOf, base)
-  const ms = Date.now() - t0
-  ok('graph: a 50-deep chain over 5000 bars under 250ms', ms < 250, ms + 'ms')
+  // A busy CPU slows every run, so a fixed wall-clock budget flakes. Warm up,
+  // keep the best of 5, and judge it against a calibration loop timed the same
+  // way in this process (load slows both alike). Idle it runs at ~1–4× the
+  // calibration; 8× leaves headroom while a 10× regression still fails. The
+  // absolute ceiling catches a pathological case the ratio could hide.
+  const bestMs = (fn) => {
+    fn()
+    let best = Infinity
+    for (let i = 0; i < 5; i++) {
+      const t = performance.now()
+      fn()
+      best = Math.min(best, performance.now() - t)
+    }
+    return best
+  }
+  const calib = () => {
+    let s = 0
+    for (let i = 0; i < 2e6; i++) s += Math.sqrt(i) % 7
+    return s
+  }
+  const ms = bestMs(() => computeAll(many, long, defOf, base))
+  const ref = bestMs(calib)
+  ok('graph: a 50-deep chain over 5000 bars within its time budget', ms < ref * 8 && ms < 5000, {
+    ms: Math.round(ms),
+    calibMs: Math.round(ref),
+  })
 }
 
 // ---------------------------------------------------------------- pine
@@ -1455,10 +1477,40 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
 
   // Performance: a typical script over 5000 bars.
   const big = mk(5000)
-  const t0 = Date.now()
-  runPine(PINE_EXAMPLES.find((x) => x.id === 'ex_macd').script, big)
-  const ms = Date.now() - t0
-  ok('pine: MACD script over 5000 bars under 400ms', ms < 400, ms + 'ms')
+  // Same scheme as the graph budget above: best of 5 after a warm-up, judged
+  // against a calibration loop so a busy CPU does not fail it. Idle it runs at
+  // ~5–12× the calibration; 35× leaves headroom while a 10× regression fails.
+  const bestMs = (fn) => {
+    fn()
+    let best = Infinity
+    for (let i = 0; i < 5; i++) {
+      const t = performance.now()
+      fn()
+      best = Math.min(best, performance.now() - t)
+    }
+    return best
+  }
+  const calib = () => {
+    let s = 0
+    for (let i = 0; i < 2e6; i++) s += Math.sqrt(i) % 7
+    return s
+  }
+  const macd = PINE_EXAMPLES.find((x) => x.id === 'ex_macd').script
+  // The runtime's own 2.5s deadline would throw under load and abort the suite:
+  // lift it to the ceiling, and report a throw as a failed assertion.
+  let ms = Infinity
+  let err
+  try {
+    ms = bestMs(() => runPine(macd, big, {}, { maxMs: 10000 }))
+  } catch (e) {
+    err = String(e && e.message)
+  }
+  const ref = bestMs(calib)
+  ok('pine: MACD script over 5000 bars within its time budget', ms < ref * 35 && ms < 10000, {
+    ms: Math.round(ms),
+    calibMs: Math.round(ref),
+    err,
+  })
 }
 
 // ------------------------------------------------- per-panel indicator stores
