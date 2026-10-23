@@ -1844,9 +1844,12 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
     bad.rows[0].pred === f15.rows[0].pred)
 }
 
-// ---- utils/indicators: daily volatility by timeframe -----------------
+// ---- utils/indicators: RSI edge case, daily volatility by timeframe -----------------
 {
-  const { dailyVolPct } = await import(src('utils/indicators.ts'))
+  const { calcRSI, dailyVolPct } = await import(src('utils/indicators.ts'))
+  eq('rsi: a perfectly flat series is neutral (50), not overbought', calcRSI(Array(30).fill(100)), 50)
+  eq('rsi: only gains is still 100', calcRSI(Array.from({ length: 30 }, (_, i) => 100 + i)), 100)
+  eq('rsi: only losses is still 0', calcRSI(Array.from({ length: 30 }, (_, i) => 100 - i)), 0)
   // Alternating +1% / -1%: per-bar sd is 1%, whatever the timeframe.
   const alt = Array.from({ length: 41 }, (_, i) => (i % 2 ? 101 : 100))
   const sd15 = dailyVolPct(alt) / Math.sqrt(96)

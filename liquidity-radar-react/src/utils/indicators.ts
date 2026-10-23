@@ -33,7 +33,9 @@ export function calcRSI(closes: number[], p?: number): number {
     ag = (ag * (p - 1) + Math.max(d, 0)) / p
     al = (al * (p - 1) + Math.max(-d, 0)) / p
   }
-  if (al === 0) return 100
+  // A perfectly flat window has neither gains nor losses: that is neutral,
+  // not overbought.
+  if (al === 0) return ag === 0 ? 50 : 100
   return 100 - 100 / (1 + ag / al)
 }
 
