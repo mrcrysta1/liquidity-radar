@@ -2242,6 +2242,30 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('compactVol: millions', compactVol(1_234_567), '1.2M')
 }
 
+// ---------------------------------------------------------------- forex factory day grouping
+{
+  const { parseFF, groupByDay } = await import(src('features/news/pro/forexFactory.ts'))
+  const ev = parseFF(
+    JSON.stringify([
+      { title: 'CPI', country: 'USD', date: '2026-09-15T08:30:00-04:00', impact: 'High' },
+      { title: 'Bank Holiday', country: 'JPY', date: '2026-09-15T00:00:00-04:00', impact: 'Holiday' },
+      { title: 'Trade Balance', country: 'AUD', date: '2026-09-15T01:00:00-04:00', impact: 'Low' },
+    ]),
+  )
+  // Expectations follow the process zone, so this holds under any TZ.
+  const ymd = (d) =>
+    d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
+  const groups = groupByDay(ev)
+  const where = (t) => groups.find((g) => g.events.some((e) => e.title === t))
+  eq('ff: all-day holiday keeps its FF date in any zone', ymd(where('Bank Holiday').date), '2026-09-15')
+  eq('ff: all-day row leads its day', where('Bank Holiday').events[0].title, 'Bank Holiday')
+  for (const e of ev.filter((x) => !x.allDay))
+    eq('ff: timed row under its local day (' + e.title + ')', ymd(where(e.title).date), ymd(new Date(e.ts)))
+  const starts = groups.map((g) => g.date.getTime())
+  eq('ff: day groups ascend', starts, [...starts].sort((a, b) => a - b))
+  eq('ff: group key matches its date', groups.every((g) => g.day === g.date.toDateString()), true)
+}
+
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')
 if (fails.length) {
   fails.forEach((f) => console.log('  FAIL  ' + f))
