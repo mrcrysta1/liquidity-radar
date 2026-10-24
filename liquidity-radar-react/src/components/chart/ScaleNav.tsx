@@ -3,10 +3,11 @@
 // <ChartNavOverlay/> sits inside #chartWrap: zoom/reset buttons on hover,
 // "Scroll to real-time" while scrolled back, and the price-scale context
 // menu. <ChartBottomBar/> sits under the chart: date-range buttons, a clock
-// with the UTC offset, and the % / log / auto toggles. The state and the
+// with the UTC offset (which opens the chart time-zone menu, as on
+// TradingView), and the % / log / auto toggles. The state and the
 // chart plumbing live in features/charts/scaleNav.
 import { useEffect, useRef, useState } from 'react'
-import type { ReactNode, RefObject } from 'react'
+import type { KeyboardEvent as ReactKeyboardEvent, ReactNode, RefObject } from 'react'
 import {
   closeScaleMenu,
   resetChartView,
@@ -23,9 +24,21 @@ import {
   toggleScaleMode,
   zoomChart,
 } from '../../features/charts/scaleNav'
-import { RANGE_PRESETS, utcOffsetLabel } from '../../features/charts/scaleNavMath'
+import { RANGE_PRESETS } from '../../features/charts/scaleNavMath'
+import {
+  LOCAL_TZ,
+  TZ_OPTIONS,
+  browserZone,
+  chartZone,
+  getChartTzSetting,
+  setChartTz,
+  subscribeChartTz,
+  tzOffsetLabel,
+} from '../../features/charts/timezone'
 import type { ScaleMode } from '../../features/charts/scaleNavMath'
 import { getActiveCell, subscribeLayout } from '../../features/charts/companionCharts'
+import { addPriceRule, alertPriceText } from '../../features/alerts/alerts'
+import { state } from '../../services/store'
 
 function useScaleNav() {
   const [, force] = useState(0)
@@ -196,6 +209,20 @@ export function ChartNavOverlay() {
           ref={menuRef}
           style={{ left: s.menu.x, top: s.menu.y }}
         >
+          {s.menu.price != null ? (
+            <>
+              <MenuItem
+                onPick={() => {
+                  const p = s.menu ? s.menu.price : null
+                  closeScaleMenu()
+                  if (p != null) addPriceRule(state.symbol, p)
+                }}
+              >
+                Add alert at {alertPriceText(s.menu.price)}
+              </MenuItem>
+              <div className="sn-msep" role="separator" />
+            </>
+          ) : null}
           <ScaleMenuItems done={closeScaleMenu} />
         </div>
       ) : null}
@@ -203,7 +230,16 @@ export function ChartNavOverlay() {
   )
 }
 
-function useClock(): { time: string; zone: string } {
+/** Re-render when the chart time zone changes. */
+function useChartTz(): string {
+  const [, force] = useState(0)
+  useEffect(() => subscribeChartTz(() => force((n) => n + 1)), [])
+  return getChartTzSetting()
+}
+
+/** The bar's clock, in the chart time zone. */
+function useClock(): { time: string; zone: string; ms: number } {
+  useChartTz()
   const [now, setNow] = useState(() => new Date())
   useEffect(() => {
     // Tick on the second boundary so the seconds change in step with the wall clock.
@@ -216,17 +252,110 @@ function useClock(): { time: string; zone: string } {
     id = setTimeout(tick, 1000 - new Date().getMilliseconds())
     return () => clearTimeout(id)
   }, [])
-  const p = (n: number) => String(n).padStart(2, '0')
-  return {
-    time: p(now.getHours()) + ':' + p(now.getMinutes()) + ':' + p(now.getSeconds()),
-    zone: utcOffsetLabel(-now.getTimezoneOffset()),
+  const zone = chartZone()
+  const time = new Intl.DateTimeFormat('en-GB', {
+    timeZone: zone,
+    hourCycle: 'h23',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(now)
+  return { time, zone: tzOffsetLabel(zone, now.getTime()), ms: now.getTime() }
+}
+
+/** The zone menu's rows: the presets, plus a stored zone that is not one of them. */
+function tzRows(setting: string): Array<{ id: string; label: string; zone: string }> {
+  const rows = TZ_OPTIONS.map((o) => ({
+    id: o.id,
+    label: o.id === LOCAL_TZ ? 'Browser time (' + browserZone().replace(/_/g, ' ') + ')' : o.label,
+    zone: o.id === LOCAL_TZ ? browserZone() : o.id,
+  }))
+  if (!rows.some((r) => r.id === setting))
+    rows.push({ id: setting, label: setting.replace(/_/g, ' '), zone: setting })
+  return rows
+}
+
+/** The clock, as a button that opens the chart time-zone menu. */
+function TimeZoneMenu() {
+  const setting = useChartTz()
+  const clock = useClock()
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const close = () => {
+    setOpen(false)
+    btnRef.current?.focus()
   }
+  useDismiss(open, ref, close)
+
+  // Opening moves focus onto the chosen zone, so the keyboard can pick at once.
+  useEffect(() => {
+    if (!open) return
+    const on = listRef.current?.querySelector<HTMLElement>('[aria-checked="true"]')
+    ;(on || listRef.current?.querySelector<HTMLElement>('button'))?.focus()
+  }, [open])
+  const onKey = (e: ReactKeyboardEvent) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Home' && e.key !== 'End') return
+    const items = Array.from(listRef.current?.querySelectorAll<HTMLElement>('button') || [])
+    if (!items.length) return
+    e.preventDefault()
+    const i = items.indexOf(document.activeElement as HTMLElement)
+    const next =
+      e.key === 'Home'
+        ? 0
+        : e.key === 'End'
+          ? items.length - 1
+          : (i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length
+    items[next].focus()
+  }
+
+  const now = clock.ms
+  return (
+    <div className="sn-tz" ref={ref}>
+      <button
+        type="button"
+        ref={btnRef}
+        className={'sn-btn sn-clock' + (open ? ' open' : '')}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={'Chart time zone: ' + chartZone().replace(/_/g, ' ') + ' (' + clock.zone + ')'}
+        title="Chart time zone"
+        onClick={() => setOpen((o) => !o)}
+      >
+        {clock.time} <i>({clock.zone})</i>
+      </button>
+      {open ? (
+        <div
+          className="sn-menu up right sn-tz-list"
+          role="menu"
+          aria-label="Chart time zone"
+          ref={listRef}
+          onKeyDown={onKey}
+        >
+          {tzRows(setting).map((r) => (
+            <MenuItem
+              key={r.id}
+              radio
+              on={r.id === setting}
+              hint={tzOffsetLabel(r.zone, now)}
+              onPick={() => {
+                setChartTz(r.id)
+                close()
+              }}
+            >
+              {r.label}
+            </MenuItem>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
 }
 
 /** Under the chart: date ranges, clock, % / log / auto. */
 export function ChartBottomBar() {
   const s = useScaleNav()
-  const clock = useClock()
   const [rangeOpen, setRangeOpen] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
   const rangeRef = useRef<HTMLDivElement>(null)
@@ -284,9 +413,7 @@ export function ChartBottomBar() {
         ) : null}
       </div>
       <span className="sn-spacer" />
-      <span className="sn-clock" title="Local time">
-        {clock.time} <i>({clock.zone})</i>
-      </span>
+      <TimeZoneMenu />
       <span className="sn-sep" aria-hidden="true" />
       <button
         type="button"

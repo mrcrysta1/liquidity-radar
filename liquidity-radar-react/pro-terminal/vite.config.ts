@@ -18,5 +18,20 @@ export default defineConfig({
   plugins: [react(), feedProxy()],
   resolve: { alias: { '@': path.resolve(__dirname, 'src') } },
   server: { port: 5174 },
+  // Split vendor libraries out of the app chunk (it was one 568 kB file). Same
+  // modules, same load order — only the file boundaries change, and the vendor
+  // chunks cache across app deploys.
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id: string) {
+          if (!id.includes('node_modules')) return undefined;
+          if (/[\\/]node_modules[\\/](lightweight-charts|fancy-canvas)[\\/]/.test(id)) return 'vendor-charts';
+          if (/[\\/]node_modules[\\/](react|react-dom|scheduler|zustand|use-sync-external-store)[\\/]/.test(id)) return 'vendor-react';
+          return 'vendor';
+        },
+      },
+    },
+  },
   test: { environment: 'node', include: ['src/**/*.test.ts'] },
 } as any);

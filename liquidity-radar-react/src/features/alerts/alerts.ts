@@ -13,12 +13,13 @@
 //     state.candles, everything else loads a 200-bar window, refreshed at most
 //     every minute (longer for slow intervals), capped per pass.
 // Nothing is fetched while Binance has us in a rate-limit cooldown.
-import { esc, pfmt } from '../../utils/format'
+import { esc, fmt, pfmt } from '../../utils/format'
 import { $, showToast } from '../../utils/dom'
 import { storageGet, storageSet } from '../../services/storage'
 import { state } from '../../services/store'
 import { loadCandleWindow } from '../../services/marketData'
 import { BASE_MS, tfDef } from '../../services/timeframe'
+import { mdTf } from '../../services/market'
 import type { CandleFlat } from '../../services/market'
 import { jget } from '../../api/client'
 import { isRateLimited } from '../../api/rateLimit'
@@ -28,13 +29,17 @@ import { symOf, watchList } from '../favorites/favorites'
 import {
   ALERT_LIMITS,
   DEFAULT_COOLDOWN_MIN,
+  alertDecimals,
   MIN_TECH_CANDLES,
+  chartedCandlesFit,
   condLabel,
   evalPrice,
   evalTechnical,
   evalWatchlist,
   normalizeRules,
+  notifyVia,
   rearm,
+  ruleForPriceClick,
   ruleName,
   stepRule,
 } from './rules'
@@ -89,7 +94,17 @@ function tickerOf(sym: string): { last: number; pct: number } | null {
 const watchSymbols = (): string[] => watchList().map(symOf)
 const techKey = (r: AlertRule) => r.sym + '|' + (r.tf || '15m')
 function isChartedKey(sym: string, tf: string): boolean {
-  return sym === state.symbol && tf === state.tf && state.candles.length >= MIN_TECH_CANDLES
+  return chartedCandlesFit(
+    {
+      symbol: state.symbol,
+      tf: state.tf,
+      tfKey: mdTf(state.tf),
+      candlesKey: state.candlesKey,
+      bars: state.candles.length,
+    },
+    sym,
+    tf,
+  )
 }
 function candlesFor(r: AlertRule): CandleFlat[] | null {
   if (r.sym && isChartedKey(r.sym, r.tf || '15m')) return state.candles
@@ -99,6 +114,44 @@ function candleTtl(tf: string): number {
   const d = tfDef(tf)
   const ms = (BASE_MS[d.base] || 86400000) * d.factor
   return Math.min(10 * 60000, Math.max(60000, ms / 3))
+}
+
+/** 24h tickers for symbols state.tickers lacks: a few per pass, each at most once a minute. */
+async function topUpTickers(syms: Iterable<string>, now: number): Promise<boolean> {
+  let got = false
+  const tk = [...syms]
+    .filter((s) => !(state.tickers && state.tickers[s]) && !badSymbols.has(s) && !isInstrument(s))
+    .filter((s) => !extraTickers[s] || now - extraTickers[s].ts > 60000)
+    .slice(0, 6)
+  for (const s of tk) {
+    if (isRateLimited()) break
+    try {
+      const d = (await jget(
+        'https://api.binance.com/api/v3/ticker/24hr?symbol=' + encodeURIComponent(s),
+      )) as Record<string, unknown>
+      extraTickers[s] = { last: Number(d.lastPrice), pct: Number(d.priceChangePercent), ts: Date.now() }
+      got = true
+    } catch (e) {
+      // A 400 means Binance has no such pair — stop asking.
+      if (/HTTP 400/.test(String(e))) badSymbols.add(s)
+    }
+  }
+  return got
+}
+
+/** A symbol's last price and 24h %: the tracked universe first, else a fetched extra ticker. */
+export const liveTicker = tickerOf
+
+/**
+ * Fetch prices for symbols outside the tracked universe (the chart's
+ * Watchlist panel), through the same paced top-up the alert rules use.
+ */
+export function ensureTickers(syms: string[]): void {
+  if (refreshing || isRateLimited()) return
+  refreshing = true
+  void topUpTickers(syms, Date.now()).finally(() => {
+    refreshing = false
+  })
 }
 
 /** Background top-up of whatever the rules need that state.tickers lacks. */
@@ -113,23 +166,7 @@ async function refreshData(rules: AlertRule[]): Promise<void> {
       if (r.kind === 'watchlist') watchSymbols().forEach((s) => needT.add(s))
       else if (r.kind === 'price' && r.sym) needT.add(r.sym)
     })
-    const tk = [...needT]
-      .filter((s) => !(state.tickers && state.tickers[s]) && !badSymbols.has(s) && !isInstrument(s))
-      .filter((s) => !extraTickers[s] || now - extraTickers[s].ts > 60000)
-      .slice(0, 6)
-    for (const s of tk) {
-      if (isRateLimited()) break
-      try {
-        const d = (await jget(
-          'https://api.binance.com/api/v3/ticker/24hr?symbol=' + encodeURIComponent(s),
-        )) as Record<string, unknown>
-        extraTickers[s] = { last: Number(d.lastPrice), pct: Number(d.priceChangePercent), ts: Date.now() }
-        got = true
-      } catch (e) {
-        // A 400 means Binance has no such pair — stop asking.
-        if (/HTTP 400/.test(String(e))) badSymbols.add(s)
-      }
-    }
+    if (await topUpTickers(needT, now)) got = true
     const keys = [...new Set(rules.filter((r) => r.kind === 'technical').map(techKey))]
     const stale = keys
       .filter((k) => {
@@ -161,11 +198,28 @@ async function refreshData(rules: AlertRule[]): Promise<void> {
 
 // ---------------------------------------------------------------- evaluation
 
+function notifyCtor(title: string, opts: NotificationOptions): void {
+  try {
+    new Notification(title, opts)
+  } catch {
+    /* Android Chrome: the constructor is not allowed — the toast still shows */
+  }
+}
+
 function notify(title: string, body: string): void {
   try {
-    if (notifOk && window.Notification && Notification.permission === 'granted') {
-      new Notification(title, { body: body, tag: 'lr-alert' })
-    }
+    const opts: NotificationOptions = { body: body, tag: 'lr-alert', icon: '/icon-192.png' }
+    const sw = 'serviceWorker' in navigator ? navigator.serviceWorker : null
+    // ready only settles once a worker controls the page (never in dev), so
+    // the worker route is taken only when one does.
+    const how = notifyVia({
+      granted: notifOk && !!window.Notification && Notification.permission === 'granted',
+      worker: !!(sw && sw.controller),
+      ctor: typeof window.Notification === 'function',
+    })
+    if (how === 'worker' && sw) {
+      sw.ready.then((reg) => reg.showNotification(title, opts)).catch(() => notifyCtor(title, opts))
+    } else if (how === 'ctor') notifyCtor(title, opts)
     showToast(title + ' — ' + body)
   } catch (e) {
     /* ignore */
@@ -317,6 +371,39 @@ export function addAlert(sym: string, dir: string, price: string): void {
     once: true,
   })
   showToast(err || 'Alert set for ' + normSym(sym) + ' ' + (dir || 'above') + ' $' + pfmt(parseFloat(price)))
+}
+
+/** The latest price known for `sym`: its ticker, else the charted candles. */
+function lastPriceOf(sym: string): number {
+  const t = tickerOf(sym)
+  if (t) return t.last
+  const c = sym === state.symbol ? state.candles : null
+  return c && c.length ? +c[c.length - 1].c : NaN
+}
+
+/** An alert level as text, with every decimal the level keeps (tiny coins included). */
+export function alertPriceText(p: number): string {
+  return fmt(p, alertDecimals(p))
+}
+
+/**
+ * "Add alert at {price}" from the chart's price axis: a repeating crosses
+ * rule (default cooldown) toward `price` from the last price. Returns whether
+ * it was saved; either way a toast says what happened.
+ */
+export function addPriceRule(sym: string, price: number): boolean {
+  const s = normSym(sym)
+  const pick = ruleForPriceClick(price, lastPriceOf(s))
+  if (!pick) {
+    showToast('No price for ' + (s || 'this chart') + ' yet — try again in a moment')
+    return false
+  }
+  const err = addRule({ kind: 'price', sym: s, condition: pick.condition, value: pick.value, once: false })
+  showToast(
+    err ||
+      'Alert set: ' + s + ' ' + (pick.condition === 'crosses_above' ? 'crosses above' : 'crosses below') + ' $' + alertPriceText(pick.value),
+  )
+  return !err
 }
 
 /** Remove a rule by id (or, for old callers, by list index). */

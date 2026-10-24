@@ -28,6 +28,7 @@ const {
   customTfDef,
   isTf,
   createFolder,
+  mergeOlderPage,
 } = await import(src('services/timeframe.ts'))
 const { buildRangeBars, atr, niceRange, autoRangeSize, minSafeRange, MAX_RANGE_BARS } =
   await import(src('features/charts/series/rangeBars.ts'))
@@ -42,13 +43,19 @@ const { buildKagi, kagiYangEnd } = await import(src('features/charts/series/kagi
 const { buildPointFigure, clampPnfReversal, pnfBoxes } = await import(
   src('features/charts/series/pointFigure.ts')
 )
-const { noteLimitResponse, cooldownLeft, isRateLimited } = await import(src('api/rateLimit.ts'))
+const { noteLimitResponse, cooldownLeft, isRateLimited, isBinanceUrl } = await import(
+  src('api/rateLimit.ts')
+)
 const { pfmt, nfmt, cfmt } = await import(src('utils/format.ts'))
+const { safeUrl } = await import(src('utils/url.ts'))
+const { newsSimplify } = await import(src('features/news/newsItem.ts'))
+const { mergeNewsFeeds, loadNewsProgressive, hedge, newsDedup } = await import(src('features/news/newsLoad.ts'))
 const { VENUES, isUsdQuoted } = await import(src('features/advanced/venues.ts'))
-const { groupAggTrades, autoThreshold, bubbleRadius } = await import(
+const { groupAggTrades, autoThreshold, bubbleRadius, gapLabelSpot, whaleLegendCompact } = await import(
   src('features/whales/whaleMath.ts')
 )
 const alerts = await import(src('features/alerts/rules.ts'))
+const wls = await import(src('features/favorites/watchlists.ts'))
 const { buildVolumeProfile, computeVolumeProfile, clampRows, clampValueArea } = await import(
   src('features/charts/volumeProfile.ts')
 )
@@ -57,6 +64,7 @@ const { ProviderChain, klineFreshness, createPacer, toKlineRows } = await import
   src('services/providerChain.ts')
 )
 const { KlineHub, MAX_HUB_STREAMS } = await import(src('services/klineHub.ts'))
+const { StreamMux } = await import(src('services/streamMux.ts'))
 
 let pass = 0
 const fails = []
@@ -188,6 +196,47 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   const jan = Date.UTC(2026, 0, 1)
   eq('bucketEnd: January rolls to February', bucketEnd(jan, tfDef('1M')), Date.UTC(2026, 1, 1))
   ok('bucketIndex: monotonic', bucketIndex(t0 + 1e6, d) > bucketIndex(t0, d))
+}
+
+// ------------------------------------------- older-history paging (resampled)
+// The loaded series usually starts mid-bucket, and a resampled bucket is
+// stamped with its first member's time — so the older page ends with the rest
+// of that same bucket. It must fold into one candle, not draw twice.
+{
+  const def45 = tfDef('45m')
+  const step = 15 * 60000
+  const t0 = Date.UTC(2026, 0, 1)
+  const all = []
+  for (let i = 0; i < 300; i++) all.push({ t: t0 + i * step, o: i, h: i + 1, l: i - 1, c: i + 0.5, v: 1 })
+  // First page from row 100: 100 % 3 = 1, so it opens one bar into a bucket.
+  const shown = resample(all.slice(100), def45)
+  const page = resample(all.filter((r) => r.t < shown[0].t), def45)
+  const naive = page.concat(shown).map((c) => bucketIndex(c.t, def45))
+  ok('paging: the naive prepend repeats a bucket (the bug)', naive.some((b, i) => i > 0 && b === naive[i - 1]))
+  const { candles, added, merged } = mergeOlderPage(page, shown, def45)
+  const ids = candles.map((c) => bucketIndex(c.t, def45))
+  ok('paging: no bucket appears twice', ids.every((b, i) => i === 0 || b !== ids[i - 1]))
+  ok('paging: times strictly ascending', candles.every((c, i) => i === 0 || c.t > candles[i - 1].t))
+  ok('paging: the split bucket was merged', merged)
+  eq('paging: added counts only new buckets', added, page.length - 1)
+  eq('paging: one candle per bucket overall', candles.length, resample(all, def45).length)
+  near('paging: volume preserved', candles.reduce((a, c) => a + c.v, 0), 300)
+  const whole = resample(all, def45)
+  eq('paging: merged bucket equals a clean resample', candles[added], whole[added])
+  eq('paging: merged bucket keeps the shown close', candles[added].c, shown[0].c)
+  eq('paging: newer candles untouched', candles.slice(added + 1), shown.slice(1))
+  // Native interval: nothing to merge, everything older is added.
+  const d15 = tfDef('15m')
+  const n = mergeOlderPage(all.slice(0, 100), all.slice(100), d15)
+  eq('paging: native interval prepends as-is', [n.added, n.merged, n.candles.length], [100, false, 300])
+  // Room cap trims the oldest new candles, never the merge.
+  const capped = mergeOlderPage(page, shown, def45, 5)
+  eq('paging: room caps what is added', [capped.added, capped.merged], [5, true])
+  ok('paging: capped result still ascending', capped.candles.every((c, i) => i === 0 || c.t > capped.candles[i - 1].t))
+  // Overlap and disorder from a provider never leak into the series.
+  const messy = mergeOlderPage([page[2], page[1], page[3], shown[0], shown[1]], shown, def45)
+  ok('paging: overlapping or unsorted page stays strictly ascending', messy.candles.every((c, i) => i === 0 || c.t > messy.candles[i - 1].t))
+  eq('paging: an empty page adds nothing', mergeOlderPage([], shown, def45), { candles: shown, added: 0, merged: false })
 }
 
 // ------------------------------------------------------- custom timeframes
@@ -577,11 +626,38 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   ok('ratelimit: a healthy response changes nothing', isRateLimited())
   noteLimitResponse(418, null, 'IP banned until 1000000000000') // long past
   ok('ratelimit: an expired ban is ignored', cooldownLeft() > 0)
+  // Only Binance's own 429/418 may freeze Binance REST (api/client rawFetch).
+  for (const u of [
+    'https://api.binance.com/api/v3/klines?symbol=BTCUSDT',
+    'https://fapi.binance.com/fapi/v1/openInterest?symbol=BTCUSDT',
+    'https://data-api.binance.vision/api/v3/aggTrades?symbol=BTCUSDT',
+  ]) ok('ratelimit: Binance host trips the guard — ' + new URL(u).host, isBinanceUrl(u))
+  for (const u of [
+    'https://api.coingecko.com/api/v3/global',
+    'https://api.bybit.com/v5/market/kline',
+    'https://www.okx.com/api/v5/market/candles',
+    'https://query1.finance.yahoo.com/v8/finance/chart/GC=F',
+    'https://nfs.faireconomy.media/ff_calendar_thisweek.json',
+    'https://testnet.binancefuture.com/fapi/v1/klines',
+    'https://evil.example/?u=https://api.binance.com',
+    'https://notbinance.com/api',
+    'not a url',
+  ]) ok('ratelimit: non-Binance host never trips the guard — ' + u, !isBinanceUrl(u))
 }
 
 // ----------------------------------------------------------------- format
 {
   eq('fmt: price keeps cents above 100', pfmt(80123.456), '80,123.46')
+  // Pinned outputs that were already right must not move.
+  eq('fmt: pfmt pins', [0, 0.5, 1, 99.99, 1234.5, 65000, 0.00012345, 0.00000401].map(pfmt),
+    ['0.00000000', '0.50000', '1.0000', '99.9900', '1,234.50', '65,000.00', '0.000123', '0.00000401'])
+  // Below a millionth, about four significant digits instead of zeros.
+  eq('fmt: nano prices are not zero', pfmt(3.2e-9), '0.000000003200')
+  eq('fmt: sub-millionth keeps 4 significant digits', pfmt(7.123e-7), '0.0000007123')
+  // Negatives take their decimals from the magnitude.
+  eq('fmt: negative thousands keep cents', pfmt(-1234.5), '-1,234.50')
+  eq('fmt: negative fractions match positives', pfmt(-0.5), '-0.50000')
+  eq('fmt: negative small price', pfmt(-0.00012345), '-0.000123')
   ok('fmt: sub-cent prices keep precision', pfmt(0.00000401).length > 6, pfmt(0.00000401))
   eq('fmt: compact millions', nfmt(2_400_000), '2.40M')
   eq('fmt: money compacts with a symbol', cfmt(2_400_000_000), '$2.40B')
@@ -589,6 +665,137 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   eq('fmt: non-finite is a dash, never NaN', pfmt(NaN), '—')
   eq('fmt: infinity is a dash', nfmt(Infinity), '—')
   eq('fmtUsd: thousands', fmtUsd(1500), '1.5K')
+}
+
+// --------------------------------------------------------- news links (XSS)
+// Feed links land in href/src via innerHTML and in the lr_news_cache copy, so
+// only absolute http(s) may survive; everything else collapses to '#'.
+{
+  eq('safeUrl: https kept', safeUrl('https://example.com/a?b=1#c'), 'https://example.com/a?b=1#c')
+  eq('safeUrl: http kept', safeUrl('http://example.com/x'), 'http://example.com/x')
+  eq('safeUrl: javascript blocked', safeUrl('javascript:alert(1)'), '#')
+  eq('safeUrl: upper-case scheme blocked', safeUrl('JAVASCRIPT:alert(1)'), '#')
+  eq('safeUrl: leading space + control chars blocked', safeUrl(' \u0001\tJaVaScRiPt:alert(1)'), '#')
+  eq('safeUrl: newline/tab inside scheme blocked', safeUrl('java\nscr\tipt:alert(1)'), '#')
+  eq('safeUrl: data blocked', safeUrl('data:text/html,<script>alert(1)</script>'), '#')
+  eq('safeUrl: vbscript blocked', safeUrl('vbscript:msgbox(1)'), '#')
+  eq('safeUrl: relative rejected', safeUrl('/news/1'), '#')
+  eq('safeUrl: protocol-relative rejected', safeUrl('//evil.example/x'), '#')
+  eq('safeUrl: empty', safeUrl(''), '#')
+  eq('safeUrl: whitespace only', safeUrl('   '), '#')
+  eq('safeUrl: non-string', safeUrl(undefined), '#')
+  eq('safeUrl: malformed', safeUrl('http://'), '#')
+  eq('safeUrl: garbage', safeUrl('not a url'), '#')
+  eq('safeUrl: attribute breakout is encoded', safeUrl('https://a.example/"><x>').includes('"'), false)
+
+  const simp = newsSimplify('Src', '#fff')
+  const good = simp({ title: ' Bitcoin surges ', link: 'https://news.example/btc', pubDate: '2026-01-01 00:00:00', thumbnail: 'https://img.example/t.jpg' })
+  eq('newsSimplify: https link kept', good.url, 'https://news.example/btc')
+  eq('newsSimplify: https thumbnail kept', good.img, 'https://img.example/t.jpg')
+  eq('newsSimplify: title trimmed + tagged', [good.title, good.coins.includes('BTC'), good.sent], ['Bitcoin surges', true, 'pos'])
+  const bad = simp({ title: 'x', link: ' JavaScript:alert(document.cookie)', thumbnail: 'javascript:alert(1)' })
+  eq('newsSimplify: javascript link becomes #', bad.url, '#')
+  eq('newsSimplify: javascript thumbnail dropped', bad.img, null)
+  eq('newsSimplify: missing link becomes #', simp({ title: 'x' }).url, '#')
+  eq('newsSimplify: data: enclosure dropped', simp({ title: 'x', enclosure: { link: 'data:image/svg+xml,<svg onload=alert(1)>' } }).img, null)
+  eq('newsSimplify: empty title skipped', simp({ title: '  ', link: 'https://a.example' }), null)
+}
+
+// ------------------------------------------------- news progressive loading
+// The wire renders as feeds land rather than after the slowest one, shows the
+// lr_news_cache copy first, and ends the loading state at a deadline.
+{
+  const item = (title, time, src = 'A') => ({ title, url: '#', time, src, color: '#fff', img: null, coins: [], sent: 'neu' })
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+  const later = (ms, v) => sleep(ms).then(() => v)
+  const fail = (ms) => sleep(ms).then(() => { throw new Error('down') })
+  const titles = (u) => u.items.map((n) => n.title)
+
+  eq('newsDedup: same words reordered', newsDedup('Bitcoin price hits record high today', 'Today bitcoin price hits record high'), true)
+  eq('newsDedup: different stories', newsDedup('Bitcoin hits record', 'Solana network outage'), false)
+  const m = mergeNewsFeeds([
+    [item('Old story', 1), item('Bitcoin price hits record high today', 5)],
+    null,
+    [item('Bitcoin price hits record high, today!', 9, 'B'), item('Fresh one', 10, 'B')],
+  ])
+  eq('merge: newest first, near-dupes dropped, first feed wins', m.map((n) => [n.title, n.src]), [['Fresh one', 'B'], ['Bitcoin price hits record high today', 'A'], ['Old story', 'A']])
+  eq('merge: order of arrival does not matter', mergeNewsFeeds([[item('x one', 1)], [item('y two', 2)]]).map((n) => n.title), ['y two', 'x one'])
+  eq('merge: empty titles skipped', mergeNewsFeeds([[item('', 1), item('!!!', 2)]]).length, 0)
+
+  // Partial results before the deadline: one feed hangs, the others land.
+  {
+    const ups = []
+    const t0 = Date.now()
+    const feeds = [() => later(10, [item('Alpha story', 3)]), () => new Promise(() => {}), () => later(20, [item('Beta story', 4)])]
+    loadNewsProgressive({ total: 3, fetchFeed: (i) => feeds[i](), onUpdate: (u) => ups.push({ ...u, at: Date.now() - t0 }), deadlineMs: 400 })
+    await sleep(450)
+    const ready = ups.filter((u) => u.phase === 'ready')
+    eq('progressive: first feed shown before the others', titles(ready[0]), ['Alpha story'])
+    ok('progressive: shown well before the deadline', ready[0].at < 300, ready[0].at)
+    eq('progressive: second feed merges in', titles(ready[ready.length - 1]), ['Beta story', 'Alpha story'])
+    ok('progressive: a hung feed never puts it back to loading', !ups.slice(1).some((u) => u.phase !== 'ready'), ups.map((u) => u.phase))
+  }
+
+  // Cache first: on screen at once, kept until the deadline, then live.
+  {
+    const ups = []
+    const cached = [item('Cached story', 1)]
+    const feeds = [() => later(10, [item('Live story', 5)]), () => new Promise(() => {})]
+    loadNewsProgressive({ total: 2, fetchFeed: (i) => feeds[i](), onUpdate: (u) => ups.push(u), cached, deadlineMs: 250 })
+    eq('cache-first: cached wire published synchronously', [ups.length, ups[0] && ups[0].cached, ups[0] && titles(ups[0])], [1, true, ['Cached story']])
+    await sleep(60)
+    eq('cache-first: one feed does not replace the cached list before the deadline', ups.length, 1)
+    await sleep(300)
+    const lastU = ups[ups.length - 1]
+    eq('cache-first: live wire takes over at the deadline', [lastU.cached, titles(lastU)], [false, ['Live story']])
+  }
+
+  // All feeds fail: error, not an endless spinner; with a cache the cache stays.
+  {
+    const ups = []
+    const fin = await loadNewsProgressive({ total: 3, fetchFeed: () => fail(5), onUpdate: (u) => ups.push(u), deadlineMs: 1000 })
+    eq('all-fail: error phase', [fin.phase, fin.items.length, fin.ok], ['error', 0, 0])
+    eq('all-fail: loading then error', ups.map((u) => u.phase), ['loading', 'error'])
+    const withCache = await loadNewsProgressive({ total: 2, fetchFeed: () => fail(5), onUpdate: () => {}, cached: [item('Kept', 1)], deadlineMs: 1000 })
+    eq('all-fail: a cached wire stays up', [withCache.phase, withCache.cached, titles(withCache)], ['ready', true, ['Kept']])
+    const empty = await loadNewsProgressive({ total: 2, fetchFeed: () => later(5, []), onUpdate: () => {}, deadlineMs: 1000 })
+    eq('empty: feeds answered with no stories', empty.phase, 'empty')
+    const ups2 = []
+    loadNewsProgressive({ total: 2, fetchFeed: () => new Promise(() => {}), onUpdate: (u) => ups2.push(u.phase), deadlineMs: 20 })
+    await sleep(40)
+    eq('deadline: nothing arrived means error, not loading', ups2, ['loading', 'error'])
+    const ups3 = []
+    let current = true
+    loadNewsProgressive({ total: 1, fetchFeed: () => later(20, [item('Stale run', 1)]), onUpdate: (u) => ups3.push(u.phase), deadlineMs: 1000, isCurrent: () => current })
+    current = false
+    await sleep(40)
+    eq('superseded run publishes nothing more', ups3, ['loading'])
+  }
+
+  // Source hedging: fallback asked on failure or after the head start.
+  {
+    eq('hedge: primary wins', await hedge(() => later(5, 'p'), () => later(1, 'f'), 50), 'p')
+    eq('hedge: failure goes straight to fallback', await hedge(() => fail(1), () => later(1, 'f'), 1000), 'f')
+    const t0 = Date.now()
+    const v = await hedge(() => new Promise(() => {}), () => later(1, 'f'), 20)
+    ok('hedge: slow primary hedged after the head start', v === 'f' && Date.now() - t0 < 500, [v, Date.now() - t0])
+    let err = null
+    await hedge(() => fail(1), () => fail(2), 1000).catch((e) => (err = e))
+    ok('hedge: rejects only when both fail', err instanceof Error)
+  }
+}
+
+// ---------------------------------------------------- modal focus trap (utils/dom)
+{
+  const { nextFocusIndex } = await import(src('utils/dom.ts'))
+  eq('focus trap: Tab moves forward', nextFocusIndex(0, 3, false), 1)
+  eq('focus trap: Tab on the last wraps to the first', nextFocusIndex(2, 3, false), 0)
+  eq('focus trap: Shift+Tab on the first wraps to the last', nextFocusIndex(0, 3, true), 2)
+  eq('focus trap: Shift+Tab moves back', nextFocusIndex(2, 3, true), 1)
+  eq('focus trap: focus outside, Tab goes to the first', nextFocusIndex(-1, 3, false), 0)
+  eq('focus trap: focus outside, Shift+Tab goes to the last', nextFocusIndex(-1, 3, true), 2)
+  eq('focus trap: a single element keeps focus', nextFocusIndex(0, 1, false), 0)
+  eq('focus trap: nothing focusable', nextFocusIndex(-1, 0, false), -1)
 }
 
 // ------------------------------------------------------------- heikin ashi
@@ -677,6 +884,77 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   ok('venues: USD-quoted ones are flagged', isUsdQuoted('gemini') && !isUsdQuoted('binance'))
 }
 
+// ------------------------------------------------- futures symbols + stale guard
+// Funding/OI/books are fetched for "the current symbol": the 1000-unit
+// memecoin perps must map, and a response for a coin the user has left must
+// never land in the new coin's state.
+{
+  const S = await import(src('services/symbolScope.ts'))
+  eq('futsym: BTC trades under its spot name', S.futuresSymbolOf('BTCUSDT'), { sym: 'BTCUSDT', mult: 1 })
+  eq('futsym: PEPE is a 1000-unit contract', S.futuresSymbolOf('PEPEUSDT'), { sym: '1000PEPEUSDT', mult: 1000 })
+  eq('futsym: SHIB too', S.futuresSymbolOf('SHIBUSDT').sym, '1000SHIBUSDT')
+  eq('futsym: BONK / FLOKI', [S.futuresSymbolOf('BONKUSDT').sym, S.futuresSymbolOf('FLOKIUSDT').sym], ['1000BONKUSDT', '1000FLOKIUSDT'])
+  eq('futsym: case-insensitive', S.futuresSymbolOf('pepeusdt').sym, '1000PEPEUSDT')
+  eq('futsym: already-1000 base is not doubled', S.futuresSymbolOf('1000SATSUSDT').sym, '1000SATSUSDT')
+  eq('futsym: gold goes through the instrument table', S.futuresSymbolOf('XAUUSD'), { sym: 'XAUUSDT', mult: 1 })
+  eq('futsym: an instrument with no perp has none', S.futuresSymbolOf('EURUSD'), null)
+  eq('futsym: empty has none', S.futuresSymbolOf(''), null)
+  ok('futsym: the list stays small', S.FUTURES_1000X.size > 0 && S.FUTURES_1000X.size <= 12, S.FUTURES_1000X.size)
+
+  const pr = S.perUnitPremium({ symbol: '1000PEPEUSDT', markPrice: '0.0125', indexPrice: '0.0124', lastFundingRate: '0.0001' }, 1000)
+  near('futsym: mark price restated per token', +pr.markPrice, 0.0000125, 1e-12)
+  near('futsym: index price restated per token', +pr.indexPrice, 0.0000124, 1e-12)
+  eq('futsym: funding is a ratio, untouched', pr.lastFundingRate, '0.0001')
+  eq('futsym: OI restated in tokens', +S.perUnitOi({ openInterest: '2.5' }, 1000).openInterest, 2500)
+  const raw = { markPrice: '100' }
+  ok('futsym: mult 1 is a no-op', S.perUnitPremium(raw, 1) === raw)
+
+  // A mocked await whose symbol changes underneath it.
+  let cur = 'BTCUSDT'
+  const deferred = () => {
+    let res, rej
+    const p = new Promise((a, b) => ((res = a), (rej = b)))
+    return { p, res, rej }
+  }
+  const store = { fr: 'BTC funding' }
+  let d = deferred()
+  let asked = ''
+  let run = S.symbolScoped(() => cur, (sym) => ((asked = sym), d.p), (v) => (store.fr = v), () => (store.fr = null))
+  cur = 'PEPEUSDT' // user switches while BTC's request is in flight
+  d.res('BTC late')
+  eq('stale guard: asked for the symbol current at call time', asked, 'BTCUSDT')
+  eq('stale guard: late answer reports stale', await run, 'stale')
+  eq('stale guard: late answer does not overwrite', store.fr, 'BTC funding')
+
+  d = deferred()
+  run = S.symbolScoped(() => cur, () => d.p, (v) => (store.fr = v), () => (store.fr = null))
+  d.res('PEPE funding')
+  eq('stale guard: current answer applies', [await run, store.fr], ['applied', 'PEPE funding'])
+
+  d = deferred()
+  run = S.symbolScoped(() => cur, () => d.p, (v) => (store.fr = v), () => (store.fr = null))
+  d.rej(new Error('HTTP 400'))
+  eq('stale guard: failure for current symbol clears', [await run, store.fr], ['failed', null])
+
+  store.fr = 'PEPE funding'
+  d = deferred()
+  run = S.symbolScoped(() => cur, () => d.p, (v) => (store.fr = v), () => (store.fr = null))
+  cur = 'ETHUSDT'
+  d.rej(new Error('timeout'))
+  eq('stale guard: failure for a left symbol is ignored', [await run, store.fr], ['stale', 'PEPE funding'])
+
+  d = deferred()
+  run = S.symbolScoped(() => cur, () => d.p, () => { throw new Error('bad shape') }, () => (store.fr = null))
+  d.res({})
+  eq('stale guard: a throwing apply counts as a failure', [await run, store.fr], ['failed', null])
+
+  eq('candles tag: symbol|tf', S.candlesTag('BTCUSDT', '15m'), 'BTCUSDT|15m')
+  ok('candles tag: matches its own market', S.candlesMatch('BTCUSDT|15m', 'BTCUSDT', '15m'))
+  ok('candles tag: another symbol does not match', !S.candlesMatch('BTCUSDT|15m', 'PEPEUSDT', '15m'))
+  ok('candles tag: another interval does not match', !S.candlesMatch('BTCUSDT|15m', 'BTCUSDT', '1h'))
+  ok('candles tag: empty (loading) matches nothing', !S.candlesMatch('', 'BTCUSDT', '15m'))
+}
+
 // ---------------------------------------------------------------- whale orders
 {
   const ag = (a, p, q, T, m) => ({ a, p: String(p), q: String(q), T, m })
@@ -706,6 +984,21 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   near('whales: threshold order draws at the minimum radius', bubbleRadius(1e5, 1e5), 3.5)
   near('whales: 4x the dollars is 2x the radius (area ∝ notional)', bubbleRadius(4e5, 1e5), 7)
   eq('whales: radius is capped', bubbleRadius(1e12, 1e5), 36)
+
+  // The unscanned-gap label: never while the scan is running, never on the
+  // centred watermark, against the scan boundary when it is in view.
+  const gap = { left: 0, width: 400, edge: true, paneH: 400, loading: false }
+  eq('whales: no gap label while the backfill is still scanning', gapLabelSpot({ ...gap, loading: true }), null)
+  eq('whales: no gap label on a sliver of unscanned time', gapLabelSpot({ ...gap, width: 100 }), null)
+  const spot = gapLabelSpot(gap)
+  ok('whales: gap label clears the centred watermark band', spot && Math.abs(spot.y - 200) >= 30, spot)
+  eq('whales: gap label hugs the scan boundary when it is in view', [spot?.x, spot?.align], [392, 'right'])
+  eq('whales: gap label centres in a stretch that fills the pane', gapLabelSpot({ ...gap, edge: false })?.align, 'center')
+  const short = gapLabelSpot({ ...gap, paneH: 280 })
+  ok('whales: a short pane puts the label above the watermark', short && short.y < 140 &&short.y >= 64, short)
+  eq('whales: no room clear of the watermark and legends: no label', gapLabelSpot({ ...gap, paneH: 200 }), null)
+  eq('whales: legend collapses to a chip under 520px', [whaleLegendCompact(390), whaleLegendCompact(519)], [true, true])
+  eq('whales: legend stays full width at 520px+ and before measuring', [whaleLegendCompact(520), whaleLegendCompact(0)], [false, false])
 }
 
 // ---------------------------------------------------------------- failover chain
@@ -828,6 +1121,163 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   eq('fresh: old snapshot, no stream → STALE', klineFreshness({ freshness: 'LIVE', ts: 0 }, 0, 6 * 60_000), 'STALE')
   eq('fresh: cached copy stays STALE', klineFreshness({ freshness: 'STALE', ts: 9000 }, 0, 10_000), 'STALE')
   eq('fresh: nothing at all is OFFLINE', klineFreshness(null, 0, 10_000), 'OFFLINE')
+}
+
+// ---------------------------------------------------------------- LRU caches
+// md.candles and mdCache.data (services/market.ts) are capped this way — the
+// same delete-and-reinsert order as memoryStore above.
+{
+  const { lruSet, lruTouch } = await import(src('utils/lru.ts'))
+  const rec = {}
+  for (let i = 0; i < 5; i++) lruSet(rec, 'S' + i + '|15m', i, 3)
+  eq('lru: keeps the newest max entries', Object.keys(rec), ['S2|15m', 'S3|15m', 'S4|15m'])
+  lruTouch(rec, 'S2|15m')
+  lruSet(rec, 'S5|15m', 5, 3)
+  eq('lru: a touched entry survives over an older one', Object.keys(rec), ['S4|15m', 'S2|15m', 'S5|15m'])
+  lruSet(rec, 'S4|15m', 44, 3)
+  eq('lru: re-setting a key refreshes it without growing', [Object.keys(rec).length, rec['S4|15m']], [3, 44])
+  const keep = (k) => k === 'S2|15m'
+  lruSet(rec, 'S6|15m', 6, 3, keep)
+  lruSet(rec, 'S7|15m', 7, 3, keep)
+  ok('lru: the protected (on-screen) key is never evicted', 'S2|15m' in rec, Object.keys(rec))
+  eq('lru: still capped with a protected key', Object.keys(rec).length, 3)
+  lruTouch(rec, 'missing')
+  ok('lru: touching a missing key adds nothing', !('missing' in rec))
+}
+
+// ---------------------------------------------------------------- Binance slot queue
+{
+  const { createSlotQueue, StaleRequestError, isStaleRequest } = await import(src('api/slotQueue.ts'))
+  // Fake clock + timers: advance() fires every timer that has come due.
+  let clock = 1000
+  let timers = []
+  const setTimer = (fn, ms) => timers.push({ at: clock + ms, fn })
+  const flush = () => new Promise((r) => setImmediate(r))
+  async function advance(ms) {
+    const end = clock + ms
+    for (;;) {
+      timers.sort((a, b) => a.at - b.at)
+      const t = timers[0]
+      if (!t || t.at > end) break
+      timers.shift()
+      clock = t.at
+      t.fn()
+      await flush()
+    }
+    clock = end
+    await flush()
+  }
+  const track = (q, name, req, log) =>
+    q.acquire(req).then(
+      () => log.push([name, clock]),
+      (e) => log.push([name, isStaleRequest(e) ? 'dropped' : 'error']),
+    )
+
+  // Ordering + spacing
+  {
+    const q = createSlotQueue(50, () => clock, setTimer)
+    const log = []
+    for (const n of ['a', 'b', 'c', 'd']) track(q, n, undefined, log)
+    await flush()
+    eq('queue: first request goes at once', log, [['a', 1000]])
+    eq('queue: the rest wait', q.pending(), 3)
+    await advance(200)
+    eq('queue: FIFO, one slot every gap', log, [
+      ['a', 1000],
+      ['b', 1050],
+      ['c', 1100],
+      ['d', 1150],
+    ])
+    eq('queue: drained', q.pending(), 0)
+    clock += 1000
+    track(q, 'e', undefined, log)
+    await flush()
+    eq('queue: after a quiet spell a request is not held back', log.at(-1), ['e', clock])
+  }
+
+  // Priority
+  {
+    clock = 10_000
+    timers = []
+    const q = createSlotQueue(50, () => clock, setTimer)
+    const log = []
+    for (const n of ['bg1', 'bg2', 'bg3']) track(q, n, { priority: 'normal' }, log)
+    await flush()
+    track(q, 'chart', { priority: 'high' }, log)
+    track(q, 'chart2', { priority: 'high' }, log)
+    await advance(500)
+    eq(
+      'queue: high priority jumps queued background work, FIFO among themselves',
+      log.map((x) => x[0]),
+      ['bg1', 'chart', 'chart2', 'bg2', 'bg3'],
+    )
+    eq('queue: the high request waits only one gap', log[1], ['chart', 10_050])
+  }
+
+  // Stale drop
+  {
+    clock = 20_000
+    timers = []
+    const q = createSlotQueue(50, () => clock, setTimer)
+    const log = []
+    let wanted = 'BTC'
+    track(q, 'first', undefined, log)
+    for (const s of ['ETH', 'SOL', 'BTC'])
+      track(q, s, { priority: 'high', isStale: () => wanted !== s }, log)
+    track(q, 'bg', undefined, log)
+    await flush()
+    await advance(500)
+    eq('queue: stale requests are dropped without spending a slot', log, [
+      ['first', 20_000],
+      ['ETH', 'dropped'],
+      ['SOL', 'dropped'],
+      ['BTC', 20_050],
+      ['bg', 20_100],
+    ])
+    // Staleness is judged when the turn comes, not when queued.
+    wanted = 'ETH'
+    const log2 = []
+    track(q, 'x', undefined, log2)
+    track(q, 'ETH', { isStale: () => wanted !== 'ETH' }, log2)
+    await flush()
+    wanted = 'SOL'
+    await advance(500)
+    eq(
+      'queue: a request that goes stale while waiting is dropped',
+      log2.map((x) => x[0] + ':' + (x[1] === 'dropped' ? 'dropped' : 'ran')),
+      ['x:ran', 'ETH:dropped'],
+    )
+    let err = null
+    await q.acquire({ isStale: () => true }).catch((e) => (err = e))
+    ok('queue: drop rejects with StaleRequestError', err instanceof StaleRequestError && isStaleRequest(err))
+    ok('queue: a real error is not a stale drop', !isStaleRequest(new Error('HTTP 500')))
+    const log3 = []
+    track(q, 'guard', { isStale: () => { throw new Error('boom') } }, log3)
+    await advance(100)
+    eq('queue: a throwing guard does not drop the request', log3.map((x) => x[0] + ':' + typeof x[1]), ['guard:number'])
+  }
+
+  // Failover chains: a dropped request is not a provider failure
+  {
+    let calls = 0
+    const chain = new ProviderChain(
+      [
+        { id: 'a', name: 'A', fn: async () => { calls++; throw new StaleRequestError() } },
+        { id: 'b', name: 'B', fn: async () => { calls += 100; return [1] } },
+      ],
+      { breakerFailures: 1, keyOf: (args) => JSON.stringify(args.slice(0, 1)) },
+    )
+    let err = null
+    await chain.get('X', { priority: 'high' }).catch((e) => (err = e))
+    ok('chain: a stale drop is rethrown as is', isStaleRequest(err))
+    eq('chain: and does not fall through to the fallback', calls, 1)
+    ok('chain: nor trip the breaker', !chain.isOpen('a'))
+    const c2 = new ProviderChain([{ id: 'a', name: 'A', fn: async () => [7] }], {
+      keyOf: (args) => JSON.stringify(args.slice(0, 1)),
+    })
+    await c2.get('X', { priority: 'high', isStale: () => false })
+    eq('chain: keyOf leaves request options out of the cache key', c2.cached('X')?.data, [7])
+  }
 }
 
 // ---------------------------------------------------------------- pacer + kline rows
@@ -990,7 +1440,180 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   }
 }
 
+// ---------------------------------------------------------------- stream mux (main chart sockets)
+{
+  const sockets = []
+  class FakeWS {
+    constructor(url) {
+      this.url = url
+      this.sent = []
+      this.closed = 0
+      this.onopen = this.onmessage = this.onclose = this.onerror = null
+      sockets.push(this)
+    }
+    send(m) {
+      this.sent.push(JSON.parse(m))
+    }
+    close() {
+      this.closed++
+      if (this.onclose) this.onclose()
+    }
+    accept() {
+      if (this.onopen) this.onopen()
+    }
+    drop() {
+      if (this.onclose) this.onclose()
+    }
+    push(stream, data) {
+      if (this.onmessage) this.onmessage({ data: JSON.stringify({ stream, data }) })
+    }
+  }
+  const prevWS = globalThis.WebSocket
+  globalThis.WebSocket = FakeWS
+  const tick = (ms = 5) => new Promise((r) => setTimeout(r, ms))
+  const params = (ws, method) => ws.sent.filter((m) => m.method === method).flatMap((m) => m.params)
+  try {
+    const live = []
+    let drops = 0
+    const mux = new StreamMux({
+      base: 'wss://test/stream',
+      flushMs: 0,
+      minGapMs: 0,
+      idleCloseMs: 20,
+      onLive: (k, up, dropped) => live.push([k, up, dropped]),
+      onDrop: () => drops++,
+    })
+    const got = []
+    const set = (sym, tag) => ({
+      [sym + '@ticker']: (d) => got.push([tag, 'tk', d.c]),
+      [sym + '@aggTrade']: () => {},
+      [sym + '@kline_15m']: () => {},
+      [sym + '@depth20@100ms']: () => {},
+    })
+    mux.want(set('btcusdt', 'btc'))
+    eq('mux: one socket for the four streams', sockets.length, 1)
+    const ws = sockets[0]
+    eq(
+      'mux: streams ride on the URL',
+      ws.url,
+      'wss://test/stream?streams=btcusdt@ticker/btcusdt@aggTrade/btcusdt@kline_15m/btcusdt@depth20@100ms',
+    )
+    eq('mux: not live while connecting', mux.liveCount, 0)
+    ws.accept()
+    eq('mux: four live streams once open', mux.liveCount, 4)
+    eq('mux: opening sends no frame', ws.sent.length, 0)
+    ws.push('btcusdt@ticker', { c: '1' })
+    eq('mux: routes a frame to its stream', got, [['btc', 'tk', '1']])
+
+    // Coin switch: the stop then the new set, as setSymbol does it.
+    mux.want({})
+    mux.want(set('ethusdt', 'eth'))
+    await tick()
+    eq('mux: a switch keeps the socket', [sockets.length, ws.closed], [1, 0])
+    eq('mux: one UNSUBSCRIBE for the old coin', params(ws, 'UNSUBSCRIBE').sort(), [
+      'btcusdt@aggTrade',
+      'btcusdt@depth20@100ms',
+      'btcusdt@kline_15m',
+      'btcusdt@ticker',
+    ])
+    eq('mux: one SUBSCRIBE for the new coin', params(ws, 'SUBSCRIBE').length, 4)
+    eq('mux: two frames for the whole switch', ws.sent.length, 2)
+    ok('mux: unsubscribing is not reported as a drop', live.every(([, up, dropped]) => up || !dropped))
+    ws.push('btcusdt@ticker', { c: '2' }) // old coin, still in flight
+    eq('mux: frames for an unsubscribed stream go nowhere', got.length, 1)
+    ws.push('ethusdt@ticker', { c: '3' })
+    eq('mux: the new coin streams', got[got.length - 1], ['eth', 'tk', '3'])
+
+    // Timeframe switch: only the kline stream changes; the rest keep flowing
+    // to the new handlers.
+    const n = ws.sent.length
+    const tf1h = set('ethusdt', 'eth2')
+    delete tf1h['ethusdt@kline_15m']
+    tf1h['ethusdt@kline_1h'] = () => {}
+    mux.want(tf1h)
+    await tick()
+    eq('mux: a timeframe switch swaps only the kline', [params(ws, 'SUBSCRIBE').pop(), ws.sent.length - n], [
+      'ethusdt@kline_1h',
+      2,
+    ])
+    ws.push('ethusdt@ticker', { c: '4' })
+    eq('mux: an unchanged stream reaches the new handler', got[got.length - 1], ['eth2', 'tk', '4'])
+
+    // An unexpected drop reconnects with what is wanted; a replaced socket is inert.
+    const rnd = Math.random
+    Math.random = () => 0
+    const d0 = drops
+    ws.drop()
+    eq('mux: a lost socket is reported once', drops - d0, 1)
+    ok('mux: and its streams as dropped', live.some(([k, up, dropped]) => k === 'ethusdt@ticker' && !up && dropped))
+    await tick(1300) // first backoff step is 1.2s
+    Math.random = rnd
+    eq('mux: reconnects after a drop', sockets.length, 2)
+    sockets[1].accept()
+    eq('mux: back to four live streams', mux.liveCount, 4)
+    const before = got.length
+    ws.push('ethusdt@ticker', { c: '5' })
+    eq('mux: the old socket can no longer deliver', got.length, before)
+
+    // Nothing wanted: the socket closes after the idle delay, handlers first,
+    // and no reconnect follows.
+    const ws2 = sockets[1]
+    mux.want({})
+    await tick(60)
+    eq('mux: idle socket closes once', ws2.closed, 1)
+    ok('mux: closed with its handlers detached', !ws2.onclose && !ws2.onmessage && !ws2.onopen)
+    await tick(1300)
+    eq('mux: and does not reconnect', sockets.length, 2)
+    eq('mux: no live streams', mux.liveCount, 0)
+
+    // A switch while the socket is still connecting neither closes it nor
+    // opens a second one; the change is sent once it opens.
+    mux.want(set('solusdt', 'sol'))
+    mux.want({})
+    mux.want(set('adausdt', 'ada'))
+    eq('mux: no second socket while connecting', sockets.length, 3)
+    const ws3 = sockets[2]
+    eq('mux: the connecting socket is not closed', ws3.closed, 0)
+    ws3.accept()
+    await tick()
+    eq('mux: the change is flushed on open', params(ws3, 'SUBSCRIBE').length, 4)
+    eq('mux: live set is the latest coin', mux.liveCount, 4)
+
+    // A stall replaces the socket; dispose stops everything for good.
+    const stall = new StreamMux({ base: 'wss://test/stream', flushMs: 0, minGapMs: 0, stallMs: () => 10 })
+    stall.want({ 'x@ticker': () => {} })
+    const sw = sockets[sockets.length - 1]
+    sw.accept()
+    ok('mux: fresh stream is not stalled', !stall.check(Date.now()))
+    ok('mux: silent stream is stalled', stall.check(Date.now() + 50))
+    eq('mux: the stalled socket is closed, handlers detached', [sw.closed, sw.onclose], [1, null])
+    stall.dispose()
+    mux.dispose()
+    const count = sockets.length
+    await tick(1300)
+    eq('mux: nothing reconnects after dispose', sockets.length, count)
+  } finally {
+    globalThis.WebSocket = prevWS
+  }
+}
+
 // ---------------------------------------------------------------- alerts
+// "Add alert at {price}" from the price axis, and the notification route.
+{
+  const { ruleForPriceClick, notifyVia, alertDecimals } = alerts
+  eq('alerts: level decimals follow the axis, then 6 significant digits', [83653.16, 1.5, 0.5, 0.00001, 1e-8].map(alertDecimals), [2, 5, 6, 10, 13])
+  eq('alerts: axis click above last crosses above', ruleForPriceClick(70500, 70000), { condition: 'crosses_above', value: 70500 })
+  eq('alerts: axis click below last crosses below (cents kept)', ruleForPriceClick(69000.123456789, 70000), { condition: 'crosses_below', value: 69000.12 })
+  eq('alerts: axis click at last price crosses below', ruleForPriceClick(70000, 70000).condition, 'crosses_below')
+  eq('alerts: tiny coin keeps its precision', ruleForPriceClick(0.0000123456789, 0.0000120001), { condition: 'crosses_above', value: 0.0000123457 })
+  eq('alerts: 1e-8 coin below', ruleForPriceClick(1.23456789e-8, 2e-8), { condition: 'crosses_below', value: 1.23457e-8 })
+  ok('alerts: no last price, no rule', ruleForPriceClick(100, NaN) === null && ruleForPriceClick(100, 0) === null)
+  ok('alerts: unusable click price, no rule', ruleForPriceClick(NaN, 100) === null && ruleForPriceClick(-1, 100) === null && ruleForPriceClick(0, 100) === null)
+  eq('alerts: notify via the worker when there is one', notifyVia({ granted: true, worker: true, ctor: true }), 'worker')
+  eq('alerts: notify via the constructor without a worker', notifyVia({ granted: true, worker: false, ctor: true }), 'ctor')
+  eq('alerts: no permission, toast only', notifyVia({ granted: false, worker: true, ctor: true }), 'none')
+  eq('alerts: no notification API at all', notifyVia({ granted: true, worker: false, ctor: false }), 'none')
+}
 {
   const { evalPrice, evalTechnical, evalWatchlist, stepRule, normalizeRules, rearm, ALERT_LIMITS } = alerts
   const r = (o) => ({ id: 'x', kind: 'price', sym: 'BTCUSDT', enabled: true, created: 0, condition: 'above', value: 0, once: false, triggerCount: 0, ...o })
@@ -998,6 +1621,18 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   const ramp = (n, f) => Array.from({ length: n }, (_, i) => f(i))
 
   eq('alerts: limits', ALERT_LIMITS, { price: 1000, technical: 1000, watchlist: 15 })
+
+  // The charted candles only stand in for a rule when they are that market's.
+  {
+    const { chartedCandlesFit, MIN_TECH_CANDLES } = alerts
+    const view = { symbol: 'PEPEUSDT', tf: '15m', tfKey: '15m', candlesKey: 'PEPEUSDT|15m', bars: 500 }
+    ok('alerts: charted candles fit their own market', chartedCandlesFit(view, 'PEPEUSDT', '15m'))
+    ok("alerts: previous coin's candles (mismatched tag) are not used", !chartedCandlesFit({ ...view, candlesKey: 'BTCUSDT|15m' }, 'PEPEUSDT', '15m'))
+    ok("alerts: previous interval's candles are not used", !chartedCandlesFit({ ...view, candlesKey: 'PEPEUSDT|1h' }, 'PEPEUSDT', '15m'))
+    ok('alerts: untagged (loading) candles are not used', !chartedCandlesFit({ ...view, candlesKey: '' }, 'PEPEUSDT', '15m'))
+    ok("alerts: another coin's rule never reads the chart", !chartedCandlesFit(view, 'BTCUSDT', '15m'))
+    ok('alerts: too few bars are not used', !chartedCandlesFit({ ...view, bars: MIN_TECH_CANDLES - 1 }, 'PEPEUSDT', '15m'))
+  }
   // crosses need a previous value on the other side (ported from Pro's engine.test.ts)
   ok('alerts: crosses above fires on the cross', evalPrice(r({ condition: 'crosses_above', value: 100 }), 101, 99, 0))
   ok('alerts: crosses above needs a previous price', !evalPrice(r({ condition: 'crosses_above', value: 100 }), 101, undefined, 0))
@@ -1067,6 +1702,83 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   eq('alerts: migrated ids are stable', normalizeRules([{ sym: 'BTCUSDT', dir: 'above', price: 1, created: 5 }])[0].id, mig[0].id)
   eq('alerts: new rules default their timeframe', mig[2].tf, '15m')
   eq('alerts: junk storage is empty', normalizeRules({ a: 1 }), [])
+}
+
+// ------------------------------------------------------- watchlists (favourites)
+{
+  const { FAV_ID, FAV_NAME, MAX_LISTS, MAX_SYMBOLS, normalizeWatchlists, initialWatchlists, createList, renameList,
+    deleteList, setActive, addSymbol, addSymbolFirst, removeSymbol, moveSymbol, togglePin, orderedSymbols, activeList,
+    getList } = wls
+  const fav = (st) => getList(st, FAV_ID)
+
+  // migration from the old single list (lr-favCoins) — nothing lost
+  const m0 = normalizeWatchlists(null, ['BTC', 'ETH', 'SOL'])
+  eq('watchlists: old favourites become the Favourites list', [m0.lists.length, m0.lists[0].id, m0.lists[0].name, m0.lists[0].symbols], [1, FAV_ID, FAV_NAME, ['BTC', 'ETH', 'SOL']])
+  eq('watchlists: migrated state is active on Favourites', m0.active, FAV_ID)
+  eq('watchlists: nothing saved at all is an empty Favourites', normalizeWatchlists(null, null), initialWatchlists())
+  eq('watchlists: migration drops junk, keeps order', normalizeWatchlists(undefined, ['BTC', 7, null, '', ' ETH ', 'BTC']).lists[0].symbols, ['BTC', 'ETH'])
+  eq('watchlists: migration caps at the old 50', normalizeWatchlists(null, Array.from({ length: 70 }, (_, i) => 'C' + i)).lists[0].symbols.length, MAX_SYMBOLS)
+  // corrupt JSON in storage reads back as null (storageGet's fallback) or junk
+  eq('watchlists: corrupt saved lists keep the old favourites', normalizeWatchlists('{not json', ['DOGE']).lists[0].symbols, ['DOGE'])
+  eq('watchlists: corrupt lists and favourites is a fresh state', normalizeWatchlists(42, 'oops'), initialWatchlists())
+  const saved = { active: 'b', lists: [{ id: FAV_ID, name: 'Mine', symbols: ['BTC'], pinned: ['BTC', 'XRP'] }, { id: 'b', name: '  Alts  ', symbols: ['SOL', 'SOL', 'ADA'], pinned: ['ADA'] }, { id: 'b', name: 'dupe' }, null, { name: 'no id' }] }
+  const r0 = normalizeWatchlists(saved, null)
+  eq('watchlists: saved lists survive, junk is dropped', r0.lists.map((l) => [l.id, l.name, l.symbols, l.pinned]), [[FAV_ID, 'Mine', ['BTC'], ['BTC']], ['b', 'Alts', ['SOL', 'ADA'], ['ADA']]])
+  eq('watchlists: saved active list is kept', r0.active, 'b')
+  eq('watchlists: the old key wins for the Favourites contents', fav(normalizeWatchlists(saved, ['ETH'])).symbols, ['ETH'])
+  eq('watchlists: pins outside the list are dropped on read', fav(normalizeWatchlists(saved, ['ETH'])).pinned, [])
+  eq('watchlists: an unknown active id falls back to Favourites', normalizeWatchlists({ ...saved, active: 'gone' }, null).active, FAV_ID)
+  eq('watchlists: Favourites is restored first when missing', normalizeWatchlists({ lists: [{ id: 'x', name: 'X', symbols: [] }] }, ['BTC']).lists.map((l) => l.id), [FAV_ID, 'x'])
+
+  // create / rename / delete / switch
+  const s0 = initialWatchlists(['BTC'])
+  const s1 = createList(s0, '  Swing   trades ', 'w1')
+  eq('watchlists: create adds and activates', [s1.lists.length, s1.active, activeList(s1).name], [2, 'w1', 'Swing trades'])
+  eq('watchlists: create with a blank name gets a default', createList(s0, '   ', 'w2').lists[1].name, 'Watchlist 2')
+  ok('watchlists: create refuses a duplicate id', createList(s1, 'Again', 'w1') === s1)
+  let full = s0
+  for (let i = 0; i < MAX_LISTS + 3; i++) full = createList(full, 'L' + i, 'id' + i)
+  eq('watchlists: list count is capped', full.lists.length, MAX_LISTS)
+  eq('watchlists: rename', getList(renameList(s1, 'w1', 'Scalps'), 'w1').name, 'Scalps')
+  ok('watchlists: rename to blank is a no-op', renameList(s1, 'w1', '  ') === s1)
+  ok('watchlists: rename unknown list is a no-op', renameList(s1, 'nope', 'X') === s1)
+  ok('watchlists: rename caps the length', getList(renameList(s1, 'w1', 'x'.repeat(80)), 'w1').name.length <= 32)
+  const d1 = deleteList(s1, 'w1')
+  eq('watchlists: delete removes and re-activates a neighbour', [d1.lists.length, d1.active], [1, FAV_ID])
+  ok('watchlists: the last list is never deleted', deleteList(s0, FAV_ID) === s0)
+  ok('watchlists: Favourites is never deleted', deleteList(s1, FAV_ID) === s1)
+  const s3 = createList(createList(s1, 'B', 'w2'), 'C', 'w3')
+  eq('watchlists: deleting a middle active list activates the next', deleteList(setActive(s3, 'w2'), 'w2').active, 'w3')
+  eq('watchlists: deleting an inactive list keeps the active one', deleteList(s3, 'w1').active, 'w3')
+  eq('watchlists: switch list', setActive(s3, 'w1').active, 'w1')
+  ok('watchlists: switching to an unknown list is a no-op', setActive(s3, 'zzz') === s3)
+
+  // symbols: add / remove / move / pin
+  let a = addSymbol(addSymbol(addSymbol(s1, 'w1', 'BTC'), 'w1', 'ETH'), 'w1', 'SOL')
+  eq('watchlists: add appends in order', getList(a, 'w1').symbols, ['BTC', 'ETH', 'SOL'])
+  ok('watchlists: add is idempotent', addSymbol(a, 'w1', 'ETH') === a)
+  ok('watchlists: add ignores blanks', addSymbol(a, 'w1', ' ') === a)
+  eq('watchlists: add leaves other lists alone', fav(a).symbols, ['BTC'])
+  eq('watchlists: addSymbolFirst puts it on top', getList(addSymbolFirst(a, 'w1', 'XRP'), 'w1').symbols, ['XRP', 'BTC', 'ETH', 'SOL'])
+  eq('watchlists: move down', getList(moveSymbol(a, 'w1', 'BTC', 1), 'w1').symbols, ['ETH', 'BTC', 'SOL'])
+  eq('watchlists: move up', getList(moveSymbol(a, 'w1', 'SOL', -1), 'w1').symbols, ['BTC', 'SOL', 'ETH'])
+  ok('watchlists: move past the top is a no-op', moveSymbol(a, 'w1', 'BTC', -1) === a)
+  ok('watchlists: move past the end is a no-op', moveSymbol(a, 'w1', 'SOL', 1) === a)
+  const p = togglePin(a, 'w1', 'SOL')
+  eq('watchlists: pin puts the symbol on top', orderedSymbols(getList(p, 'w1')), ['SOL', 'BTC', 'ETH'])
+  ok('watchlists: pinning a symbol not in the list is a no-op', togglePin(a, 'w1', 'DOGE') === a)
+  eq('watchlists: unpin', getList(togglePin(p, 'w1', 'SOL'), 'w1').pinned, [])
+  eq('watchlists: unpinned moves skip the pinned row', orderedSymbols(getList(moveSymbol(p, 'w1', 'BTC', 1), 'w1')), ['SOL', 'ETH', 'BTC'])
+  ok('watchlists: the first unpinned row cannot move into the pins', moveSymbol(p, 'w1', 'BTC', -1) === p)
+  const pp = togglePin(p, 'w1', 'BTC')
+  eq('watchlists: pinned rows reorder among themselves', orderedSymbols(getList(moveSymbol(pp, 'w1', 'BTC', -1), 'w1')), ['BTC', 'SOL', 'ETH'])
+  const rm = removeSymbol(p, 'w1', 'SOL')
+  eq('watchlists: remove drops the symbol and its pin', [getList(rm, 'w1').symbols, getList(rm, 'w1').pinned], [['BTC', 'ETH'], []])
+  ok('watchlists: removing a missing symbol is a no-op', removeSymbol(a, 'w1', 'DOGE') === a)
+  for (let i = 0; i < MAX_SYMBOLS + 5; i++) a = addSymbol(a, 'w1', 'Z' + i)
+  eq('watchlists: symbols per list are capped', getList(a, 'w1').symbols.length, MAX_SYMBOLS)
+  // round trip through JSON, as storage does
+  eq('watchlists: a saved state reads back unchanged', normalizeWatchlists(JSON.parse(JSON.stringify(pp)), fav(pp).symbols), pp)
 }
 
 // ---------------------------------------------------------- volume profile
@@ -1256,10 +1968,32 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
     return { t: i * 60000, o: p, h: p + 1, l: p - 1, c: p, v: 1 + (i % 7) }
   })
   const many = Array.from({ length: 50 }, (_, i) => inst('m' + i, i % 2 ? 'rsi' : 'sma', i ? 'm' + (i - 1) + '.v' : 'close'))
-  const t0 = Date.now()
-  computeAll(many, long, defOf, base)
-  const ms = Date.now() - t0
-  ok('graph: a 50-deep chain over 5000 bars under 250ms', ms < 250, ms + 'ms')
+  // A busy CPU slows every run, so a fixed wall-clock budget flakes. Warm up,
+  // keep the best of 5, and judge it against a calibration loop timed the same
+  // way in this process (load slows both alike). Idle it runs at ~1–4× the
+  // calibration; 8× leaves headroom while a 10× regression still fails. The
+  // absolute ceiling catches a pathological case the ratio could hide.
+  const bestMs = (fn) => {
+    fn()
+    let best = Infinity
+    for (let i = 0; i < 5; i++) {
+      const t = performance.now()
+      fn()
+      best = Math.min(best, performance.now() - t)
+    }
+    return best
+  }
+  const calib = () => {
+    let s = 0
+    for (let i = 0; i < 2e6; i++) s += Math.sqrt(i) % 7
+    return s
+  }
+  const ms = bestMs(() => computeAll(many, long, defOf, base))
+  const ref = bestMs(calib)
+  ok('graph: a 50-deep chain over 5000 bars within its time budget', ms < ref * 8 && ms < 5000, {
+    ms: Math.round(ms),
+    calibMs: Math.round(ref),
+  })
 }
 
 // ---------------------------------------------------------------- pine
@@ -1455,10 +2189,40 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
 
   // Performance: a typical script over 5000 bars.
   const big = mk(5000)
-  const t0 = Date.now()
-  runPine(PINE_EXAMPLES.find((x) => x.id === 'ex_macd').script, big)
-  const ms = Date.now() - t0
-  ok('pine: MACD script over 5000 bars under 400ms', ms < 400, ms + 'ms')
+  // Same scheme as the graph budget above: best of 5 after a warm-up, judged
+  // against a calibration loop so a busy CPU does not fail it. Idle it runs at
+  // ~5–12× the calibration; 35× leaves headroom while a 10× regression fails.
+  const bestMs = (fn) => {
+    fn()
+    let best = Infinity
+    for (let i = 0; i < 5; i++) {
+      const t = performance.now()
+      fn()
+      best = Math.min(best, performance.now() - t)
+    }
+    return best
+  }
+  const calib = () => {
+    let s = 0
+    for (let i = 0; i < 2e6; i++) s += Math.sqrt(i) % 7
+    return s
+  }
+  const macd = PINE_EXAMPLES.find((x) => x.id === 'ex_macd').script
+  // The runtime's own 2.5s deadline would throw under load and abort the suite:
+  // lift it to the ceiling, and report a throw as a failed assertion.
+  let ms = Infinity
+  let err
+  try {
+    ms = bestMs(() => runPine(macd, big, {}, { maxMs: 10000 }))
+  } catch (e) {
+    err = String(e && e.message)
+  }
+  const ref = bestMs(calib)
+  ok('pine: MACD script over 5000 bars within its time budget', ms < ref * 35 && ms < 10000, {
+    ms: Math.round(ms),
+    calibMs: Math.round(ref),
+    err,
+  })
 }
 
 // ------------------------------------------------- per-panel indicator stores
@@ -1752,6 +2516,23 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   else delete globalThis.localStorage
 }
 
+// ---- signal analysis: only the newest request may paint ---------------------------
+{
+  const { createLatest } = await import(src('utils/latest.ts'))
+  const run = createLatest()
+  const btc = run.start()
+  const eth = run.start()
+  ok('latest: a superseded run is stale', !run.isCurrent(btc))
+  ok('latest: the newest run is current', run.isCurrent(eth))
+  // BTC resolving after ETH must be dropped.
+  let painted = null
+  const paint = (token, sym) => { if (run.isCurrent(token)) painted = sym }
+  paint(eth, 'ETH')
+  paint(btc, 'BTC')
+  eq('latest: a late answer for an old run does not overwrite', painted, 'ETH')
+  ok('latest: runs are independent', createLatest().isCurrent(1) === false)
+}
+
 // ---- signal scanner: per-timeframe scoring ------------------------------------------
 {
   const { scoreTimeframe, closedOnly } = await import(src('features/signals/scoring.ts'))
@@ -1802,6 +2583,48 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   const f15 = forecastFrom(cl), f60 = forecastFrom(cl, 60)
   ok('forecast: 1H on 1h candles is one bar ahead (a quarter of the 15m step count)',
     Math.abs((f60.rows[0].pred - cl.at(-1)) * 4 - (f15.rows[0].pred - cl.at(-1))) < 1e-9)
+  // On daily candles 1H is 1/24 of a bar, not 4 bars (4 days) ahead.
+  const f1d = forecastFrom(cl, 1440)
+  ok('forecast: 1H on 1D candles is a 24th of the 24H move',
+    Math.abs((f1d.rows[0].pred - cl.at(-1)) * 24 - (f1d.rows[3].pred - cl.at(-1))) < 1e-9)
+  ok('forecast: 24H on 1D candles is one bar ahead (same drift as 1H on 1h)',
+    Math.abs((f1d.rows[3].pred - cl.at(-1)) - (f60.rows[0].pred - cl.at(-1))) < 1e-9)
+  ok('forecast: a sub-bar horizon has a narrower band than a whole bar',
+    f1d.rows[0].hi - f1d.rows[0].lo < f1d.rows[3].hi - f1d.rows[3].lo)
+  const bad = forecastFrom(cl, 0)
+  ok('forecast: a bad bar size falls back to 15m, never NaN', bad.rows.every((r) => Number.isFinite(r.pred)) &&
+    bad.rows[0].pred === f15.rows[0].pred)
+}
+
+// ---- utils/indicators: RSI edge case, daily volatility by timeframe -----------------
+{
+  const { calcRSI, dailyVolPct } = await import(src('utils/indicators.ts'))
+  eq('rsi: a perfectly flat series is neutral (50), not overbought', calcRSI(Array(30).fill(100)), 50)
+  eq('rsi: only gains is still 100', calcRSI(Array.from({ length: 30 }, (_, i) => 100 + i)), 100)
+  eq('rsi: only losses is still 0', calcRSI(Array.from({ length: 30 }, (_, i) => 100 - i)), 0)
+  // Alternating +1% / -1%: per-bar sd is 1%, whatever the timeframe.
+  const alt = Array.from({ length: 41 }, (_, i) => (i % 2 ? 101 : 100))
+  const sd15 = dailyVolPct(alt) / Math.sqrt(96)
+  near('vol: 15m default keeps the 96-bar day', dailyVolPct(alt, 15), sd15 * Math.sqrt(96), 1e-9)
+  near('vol: 1h candles scale by sqrt(24)', dailyVolPct(alt, 60), sd15 * Math.sqrt(24), 1e-9)
+  near('vol: 1D candles are already daily', dailyVolPct(alt, 1440), sd15, 1e-9)
+  near('vol: 1W candles scale down by sqrt(7)', dailyVolPct(alt, 10080), sd15 / Math.sqrt(7), 1e-9)
+  eq('vol: no returns is zero, not NaN', dailyVolPct([100]), 0)
+}
+
+// ---- signal scanner: market-wide sentiment word (Neural Net ring) ------------------
+{
+  const { avgScore100, sentimentWord, toScale100, SIGNAL_CUTOFF } = await import(src('features/signals/sentiment.ts'))
+  eq('sentiment: no markets is no average', avgScore100([]), null)
+  eq('sentiment: no average reads Scanning', sentimentWord(null), 'Scanning')
+  eq('sentiment: -100..100 maps onto 0..100', avgScore100([-100, 100, 0]), 50)
+  // The audit case: an average of 45 while no market is a SELL must not read Bearish.
+  const flat = [-10, -10, -10]
+  ok('sentiment: scores inside the dead zone are all WAIT', flat.every((v) => Math.abs(v) <= SIGNAL_CUTOFF))
+  eq('sentiment: average 45 of WAIT calls reads Neutral', sentimentWord(avgScore100(flat)), 'Neutral')
+  eq('sentiment: just past the BUY cut-off reads Bullish', sentimentWord(toScale100(SIGNAL_CUTOFF + 1)), 'Bullish')
+  eq('sentiment: just past the SELL cut-off reads Bearish', sentimentWord(toScale100(-SIGNAL_CUTOFF - 1)), 'Bearish')
+  eq('sentiment: exactly on the cut-off is still Neutral', sentimentWord(toScale100(SIGNAL_CUTOFF)), 'Neutral')
 }
 
 // ---- assistant: actions it can take in the app --------------------------------------
@@ -2196,6 +3019,216 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('zoom: never below the minimum', sn.zoomLogicalRange({ from: 0, to: 6 }, 4, true), { from: 1, to: 6 })
 }
 
+// ---- Crosshair sync across layout cells (features/charts/crosshairSyncMath) ----
+{
+  const { barAtOrBefore } = await import(src('features/charts/crosshairSyncMath.ts'))
+  // 1h bars from 10:00 UTC; times handed over by the charts are in seconds.
+  const H = 3600
+  const t0 = Date.UTC(2026, 9, 14, 10) / 1000
+  const hourly = [0, 1, 2, 3].map((i) => ({ t: (t0 + i * H) * 1000, c: 100 + i }))
+  eq('xsync: exact bar time', barAtOrBefore(hourly, t0 + 2 * H), 2)
+  eq('xsync: inside a bar maps to the bar that opened before', barAtOrBefore(hourly, t0 + 2 * H + 59 * 60), 2)
+  eq('xsync: after the last bar holds the last bar', barAtOrBefore(hourly, t0 + 10 * H), 3)
+  eq('xsync: before the first bar has no bar', barAtOrBefore(hourly, t0 - 1), -1)
+  eq('xsync: first bar', barAtOrBefore(hourly, t0), 0)
+  eq('xsync: no bars', barAtOrBefore([], t0), -1)
+  eq('xsync: junk time', barAtOrBefore(hourly, NaN), -1)
+  // A 15m cell hovered at 11:45 lands on the 1h cell's 11:00 bar; a 1h cell
+  // hovered at 11:00 lands on the 15m cell's 11:00 bar.
+  const q = Array.from({ length: 16 }, (_, i) => ({ t: (t0 + i * 900) * 1000, c: 1 }))
+  eq('xsync: lower timeframe to higher', barAtOrBefore(hourly, q[7].t / 1000), 1)
+  eq('xsync: higher timeframe to lower', barAtOrBefore(q, hourly[1].t / 1000), 4)
+  // Millisecond remainders (range bars spaced by the second) still match.
+  eq('xsync: sub-second bar times', barAtOrBefore([{ t: t0 * 1000 + 500, c: 1 }], t0), 0)
+}
+
+// ---- Chart time zone: formatter-only (features/charts/timezone) ----
+{
+  const tz = await import(src('features/charts/timezone.ts'))
+  const { TICK } = tz
+  // 2026-10-23 09:30:05 UTC, a Friday.
+  const t = Date.UTC(2026, 9, 23, 9, 30, 5)
+  eq('tz: UTC time tick', tz.formatTick(t, TICK.Time, 'UTC'), '09:30')
+  eq('tz: UTC time-with-seconds tick', tz.formatTick(t, TICK.TimeWithSeconds, 'UTC'), '09:30:05')
+  eq('tz: UTC day tick', tz.formatTick(t, TICK.DayOfMonth, 'UTC'), '23')
+  eq('tz: UTC month tick', tz.formatTick(t, TICK.Month, 'UTC'), 'Oct')
+  eq('tz: UTC year tick', tz.formatTick(t, TICK.Year, 'UTC'), '2026')
+  eq('tz: Karachi is UTC+5', tz.formatTick(t, TICK.Time, 'Asia/Karachi'), '14:30')
+  eq('tz: Karachi offset', tz.tzOffsetLabel('Asia/Karachi', t), 'UTC+5')
+  eq('tz: Kolkata half hour', tz.tzOffsetLabel('Asia/Kolkata', t), 'UTC+5:30')
+  // Late UTC evening is already tomorrow in Karachi: day/month/year roll over.
+  const nye = Date.UTC(2026, 11, 31, 20, 0)
+  eq('tz: Karachi crosses midnight', tz.formatTick(nye, TICK.DayOfMonth, 'Asia/Karachi'), '1')
+  eq('tz: Karachi crosses the month', tz.formatTick(nye, TICK.Month, 'Asia/Karachi'), 'Jan')
+  eq('tz: Karachi crosses the year', tz.formatTick(nye, TICK.Year, 'Asia/Karachi'), '2027')
+  eq('tz: New York on summer time (EDT)', tz.formatTick(t, TICK.Time, 'America/New_York'), '05:30')
+  eq('tz: New York EDT offset', tz.tzOffsetLabel('America/New_York', t), 'UTC-4')
+  // US DST ended 2026-11-01 at 02:00 EDT (06:00 UTC): one hour later is EST.
+  const before = Date.UTC(2026, 10, 1, 5, 59)
+  const after = Date.UTC(2026, 10, 1, 6, 0)
+  eq('tz: NY just before the DST change', tz.formatTick(before, TICK.Time, 'America/New_York'), '01:59')
+  eq('tz: NY just after the DST change', tz.formatTick(after, TICK.Time, 'America/New_York'), '01:00')
+  eq('tz: NY offset before', tz.tzOffsetMinutes('America/New_York', before), -240)
+  eq('tz: NY offset after', tz.tzOffsetMinutes('America/New_York', after), -300)
+  // Spring forward: 2026-03-08 02:00 EST (07:00 UTC) jumps to 03:00 EDT.
+  eq('tz: NY spring forward skips 02:00', tz.formatTick(Date.UTC(2026, 2, 8, 7, 0), TICK.Time, 'America/New_York'), '03:00')
+  eq('tz: UTC never shifts', tz.formatTick(after, TICK.Time, 'UTC'), '06:00')
+  // The cached-offset fast path agrees with Intl across a year, DST included.
+  {
+    const bad = []
+    for (const z of ['America/New_York', 'Australia/Sydney', 'Asia/Kolkata', 'Europe/London']) {
+      const ref = new Intl.DateTimeFormat('en-GB', { timeZone: z, hourCycle: 'h23', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      for (let i = 0; i < 400; i++) {
+        const ms = Date.UTC(2026, 0, 1) + i * 79_013_000 // ~22h steps, odd seconds
+        const got = tz.formatTick(ms, TICK.DayOfMonth, z) + ' ' + tz.formatTick(ms, TICK.TimeWithSeconds, z)
+        const want = ref.format(ms).replace(',', '')
+        if (got !== want) bad.push(z + ' ' + ms + ' ' + got + ' vs ' + want)
+      }
+    }
+    eq('tz: fast path matches Intl', bad.slice(0, 3), [])
+  }
+
+  eq('tz: crosshair, UTC', tz.formatCrosshair(Date.UTC(2026, 9, 23, 9, 30), 'UTC'), "Fri 23 Oct '26  09:30")
+  eq('tz: crosshair shows seconds when present', tz.formatCrosshair(t, 'UTC'), "Fri 23 Oct '26  09:30:05")
+  eq('tz: crosshair, Karachi', tz.formatCrosshair(nye, 'Asia/Karachi'), "Fri 1 Jan '27  01:00")
+  eq('tz: crosshair, date only', tz.formatCrosshair(Date.UTC(2026, 9, 23), 'America/New_York', true), "Fri 23 Oct '26")
+
+  // The lightweight-charts formatters: UTC seconds in, zone text out.
+  const ny = tz.chartTzOptions(() => false, 'America/New_York')
+  const sec = Math.floor(t / 1000)
+  eq('tz: timeFormatter takes UTC seconds', ny.localization.timeFormatter(sec), "Fri 23 Oct '26  05:30:05")
+  eq('tz: tickMarkFormatter takes UTC seconds', ny.timeScale.tickMarkFormatter(sec, TICK.Time), '05:30')
+  // Daily bars keep their UTC session date in any zone (no "22 Oct 20:00").
+  const nyDaily = tz.chartTzOptions(() => true, 'America/New_York')
+  const day = Date.UTC(2026, 9, 23) / 1000
+  eq('tz: daily bar crosshair is the UTC date', nyDaily.localization.timeFormatter(day), "Fri 23 Oct '26")
+  eq('tz: daily day tick is the UTC date', nyDaily.timeScale.tickMarkFormatter(day, TICK.DayOfMonth), '23')
+  eq('tz: intraday day tick is the zone date', ny.timeScale.tickMarkFormatter(day, TICK.DayOfMonth), '22')
+  eq('tz: business-day times are dates', ny.localization.timeFormatter({ year: 2026, month: 10, day: 23 }), "Fri 23 Oct '26")
+  eq('tz: string times are dates', ny.timeScale.tickMarkFormatter('2026-10-23', TICK.DayOfMonth), '23')
+
+  eq('tz: daily timeframes', ['1m', '4h', '1d', '1w', '1M'].map((x) => tz.isDailyTf(x)), [false, false, true, true, true])
+  eq('tz: junk setting falls back to the browser zone', tz.cleanTzSetting('Mars/Olympus'), 'local')
+  eq('tz: a valid zone is kept', tz.cleanTzSetting('Asia/Dubai'), 'Asia/Dubai')
+  eq('tz: local resolves to the browser zone', tz.resolveZone('local'), Intl.DateTimeFormat().resolvedOptions().timeZone)
+  ok('tz: every menu zone is valid', tz.TZ_OPTIONS.every((o) => o.id === 'local' || tz.isValidZone(o.id)))
+  for (const z of ['America/New_York', 'Europe/London', 'Asia/Karachi', 'Asia/Dubai', 'Asia/Singapore', 'Asia/Tokyo', 'Australia/Sydney', 'UTC'])
+    ok('tz: menu offers ' + z, tz.TZ_OPTIONS.some((o) => o.id === z))
+  // The change is announced; without localStorage it still holds in memory.
+  let heard = 0
+  const off = tz.subscribeChartTz(() => heard++)
+  tz.setChartTz('Asia/Tokyo')
+  eq('tz: set + notify', [tz.getChartTzSetting(), tz.chartZone(), heard], ['Asia/Tokyo', 'Asia/Tokyo', 1])
+  tz.setChartTz('Asia/Tokyo')
+  eq('tz: same zone does not notify', heard, 1)
+  off()
+  tz.setChartTz('local')
+  eq('tz: unsubscribed', heard, 1)
+}
+
+// ---- Saved chart layouts + workspace panels (features/charts/savedLayoutsMath) ----
+{
+  const L = await import(src('features/charts/savedLayoutsMath.ts'))
+  const NS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16]
+  const snap4 = {
+    n: 4,
+    active: 1,
+    cells: [
+      { sym: 'BTCUSDT', tf: '15m', style: 'candle' },
+      { sym: 'ETHUSDT', tf: '1h', style: 'line' },
+      { sym: 'SOLUSDT', tf: '4h', style: 'bar' },
+      { sym: 'XAUUSD', tf: '1d', style: 'candle' },
+    ],
+    mainIndicators: [{ uid: 'iabc', type: 'ema', params: { length: 21 }, source: 'close', visible: true }],
+    panelIndicators: { c2: [{ uid: 'pabc', type: 'rsi', params: {}, source: 'close', visible: true }] },
+    scale: { mode: 'log', invert: true, lock: false },
+  }
+  // names
+  eq('saved: name trimmed and folded', L.cleanLayoutName('  My   setup \n'), 'My setup')
+  eq('saved: name capped at 32', L.cleanLayoutName('x'.repeat(50)).length, 32)
+  eq('saved: control chars dropped', L.cleanLayoutName('a\u0000b\u0007c'), 'abc')
+  eq('saved: junk name is empty', L.cleanLayoutName(null), '')
+  // validation
+  ok('saved: USDT pair valid', L.validSymbol('BTCUSDT'))
+  ok('saved: instrument valid', L.validSymbol('XAUUSD'))
+  ok('saved: junk symbol invalid', !L.validSymbol('btc<script>') && !L.validSymbol('') && !L.validSymbol(42))
+  ok('saved: catalogue tf valid', L.validTimeframe('4h') && L.validTimeframe('1M'))
+  ok('saved: junk tf invalid', !L.validTimeframe('7x') && !L.validTimeframe(null))
+  eq('saved: bad symbol drops the cell', L.cleanSnapCell({ sym: 'nope', tf: '1h' }), null)
+  eq('saved: bad tf drops only the tf', L.cleanSnapCell({ sym: 'ETHUSDT', tf: 'bogus', style: 'line' }), { sym: 'ETHUSDT', style: 'line' })
+  eq('saved: unknown cell fields ignored', L.cleanSnapCell({ sym: 'ETHUSDT', tf: '1h', extra: 1 }), { sym: 'ETHUSDT', tf: '1h' })
+  // snapshot
+  const cs = L.cleanSnapshot(snap4, NS)
+  eq('saved: snapshot round-trips', cs, snap4)
+  eq('saved: unknown layout count rejected', L.cleanSnapshot({ ...snap4, n: 11 }, NS), null)
+  eq('saved: active outside the layout resets to 0', L.cleanSnapshot({ ...snap4, active: 9 }, NS).active, 0)
+  eq('saved: bad scale mode falls back', L.cleanSnapshot({ ...snap4, scale: { mode: 'cubic' } }, NS).scale, { mode: 'normal', invert: false, lock: false })
+  eq(
+    'saved: panel slots only c0..c15',
+    Object.keys(L.cleanSnapshot({ ...snap4, panelIndicators: { c2: [{}], mc1: [{}], c99: [{}], c3: 'x' } }, NS).panelIndicators),
+    ['c2'],
+  )
+  eq('saved: missing indicators are empty', L.cleanSnapshot({ n: 2, active: 0, cells: [] }, NS).mainIndicators, [])
+  // list: parse / migrate / serialize
+  const entry = { id: 'a1', name: 'Test', savedAt: 5, snapshot: snap4 }
+  eq('saved: corrupt storage is an empty list', L.parseSavedLayouts('{oops', NS), [])
+  eq('saved: null storage is an empty list', L.parseSavedLayouts(null, NS), [])
+  eq('saved: v1 shape parses', L.parseSavedLayouts({ v: 1, items: [entry] }, NS).map((e) => e.name), ['Test'])
+  eq('saved: bare array (unversioned) migrates', L.parseSavedLayouts([entry], NS).map((e) => e.id), ['a1'])
+  eq('saved: newer version keeps parseable items', L.parseSavedLayouts({ v: 9, items: [entry], future: true }, NS).length, 1)
+  const mixed = L.parseSavedLayouts(
+    [entry, { ...entry, id: 'a2', name: 'test' }, { id: 'a3', name: '', snapshot: snap4 }, { id: 'a4', name: 'X', snapshot: { n: 99 } }, 7, { ...entry, id: 'a1', name: 'Other' }],
+    NS,
+  )
+  eq('saved: duplicate names, empty names, bad snapshots dropped', mixed.map((e) => e.name), ['Test', 'Other'])
+  ok('saved: duplicate id replaced', mixed[1].id !== 'a1', mixed[1].id)
+  eq('saved: at most 20 kept', L.parseSavedLayouts(Array.from({ length: 30 }, (_, i) => ({ ...entry, id: 'x' + i, name: 'n' + i })), NS).length, 20)
+  const ser = L.serializeSavedLayouts([entry])
+  eq('saved: serialized with version', ser.v, 1)
+  eq('saved: serialize/parse round-trip', L.parseSavedLayouts(JSON.parse(JSON.stringify(ser)), NS), [entry])
+  // list edits
+  let r = L.addSavedLayout([], '  Test ', snap4, 10, 'id1')
+  eq('saved: add', [r.error, r.list.map((e) => [e.id, e.name, e.savedAt])], [null, [['id1', 'Test', 10]]])
+  r = L.addSavedLayout(r.list, 'Second', snap4, 11, 'id2')
+  eq('saved: newest first', r.list.map((e) => e.name), ['Second', 'Test'])
+  r = L.addSavedLayout(r.list, 'TEST', { ...snap4, n: 2 }, 12, 'id3')
+  eq('saved: same name overwrites in place', r.list.map((e) => [e.id, e.name, e.snapshot.n]), [['id2', 'Second', 4], ['id1', 'TEST', 2]])
+  eq('saved: add refuses an empty name', L.addSavedLayout(r.list, '   ', snap4, 1, 'z').error !== null, true)
+  const full = Array.from({ length: 20 }, (_, i) => ({ ...entry, id: 'f' + i, name: 'n' + i }))
+  const rf = L.addSavedLayout(full, 'one more', snap4, 1, 'z')
+  ok('saved: full list refuses a new name', rf.error && rf.list === full, rf.error)
+  ok('saved: full list still overwrites', !L.addSavedLayout(full, 'n3', snap4, 1, 'z').error)
+  let rn = L.renameSavedLayout(r.list, 'id1', ' Renamed ')
+  eq('saved: rename', rn.list.map((e) => e.name), ['Second', 'Renamed'])
+  rn = L.renameSavedLayout(r.list, 'id1', 'second')
+  ok('saved: rename refuses a taken name', rn.error && rn.list === r.list, rn.error)
+  ok('saved: rename refuses empty', L.renameSavedLayout(r.list, 'id1', '').error)
+  ok('saved: rename of a missing id refused', L.renameSavedLayout(r.list, 'nope', 'x').error)
+  ok('saved: rename to own name in another case', !L.renameSavedLayout(r.list, 'id1', 'test').error)
+  eq('saved: delete', L.deleteSavedLayout(r.list, 'id2').map((e) => e.id), ['id1'])
+  eq('saved: delete of a missing id is a no-op', L.deleteSavedLayout(r.list, 'nope').length, 2)
+
+  // Charts-tab workspace panels
+  const DEF = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'DOGEUSDT'].map((sym) => ({ sym, interval: '1h' }))
+  const IVS = ['1m', '5m', '15m', '1h', '4h', '1d']
+  eq('mc panels: nothing stored gives the defaults', L.parseMcPanels(null, DEF, IVS, 8), DEF)
+  eq('mc panels: empty list gives the defaults', L.parseMcPanels([], DEF, IVS, 8), DEF)
+  eq('mc panels: junk gives the defaults', L.parseMcPanels('x', DEF, IVS, 8), DEF)
+  eq(
+    'mc panels: stored panels restored in order',
+    L.parseMcPanels([{ sym: 'XRPUSDT', interval: '5m' }, { sym: 'ADAUSDT', interval: '1d' }], DEF, IVS, 8),
+    [{ sym: 'XRPUSDT', interval: '5m' }, { sym: 'ADAUSDT', interval: '1d' }],
+  )
+  eq(
+    'mc panels: bad parts fall back per position',
+    L.parseMcPanels([{ sym: '???', interval: '5m' }, { sym: 'ADAUSDT', interval: '7h' }, null], DEF, IVS, 8),
+    [{ sym: 'BTCUSDT', interval: '5m' }, { sym: 'ADAUSDT', interval: '1h' }, { sym: 'SOLUSDT', interval: '1h' }],
+  )
+  eq('mc panels: beyond the defaults falls back to the first', L.parseMcPanels(Array(6).fill({ sym: 1 }), DEF, IVS, 8)[5], DEF[0])
+  eq('mc panels: capped', L.parseMcPanels(Array(12).fill({ sym: 'BTCUSDT', interval: '1h' }), DEF, IVS, 8).length, 8)
+  ok('mc panels: defaults are copies', L.parseMcPanels(null, DEF, IVS, 8)[0] !== DEF[0])
+}
+
 // ---------------------------------------------------------------- chart style data
 {
   const { sessionKey, toCandleData, hollowCandleData, compactVol } = await import(
@@ -2240,6 +3273,53 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('compactVol: small', compactVol(0.42), '0.4')
   eq('compactVol: thousands', compactVol(3400), '3.4K')
   eq('compactVol: millions', compactVol(1_234_567), '1.2M')
+}
+
+// ---------------------------------------------------------------- forex factory day grouping
+{
+  const { parseFF, groupByDay } = await import(src('features/news/pro/forexFactory.ts'))
+  const ev = parseFF(
+    JSON.stringify([
+      { title: 'CPI', country: 'USD', date: '2026-09-15T08:30:00-04:00', impact: 'High' },
+      { title: 'Bank Holiday', country: 'JPY', date: '2026-09-15T00:00:00-04:00', impact: 'Holiday' },
+      { title: 'Trade Balance', country: 'AUD', date: '2026-09-15T01:00:00-04:00', impact: 'Low' },
+    ]),
+  )
+  // Expectations follow the process zone, so this holds under any TZ.
+  const ymd = (d) =>
+    d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
+  const groups = groupByDay(ev)
+  const where = (t) => groups.find((g) => g.events.some((e) => e.title === t))
+  eq('ff: all-day holiday keeps its FF date in any zone', ymd(where('Bank Holiday').date), '2026-09-15')
+  eq('ff: all-day row leads its day', where('Bank Holiday').events[0].title, 'Bank Holiday')
+  for (const e of ev.filter((x) => !x.allDay))
+    eq('ff: timed row under its local day (' + e.title + ')', ymd(where(e.title).date), ymd(new Date(e.ts)))
+  const starts = groups.map((g) => g.date.getTime())
+  eq('ff: day groups ascend', starts, [...starts].sort((a, b) => a - b))
+  eq('ff: group key matches its date', groups.every((g) => g.day === g.date.toDateString()), true)
+}
+
+// ---- auth: the once-per-session sign-in invite flag --------------------------------
+{
+  const { INVITED, wasInvited, markInvited } = await import(src('features/auth/invite.ts'))
+  const m = new Map()
+  const s = { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => void m.set(k, String(v)) }
+  eq('invite: a fresh session has not been invited', wasInvited(s), false)
+  // A manual open of the dialog marks the same flag the auto popup checks.
+  markInvited(s)
+  eq('invite: marking sets the session flag', s.getItem(INVITED), '1')
+  eq('invite: after a manual open the auto popup is suppressed', wasInvited(s), true)
+  const blocked = {
+    getItem: () => {
+      throw new Error('blocked')
+    },
+    setItem: () => {
+      throw new Error('blocked')
+    },
+  }
+  eq('invite: blocked storage never nags', wasInvited(blocked), true)
+  markInvited(blocked)
+  eq('invite: no storage at all never nags', wasInvited(null), true)
 }
 
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')

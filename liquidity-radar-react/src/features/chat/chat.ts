@@ -17,6 +17,7 @@ import type { ChatAction } from './actions'
 import { esc, pfmt, cfmt, nfmt, timeAgo } from '../../utils/format'
 import { baseOf, coinMeta } from '../../utils/coins'
 import { aiComposite, forecastFrom } from '../../utils/indicators'
+import { tfDef, tfMs } from '../../services/timeframe'
 import { jget, jget2 } from '../../api/client'
 import { fetchKlineRows } from '../../services/failover'
 import { $ } from '../../utils/dom'
@@ -103,7 +104,8 @@ async function safeCtx(base: string): Promise<CtxData> {
       closes,
       candles: state.candles,
       ai: (state._ai as AIScore | null | undefined) || aiComposite(state.candles, closes, state.candles.map((c) => c.v as number)),
-      fc: forecastFrom(closes),
+      // The chart's candles are on state.tf, not the 15m loadCtx fetches.
+      fc: forecastFrom(closes, tfMs(tfDef(state.tf)) / 60000),
     }
   }
   return await loadCtx(base)

@@ -5,6 +5,7 @@
 // delegated through the hooks wired by the engine via wireMarketHooks()
 // (the same pattern as userActions), so the engine stays pure orchestration.
 import { binancePerpOf, isInstrument } from '../constants/instruments'
+import { candlesTag, futuresSymbolOf, perUnitOi, perUnitPremium, symbolScoped } from './symbolScope'
 import { perpKlines } from './perpData'
 import { refreshSpotBasis, spotBasis } from './spotGold'
 import { yahooCandles } from './yahoo'
@@ -22,7 +23,7 @@ import {
   mdTf,
 } from './market'
 import type { CandleFlat } from './market'
-import { DEFAULT_TF, createFolder, mainFolder, resample, tfDef } from './timeframe'
+import { DEFAULT_TF, createFolder, mainFolder, mergeOlderPage, resample, tfDef } from './timeframe'
 import type { Folder } from './timeframe'
 import {
   fetchKlinesChain,
@@ -31,6 +32,7 @@ import {
   tickerChain,
   tickerFeed,
 } from './failover'
+import type { KlineReq } from './failover'
 import type { ChainResult } from './providerChain'
 
 export interface MarketHooks {
@@ -96,6 +98,7 @@ async function fetchBase(
   base: string,
   need: number,
   before = 0,
+  req?: KlineReq,
 ): Promise<{ rows: CandleFlat[]; source: KlineSource }> {
   // Metals, energy, FX, indices and equities are priced by Yahoo, not
   // Binance. Dispatching here — the one place candles enter the app — means
@@ -128,7 +131,7 @@ async function fetchBase(
     return { rows: await yahooCandles(sym, base, need), source: null }
   }
   // Binance → Bybit → OKX → last good copy (see services/failover).
-  const { data, ...source } = await fetchKlinesChain(sym, base, need, before)
+  const { data, ...source } = await fetchKlinesChain(sym, base, need, before, req)
   return { rows: data, source }
 }
 
@@ -155,9 +158,10 @@ export async function loadCandleWindow(
 export async function loadCandles(
   sym: string,
   tf: string,
+  req?: KlineReq,
 ): Promise<{ candles: CandleFlat[]; folder: Folder; source: KlineSource }> {
   const def = tfDef(tf)
-  const { rows, source } = await fetchBase(sym, def.base, TARGET_CANDLES * def.factor)
+  const { rows, source } = await fetchBase(sym, def.base, TARGET_CANDLES * def.factor, 0, req)
   const folder = createFolder(def)
   folder.seed(rows)
   return { candles: resample(rows, def).slice(-MAX_KEEP), folder, source }
@@ -202,34 +206,35 @@ export async function fetchOlderKlines(): Promise<number> {
   try {
     const tf = mdTf(state.tf || DEFAULT_TF)
     const def = tfDef(tf)
-    // Strictly before the oldest bucket's open, so the older page resamples
-    // into whole buckets of its own and cannot half-fill the one we hold.
+    // Strictly before the oldest candle we hold. On a resampled interval that
+    // candle usually opens mid-bucket, so the page's last bucket is the rest
+    // of it — mergeOlderPage folds the two rather than drawing it twice.
     const { rows, source } = await fetchBase(
       state.symbol,
       def.base,
       PAGE_CANDLES * def.factor,
       oldest.t - 1,
+      // The user is dragging this chart back: ahead of background work, and
+      // dropped unsent if the symbol/interval changes first.
+      { priority: 'high', isStale: () => ident !== historyIdent() },
     )
     if (ident !== historyIdent()) return 0 // symbol/interval changed mid-flight
     // Every provider failed and this is a cached copy: not proof the history
     // has ended, so leave it retryable rather than marking it done.
     if (source && (source.freshness === 'STALE' || source.freshness === 'OFFLINE')) return 0
-    const older = resample(rows, def).filter((c) => c.t < oldest.t)
-    if (!older.length) {
-      historyDone = true
-      return 0
-    }
-    // Trim the page rather than the array, so the count reported back is
+    // The page is trimmed rather than the array, so the count reported back is
     // exactly what was prepended and the viewport shift stays correct.
     const room = MAX_KEEP - state.candles.length
-    const add = older.length > room ? older.slice(-room) : older
-    if (!add.length) {
+    const { candles, added, merged } = mergeOlderPage(resample(rows, def), state.candles, def, room)
+    if (!added && !merged) {
       historyDone = true
       return 0
     }
-    state.candles = add.concat(state.candles)
+    // A page holding only the rest of our oldest bucket still merges, and
+    // leaves history open so the next drag keeps paging.
+    state.candles = candles
     mdStoreCandles(state.symbol, tf, state.candles)
-    return add.length
+    return added
   } catch (e) {
     mdDebug.log('klines', 'older page failed')
     return 0
@@ -287,10 +292,17 @@ export async function fetchKlines(sym: string): Promise<void> {
   const key = mdSym(sym) + '|' + tf
   const seq = ++klineSeq
   try {
-    const { candles, folder, source } = await loadCandles(sym, tf)
+    // The visible chart's history jumps the Binance queue; once a newer load
+    // supersedes this one, its still-queued pages are dropped unsent (and the
+    // StaleRequestError lands in the seq check below).
+    const { candles, folder, source } = await loadCandles(sym, tf, {
+      priority: 'high',
+      isStale: () => seq !== klineSeq,
+    })
     if (seq !== klineSeq) return
     if (!candles.length) throw new Error('empty')
     state.candles = candles
+    state.candlesKey = candlesTag(sym, tf)
     mainFolder.key = key
     mainFolder.folder = folder
     mdStoreCandles(state.symbol, tf, candles)
@@ -316,6 +328,7 @@ export async function fetchKlines(sym: string): Promise<void> {
       mdCacheGet(state.symbol, tf) || md.candles[mdSym(state.symbol) + '|' + tf] || null
     if (cached && cached.length) {
       state.candles = cached
+      state.candlesKey = candlesTag(state.symbol, tf)
       mdDebug.log('klines', 'serving cached ' + state.symbol + ' ' + tf)
       if (!isInstrument(sym))
         setKlineFeed(key, { freshness: 'STALE', ts: Date.now(), name: 'cache', primary: false })
@@ -345,16 +358,25 @@ export async function fetchOB(): Promise<void> {
     state.ob = { bids: [], asks: [] }
     return
   }
-  try {
-    const d = (await jget(
-      'https://api.binance.com/api/v3/depth?symbol=' + mdSym(state.symbol) + '&limit=15',
-    )) as { bids: Array<Array<string | number>>; asks: Array<Array<string | number>> }
-    const ob = { bids: d.bids.map((b) => [+b[0], +b[1]]), asks: d.asks.map((a) => [+a[0], +a[1]]) }
-    if (!mdStoreOB(state.symbol, ob)) return
-    state.ob = ob
-  } catch (e) {
-    console.warn('depth', e)
-  }
+  // Scoped to the symbol asked for: a late book for the previous coin must
+  // not land in this coin's slot (or under its md.ob key).
+  await symbolScoped(
+    () => state.symbol,
+    (sym) =>
+      jget('https://api.binance.com/api/v3/depth?symbol=' + mdSym(sym) + '&limit=15') as Promise<{
+        bids: Array<Array<string | number>>
+        asks: Array<Array<string | number>>
+      }>,
+    (d, sym) => {
+      const ob = { bids: d.bids.map((b) => [+b[0], +b[1]]), asks: d.asks.map((a) => [+a[0], +a[1]]) }
+      if (!mdStoreOB(sym, ob)) return
+      state.ob = ob
+    },
+    (e) => {
+      console.warn('depth', e)
+      state.ob = { bids: [], asks: [] }
+    },
+  )
 }
 
 export async function fetchFR(): Promise<void> {
@@ -364,18 +386,27 @@ export async function fetchFR(): Promise<void> {
   // previous crypto symbol left in state has to go, or gold ends up skewed
   // by Bitcoin's funding rate.
   // Gold is the exception: its perpetual (XAUUSDT) has real funding.
-  const frSym = binancePerpOf(state.symbol) ?? state.symbol
-  if (isInstrument(state.symbol) && frSym === state.symbol) {
+  // PEPE/SHIB/BONK… trade on futures as 1000-unit contracts (symbolScope).
+  const fut = futuresSymbolOf(state.symbol)
+  if (!fut) {
     state.fr = null
     return
   }
-  try {
-    state.fr = await jget('https://fapi.binance.com/fapi/v1/premiumIndex?symbol=' + frSym)
-    hooks!.onFR()
-  } catch (e) {
-    console.warn('premiumIndex', e)
-    hooks!.onFRfail()
-  }
+  await symbolScoped(
+    () => state.symbol,
+    () => jget('https://fapi.binance.com/fapi/v1/premiumIndex?symbol=' + fut.sym),
+    (d) => {
+      state.fr = perUnitPremium(d as object, fut.mult)
+      hooks!.onFR()
+    },
+    (e) => {
+      // Clear rather than keep: what is in state.fr may be the previous
+      // coin's funding, and analytics would go on reading it as this one's.
+      console.warn('premiumIndex', e)
+      state.fr = null
+      hooks!.onFRfail()
+    },
+  )
 }
 
 export async function fetchOI(): Promise<void> {
@@ -384,18 +415,24 @@ export async function fetchOI(): Promise<void> {
   // asking would just be a guaranteed 400 every poll — and whatever the
   // previous crypto symbol left in state has to go, or gold ends up skewed
   // by Bitcoin's funding rate.
-  const oiSym = binancePerpOf(state.symbol) ?? state.symbol
-  if (isInstrument(state.symbol) && oiSym === state.symbol) {
+  const fut = futuresSymbolOf(state.symbol)
+  if (!fut) {
     state.oi = null
     return
   }
-  try {
-    state.oi = await jget('https://fapi.binance.com/fapi/v1/openInterest?symbol=' + oiSym)
-    hooks!.onOI()
-  } catch (e) {
-    console.warn('openInterest', e)
-    hooks!.onOIfail()
-  }
+  await symbolScoped(
+    () => state.symbol,
+    () => jget('https://fapi.binance.com/fapi/v1/openInterest?symbol=' + fut.sym),
+    (d) => {
+      state.oi = perUnitOi(d as object, fut.mult)
+      hooks!.onOI()
+    },
+    (e) => {
+      console.warn('openInterest', e)
+      state.oi = null
+      hooks!.onOIfail()
+    },
+  )
 }
 
 export async function fetchFG(): Promise<void> {
@@ -430,25 +467,46 @@ export async function fetchWhales(): Promise<void> {
     state.whales = []
     return
   }
-  try {
-    const trades = (await jget(
-      'https://api.binance.com/api/v3/trades?symbol=' + state.symbol + '&limit=1000',
-    )) as Array<{ id: unknown; time: unknown; price: unknown; qty: unknown; isBuyerMaker: unknown }>
-    const big: WhaleTape[] = trades
-      .map((t) => ({
-        id: t.id,
-        time: Number(t.time),
-        price: Number(t.price),
-        qty: Number(t.qty),
-        usd: Number(t.price) * Number(t.qty),
-        maker: t.isBuyerMaker,
-      }))
-      .filter((t) => t.usd >= 50000)
-      .sort((a, b) => b.time - a.time)
-      .slice(0, 40)
-    state.whales = big
-    hooks!.onWhales()
-  } catch (e) {
-    console.warn('trades', e)
-  }
+  // A failure keeps the tape (it is this coin's — setSymbol clears it on a
+  // switch); a late tape for a coin the user has left is dropped.
+  await symbolScoped(
+    () => state.symbol,
+    (sym) =>
+      jget('https://api.binance.com/api/v3/trades?symbol=' + sym + '&limit=1000') as Promise<
+        Array<{ id: unknown; time: unknown; price: unknown; qty: unknown; isBuyerMaker: unknown }>
+      >,
+    (trades) => {
+      const big: WhaleTape[] = trades
+        .map((t) => ({
+          id: t.id,
+          time: Number(t.time),
+          price: Number(t.price),
+          qty: Number(t.qty),
+          usd: Number(t.price) * Number(t.qty),
+          maker: t.isBuyerMaker,
+        }))
+        .filter((t) => t.usd >= 50000)
+        .sort((a, b) => b.time - a.time)
+        .slice(0, 40)
+      state.whales = big
+      hooks!.onWhales()
+    },
+    (e) => {
+      console.warn('trades', e)
+    },
+  )
+}
+
+/**
+ * Drop the charted candles before loading another symbol or interval, so
+ * nothing (technical alerts, analytics, the scanner) reads the previous
+ * market's bars as this one's while the new ones are in flight. The live
+ * kline socket only patches a non-empty array, and every reader already
+ * copes with the empty array the app boots with.
+ */
+export function resetCandles(): void {
+  state.candles = []
+  state.candlesKey = ''
+  mainFolder.key = ''
+  mainFolder.folder = null
 }

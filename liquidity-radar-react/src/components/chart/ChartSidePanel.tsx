@@ -1,5 +1,5 @@
 // Right-hand side panel on the price-action chart: an icon rail that opens
-// Order book, Liquidity, Futures or Structure — the Pro terminal's side tabs,
+// Order book, Liquidity, Futures, Structure or Watchlist — the Pro terminal's side tabs,
 // built on this app's own market state.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
@@ -18,8 +18,9 @@ import type { Level } from '../../features/charts/sidePanels/metrics'
 import { storageGetRaw, storageSetRaw } from '../../services/storage'
 import { syncStageHeight } from '../../features/charts/companionCharts'
 import { CHART_TABS, useTick } from '../useTick'
+import { WatchlistPanel } from './WatchlistPanel'
 
-type TabId = 'book' | 'liquidity' | 'futures' | 'structure'
+type TabId = 'book' | 'liquidity' | 'futures' | 'structure' | 'watchlist'
 
 const S = {
   fill: 'none',
@@ -54,6 +55,16 @@ function TabIcon({ id }: { id: TabId }) {
         />
       </svg>
     )
+  if (id === 'watchlist')
+    return (
+      <svg {...p}>
+        <path
+          d="M12 3.5l2.6 5.3 5.8.8-4.2 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.2-4.1 5.8-.8L12 3.5Z"
+          stroke="var(--amber)"
+          {...S}
+        />
+      </svg>
+    )
   if (id === 'futures')
     return (
       <svg {...p}>
@@ -75,6 +86,7 @@ const TABS: Array<{ id: TabId; label: string }> = [
   { id: 'liquidity', label: 'Liquidity' },
   { id: 'futures', label: 'Futures' },
   { id: 'structure', label: 'Structure' },
+  { id: 'watchlist', label: 'Watchlist' },
 ]
 
 const OPEN_KEY = 'lr-chartSide'
@@ -180,6 +192,7 @@ export function ChartSidePanel({ tools }: { tools?: ReactNode }) {
             {tab === 'liquidity' && <LiquidityPanel />}
             {tab === 'futures' && <FuturesPanel now={now} />}
             {tab === 'structure' && <StructurePanel />}
+            {tab === 'watchlist' && <WatchlistPanel />}
           </div>
         </div>
       )}

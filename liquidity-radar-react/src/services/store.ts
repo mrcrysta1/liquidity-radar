@@ -11,6 +11,12 @@ export interface AppState {
   tf: string
   tickers: Record<string, { last: number; pct: number; qvol: number; high?: number; low?: number }>
   candles: CandleFlat[]
+  /**
+   * Which `symbol|tf` state.candles belong to (symbolScope.candlesTag), set
+   * when a load lands; '' while a switch is loading. Readers that must not
+   * mix markets (technical alerts, the live kline patcher) check it.
+   */
+  candlesKey: string
   ob: { bids: Array<Array<number | string>>; asks: Array<Array<number | string>> }
   fr: unknown
   oi: unknown
@@ -40,6 +46,7 @@ export const state: AppState = {
   tf: '15m',
   tickers: {},
   candles: [],
+  candlesKey: '',
   ob: { bids: [], asks: [] },
   fr: null,
   oi: null,

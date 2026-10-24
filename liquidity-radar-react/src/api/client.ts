@@ -1,6 +1,10 @@
 import { mdRestErr, mdRestOk } from '../services/market'
 import { noteCall } from '../services/dataSources'
-import { RateLimitedError, cooldownLeft, isRateLimited, noteLimitResponse } from './rateLimit'
+import { RateLimitedError, cooldownLeft, isBinanceUrl, isRateLimited, noteLimitResponse } from './rateLimit'
+import { StaleRequestError, createSlotQueue, staleNow } from './slotQueue'
+import type { SlotPriority } from './slotQueue'
+
+export { StaleRequestError, isStaleRequest } from './slotQueue'
 
 // --- REST adapter: dedup + throttling + retry/backoff -------
 
@@ -25,9 +29,11 @@ async function rawFetch(url: string, to?: number): Promise<unknown> {
     const r = await fetch(url, { signal: c.signal })
     noteCall(url, r.ok, r.status, Date.now() - started)
     if (!r.ok) {
-      // 429/418 mean slow down or you are banned. Read the cooldown out of the
-      // response and record it, so nothing retries into a longer ban.
-      if (r.status === 429 || r.status === 418) {
+      // 429/418 from Binance mean slow down or you are banned. Read the
+      // cooldown out of the response and record it, so nothing retries into a
+      // longer ban. Another host's 429 is that host's problem: it must not
+      // freeze Binance REST, so it falls through to a plain HTTP error.
+      if ((r.status === 429 || r.status === 418) && isBinanceUrl(url)) {
         let body = ''
         try {
           body = await r.text()
@@ -144,14 +150,16 @@ function weightUsed(now: number): number {
   return n
 }
 
-let binanceNext = 0
 const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
-async function binanceSlot(url: string): Promise<void> {
-  const now = Date.now()
-  const at = Math.max(now, binanceNext)
-  binanceNext = at + BINANCE_GAP
-  if (at > now) await wait(at - now)
+// One slot every BINANCE_GAP ms, handed out by a real queue: the visible
+// chart's own history ('high') goes ahead of background work, and a request
+// whose caller has moved on (isStale) is dropped before it spends a slot or
+// any budget.
+const binanceQueue = createSlotQueue(BINANCE_GAP)
+
+async function binanceSlot(url: string, o: JgetOptions): Promise<void> {
+  await binanceQueue.acquire({ priority: o.priority, isStale: o.isStale })
   const w = weightOf(url)
   // Over budget: hold while the oldest spend ages out — but only briefly. If
   // the window still has not cleared, go anyway and let the 418 guard deal with
@@ -160,15 +168,32 @@ async function binanceSlot(url: string): Promise<void> {
   while (Date.now() < until && weightUsed(Date.now()) + w > WEIGHT_CAP) {
     await wait(Math.min(400, Math.max(50, until - Date.now())))
   }
+  // A budget wait can outlast the caller's interest: spend nothing on an
+  // answer nobody will read.
+  if (staleNow(o.isStale)) throw new StaleRequestError()
   spent.push({ t: Date.now(), w })
 }
 
-export async function jget(url: string, to?: number): Promise<unknown> {
-  const timeout = to || 12000
+export interface JgetOptions {
+  /** Timeout in ms (default 12000). */
+  to?: number
+  /** Binance only: 'high' for the visible chart's own history; default 'normal'. */
+  priority?: SlotPriority
+  /**
+   * Binance only: asked while the request waits for its slot. True drops it
+   * with a StaleRequestError — not a failure (see isStaleRequest), and not
+   * counted by mdRestErr, since nothing was sent.
+   */
+  isStale?: () => boolean
+}
+
+export async function jget(url: string, toOrOpts?: number | JgetOptions): Promise<unknown> {
+  const o: JgetOptions = typeof toOrOpts === 'number' ? { to: toOrOpts } : (toOrOpts ?? {})
+  const timeout = o.to || 12000
   const isBinance = /binance\.com/.test(url)
   // While Binance has us in a cooldown, do not even open the connection.
   if (isBinance && isRateLimited()) throw new RateLimitedError(Date.now() + cooldownLeft())
-  if (isBinance) await binanceSlot(url)
+  if (isBinance) await binanceSlot(url, o)
   try {
     const res = await jget2(url, { to: timeout, retries: isBinance ? 1 : 0, dedup: true })
     if (isBinance) mdRestOk()

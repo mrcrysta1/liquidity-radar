@@ -15,6 +15,8 @@ export interface CalendarEvent {
   forecast?: string
   previous?: string
   allDay: boolean
+  /** FF calendar date (YYYY-MM-DD) of an all-day row: its day header in every time zone. */
+  day?: string
 }
 export const FF_URLS = {
   lastWeek: 'https://nfs.faireconomy.media/ff_calendar_lastweek.json',
@@ -42,18 +44,33 @@ export function parseFF(json: string): CalendarEvent[] {
         forecast: r.forecast ? String(r.forecast) : undefined,
         previous: r.previous ? String(r.previous) : undefined,
         allDay,
+        day:
+          allDay && /^\d{4}-\d{2}-\d{2}/.test(String(r.date))
+            ? String(r.date).slice(0, 10)
+            : undefined,
       }
     })
     .filter((e) => e.title)
     .sort((a, b) => a.ts - b.ts)
 }
-/** Group by local calendar day, like Forex Factory's day header rows. */
+/**
+ * Local midnight of the day an event is listed under. Timed rows use the viewer's local day; all-day rows
+ * (bank holidays, sent as midnight New York) keep their FF calendar date, so they don't slide to the
+ * previous day for viewers west of New York.
+ */
+export function eventDay(e: CalendarEvent): Date {
+  const m = e.allDay && e.day ? /^(\d{4})-(\d{2})-(\d{2})/.exec(e.day) : null
+  if (m) return new Date(+m[1], +m[2] - 1, +m[3])
+  const d = new Date(e.ts)
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate())
+}
+/** Group by calendar day (see eventDay), like Forex Factory's day header rows: days ascending, all-day rows first within a day. */
 export function groupByDay(
   events: CalendarEvent[],
 ): { day: string; date: Date; events: CalendarEvent[] }[] {
   const m = new Map<string, { day: string; date: Date; events: CalendarEvent[] }>()
   for (const e of events) {
-    const d = new Date(e.ts)
+    const d = eventDay(e)
     const key = d.toDateString()
     let g = m.get(key)
     if (!g) {
@@ -62,7 +79,9 @@ export function groupByDay(
     }
     g.events.push(e)
   }
-  return [...m.values()]
+  const out = [...m.values()].sort((a, b) => a.date.getTime() - b.date.getTime())
+  for (const g of out) g.events.sort((a, b) => Number(b.allDay) - Number(a.allDay))
+  return out
 }
 /** Actual vs forecast tone: green if better for the currency (higher), red if worse; unemployment/claims-type rows invert. */
 export function actualTone(e: CalendarEvent): 'better' | 'worse' | 'neutral' {

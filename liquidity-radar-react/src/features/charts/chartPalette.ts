@@ -10,6 +10,7 @@
 //
 // Kept free of chart imports so the close timer and the indicator renderer can
 // read the same colours without an import cycle through chartRender.
+import { chartTzOptions } from './timezone'
 
 /** TradingView's scale font stack. */
 export const TV_FONT =
@@ -99,9 +100,18 @@ export function volumeColor(up: boolean): string {
   return withAlpha(up ? p.up : p.dn, 0.5)
 }
 
-/** Chart options shared by the main chart and the companions. */
-export function tvChartOptions(p: ChartPalette = chartPalette()): Record<string, unknown> {
+/**
+ * Chart options shared by the main chart and the companions. Includes the
+ * time-zone formatters (./timezone); `daily` reports whether the chart's bars
+ * are a day or longer, which are dated by their UTC session.
+ */
+export function tvChartOptions(
+  p: ChartPalette = chartPalette(),
+  daily?: () => boolean,
+): Record<string, unknown> {
+  const tz = chartTzOptions(daily)
   return {
+    localization: tz.localization,
     layout: {
       background: { type: 'solid', color: p.bg },
       textColor: p.txt,
@@ -110,7 +120,7 @@ export function tvChartOptions(p: ChartPalette = chartPalette()): Record<string,
     },
     grid: { vertLines: { color: p.grid }, horzLines: { color: p.grid } },
     rightPriceScale: { borderVisible: true, borderColor: p.border },
-    timeScale: { borderVisible: true, borderColor: p.border },
+    timeScale: { ...tz.timeScale, borderVisible: true, borderColor: p.border },
     crosshair: {
       // LargeDashed lines with grey labels, as TradingView draws them.
       vertLine: { color: p.cross, width: 1, style: 3, labelBackgroundColor: p.crossLabel },

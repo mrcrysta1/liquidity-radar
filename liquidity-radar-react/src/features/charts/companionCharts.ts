@@ -47,6 +47,7 @@ import {
   volumeColor,
 } from './chartPalette'
 import { LAYOUTS, MAX_CHARTS, cells, layoutSpec, rowCount } from './layouts'
+import { isDailyTf } from './timezone'
 import { loadCandles } from '../../services/marketData'
 import { mdSym, mdTf } from '../../services/market'
 import { klineHub } from '../../services/failover'
@@ -64,6 +65,7 @@ import { createIndicatorRenderer } from './indicators/render'
 import type { IndicatorRenderer } from './indicators/render'
 import { panelIndicatorStore } from './indicators/panelStore'
 import { unmountCoinPickers } from '../../components/chart/mountCoinPicker'
+import { registerCrosshairSync } from './crosshairSync'
 
 type Any = any
 
@@ -106,6 +108,8 @@ interface Panel {
   indAt: number
   /** The crosshair is on a bar: its OHLC owns the legend, not live ticks. */
   hover: boolean
+  /** Leave the crosshair-sync hub. */
+  syncOff: (() => void) | null
 }
 
 /** Live ticks redraw a panel's indicators at most this often. */
@@ -333,6 +337,65 @@ export function activateCell(pos: number): void {
   emit()
 }
 
+/** A layout as data: what every cell shows and which one is active. */
+export interface LayoutState {
+  n: number
+  active: number
+  /** By grid position (the active cell's read live from the main chart). */
+  cells: Array<CellCfg | null>
+}
+
+/** The layout on screen, for saving it under a name (see ./savedLayouts). */
+export function captureLayout(): LayoutState {
+  const cellsNow = saved.slice(0, MAX_CHARTS).map((c) => (c ? { ...c } : null))
+  panels.forEach((p) => {
+    cellsNow[p.pos] = { sym: p.sym, tf: p.tf, style: p.style }
+  })
+  cellsNow[active] = mainCfg()
+  for (let i = 0; i < cellsNow.length; i++) if (cellsNow[i] === undefined) cellsNow[i] = null
+  return { n: layout, active, cells: cellsNow }
+}
+
+/**
+ * Put a whole layout on screen: cell count, every companion's coin, timeframe
+ * and style, and the active cell — whose setup goes to the main chart through
+ * the toolbar's own setters. `cellSets` are the indicator sets by slot
+ * ('c<pos>'; the active cell's goes to the main chart).
+ */
+export function restoreLayout(
+  next: LayoutState,
+  sets?: { main: unknown[]; cells: Record<string, unknown[]> },
+): void {
+  const spec = layoutSpec(next.n)
+  const a = Number.isInteger(next.active) && next.active >= 0 && next.active < spec.n ? next.active : 0
+  const cellsNext = next.cells.slice(0, MAX_CHARTS).map((c) => cleanCfg(c))
+  // Every companion is rebuilt from the new setup.
+  for (let i = panels.length - 1; i >= 0; i--) destroyPanel(i)
+  if (sets) {
+    for (let pos = 0; pos < MAX_CHARTS; pos++) {
+      const slot = 'c' + pos
+      const want = pos === a ? [] : sets.cells[slot] || []
+      const store = panelIndicatorStore(slot)
+      if (want.length || store.indicatorCount()) store.replace(want)
+    }
+    mainIndicatorStore.replace(sets.main)
+  }
+  // The active cell's own setup lives in the main chart, not in `saved`.
+  const incoming = cellsNext[a] || mainCfg()
+  saved = cellsNext
+  layout = spec.n
+  active = a
+  applyGrid()
+
+  if (incoming.style !== getChartStyle()) setChartStyle(incoming.style)
+  // One load of the new pair, as in activateCell.
+  const symChange = !!incoming.sym && incoming.sym !== state.symbol
+  if (incoming.tf !== getTimeframe()) setTimeframe(incoming.tf, { reload: !symChange })
+  if (symChange) void setSymbol(incoming.sym, { keepTab: true })
+  persist()
+  emit()
+}
+
 function defaultFor(pos: number): CellCfg {
   const s = saved[pos]
   if (s) return s
@@ -368,6 +431,7 @@ function addPanel(pos: number): void {
     indTimer: null,
     indAt: 0,
     hover: false,
+    syncOff: null,
   }
   // No controls of its own: the toolbar drives whichever chart is active,
   // and clicking this one (or Enter/Space on it) makes it the active chart.
@@ -438,6 +502,8 @@ function destroyPanel(i: number): void {
   p.indTimer = null
   p.ind = null
   if (p.ro) p.ro.disconnect()
+  p.syncOff?.()
+  p.syncOff = null
   if (p.chart) {
     try {
       p.chart.remove()
@@ -460,7 +526,7 @@ function initChart(p: Panel): void {
   const body = p.el?.querySelector('.rc-body') as HTMLElement | null
   if (!body) return
   // The main chart's TradingView look (./chartPalette), a size smaller.
-  const tv: Any = tvChartOptions()
+  const tv: Any = tvChartOptions(undefined, () => isDailyTf(p.tf))
   const chart: Any = LightweightCharts.createChart(body, {
     // Same reason as the main chart: let the library measure its own box so it
     // never writes inline sizes that outlive the layout that caused them.
@@ -476,7 +542,7 @@ function initChart(p: Panel): void {
       rightOffset: 5,
     },
     crosshair: { ...tv.crosshair, mode: 0 },
-    localization: { priceFormatter: (v: number) => pfmt(v) },
+    localization: { ...tv.localization, priceFormatter: (v: number) => pfmt(v) },
   } as Any)
   p.chart = chart
   // The same series the main chart builds for this style, so a cell keeps its
@@ -504,24 +570,37 @@ function initChart(p: Panel): void {
   })
   p.ind.attach(chart)
   p.indOff = store.subscribe(() => drawIndicators(p))
-  const legend = p.el?.querySelector('.rc-legend') as HTMLElement | null
-  // The bar under the crosshair, else the live one — read from the panel's own
-  // bars so every style (line, footprint, ...) gets the full OHLC readout.
-  chart.subscribeCrosshairMove((param: Any) => {
-    if (!legend) return
-    const bars = legendCandles(p.style, p.shown)
-    const i =
-      param.time && param.point ? bars.findIndex((c) => Math.floor(c.t / 1000) === param.time) : -1
-    if (i >= 0) {
-      p.hover = true
-      legend.innerHTML = legendHtml(p, bars[i], bars[i - 1])
-    } else if (p.hover) {
-      p.hover = false
-      liveLegend(p)
-    }
+  chart.subscribeCrosshairMove((param: Any) =>
+    hoverLegend(p, param.time && param.point ? param.time : null),
+  )
+  // Crosshair sync with the other cells: a synced crosshair drives the legend too.
+  p.syncOff = registerCrosshairSync({
+    chart,
+    series: () => p.candleSeries,
+    bars: () => legendCandles(p.style, p.shown),
+    onSync: (t) => hoverLegend(p, t),
   })
   p.ro = null
   reload(p)
+}
+
+/**
+ * The bar under the crosshair (time in seconds), else the live one — read from
+ * the panel's own bars so every style (line, footprint, ...) gets the full
+ * OHLC readout.
+ */
+function hoverLegend(p: Panel, time: Any): void {
+  const legend = p.el?.querySelector('.rc-legend') as HTMLElement | null
+  if (!legend) return
+  const bars = legendCandles(p.style, p.shown)
+  const i = time ? bars.findIndex((c) => Math.floor(c.t / 1000) === time) : -1
+  if (i >= 0) {
+    p.hover = true
+    legend.innerHTML = legendHtml(p, bars[i], bars[i - 1])
+  } else if (p.hover) {
+    p.hover = false
+    liveLegend(p)
+  }
 }
 
 function reload(p: Panel): void {
@@ -530,7 +609,8 @@ function reload(p: Panel): void {
   closeWs(p)
   const legend = p.el?.querySelector('.rc-legend') as HTMLElement | null
   if (legend) legend.textContent = 'Loading…'
-  loadCandles(p.sym, p.tf)
+  // Background priority; a load superseded before its turn is dropped unsent.
+  loadCandles(p.sym, p.tf, { isStale: () => p.token !== token })
     .then(({ candles, folder }) => {
       // A later symbol/interval change, or a teardown, wins over this response.
       if (p.token !== token || !p.candleSeries) return
@@ -539,8 +619,10 @@ function reload(p: Panel): void {
       connect(p, token)
     })
     .catch((e) => {
+      // Superseded (including a dropped, never-sent load): nothing to report.
+      if (p.token !== token) return
       console.warn('companion load', e)
-      if (p.token === token && legend) legend.textContent = 'Data unavailable'
+      if (legend) legend.textContent = 'Data unavailable'
     })
 }
 
@@ -770,9 +852,10 @@ export function watchStageHeight(): void {
 
 /** Re-theme companions when the palette or light/dark mode changes. */
 export function applyCompanionTheme(): void {
-  const tv: Any = tvChartOptions()
+  const pal = chartPalette()
   panels.forEach((p) => {
     if (!p.chart) return
+    const tv: Any = tvChartOptions(pal, () => isDailyTf(p.tf))
     p.chart.applyOptions({
       ...tv,
       ...tvWatermark(watermarkOf(p), 32),
