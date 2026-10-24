@@ -17,6 +17,7 @@ import { pfmt, cfmt } from '../../utils/format'
 import { signalData } from '../signals/signals'
 import { latestNews } from '../news/newsFeed'
 import { aiComposite, calcATR, forecastFrom } from '../../utils/indicators'
+import { tfDef, tfMs } from '../../services/timeframe'
 import { getMLState } from '../ml/store'
 
 type Any = any
@@ -60,7 +61,8 @@ function activeMarket(): string {
       `indicators (${state.tf || '15m'}): RSI(14) ${a.rsi.toFixed(1)} | MACD hist ${a.macd.hist > 0 ? 'positive' : 'negative'} (${a.macd.hist.toFixed(4)}) | EMA20 ${n2(a.e20)} price ${a.last > a.e20 ? 'above' : 'below'} it | Bollinger %B ${a.bb.pctB.toFixed(0)}% | volume ${String(a.vt).toLowerCase()} | ATR(14) ${n2(atr)}`,
     )
     lines.push(`composite score ${a.score > 0 ? '+' : ''}${a.score} (${a.label})`)
-    const fc = forecastFrom(closes) as Any
+    // The chart's candles: 1h/24h must mean clock hours on any timeframe.
+    const fc = forecastFrom(closes, tfMs(tfDef(state.tf)) / 60000) as Any
     if (fc && fc.rows) {
       lines.push(
         `linear-regression bias ${fc.bias}: 1h ~${n2(fc.rows[0].pred)}, 24h ~${n2(fc.rows[3].pred)} (projection from recent closes, not a forecast the terminal stands behind)`,

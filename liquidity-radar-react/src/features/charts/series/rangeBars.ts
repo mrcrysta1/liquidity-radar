@@ -14,7 +14,7 @@
 import type { CandleFlat } from '../../../services/market'
 
 /** The chart works in whole seconds, so bars are spaced at least this far apart. */
-const STEP_MS = 1000
+export const STEP_MS = 1000
 /** Past this many bars a range is too small to be useful — see minSafeRange. */
 export const MAX_RANGE_BARS = 20000
 

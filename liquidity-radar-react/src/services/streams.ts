@@ -20,6 +20,7 @@ import {
 } from './market'
 import { bucketEnd, mainFolder, tfDef } from './timeframe'
 import { noteStream } from './dataSources'
+import { StreamMux } from './streamMux'
 import { ingestTrade } from '../features/delta/delta'
 import { ingestWhaleAgg } from '../features/whales/whaleFlow'
 
@@ -34,11 +35,6 @@ export interface StreamsCallbacks {
   onAnalytics(): void
 }
 
-let wsTk: Any = null
-let wsKl: Any = null
-let wsDp: Any = null
-let wsAg: Any = null
-
 // The trade tape can run to hundreds of prints a second; paints are coalesced
 // onto an animation frame so a busy market cannot outrun the renderer.
 let tradeFrame = 0
@@ -52,62 +48,76 @@ const unraf: (h: number) => void =
     ? cancelAnimationFrame
     : (h) => clearTimeout(h as unknown as ReturnType<typeof setTimeout>)
 
-// Socket lifecycle. Every connectStreams() starts a new generation; a socket
-// from an older generation can no longer write data, touch the live count or
-// schedule a reconnect. That closes three holes the old counter-based version
-// had: closing sockets decrementing the *new* sockets' count (the status pill
-// flipping to "Try" while data flowed), untracked reconnect timers opening a
-// duplicate socket after a timeframe switch, and the previous coin's sockets
-// writing prices into the new coin while a symbol switch was still loading.
+// Socket lifecycle. The focused symbol's four streams share one combined
+// socket per host (services/streamMux) that stays open across coin and
+// timeframe switches: a switch replaces the wanted set and the mux sends the
+// difference as SUBSCRIBE / UNSUBSCRIBE frames. Closing and reopening four
+// sockets per switch is what produced Chrome's "Ping received after close"
+// (Binance answers a client Close ~2s late and pings inside that window) and
+// sockets torn down while still connecting.
+//
+// Every connectStreams() starts a new generation with fresh handlers, so the
+// previous coin's frames still in flight have nowhere to land.
 let gen = 0
-/** Open sockets of the current generation — the live count is its size, never a running tally. */
-const openSockets = new Set<Any>()
-const reconnectTimers = new Set<ReturnType<typeof setTimeout>>()
-const lastMsgAt = new Map<Any, number>()
 let lastCb: StreamsCallbacks | null = null
-let expectedStreams = 0
+const SPOT_WS = 'wss://stream.binance.com:9443/ws/'
 /**
- * Silence after which a socket counts as stalled and is replaced. The ticker
- * pushes every second and klines every ~2s; depth pushes only on change. The
- * trade tape has no limit: a quiet pair can go minutes without a print.
+ * Silence after which a stream counts as stalled and its socket is replaced.
+ * The ticker pushes every second and klines every ~2s; depth pushes only on
+ * change. The trade tape has no limit: a quiet pair can go minutes without a
+ * print.
  */
-const STALL_MS: Record<string, number> = { tk: 20_000, kl: 45_000, dp: 45_000 }
+const STALL_MS: Record<string, number> = { ticker: 20_000, kline: 45_000, depth: 45_000 }
+const stallOf = (stream: string): number =>
+  /@ticker$/.test(stream)
+    ? STALL_MS.ticker
+    : /@kline_/.test(stream)
+      ? STALL_MS.kline
+      : /@depth/.test(stream)
+        ? STALL_MS.depth
+        : 0
+
+/** One mux per host: spot, and the futures host gold streams from. */
+const muxes = new Map<string, StreamMux>()
+function muxFor(wsBase: string): StreamMux {
+  let m = muxes.get(wsBase)
+  if (!m) {
+    m = new StreamMux({
+      base: wsBase.replace(/\/ws\/$/, '/stream'),
+      stallMs: stallOf,
+      // Per-stream URL, as dataSources matches it (…/ws/btcusdt@ticker).
+      onLive: (stream, up, dropped) => {
+        if (up) noteStream(wsBase + stream, true)
+        else if (dropped) noteStream(wsBase + stream, false)
+      },
+      onChange: () => {
+        if (m!.connected) mdHearbeat('ws')
+        syncCount()
+        lastCb?.onStatus()
+      },
+      onDrop: (reason) => {
+        mdDebug.log('ws', reason + ' — reconnecting')
+        md.conn.ws.reconnects++
+        mdHealth.wsReconnects++
+      },
+    })
+    muxes.set(wsBase, m)
+  }
+  return m
+}
 
 function syncCount(): void {
-  state.wsOpen = openSockets.size
-  md.conn.ws.streams = openSockets.size
-  md.conn.ws.up = openSockets.size > 0
+  let n = 0
+  muxes.forEach((m) => (n += m.liveCount))
+  state.wsOpen = n
+  md.conn.ws.streams = n
+  md.conn.ws.up = n > 0
 }
 
-function closeWS(ws: Any): void {
-  if (ws) {
-    ws._dead = true
-    openSockets.delete(ws)
-    lastMsgAt.delete(ws)
-    try {
-      ws.close()
-    } catch (e) {
-      /* ignore */
-    }
-  }
-}
-
-/** Close every stream now, e.g. the moment the symbol changes. */
+/** Stop every stream now, e.g. the moment the symbol changes. The socket stays up for the next one. */
 export function disconnectStreams(cb?: StreamsCallbacks): void {
   gen++
-  reconnectTimers.forEach((h) => clearTimeout(h))
-  reconnectTimers.clear()
-  closeWS(wsTk)
-  closeWS(wsKl)
-  closeWS(wsDp)
-  closeWS(wsAg)
-  wsTk = null
-  wsKl = null
-  wsDp = null
-  wsAg = null
-  openSockets.clear()
-  lastMsgAt.clear()
-  expectedStreams = 0
+  muxes.forEach((m) => m.want({}))
   syncCount()
   if (tradeFrame) unraf(tradeFrame)
   tradeFrame = 0
@@ -119,31 +129,14 @@ let watching = false
 function watchStreams(): void {
   if (watching || typeof window === 'undefined') return
   watching = true
-  const check = () => {
-    const now = Date.now()
-    openSockets.forEach((ws) => {
-      const limit = STALL_MS[ws._key]
-      if (!limit) return
-      if (now - (lastMsgAt.get(ws) ?? ws._openedAt ?? now) > limit) {
-        mdDebug.log('ws', 'stalled ' + ws._key + ' — reconnecting')
-        // Not marked dead, so onclose takes the normal reconnect path.
-        try {
-          ws.close()
-        } catch (e) {
-          /* ignore */
-        }
-      }
-    })
-  }
+  const check = () => muxes.forEach((m) => m.check())
   setInterval(check, 5000)
   // Back from sleep or a hidden tab: check at once instead of up to 5s later.
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') check()
   })
   // The network returned: anything missing reconnects now, not on its backoff.
-  window.addEventListener('online', () => {
-    if (lastCb && openSockets.size < expectedStreams) connectStreams(lastCb)
-  })
+  window.addEventListener('online', () => muxes.forEach((m) => m.wake()))
 }
 
 export function connectStreams(cb: StreamsCallbacks): void {
@@ -165,9 +158,8 @@ export function connectStreams(cb: StreamsCallbacks): void {
     cb.onStatus()
     return
   }
-  expectedStreams = 4
   const s = (perp ?? mdSym(state.symbol) ?? '').toLowerCase()
-  const WS = perp ? PERP_WS : 'wss://stream.binance.com:9443/ws/'
+  const WS = perp ? PERP_WS : SPOT_WS
   // Gold's perpetual trades at a basis to spot; shift every price onto spot
   // (services/spotGold). 0 for everything else.
   const sb = (): number => (perp ? spotBasis(perp) : 0)
@@ -175,55 +167,16 @@ export function connectStreams(cb: StreamsCallbacks): void {
   const def = tfDef(tf)
   const bufKey = mdSym(state.symbol) + '|' + tf
   md.series = { symbol: state.symbol, tf: tf }
-  // Reconnect backoff per stream: 1.2s x 2^attempt, capped at 30s, with jitter.
-  const make = function (key: string, url: string, onMsg: (d: Any) => void) {
-    if (gen !== myGen) return null
-    let ws: Any = null
-    try {
-      ws = new WebSocket(url)
-    } catch (e) {
-      mdDebug.log('ws', 'create fail ' + key)
-      return null
-    }
-    if (key === 'tk') wsTk = ws
-    else if (key === 'kl') wsKl = ws
-    else if (key === 'ag') wsAg = ws
-    else wsDp = ws
-    const attempts = (state[key + '_retry'] = Number(state[key + '_retry'] || 0) + 1)
-    ws._attempts = attempts
-    ws._gen = myGen
-    ws._key = key
-    ws.onopen = function () {
-      if (ws._gen !== gen || ws._dead) {
-        try {
-          ws.close()
-        } catch (e) {
-          /* ignore */
-        }
-        return
-      }
-      noteStream(url, true)
-      ws._openedAt = Date.now()
-      openSockets.add(ws)
-      state[key + '_retry'] = 0
-      mdHearbeat('ws')
-      syncCount()
-      cb.onStatus()
-    }
-    ws.onmessage = function (ev: MessageEvent) {
-      // A socket from an earlier generation (the previous coin or timeframe)
-      // must not write into the current one's state.
-      if (ws._gen !== gen) return
-      lastMsgAt.set(ws, Date.now())
-      let d: Any
-      try {
-        d = JSON.parse(ev.data)
-      } catch (e) {
-        mdDebug.log('ws', 'bad json ' + key)
-        return
-      }
+  // Handlers for this generation, keyed by stream name; handed to the mux
+  // below once all four are built.
+  const wanted: Record<string, (d: unknown) => void> = {}
+  const make = function (key: string, url: string, onMsg: (d: Any) => void): void {
+    wanted[url.slice(WS.length)] = function (d: unknown) {
+      // The previous coin's or timeframe's handler must not write into the
+      // current one's state.
+      if (gen !== myGen) return
       if (!mdVal.wsMsg(d)) {
-        mdDebug.log('ws', 'invalid ' + key, ev.data && ev.data.slice ? ev.data.slice(0, 60) : '')
+        mdDebug.log('ws', 'invalid ' + key, JSON.stringify(d).slice(0, 60))
         return
       }
       mdHearbeat('ws')
@@ -233,32 +186,6 @@ export function connectStreams(cb: StreamsCallbacks): void {
         mdDebug.log('ws', 'handler ' + key, e)
       }
     }
-    ws.onclose = function () {
-      noteStream(url, false)
-      openSockets.delete(ws)
-      lastMsgAt.delete(ws)
-      if (ws._gen !== gen) return // superseded: it neither counts nor reconnects
-      syncCount()
-      cb.onStatus()
-      if (ws._dead) return
-      md.conn.ws.reconnects++
-      mdHealth.wsReconnects++
-      // subscription restoration: only revive if this stream is still wanted & symbol unchanged
-      if (state[key + '_want'] !== url || state.symbol !== md.series.symbol) return
-      const exp = Number(state[key + '_retry'] || 0)
-      const delay = Math.min(30000, 1200 * Math.pow(2, Math.min(exp, 5))) + Math.floor(Math.random() * 400)
-      const h = setTimeout(function () {
-        reconnectTimers.delete(h)
-        if (gen === myGen && state[key + '_want'] === url && state.symbol === md.series.symbol)
-          make(key, url, onMsg)
-      }, delay)
-      reconnectTimers.add(h)
-    }
-    ws.onerror = function () {
-      /* recovery handled via onclose */
-    }
-    state[key + '_want'] = url
-    return ws
   }
   const ticker = function (): Any {
     const t = (state.tickers[state.symbol] as Any) || {
@@ -392,4 +319,7 @@ export function connectStreams(cb: StreamsCallbacks): void {
     if (!mdStoreOB(state.symbol, ob)) return
     state.ob = ob
   })
+  muxFor(WS).want(wanted)
+  syncCount()
+  cb.onStatus()
 }

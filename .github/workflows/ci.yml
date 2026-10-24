@@ -1,0 +1,65 @@
+# App checks for the React app (liquidity-radar-react): lint, type check, engine
+# tests, production build (main app + nested pro-terminal) and the pro-terminal
+# unit tests. Runs on pull requests to master and on pushes to master, only when
+# the web app (or this workflow) changes. The job "checks" is the one to mark as
+# a required status check.
+#
+# The browser smoke tests (npm run smoke / smoke:layout / smoke:styles) are NOT
+# run here: they need headless Chrome plus live Binance market data, and GitHub's
+# US runners are often refused by api.binance.com (HTTP 451). Run them locally.
+name: CI
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - 'liquidity-radar-react/**'
+      - '.github/workflows/ci.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'liquidity-radar-react/**'
+      - '.github/workflows/ci.yml'
+
+# A newer push to the same branch/PR cancels the run still in progress.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: liquidity-radar-react
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          # Node 24 (same as the bot workflows): the tests import .ts files
+          # directly, which needs Node's built-in type stripping.
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            liquidity-radar-react/package-lock.json
+            liquidity-radar-react/pro-terminal/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      # The build (scripts/build-pro.mjs) also builds the nested Pro Terminal app;
+      # installing it explicitly keeps the install step visible and cached.
+      - name: Install pro-terminal dependencies
+        run: npm ci --prefix pro-terminal
+      - name: Lint
+        run: npm run lint
+      - name: Type check
+        run: npx tsc -p tsconfig.app.json --noEmit
+      - name: Test
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Test pro-terminal
+        run: npm test --prefix pro-terminal

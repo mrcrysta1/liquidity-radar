@@ -7,7 +7,7 @@
 import { state } from './store'
 import { jget } from '../api/client'
 import { COINS, HOT_LIST } from '../constants/market'
-import { binancePerpOf } from '../constants/instruments'
+import { futuresSymbolOf } from './symbolScope'
 import { noteCall } from './dataSources'
 
 export interface FuturesEntry {
@@ -34,8 +34,13 @@ interface OiRow {
 }
 
 const FAPI = 'https://fapi.binance.com'
-/** The futures symbol for a hot-list key (gold's spot symbol XAUUSD trades as XAUUSDT). */
-const futSym = (k: string) => binancePerpOf(COINS[k].sym) ?? COINS[k].sym
+/**
+ * The futures symbol for a hot-list key: gold's spot XAUUSD trades as
+ * XAUUSDT, and PEPE/SHIB/BONK/FLOKI as 1000-unit contracts (symbolScope).
+ */
+const futSym = (k: string) => futuresSymbolOf(COINS[k].sym)?.sym ?? COINS[k].sym
+/** Spot units per contract unit for a hot-list key (1000 for 1000PEPEUSDT). */
+const futMult = (k: string) => futuresSymbolOf(COINS[k].sym)?.mult ?? 1
 
 export async function fetchFuturesSnapshot(): Promise<void> {
   const symbols = new Set(HOT_LIST.map(futSym))
@@ -49,9 +54,9 @@ export async function fetchFuturesSnapshot(): Promise<void> {
     const tickerBySym = new Map(tickers.filter((t) => symbols.has(t.symbol)).map((t) => [t.symbol, t]))
 
     // premiumIndex lists every pair that actually has a futures market, so
-    // use it to skip the ones that do not. FLOKI, PEPE and SHIB were failing
-    // an open-interest call apiece on every poll and showing up in the data
-    // source register as permanently unhealthy.
+    // use it to skip the ones that do not. FLOKI, PEPE and SHIB used to fail
+    // an open-interest call apiece on every poll (they trade as 1000-unit
+    // contracts, now mapped by futSym); this still guards any unlisted coin.
     const oiKeys = HOT_LIST.filter((k) => premiumBySym.has(futSym(k)))
     const oiResults = await Promise.allSettled(
       oiKeys.map((k) => jget(FAPI + '/fapi/v1/openInterest?symbol=' + futSym(k)) as Promise<OiRow>),
@@ -70,12 +75,14 @@ export async function fetchFuturesSnapshot(): Promise<void> {
       const t = tickerBySym.get(sym)
       if (!p || !t) return
       const oi = oiByKey.get(k) ?? null
+      // Restated per spot unit so a 1000PEPE row reads at PEPE's own price.
+      const mult = futMult(k)
       out[k] = {
-        markPrice: Number(p.markPrice),
+        markPrice: Number(p.markPrice) / mult,
         fundingRate: Number(p.lastFundingRate),
         pct: Number(t.priceChangePercent),
         qvol: Number(t.quoteVolume),
-        openInterest: oi != null && isFinite(oi) ? oi : null,
+        openInterest: oi != null && isFinite(oi) ? oi * mult : null,
       }
     })
     state.futures = out

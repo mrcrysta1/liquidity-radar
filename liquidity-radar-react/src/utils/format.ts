@@ -12,7 +12,12 @@ export function fmt(n: number, d?: number): string {
 
 export function pfmt(p: number): string {
   if (!isFinite(p)) return '—'
-  const d = p >= 100 ? 2 : p >= 1 ? 4 : p >= 0.01 ? 5 : p >= 0.0001 ? 6 : 8
+  // Decimals follow the magnitude, so a short is formatted like a long.
+  const a = Math.abs(p)
+  // Below a millionth, 8 decimals keep fewer than two digits (or none):
+  // show about four significant digits instead.
+  const tiny = a > 0 && a < 1e-6 ? Math.min(20, Math.ceil(-Math.log10(a)) + 3) : 0
+  const d = a >= 100 ? 2 : a >= 1 ? 4 : a >= 0.01 ? 5 : a >= 0.0001 ? 6 : tiny || 8
   return fmt(p, d)
 }
 

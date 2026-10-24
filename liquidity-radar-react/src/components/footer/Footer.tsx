@@ -4,5 +4,5 @@
 // swaps), so React can own it safely. Markup is byte-identical to the original
 // vanilla index.html footer; no hooks, no imports, no engine coupling.
 export function Footer() {
-  return <footer>&copy; 2027 Liquidity Radar. All rights reserved.</footer>
+  return <footer>&copy; {new Date().getFullYear()} Liquidity Radar. All rights reserved.</footer>
 }

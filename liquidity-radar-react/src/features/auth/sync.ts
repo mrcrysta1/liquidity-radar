@@ -14,12 +14,12 @@ export const SYNC_KEYS = [
   'lr-theme', 'lr-palette-v3', 'lr-navCollapsed',
   // chart
   'lr-chartIndicators', 'lr-chartPrefs', 'lr-chartLayout', 'lr-chartMagnet', 'lr-tf', 'lr-tfFavs', 'lr-tfGroups',
-  'lr-tfCustom', 'lr-rangeBars',
+  'lr-tfCustom', 'lr-chartTz', 'lr-rangeBars', 'lr-renkoBox', 'lr-reversalCharts', 'lr-crosshairSync',
   'lr-chartSide', 'lr-chartSideTab', 'lr-showDelta', 'lr-showMLPrediction', 'lr-showConfluence', 'lr-showObGauge',
   'lr-showRLPolicy', 'lr-showVolumeProfile', 'lr-vpSettings', 'lr-showWhaleBubbles', 'lr-whaleMult', 'lr-mc-cols',
-  'lr-drawings-v1', 'lr-pineScripts', 'lr-panelIndicators-v1',
+  'lr-drawings-v1', 'lr-pineScripts', 'lr-panelIndicators-v1', 'lr-savedLayouts-v1', 'lr-mc-panels-v1',
   // lists and alerts
-  'lr-favCoins', 'lr-pinCoin', 'lr_alerts_v1',
+  'lr-favCoins', 'lr-pinCoin', 'lr-watchlists', 'lr_alerts_v1',
   // paper trading and the self-learning engine
   'lr-paperTrades', 'lr-rlAutoTrade', 'lr-sl-config-v1', 'lr-sl-trades-v1', 'lr-sl-log-v1', 'lr-sl-models-v1',
 ] as const

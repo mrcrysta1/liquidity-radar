@@ -9,6 +9,8 @@
 // A venue is data, not code: symbol mapping, the URLs to call and a parser for
 // the shapes they return. Adding one is a table entry.
 
+import { futuresSymbolOf } from '../../services/symbolScope.ts'
+
 /** What the table shows for a venue, once parsed. */
 export interface VenueQuote {
   last?: number
@@ -57,7 +59,8 @@ export const VENUES: Venue[] = [
     urls: (s) => [
       'https://api.binance.com/api/v3/ticker/24hr?symbol=' + s,
       'https://api.binance.com/api/v3/ticker/bookTicker?symbol=' + s,
-      'https://fapi.binance.com/fapi/v1/premiumIndex?symbol=' + s,
+      // Funding only (a ratio, so the 1000-unit contracts need no rescale).
+      'https://fapi.binance.com/fapi/v1/premiumIndex?symbol=' + (futuresSymbolOf(s)?.sym ?? s),
     ],
     parse: ([t, b, f]) => ({
       last: num(obj(t)?.lastPrice),

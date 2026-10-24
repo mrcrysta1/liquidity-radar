@@ -10,7 +10,8 @@
 // core/providers/chain.ts and providers/{binance,bybit,okx}.ts.
 import { COINS } from '../constants/market'
 import { isInstrument } from '../constants/instruments'
-import { jget } from '../api/client'
+import { isStaleRequest, jget } from '../api/client'
+import type { JgetOptions } from '../api/client'
 import { noteStream } from './dataSources'
 import { mdFromK, mdSym, mdTf } from './market'
 import type { CandleFlat } from './market'
@@ -52,6 +53,8 @@ export async function pageKlines(
     try {
       page = await fetchPage(limit, endTime)
     } catch (e) {
+      // Abandoned by the caller: nobody wants even the pages in hand.
+      if (isStaleRequest(e)) throw e
       // Keep the pages already fetched — a short history beats a blank chart.
       if (out.length) break
       throw e
@@ -70,7 +73,14 @@ const KLINE_URL = 'https://api.binance.com/api/v3/klines'
 // 45s off 1s candles would otherwise want 9000 rows.
 const MAX_PAGES = 5
 
-function binanceKlines(sym: string, base: string, need: number, before: number) {
+/**
+ * How a candle load waits for its Binance slot: the visible chart's own
+ * history asks for 'high', and a load the caller has superseded (another coin
+ * or interval picked) says so through isStale and is dropped unsent.
+ */
+export type KlineReq = Pick<JgetOptions, 'priority' | 'isStale'>
+
+function binanceKlines(sym: string, base: string, need: number, before: number, req?: KlineReq) {
   return pageKlines(need, before, 1000, MAX_PAGES, async (limit, endTime) => {
     const url =
       KLINE_URL +
@@ -81,7 +91,7 @@ function binanceKlines(sym: string, base: string, need: number, before: number) 
       '&limit=' +
       limit +
       (endTime ? '&endTime=' + endTime : '')
-    const rows = (await jget(url)) as unknown[]
+    const rows = (await jget(url, req)) as unknown[]
     return rows.map(mdFromK).filter((c): c is CandleFlat => !!c)
   })
 }
@@ -288,26 +298,30 @@ function klineStore(): ChainStore<CandleFlat[]> {
 }
 
 /** Candle history: Binance → Bybit → OKX → last good copy. */
-export const klineChain = new ProviderChain<[string, string, number, number], CandleFlat[]>(
+export const klineChain = new ProviderChain<[string, string, number, number, KlineReq?], CandleFlat[]>(
   [
     { id: 'binance', name: 'Binance', fn: binanceKlines },
     { id: 'bybit', name: 'Bybit', fn: bybitKlines },
     { id: 'okx', name: 'OKX', fn: okxKlines },
   ],
-  { store: klineStore() },
+  // The request options say how to wait, not what to fetch: keep them out of
+  // the last-good key (klineStore reads its fourth element).
+  { store: klineStore(), keyOf: (args) => JSON.stringify(args.slice(0, 4)) },
 )
 
 /**
  * Base-interval candles for a crypto symbol via the failover chain. Throws
- * only when every provider failed and nothing was ever cached.
+ * only when every provider failed and nothing was ever cached — or with a
+ * StaleRequestError when `req.isStale` dropped the load before it was sent.
  */
 export function fetchKlinesChain(
   sym: string,
   base: string,
   need: number,
   before = 0,
+  req?: KlineReq,
 ): Promise<ChainResult<CandleFlat[]>> {
-  return klineChain.get(String(mdSym(sym)), base, need, before)
+  return klineChain.get(String(mdSym(sym)), base, need, before, req)
 }
 
 // ---- Feature kline rows ------------------------------------------------

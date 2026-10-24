@@ -22,7 +22,7 @@ import {
 import { baseOf, coinMeta } from '../utils/coins'
 import { $, showToast, closeModal } from '../utils/dom'
 import { computeAnalytics, renderAnalysis } from '../features/analysis'
-import { fetchNews, fetchTrending, fetchBreaking, wireNewsUI } from '../features/news/newsFeed'
+import { fetchNews, fetchTrending, fetchBreaking, wireNewsUI, primeNewsCache } from '../features/news/newsFeed'
 
 import { state } from '../services/store'
 import { mdPill, mdToggleDebug } from '../services/market'
@@ -43,6 +43,7 @@ import {
   fetchOI,
   fetchFG,
   fetchWhales,
+  resetCandles,
   wireMarketHooks,
 } from '../services/marketData'
 import { noteKlineLive, renderKlineBadge, tickerFeed } from '../services/failover'
@@ -139,6 +140,7 @@ $('symSelect').addEventListener('change',e=>setSymbol(e.target.value));
 // The <TimeframePicker/> component owns the toolbar UI and state.tf; the
 // engine only supplies the reload when the interval changes.
 onTimeframeChange(()=>{
+  resetCandles(); // the previous interval's bars must not stand in for this one's
   fetchKlines(state.symbol);
   connectStreams(streamCb); // restart live kline stream at the new, consistent interval
 });
@@ -184,6 +186,9 @@ function init(){
   initTheme();
   syncMLWanted();
   wireNewsUI();
+  // The last wire from lr_news_cache, so the News tab and the dashboard's
+  // headlines are not blank until the feeds are asked in wave 4.
+  primeNewsCache();
 
   // Wave 1 — the rest of the charted symbol's own context.
   wave(1200, 'symbol-context', () => {

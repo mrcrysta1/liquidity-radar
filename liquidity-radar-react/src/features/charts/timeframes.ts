@@ -186,7 +186,11 @@ export function onTimeframeChange(fn: (tf: string) => void): void {
   onChange = fn
 }
 
-export function setTimeframe(id: string): void {
+/**
+ * Switch the main chart's timeframe. `reload: false` leaves the reload to
+ * the caller — a coin switch that follows will load the new pair once.
+ */
+export function setTimeframe(id: string, opts: { reload?: boolean } = {}): void {
   const tf = normalizeTf(id)
   if (tf === current) return
   current = tf
@@ -194,5 +198,5 @@ export function setTimeframe(id: string): void {
   storageSetRaw(TF_KEY, tf)
   syncChartTitle()
   emit()
-  if (onChange) onChange(tf)
+  if (onChange && opts.reload !== false) onChange(tf)
 }

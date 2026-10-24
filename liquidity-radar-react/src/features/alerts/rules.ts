@@ -7,6 +7,7 @@
 // The indicator import carries its extension because Node's type stripping
 // (used by the unit tests) resolves specifiers literally.
 import { calcRSI, emaArr, macdSeries, smaArr } from '../../utils/indicators.ts'
+import { candlesMatch } from '../../services/symbolScope.ts'
 
 export type AlertKind = 'price' | 'technical' | 'watchlist'
 export const ALERT_LIMITS: Record<AlertKind, number> = { price: 1000, technical: 1000, watchlist: 15 }
@@ -210,6 +211,32 @@ export function evalPrice(
 /** Minimum candles before a technical condition is judged at all. */
 export const MIN_TECH_CANDLES = 60
 
+/** What the main chart currently holds, as far as alert evaluation cares. */
+export interface ChartedCandles {
+  symbol: string
+  tf: string
+  /** mdTf(tf): the interval form the candles tag is written with. */
+  tfKey: string
+  /** state.candlesKey — which market the candles actually belong to. */
+  candlesKey: string
+  bars: number
+}
+
+/**
+ * Whether a technical rule on `sym`/`tf` may read the main chart's candles.
+ * Symbol and interval matching is not enough: right after a switch the array
+ * can still hold the previous market's bars, so the candles' own tag must
+ * agree too.
+ */
+export function chartedCandlesFit(c: ChartedCandles, sym: string, tf: string): boolean {
+  return (
+    sym === c.symbol &&
+    tf === c.tf &&
+    candlesMatch(c.candlesKey, sym, c.tfKey) &&
+    c.bars >= MIN_TECH_CANDLES
+  )
+}
+
 /** Whether a technical condition holds on the latest candle (candles oldest first, `c` = close). */
 export function evalTechnical(
   rule: Pick<AlertRule, 'condition' | 'value' | 'value2'>,
@@ -327,4 +354,42 @@ export function stepRule(rule: AlertRule, hit: boolean, now: number, matched?: s
 /** Re-arming a rule clears its edge memory so it judges afresh. */
 export function rearm(rule: AlertRule): AlertRule {
   return { ...rule, enabled: true, lastState: undefined, lastMatched: undefined }
+}
+
+/**
+ * Decimals an alert level keeps: at least what the price axis shows (pfmt's
+ * steps) and at least six significant digits, so tiny-priced coins (1e-8)
+ * keep their precision while the pixel noise of a click is dropped.
+ */
+export function alertDecimals(p: number): number {
+  if (!Number.isFinite(p) || !(p > 0)) return 2
+  const axis = p >= 100 ? 2 : p >= 1 ? 4 : p >= 0.01 ? 5 : p >= 0.0001 ? 6 : 8
+  return Math.min(20, Math.max(axis, 5 - Math.floor(Math.log10(p))))
+}
+
+/**
+ * A price picked on the chart's price axis ("Add alert at …"): a crosses rule
+ * in the direction the market has to travel to reach it — above the last
+ * price it must cross up, at or below it cross down. The level is rounded to
+ * alertDecimals. Null when either price is unusable.
+ */
+export function ruleForPriceClick(
+  price: number,
+  last: number,
+): { condition: 'crosses_above' | 'crosses_below'; value: number } | null {
+  if (!Number.isFinite(price) || !(price > 0) || !Number.isFinite(last) || !(last > 0)) return null
+  const value = Number(price.toFixed(alertDecimals(price)))
+  return { condition: value > last ? 'crosses_above' : 'crosses_below', value }
+}
+
+/**
+ * How to show a system notification. Android Chrome throws on
+ * `new Notification()` — only a service-worker registration may show one — so
+ * the worker is preferred whenever there is one; the constructor is the
+ * fallback; without permission there is only the in-app toast.
+ */
+export function notifyVia(o: { granted: boolean; worker: boolean; ctor: boolean }): 'worker' | 'ctor' | 'none' {
+  if (!o.granted) return 'none'
+  if (o.worker) return 'worker'
+  return o.ctor ? 'ctor' : 'none'
 }

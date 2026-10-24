@@ -30,14 +30,14 @@ const MARKET = ['market']
 type Tick = { last?: number; pct?: number; qvol?: number } | undefined
 const tick = (base: string) => state.tickers[symOf(base)] as Tick
 
-function ChgPill({ pct }: { pct?: number }) {
+export function ChgPill({ pct }: { pct?: number }) {
   if (pct == null || !isFinite(pct)) return <span className="cmc-pill flat">—</span>
   const cls = pct > 0.005 ? 'up' : pct < -0.005 ? 'down' : 'flat'
   return <span className={'cmc-pill ' + cls}>{(pct > 0 ? '+' : '') + pct.toFixed(2)}%</span>
 }
 
 /** A button inside a clickable row: must not also open the chart. */
-function Btn({
+export function Btn({
   label,
   on,
   disabled,

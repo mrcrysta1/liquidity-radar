@@ -4,25 +4,11 @@ import { esc, pfmt, timeAgo } from '../../utils/format'
 import { $ } from '../../utils/dom'
 import { mdVal } from '../../services/market'
 import { state } from '../../services/store'
+import { safeUrl } from '../../utils/url'
+import { newsSimplify, type NewsItem, type RssItem } from './newsItem'
+import { hedge, loadNewsProgressive, type NewsLoadUpdate, type NewsPhase } from './newsLoad'
 
-export interface NewsItem {
-  title: string
-  url: string
-  time: number
-  src: string
-  color: string
-  img: string | null
-  coins: string[]
-  sent: 'pos' | 'neg' | 'neu'
-}
-
-interface RssItem {
-  title?: unknown
-  link?: string
-  pubDate?: string
-  thumbnail?: unknown
-  enclosure?: { link?: string }
-}
+export type { NewsItem }
 
 interface RssResponse {
   status?: string
@@ -60,195 +46,6 @@ interface NewsState {
   shown: number
 }
 
-function newsCoinsFor(title: string): string[] {
-  const coins: string[] = []
-  const t = (title || '').toUpperCase()
-  for (const k in COINS) {
-    const c = COINS[k]
-    if (!c || !c.sym) continue
-    const names = [k, c.name.toUpperCase()].filter(Boolean)
-    if (names.some((n) => n.length >= 3 && t.indexOf(n) > -1)) coins.push(k)
-  }
-  const alt: Record<string, string> = {
-    ETHEREUM: 'ETH',
-    BITCOIN: 'BTC',
-    SOLANA: 'SOL',
-    BINANCE: 'BNB',
-    'BNB COIN': 'BNB',
-    XRP: 'XRP',
-    DOGECOIN: 'DOGE',
-    DOGE: 'DOGE',
-    'SHIBA INU': 'SHIB',
-    PEPE: 'PEPE',
-    CARDANO: 'ADA',
-    AVALANCHE: 'AVAX',
-    POLKADOT: 'DOT',
-    CHAINLINK: 'LINK',
-    UNISWAP: 'UNI',
-    ARBITRUM: 'ARB',
-    OPTIMISM: 'OP',
-    POLYGON: 'POL',
-    SUI: 'SUI',
-    APTOS: 'APT',
-    NEAR: 'NEAR',
-    INJECTIVE: 'INJ',
-    CELESTIA: 'TIA',
-    SEI: 'SEI',
-    MAKER: 'MKR',
-    AAVE: 'AAVE',
-    FILECOIN: 'FIL',
-    BONK: 'BONK',
-    FLOKI: 'FLOKI',
-    ONDO: '',
-    RENDER: '',
-  }
-  Object.keys(alt).forEach((name) => {
-    const cn = alt[name]
-    if (cn && t.indexOf(name) > -1 && coins.indexOf(cn) < 0) coins.push(cn)
-  })
-  return coins
-}
-
-function newsSentiment(title: string): 'pos' | 'neg' | 'neu' {
-  const pos = [
-    'surge',
-    'rallies',
-    'soars',
-    'hits all-time',
-    'record high',
-    'gain',
-    'gains',
-    'bullish',
-    'breakout',
-    'breaks out',
-    'adopts',
-    'approval',
-    'approved',
-    'launch',
-    'partnership',
-    'institutional',
-    'inflow',
-    'accumulat',
-    'recovery',
-    'rebound',
-    'upgrade',
-    'milestone',
-    'outperform',
-    'beats',
-    'beats earnings',
-    'positive',
-    'boost',
-    'win',
-    'wins',
-    'green',
-    'new high',
-    'all-time high',
-    'etf approves',
-    'cleared',
-    'mainnet',
-    'integration',
-    'investment',
-    'demand surge',
-    'adoption',
-  ]
-  const neg = [
-    'crash',
-    'plunges',
-    'tanks',
-    'slumps',
-    'drops',
-    'sell-off',
-    'selloff',
-    'decline',
-    'bearish',
-    'hack',
-    'exploit',
-    'fraud',
-    'scam',
-    'lawsuit',
-    'sues',
-    'banned',
-    'ban',
-    'freeze',
-    'seized',
-    'arrest',
-    'insolvenc',
-    'bankrupt',
-    'delist',
-    'collapse',
-    'dip',
-    'warning',
-    'crackdown',
-    'regulatory risk',
-    'fine',
-    'penal',
-    'loss',
-    'outflow',
-    'withdrawal halt',
-    'pump and dump',
-    'ponzi',
-    'rug pull',
-    'vulnerability',
-    'security breach',
-    'data breach',
-    'deficit',
-    'downgrade',
-    'fail',
-    'fails',
-    'unemploy',
-    'recession',
-    'inflation fears',
-    'repeats',
-    'resign',
-    'step down',
-    'suspension',
-  ]
-  let s = 0
-  const text = (title || '').toLowerCase()
-  pos.forEach((w) => {
-    if (text.indexOf(w) > -1) s += 1
-  })
-  neg.forEach((w) => {
-    if (text.indexOf(w) > -1) s -= 1
-  })
-  if (
-    text.indexOf('not ') > -1 &&
-    (text.indexOf('not approve') > -1 ||
-      text.indexOf('not fixing') > -1 ||
-      text.indexOf('no gains') > -1)
-  )
-    s -= 1
-  return s > 0 ? 'pos' : s < 0 ? 'neg' : 'neu'
-}
-
-function newsDedup(a: string, b: string): boolean {
-  const norm = (t: string) =>
-    t
-      .toLowerCase()
-      .replace(/[^a-z0-9 ]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-  const na = norm(a)
-  const nb = norm(b)
-  if (na === nb) return true
-  const wa = new Set(na.split(' ').filter((w) => w.length > 3))
-  const wb = new Set(nb.split(' ').filter((w) => w.length > 3))
-  if (!wa.size || !wb.size) return false
-  let inter = 0
-  wa.forEach((w) => {
-    if (wb.has(w)) inter++
-  })
-  const union = wa.size + wb.size - inter
-  return union > 0 && inter / union >= 0.6
-}
-
-function newsNormKey(t: string): string {
-  return t
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '')
-    .slice(0, 60)
-}
-
 function newsCacheSave(): void {
   try {
     localStorage.setItem(NEWS_STO_KEY, JSON.stringify({ t: Date.now(), news: newsCache.news }))
@@ -257,14 +54,23 @@ function newsCacheSave(): void {
   }
 }
 
-function newsCacheLoad(): NewsItem[] | null {
+function newsCacheLoad(): { t: number; news: NewsItem[] } | null {
   try {
     const raw = localStorage.getItem(NEWS_STO_KEY)
     if (!raw) return null
     const d = JSON.parse(raw)
     if (!d || !d.news || !d.news.length) return null
     if (Date.now() - d.t > 6 * 60 * 60 * 1000) return null
-    return d.news
+    // A cache written before links were sanitised can still hold a
+    // javascript: URL, and latestNews() hands these items to other views.
+    const news = (d.news as NewsItem[])
+      .filter((n) => n && typeof n === 'object' && typeof n.title === 'string')
+      .map((n) => ({
+        ...n,
+        url: safeUrl(n.url),
+        img: n.img && safeUrl(n.img) !== '#' ? n.img : null,
+      }))
+    return news.length ? { t: Number(d.t) || 0, news } : null
   } catch (e) {
     return null
   }
@@ -328,104 +134,80 @@ async function rawNewsFetchProxy(i: number, to?: number): Promise<RssResponse> {
   }
 }
 
-async function rawNewsFetchFallback(i: number, to?: number): Promise<RssResponse> {
-  const c = new AbortController()
-  const h = setTimeout(() => c.abort(), to || 15000)
-  const url = NEWS_RSS[i][1]
-  try {
-    const t0 = Date.now()
-    // Through our own proxy, not straight at allorigins. A direct call is
-    // cross-origin and allorigins sends no CORS header for it, so in
-    // production this branch could only ever fail — it produced a blocked
-    // request and a console error every time the two feeds above did not
-    // answer. The host is already on the proxy allow-list.
-    const relay = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url)
-    const r = await fetch('/api/fetch?url=' + encodeURIComponent(relay), { signal: c.signal })
-    noteCall('https://api.allorigins.win/raw', r.ok, r.status, Date.now() - t0)
-    if (!r.ok) throw new Error('http ' + r.status)
-    return parseRssXml(await r.text())
-  } catch (e) {
-    throw new Error('allorigins fail', { cause: e })
-  } finally {
-    clearTimeout(h)
-  }
-}
+// Per-source budgets. rss2json usually answers in 1-3 s; the proxy is asked
+// as well once rss2json has had a head start, so one slow source no longer
+// costs a feed the sum of both timeouts.
+const RSS2JSON_TIMEOUT = 7000
+const PROXY_TIMEOUT = 7000
+const PROXY_HEAD_START = 3500
+/** After this the loading state ends with whatever has arrived. */
+const NEWS_DEADLINE = 8000
 
 function rawNewsFetchAny(i: number): Promise<RssResponse> {
-  // rss2json (CORS-enabled) -> same-origin /api/fetch proxy -> allorigins
-  return rawNewsFetch(i, 13000).catch(function () {
-    return rawNewsFetchProxy(i, 15000).catch(function () {
-      return rawNewsFetchFallback(i, 15000)
-    })
+  // rss2json (CORS-enabled) first, then the same-origin /api/fetch proxy.
+  // A 200 from rss2json can still carry status:"error" (feed it cannot
+  // read), which used to drop the feed without trying the proxy.
+  return hedge(
+    () =>
+      rawNewsFetch(i, RSS2JSON_TIMEOUT).then((r) => {
+        if (!r || r.status !== 'ok' || !r.items) throw new Error('rss2json ' + (r && r.status))
+        return r
+      }),
+    () => rawNewsFetchProxy(i, PROXY_TIMEOUT),
+    PROXY_HEAD_START,
+  )
+}
+
+function feedItems(i: number): Promise<NewsItem[] | null> {
+  return rawNewsFetchAny(i).then((res) => {
+    if (!res || res.status !== 'ok' || !res.items) return null
+    return res.items
+      .map(newsSimplify(NEWS_RSS[i][0], NEWS_RSS[i][2]))
+      .filter((n): n is NewsItem => !!n)
   })
 }
 
-function newsSimplify(
-  src: string,
-  color: string,
-): (it: RssItem | null | undefined) => NewsItem | null {
-  return function (it) {
-    if (!it || !it.title || typeof it.title !== 'string' || !it.title.trim()) return null
-    const title = it.title.trim()
-    const p = it.pubDate ? new Date(it.pubDate.replace(' ', 'T')).getTime() : Date.now()
-    return {
-      title,
-      url: it.link || '#',
-      time: p,
-      src,
-      color,
-      img: (it.thumbnail as string | undefined) || (it.enclosure && it.enclosure.link) || null,
-      coins: newsCoinsFor(title),
-      sent: newsSentiment(title),
-    }
-  }
+const newsStatus: { phase: NewsPhase | 'idle'; cachedAt: number | null } = {
+  phase: 'idle',
+  cachedAt: null,
 }
 
-export async function fetchNews(): Promise<void> {
+/** Where the wire is: for views (the dashboard tile) that need the empty/error state. */
+export function newsLoadPhase(): NewsPhase | 'idle' {
+  return newsStatus.phase
+}
+
+/**
+ * Put the lr_news_cache copy on screen before any feed is asked. Safe to
+ * call before the News tab exists; only fills in when nothing is shown yet.
+ */
+export function primeNewsCache(): void {
+  if (newsCache.news.length) return
   const cached = newsCacheLoad()
-  if (!newsCache.news && cached) {
-    newsCache.news = cached
-    renderNewsList()
-    renderNewsMeta()
-  }
-  try {
-    // stagger requests (120ms apart) so rss2json free-tier throttling doesn't drop feeds
-    const results = await Promise.all(
-      NEWS_RSS.map((_, i) =>
-        new Promise<void>((res) => setTimeout(res, i * 120)).then(() =>
-          rawNewsFetchAny(i).catch(() => null),
-        ),
-      ),
-    )
-    const merged: NewsItem[] = []
-    results.forEach((res, i) => {
-      if (!res || res.status !== 'ok' || !res.items) return
-      const src = NEWS_RSS[i][0]
-      const color = NEWS_RSS[i][2]
-      res.items.map(newsSimplify(src, color)).forEach((n) => {
-        if (!n) return
-        const k = newsNormKey(n.title)
-        if (!k) return
-        if (!merged.some((m) => newsDedup(m.title, n.title) || newsNormKey(m.title) === k))
-          merged.push(n)
-      })
-    })
-    merged.sort((a, b) => b.time - a.time)
-    const unique: NewsItem[] = []
-    merged.forEach((n) => {
-      if (unique.some((u) => newsDedup(u.title, n.title))) return
-      unique.push(n)
-    })
-    if (!unique.length) throw new Error('empty')
-    newsCache.news = unique
-    newsCacheSave()
-    renderNewsList()
-    renderNewsMeta()
-    const srcCounts: Record<string, number> = {}
-    unique.forEach((n) => {
-      srcCounts[n.src] = (srcCounts[n.src] || 0) + 1
-    })
-    $('newsSrcStrip')!.innerHTML =
+  if (!cached) return
+  newsCache.news = cached.news
+  newsStatus.phase = 'ready'
+  newsStatus.cachedAt = cached.t || null
+  renderNewsAll()
+}
+
+function cachedLabel(): string {
+  if (newsStatus.cachedAt == null) return ''
+  return ' · CACHED ' + timeAgo(newsStatus.cachedAt).toUpperCase()
+}
+
+function renderNewsAll(): void {
+  if (!$('newsList')) return
+  renderNewsList()
+  renderNewsMeta()
+  const items = newsCache.news
+  const srcCounts: Record<string, number> = {}
+  items.forEach((n) => {
+    srcCounts[n.src] = (srcCounts[n.src] || 0) + 1
+  })
+  const strip = $('newsSrcStrip')
+  if (strip)
+    strip.innerHTML =
       NEWS_RSS.filter((n) => srcCounts[n[0]])
         .map(
           (n) =>
@@ -440,22 +222,73 @@ export async function fetchNews(): Promise<void> {
             '</span>',
         )
         .join('') || ''
-    const clear = $('newsSrcClear')!
-    clear.style.display = newsState.src ? 'inline-flex' : 'none'
-    if (newsState.src) $('newsSrcName')!.textContent = newsState.src
-    renderTrending(unique)
-    fetchBreaking()
-    wireNewsUI()
-  } catch (e) {
-    if (newsCache.news && newsCache.news.length) {
-      renderNewsList()
-    } else {
-      $('newsList')!.innerHTML =
-        '<div class="fc-note">News feed unreachable from this network. Core radar features remain live via Binance.</div>'
-      $('newsCount')!.textContent = 'OFFLINE'
-      $('newsMore')!.style.display = 'none'
-    }
+  const clear = $('newsSrcClear')
+  if (clear) clear.style.display = newsState.src ? 'inline-flex' : 'none'
+  if (newsState.src && $('newsSrcName')) $('newsSrcName')!.textContent = newsState.src
+  renderTrending(items)
+  fetchBreaking()
+  wireNewsUI()
+}
+
+function renderNewsProblem(phase: 'empty' | 'error'): void {
+  const list = $('newsList')
+  if (!list) return
+  list.innerHTML =
+    phase === 'empty'
+      ? '<div class="fc-note">No stories in the feeds right now. They refresh every five minutes.</div>'
+      : '<div class="fc-note">News unavailable — the feeds did not answer. Core radar features remain live via Binance. ' +
+        '<button type="button" class="dt-cta" style="display:inline-flex;margin-left:6px" data-news-retry="1">Retry</button></div>'
+  $('newsCount')!.textContent = phase === 'empty' ? '0 STORIES' : 'OFFLINE'
+  $('newsMore')!.style.display = 'none'
+  const btn = list.querySelector('[data-news-retry]') as HTMLButtonElement | null
+  if (btn) btn.onclick = () => retryNews()
+}
+
+/** Re-run the fetch now (the Retry buttons on the News tab and dashboard). */
+export function retryNews(): void {
+  if (newsStatus.phase === 'error') {
+    newsStatus.phase = 'loading'
+    const list = $('newsList')
+    if (list) list.innerHTML = '<div class="fc-note">Loading live feed…</div>'
+    const cnt = $('newsCount')
+    if (cnt) cnt.textContent = '—'
   }
+  void fetchNews()
+}
+
+let newsRun = 0
+
+export async function fetchNews(): Promise<void> {
+  primeNewsCache()
+  const run = ++newsRun
+  if (!newsCache.news.length) newsStatus.phase = 'loading'
+  const apply = (u: NewsLoadUpdate) => {
+    if (u.phase === 'loading') return
+    if (u.phase === 'ready') {
+      newsStatus.phase = 'ready'
+      if (!u.cached) {
+        newsStatus.cachedAt = null
+        newsCache.news = u.items
+      }
+      renderNewsAll()
+      return
+    }
+    newsStatus.phase = u.phase
+    newsCache.news = []
+    renderNewsProblem(u.phase)
+  }
+  // Every feed at once (staggered 120ms so rss2json's free tier doesn't drop
+  // any), rendered as each lands; see loadNewsProgressive for the rules.
+  const final = await loadNewsProgressive({
+    total: NEWS_RSS.length,
+    fetchFeed: feedItems,
+    onUpdate: apply,
+    cached: newsCache.news,
+    deadlineMs: NEWS_DEADLINE,
+    staggerMs: 120,
+    isCurrent: () => run === newsRun,
+  })
+  if (run === newsRun && final && final.phase === 'ready' && !final.cached) newsCacheSave()
 }
 
 function filteredNews(): NewsItem[] {
@@ -548,12 +381,14 @@ function renderNewsMeta(): void {
 }
 
 function renderNewsList(): void {
-  if (!newsCache.news) return
+  // Nothing loaded yet: leave the loading / unavailable message in place.
+  if (!newsCache.news.length) return
   const list = filteredNews()
   const shown = newsState.shown
   $('newsCount')!.textContent =
     (newsState.src || newsState.query ? list.length + ' / ' + newsCache.news.length : list.length) +
-    ' STORIES'
+    ' STORIES' +
+    cachedLabel()
   if (!list.length) {
     $('newsList')!.innerHTML = '<div class="fc-note">No stories match this filter.</div>'
     $('newsMore')!.style.display = 'none'
@@ -578,8 +413,8 @@ function renderNewsList(): void {
         '<a class="news-item ' +
         sentCls +
         '" href="' +
-        esc(n.url) +
-        '" target="_blank" rel="noopener">' +
+        esc(safeUrl(n.url)) +
+        '" target="_blank" rel="noopener noreferrer">' +
         '<div class="news-item-body">' +
         '<div class="ni-meta">' +
         sentTag +
@@ -595,9 +430,9 @@ function renderNewsList(): void {
         '</div>' +
         coinTags +
         '</div>' +
-        (n.img && !/logo|placeholder|\.svg/i.test(n.img)
+        (n.img && !/logo|placeholder|\.svg/i.test(n.img) && safeUrl(n.img) !== '#'
           ? '<img class="news-thumb" src="' +
-            esc(n.img) +
+            esc(safeUrl(n.img)) +
             '" alt="" loading="lazy" onerror="this.style.display=\'none\'">'
           : '') +
         '</a>'
@@ -769,7 +604,7 @@ function wireNewsUI(): void {
 }
 
 export async function fetchTrending(): Promise<void> {
-  if (newsCache.news) {
+  if (newsCache.news.length) {
     renderTrending(newsCache.news)
   } else {
     $('trendingList')!.innerHTML =
@@ -793,8 +628,8 @@ export async function fetchBreaking(): Promise<void> {
     .map((n) => {
       return (
         '<div class="bb-item"><span class="bb-live">BREAKING</span><a href="' +
-        esc(n.url) +
-        '" target="_blank" rel="noopener" style="color:var(--txt);font-weight:600;font-size:13px">' +
+        esc(safeUrl(n.url)) +
+        '" target="_blank" rel="noopener noreferrer" style="color:var(--txt);font-weight:600;font-size:13px">' +
         esc(n.title) +
         '</a><span class="ni-time">' +
         esc(n.src) +

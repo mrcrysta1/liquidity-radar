@@ -10,6 +10,7 @@ import {
   getDrawTool,
   isMagnet,
   pendingPoints,
+  setDrawTool,
   setMagnet,
   subscribeDrawTools,
   toggleDrawTool,
@@ -585,5 +586,94 @@ export function DrawToolPicker() {
         </div>
       )}
     </div>
+  )
+}
+
+/** Re-render whenever the armed tool, the magnet or the drawings change. */
+function useDrawTools() {
+  const [, force] = useState(0)
+  useEffect(() => subscribeDrawTools(() => force((n) => n + 1)), [])
+}
+
+/** The tools TradingView keeps one click away on its left toolbar. */
+const QUICK_TOOLS = ['trend', 'hline', 'fibretr', 'rect', 'text']
+
+/**
+ * Left drawing toolbar, top group: the cursor (disarms any tool) and the most
+ * used tools. The full catalogue stays one button below, in DrawToolPicker.
+ */
+export function DrawQuickTools() {
+  useDrawTools()
+  const active = getDrawTool()
+  return (
+    <>
+      <button
+        type="button"
+        className={'chart-tool-btn tvb-icon draw-quick' + (active ? '' : ' on')}
+        aria-pressed={!active}
+        aria-label="Cursor"
+        onClick={() => setDrawTool(null)}
+      >
+        <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+          <path
+            d="M6 3.5v15l4-3.6 2.6 5.6 2.4-1.1-2.6-5.5 5.4-.4Z"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinejoin="round"
+          />
+        </svg>
+        <span className="tvb-tip">Cursor</span>
+      </button>
+      {QUICK_TOOLS.map((id) => {
+        const def = drawToolDef(id)
+        if (!def) return null
+        const on = active === id
+        return (
+          <button
+            key={id}
+            type="button"
+            className={'chart-tool-btn tvb-icon draw-quick' + (on ? ' on' : '')}
+            aria-pressed={on}
+            aria-label={def.name}
+            onClick={() => toggleDrawTool(id)}
+          >
+            <ToolIcon id={id} size={18} />
+            <span className="tvb-tip">{def.name}</span>
+          </button>
+        )
+      })}
+    </>
+  )
+}
+
+/** Left drawing toolbar, edit group: magnet snapping and the eraser. */
+export function DrawEditTools() {
+  useDrawTools()
+  const magnet = isMagnet()
+  const erasing = getDrawTool() === 'erase'
+  return (
+    <>
+      <button
+        type="button"
+        className={'chart-tool-btn tvb-icon draw-quick' + (magnet ? ' on' : '')}
+        aria-pressed={magnet}
+        aria-label="Magnet mode"
+        onClick={() => setMagnet(!magnet)}
+      >
+        <ToolIcon id="magnet" size={18} />
+        <span className="tvb-tip">Magnet: snap to open/high/low/close</span>
+      </button>
+      <button
+        type="button"
+        className={'chart-tool-btn tvb-icon draw-quick' + (erasing ? ' on' : '')}
+        aria-pressed={erasing}
+        aria-label="Eraser"
+        onClick={() => toggleDrawTool('erase')}
+      >
+        <ToolIcon id="erase" size={18} />
+        <span className="tvb-tip">Eraser</span>
+      </button>
+    </>
   )
 }
