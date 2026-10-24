@@ -698,6 +698,8 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   eq('newsSimplify: javascript thumbnail dropped', bad.img, null)
   eq('newsSimplify: missing link becomes #', simp({ title: 'x' }).url, '#')
   eq('newsSimplify: data: enclosure dropped', simp({ title: 'x', enclosure: { link: 'data:image/svg+xml,<svg onload=alert(1)>' } }).img, null)
+  eq('newsSimplify: RFC 822 pubDate parsed', simp({ title: 'x', pubDate: 'Fri, 24 Oct 2026 10:00:00 +0000' }).time, Date.UTC(2026, 9, 24, 10))
+  eq('newsSimplify: unparseable pubDate is 0, not NaN', simp({ title: 'x', pubDate: 'garbage' }).time, 0)
   eq('newsSimplify: empty title skipped', simp({ title: '  ', link: 'https://a.example' }), null)
 }
 
