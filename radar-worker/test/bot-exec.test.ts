@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { Futures, roundStep, roundTick, sign } from '../src/bot/futures.ts'
+import { Futures, TESTNET, TESTNET_BASES, assertTestnetBase, roundStep, roundTick, sign } from '../src/bot/futures.ts'
 import { DEFAULT_RISK, checkLimits, size } from '../src/bot/risk.ts'
 
 test('request signing matches Binance’s published example', () => {
@@ -8,10 +8,52 @@ test('request signing matches Binance’s published example', () => {
   assert.equal(sign(q, '2b5eb11e18796d12d88f13dc27dbbd02c2cc51ff7059765ed9821957d82bb4d9'), '3c661234138461fcc7a7d8746c6558c9842d4e10870d2ecbedf7777cad694af9')
 })
 
-test('mainnet needs an explicit opt-in', () => {
-  delete process.env.ALLOW_MAINNET
-  assert.throws(() => new Futures('k', 's', 'https://fapi.binance.com'), /mainnet/)
-  assert.ok(new Futures('k', 's').isTestnet)
+test('testnet-only guard: only the exact testnet base URLs are accepted', () => {
+  // Allowed (a trailing slash or surrounding spaces are tolerated).
+  for (const ok of [TESTNET, ...TESTNET_BASES, 'https://demo-fapi.binance.com/', ' https://testnet.binancefuture.com ']) {
+    const f = new Futures('k', 's', ok)
+    assert.ok(f.isTestnet)
+    assert.ok(TESTNET_BASES.includes(f.base))
+  }
+  assert.equal(new Futures('k', 's').base, TESTNET, 'default is the testnet')
+  // Everything else is refused, and there is no override any more.
+  process.env.ALLOW_MAINNET = 'yes'
+  try {
+    for (const bad of [
+      'https://fapi.binance.com',
+      'https://fapi.binance.com/',
+      'https://dapi.binance.com',
+      'https://api.binance.com',
+      'http://demo-fapi.binance.com',
+      'https://demo-fapi.binance.com.evil.example',
+      'https://demo-fapi.binance.com@fapi.binance.com',
+      'https://demo-fapi.binance.com/fapi',
+      'https://DEMO-FAPI.binance.com',
+      'https://testnet.binancefuture.com:8443',
+      '',
+    ])
+      assert.throws(() => new Futures('k', 's', bad), /Refusing to start/, bad)
+    assert.throws(() => assertTestnetBase(undefined), /Refusing to start/)
+  } finally {
+    delete process.env.ALLOW_MAINNET
+  }
+})
+
+test('testnet-only guard: requests never go to a base that was changed after start', async () => {
+  const f = new Futures('k', 's')
+  ;(f as unknown as { base: string }).base = 'https://fapi.binance.com'
+  const real = globalThis.fetch
+  let called = 0
+  globalThis.fetch = (async () => {
+    called++
+    return new Response('{}')
+  }) as typeof fetch
+  try {
+    await assert.rejects(() => f.request('GET', '/fapi/v1/time', {}, false), /Refusing to start/)
+    assert.equal(called, 0, 'nothing was sent')
+  } finally {
+    globalThis.fetch = real
+  }
 })
 
 test('a -1021 clock rejection re-syncs and retries once; stamps stay behind server time', async () => {
