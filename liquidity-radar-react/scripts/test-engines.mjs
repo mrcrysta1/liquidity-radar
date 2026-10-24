@@ -1462,6 +1462,29 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('selflearn: result survives structured clone', JSON.stringify(structuredClone(a)), JSON.stringify(a))
 }
 
+// ---- auth: the once-per-session sign-in invite flag --------------------------------
+{
+  const { INVITED, wasInvited, markInvited } = await import(src('features/auth/invite.ts'))
+  const m = new Map()
+  const s = { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => void m.set(k, String(v)) }
+  eq('invite: a fresh session has not been invited', wasInvited(s), false)
+  // A manual open of the dialog marks the same flag the auto popup checks.
+  markInvited(s)
+  eq('invite: marking sets the session flag', s.getItem(INVITED), '1')
+  eq('invite: after a manual open the auto popup is suppressed', wasInvited(s), true)
+  const blocked = {
+    getItem: () => {
+      throw new Error('blocked')
+    },
+    setItem: () => {
+      throw new Error('blocked')
+    },
+  }
+  eq('invite: blocked storage never nags', wasInvited(blocked), true)
+  markInvited(blocked)
+  eq('invite: no storage at all never nags', wasInvited(null), true)
+}
+
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')
 if (fails.length) {
   fails.forEach((f) => console.log('  FAIL  ' + f))

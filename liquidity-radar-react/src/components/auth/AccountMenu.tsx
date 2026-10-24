@@ -18,6 +18,7 @@ import {
   useAuth,
   warmAuth,
 } from '../../features/auth/session'
+import { markInvited, wasInvited } from '../../features/auth/invite'
 import { useFavorites } from '../../features/favorites/favorites'
 import { toEdit } from '../../features/auth/profile'
 import type { ProfileEdit } from '../../features/auth/profile'
@@ -311,7 +312,6 @@ function Dialog({ close }: { close: () => void }) {
   )
 }
 
-const INVITED = 'lr-auth-invited'
 const INVITE_DELAY = 3000
 
 export function AccountMenu() {
@@ -319,18 +319,11 @@ export function AccountMenu() {
   const [open, setOpen] = useState(false)
   // Invite a guest to sign in shortly after load, at most once per session.
   useEffect(() => {
-    if (a.status !== 'guest') return
-    try {
-      if (sessionStorage.getItem(INVITED)) return
-    } catch {
-      return
-    }
+    if (a.status !== 'guest' || wasInvited()) return
     const t = setTimeout(() => {
-      try {
-        sessionStorage.setItem(INVITED, '1')
-      } catch {
-        /* storage blocked: the popup may show again next load */
-      }
+      // The guest may have opened the dialog themselves in the meantime.
+      if (wasInvited()) return
+      markInvited()
       warmAuth()
       setOpen(true)
     }, INVITE_DELAY)
@@ -347,6 +340,8 @@ export function AccountMenu() {
         title={u ? u.name + ' · account' : 'Sign in'}
         aria-label={u ? 'Account: ' + u.name : 'Sign in'}
         onClick={() => {
+          // A manual open counts as the session's invite: no auto popup later.
+          markInvited()
           warmAuth()
           setOpen(true)
         }}
