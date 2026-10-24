@@ -79,6 +79,12 @@ jobs:
           cache: npm
           cache-dependency-path: radar-worker/package-lock.json
       - run: npm ci --omit=dev
+      # Idempotent (IF NOT EXISTS), so applying it on every run is harmless and
+      # keeps the schema in step with the code.
+      - name: Apply the learning schema
+        run: node scripts/apply-sql.mjs sql/005_bot_learning.sql
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
       - run: echo "BOT_STARTED=$(date +%s)" >> "$GITHUB_ENV"
       - name: Run the bot (5 h 40 min)
         run: node src/bot.ts
