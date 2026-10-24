@@ -31,6 +31,7 @@ import {
   tickerChain,
   tickerFeed,
 } from './failover'
+import type { KlineReq } from './failover'
 import type { ChainResult } from './providerChain'
 
 export interface MarketHooks {
@@ -96,6 +97,7 @@ async function fetchBase(
   base: string,
   need: number,
   before = 0,
+  req?: KlineReq,
 ): Promise<{ rows: CandleFlat[]; source: KlineSource }> {
   // Metals, energy, FX, indices and equities are priced by Yahoo, not
   // Binance. Dispatching here — the one place candles enter the app — means
@@ -128,7 +130,7 @@ async function fetchBase(
     return { rows: await yahooCandles(sym, base, need), source: null }
   }
   // Binance → Bybit → OKX → last good copy (see services/failover).
-  const { data, ...source } = await fetchKlinesChain(sym, base, need, before)
+  const { data, ...source } = await fetchKlinesChain(sym, base, need, before, req)
   return { rows: data, source }
 }
 
@@ -155,9 +157,10 @@ export async function loadCandleWindow(
 export async function loadCandles(
   sym: string,
   tf: string,
+  req?: KlineReq,
 ): Promise<{ candles: CandleFlat[]; folder: Folder; source: KlineSource }> {
   const def = tfDef(tf)
-  const { rows, source } = await fetchBase(sym, def.base, TARGET_CANDLES * def.factor)
+  const { rows, source } = await fetchBase(sym, def.base, TARGET_CANDLES * def.factor, 0, req)
   const folder = createFolder(def)
   folder.seed(rows)
   return { candles: resample(rows, def).slice(-MAX_KEEP), folder, source }
@@ -209,6 +212,9 @@ export async function fetchOlderKlines(): Promise<number> {
       def.base,
       PAGE_CANDLES * def.factor,
       oldest.t - 1,
+      // The user is dragging this chart back: ahead of background work, and
+      // dropped unsent if the symbol/interval changes first.
+      { priority: 'high', isStale: () => ident !== historyIdent() },
     )
     if (ident !== historyIdent()) return 0 // symbol/interval changed mid-flight
     // Every provider failed and this is a cached copy: not proof the history
@@ -287,7 +293,13 @@ export async function fetchKlines(sym: string): Promise<void> {
   const key = mdSym(sym) + '|' + tf
   const seq = ++klineSeq
   try {
-    const { candles, folder, source } = await loadCandles(sym, tf)
+    // The visible chart's history jumps the Binance queue; once a newer load
+    // supersedes this one, its still-queued pages are dropped unsent (and the
+    // StaleRequestError lands in the seq check below).
+    const { candles, folder, source } = await loadCandles(sym, tf, {
+      priority: 'high',
+      isStale: () => seq !== klineSeq,
+    })
     if (seq !== klineSeq) return
     if (!candles.length) throw new Error('empty')
     state.candles = candles

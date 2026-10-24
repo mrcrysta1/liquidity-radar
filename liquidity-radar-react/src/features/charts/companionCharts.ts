@@ -530,7 +530,8 @@ function reload(p: Panel): void {
   closeWs(p)
   const legend = p.el?.querySelector('.rc-legend') as HTMLElement | null
   if (legend) legend.textContent = 'Loading…'
-  loadCandles(p.sym, p.tf)
+  // Background priority; a load superseded before its turn is dropped unsent.
+  loadCandles(p.sym, p.tf, { isStale: () => p.token !== token })
     .then(({ candles, folder }) => {
       // A later symbol/interval change, or a teardown, wins over this response.
       if (p.token !== token || !p.candleSeries) return
@@ -539,8 +540,10 @@ function reload(p: Panel): void {
       connect(p, token)
     })
     .catch((e) => {
+      // Superseded (including a dropped, never-sent load): nothing to report.
+      if (p.token !== token) return
       console.warn('companion load', e)
-      if (p.token === token && legend) legend.textContent = 'Data unavailable'
+      if (legend) legend.textContent = 'Data unavailable'
     })
 }
 

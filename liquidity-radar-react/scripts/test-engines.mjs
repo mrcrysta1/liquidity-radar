@@ -830,6 +830,141 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   eq('fresh: nothing at all is OFFLINE', klineFreshness(null, 0, 10_000), 'OFFLINE')
 }
 
+// ---------------------------------------------------------------- Binance slot queue
+{
+  const { createSlotQueue, StaleRequestError, isStaleRequest } = await import(src('api/slotQueue.ts'))
+  // Fake clock + timers: advance() fires every timer that has come due.
+  let clock = 1000
+  let timers = []
+  const setTimer = (fn, ms) => timers.push({ at: clock + ms, fn })
+  const flush = () => new Promise((r) => setImmediate(r))
+  async function advance(ms) {
+    const end = clock + ms
+    for (;;) {
+      timers.sort((a, b) => a.at - b.at)
+      const t = timers[0]
+      if (!t || t.at > end) break
+      timers.shift()
+      clock = t.at
+      t.fn()
+      await flush()
+    }
+    clock = end
+    await flush()
+  }
+  const track = (q, name, req, log) =>
+    q.acquire(req).then(
+      () => log.push([name, clock]),
+      (e) => log.push([name, isStaleRequest(e) ? 'dropped' : 'error']),
+    )
+
+  // Ordering + spacing
+  {
+    const q = createSlotQueue(50, () => clock, setTimer)
+    const log = []
+    for (const n of ['a', 'b', 'c', 'd']) track(q, n, undefined, log)
+    await flush()
+    eq('queue: first request goes at once', log, [['a', 1000]])
+    eq('queue: the rest wait', q.pending(), 3)
+    await advance(200)
+    eq('queue: FIFO, one slot every gap', log, [
+      ['a', 1000],
+      ['b', 1050],
+      ['c', 1100],
+      ['d', 1150],
+    ])
+    eq('queue: drained', q.pending(), 0)
+    clock += 1000
+    track(q, 'e', undefined, log)
+    await flush()
+    eq('queue: after a quiet spell a request is not held back', log.at(-1), ['e', clock])
+  }
+
+  // Priority
+  {
+    clock = 10_000
+    timers = []
+    const q = createSlotQueue(50, () => clock, setTimer)
+    const log = []
+    for (const n of ['bg1', 'bg2', 'bg3']) track(q, n, { priority: 'normal' }, log)
+    await flush()
+    track(q, 'chart', { priority: 'high' }, log)
+    track(q, 'chart2', { priority: 'high' }, log)
+    await advance(500)
+    eq(
+      'queue: high priority jumps queued background work, FIFO among themselves',
+      log.map((x) => x[0]),
+      ['bg1', 'chart', 'chart2', 'bg2', 'bg3'],
+    )
+    eq('queue: the high request waits only one gap', log[1], ['chart', 10_050])
+  }
+
+  // Stale drop
+  {
+    clock = 20_000
+    timers = []
+    const q = createSlotQueue(50, () => clock, setTimer)
+    const log = []
+    let wanted = 'BTC'
+    track(q, 'first', undefined, log)
+    for (const s of ['ETH', 'SOL', 'BTC'])
+      track(q, s, { priority: 'high', isStale: () => wanted !== s }, log)
+    track(q, 'bg', undefined, log)
+    await flush()
+    await advance(500)
+    eq('queue: stale requests are dropped without spending a slot', log, [
+      ['first', 20_000],
+      ['ETH', 'dropped'],
+      ['SOL', 'dropped'],
+      ['BTC', 20_050],
+      ['bg', 20_100],
+    ])
+    // Staleness is judged when the turn comes, not when queued.
+    wanted = 'ETH'
+    const log2 = []
+    track(q, 'x', undefined, log2)
+    track(q, 'ETH', { isStale: () => wanted !== 'ETH' }, log2)
+    await flush()
+    wanted = 'SOL'
+    await advance(500)
+    eq(
+      'queue: a request that goes stale while waiting is dropped',
+      log2.map((x) => x[0] + ':' + (x[1] === 'dropped' ? 'dropped' : 'ran')),
+      ['x:ran', 'ETH:dropped'],
+    )
+    let err = null
+    await q.acquire({ isStale: () => true }).catch((e) => (err = e))
+    ok('queue: drop rejects with StaleRequestError', err instanceof StaleRequestError && isStaleRequest(err))
+    ok('queue: a real error is not a stale drop', !isStaleRequest(new Error('HTTP 500')))
+    const log3 = []
+    track(q, 'guard', { isStale: () => { throw new Error('boom') } }, log3)
+    await advance(100)
+    eq('queue: a throwing guard does not drop the request', log3.map((x) => x[0] + ':' + typeof x[1]), ['guard:number'])
+  }
+
+  // Failover chains: a dropped request is not a provider failure
+  {
+    let calls = 0
+    const chain = new ProviderChain(
+      [
+        { id: 'a', name: 'A', fn: async () => { calls++; throw new StaleRequestError() } },
+        { id: 'b', name: 'B', fn: async () => { calls += 100; return [1] } },
+      ],
+      { breakerFailures: 1, keyOf: (args) => JSON.stringify(args.slice(0, 1)) },
+    )
+    let err = null
+    await chain.get('X', { priority: 'high' }).catch((e) => (err = e))
+    ok('chain: a stale drop is rethrown as is', isStaleRequest(err))
+    eq('chain: and does not fall through to the fallback', calls, 1)
+    ok('chain: nor trip the breaker', !chain.isOpen('a'))
+    const c2 = new ProviderChain([{ id: 'a', name: 'A', fn: async () => [7] }], {
+      keyOf: (args) => JSON.stringify(args.slice(0, 1)),
+    })
+    await c2.get('X', { priority: 'high', isStale: () => false })
+    eq('chain: keyOf leaves request options out of the cache key', c2.cached('X')?.data, [7])
+  }
+}
+
 // ---------------------------------------------------------------- pacer + kline rows
 {
   let clock = 1000
