@@ -2207,7 +2207,6 @@ html.radar-fs #radarChartCard #fsBtn::before{
   background:var(--hair-2);color:var(--cyan);
 }
 .msg>div{margin:2px 0}
-.msg>br+br{display:none}
 .msg{max-width:88%;padding:11px 14px;border-radius:14px;font-size:13.5px;line-height:1.55;animation:fadeUp .25s ease;word-wrap:break-word}
 .msg.user{align-self:flex-end;background:linear-gradient(135deg,var(--primary),color-mix(in srgb,var(--primary) 66%,#000));border-bottom-right-radius:4px;box-shadow:0 4px 14px rgb(var(--pRGB)/.3)}
 .msg.ai{align-self:flex-start;background:var(--card2);border:1px solid var(--border2);border-bottom-left-radius:4px}

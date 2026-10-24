@@ -119,7 +119,8 @@ export function renderMarkdown(md: string): string {
       inList = false
     }
     if (!line.trim()) {
-      out.push('<br>')
+      // A run of blank lines is one gap.
+      if (out[out.length - 1] !== '<br>') out.push('<br>')
       continue
     }
     out.push('<div>' + inline(line) + '</div>')
