@@ -582,6 +582,9 @@ function mcRefreshAll(): void {
         iv = mdTf(p.interval)
       fetchKlineRows(sym, iv, 5)
         .then(function (data: Any) {
+          // The panel's coin or interval changed (or it was removed) while
+          // this was in flight: the bar belongs to another series.
+          if (mcPanels.indexOf(p) === -1 || mdSym(p.sym) !== sym || mdTf(p.interval) !== iv) return
           if (data && data.length) {
             const c = mdFromK(data[data.length - 1])
             if (!c || !mdVal.candle(c)) return
@@ -590,7 +593,7 @@ function mcRefreshAll(): void {
             else if (arr.length && c.t > arr[arr.length - 1].t) {
               arr.push(c)
               if (arr.length > 200) arr.shift()
-            }
+            } else return // older than the live bar (or no data yet): nothing to draw
             mcUpdateLast(p, c)
           }
         })
