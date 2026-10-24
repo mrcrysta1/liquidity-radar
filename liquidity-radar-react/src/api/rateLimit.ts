@@ -56,7 +56,10 @@ export function isBinanceUrl(url: string): boolean {
 export function noteLimitResponse(status: number, retryAfter: string | null, body: string): void {
   if (status !== 418 && status !== 429) return
   const m = /banned until (\d{10,})/i.exec(body || '')
-  if (m) {
+  // The expiry is the server's clock. A local clock running ahead of it can
+  // read a live ban as already over; the server just refused us, so fall back
+  // to Retry-After rather than recording no cooldown at all.
+  if (m && Number(m[1]) > Date.now()) {
     noteRateLimit(Number(m[1]))
     return
   }
