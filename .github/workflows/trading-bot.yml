@@ -7,8 +7,14 @@
 #
 # The bot ticks every 15 s: mirrors the Binance Demo account for the website,
 # manages any open trade, and decides on each newly closed 5-minute candle
-# (BOT_INTERVAL). BOT_MIN_EV=any: it takes the better side on every candle
-# while flat — a testing setting; fees make 5m trading lose on average.
+# (BOT_INTERVAL) for five markets. Every idea must pass the setup rules (R:R
+# >= 1.5 and cost <= 0.15R after fees, cooldown after a stop-out, <= 4 open,
+# <= 120 trades/day, calibrated EV > 0); ideas rejected only for EV become
+# shadow trades. On 5m bars fees are ~0.9R of a 1.5-ATR stop, so the bracket
+# is widened to 9 / 18 ATR (about a 1% stop on BTC) with an 8 h time exit,
+# which keeps the cost rule satisfiable. It learns from every closed real and
+# shadow trade and trains a challenger model hourly or every 20 closed trades.
+# Requires radar-worker/sql/005_bot_learning.sql to be applied first.
 #
 # GitHub's runners are in the US, where Binance's main API is blocked; the
 # futures testnet host and the public market-data mirror are reachable, and the
@@ -79,10 +85,22 @@ jobs:
         env:
           BOT_RUN_MINUTES: '340'
           BOT_MODE: explore
-          BOT_SYMBOLS: BTCUSDT,XAUUSDT
+          BOT_SYMBOLS: BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XAUUSDT
           BOT_INTERVAL: 5m
           BOT_MIN_EV: any
           BOT_MIN_MARGIN: '100'
+          BOT_SL_ATR: '9'
+          BOT_TP_ATR: '18'
+          BOT_HORIZON: '96'
+          BOT_MIN_RR: '1.5'
+          BOT_MAX_COST_R: '0.15'
+          BOT_COOLDOWN_MIN: '30'
+          BOT_MAX_OPEN: '4'
+          BOT_MAX_TRADES_DAY: '120'
+          BOT_SHADOW: '1'
+          BOT_SHADOW_MAX_OPEN: '1'
+          BOT_LEARN_EVERY_MIN: '60'
+          BOT_LEARN_EVERY_TRADES: '20'
           FUTURES_BASE: https://testnet.binancefuture.com
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
