@@ -538,7 +538,12 @@ html.radar-fs #chart{height:100% !important}
   padding:2px 4px;font-size:var(--text-xs);font-family:var(--mono);outline:none;max-width:78px;
 }
 .rc-controls select:focus{border-color:var(--primary)}
-.rc-body{flex:1;position:relative;min-height:0}
+.rc-body{flex:1;position:relative;min-height:0;container-type:inline-size}
+/* A narrow cell (many charts, or a phone) has no room for the OHLC legend: it
+   wrapped into a column over the candles. The cell head still names the coin
+   and interval, and the price scale shows the last price. A plain status
+   ("Loading…", "Data unavailable") has no child elements and stays. */
+@container (max-width:259px){.rc-body>.rc-legend:has(*){display:none}}
 /* Layout cells: the toolbar drives the active chart; any other cell is a click away. */
 .rc-cell{cursor:pointer;transition:border-color .15s,box-shadow .15s}
 .rc-cell:hover{border-color:var(--border2)}
