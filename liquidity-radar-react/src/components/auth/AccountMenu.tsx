@@ -1,7 +1,9 @@
 // The account button in the top bar and its dialog: sign in or create an
 // account with email and password, continue with Google, reset a password,
 // and — once signed in — see what is saved to the account and sign out.
-import { useEffect, useState } from 'react'
+// Guests are also invited to sign in by a popup that opens a few seconds
+// after the app settles — once per browser session.
+import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { createPortal } from 'react-dom'
 import {
@@ -16,11 +18,13 @@ import {
   useAuth,
   warmAuth,
 } from '../../features/auth/session'
+import { markInvited, wasInvited } from '../../features/auth/invite'
 import { useFavorites } from '../../features/favorites/favorites'
 import { toEdit } from '../../features/auth/profile'
 import type { ProfileEdit } from '../../features/auth/profile'
 import { getIndicators } from '../../features/charts/indicators/store'
 import { useTick } from '../useTick'
+import { trapFocus } from '../../utils/dom'
 
 type Mode = 'in' | 'up' | 'forgot'
 
@@ -278,10 +282,16 @@ function Dialog({ close }: { close: () => void }) {
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [close])
+  // Focus moves into the card, Tab stays there, and closing hands focus back
+  // to the button that opened it.
+  // The opener is read while rendering, before an autoFocus field takes focus.
+  const cardRef = useRef<HTMLDivElement>(null)
+  const [opener] = useState(() => document.activeElement)
+  useEffect(() => (cardRef.current ? trapFocus(cardRef.current, opener) : undefined), [opener])
   const title = a.recovery ? 'Reset password' : a.status === 'user' ? 'Your account' : 'Welcome to Liquidity Radar'
   return createPortal(
     <div className="acct-overlay" role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.target === e.currentTarget && close()}>
-      <div className="acct-card">
+      <div className="acct-card" ref={cardRef}>
         <header>
           <h2>{title}</h2>
           <button type="button" className="acct-x" aria-label="Close" onClick={close}>✕</button>
@@ -309,9 +319,23 @@ function Dialog({ close }: { close: () => void }) {
   )
 }
 
+const INVITE_DELAY = 3000
+
 export function AccountMenu() {
   const a = useAuth()
   const [open, setOpen] = useState(false)
+  // Invite a guest to sign in shortly after load, at most once per session.
+  useEffect(() => {
+    if (a.status !== 'guest' || wasInvited()) return
+    const t = setTimeout(() => {
+      // The guest may have opened the dialog themselves in the meantime.
+      if (wasInvited()) return
+      markInvited()
+      warmAuth()
+      setOpen(true)
+    }, INVITE_DELAY)
+    return () => clearTimeout(t)
+  }, [a.status])
   // A password-reset link opens the dialog on its own.
   const show = open || a.recovery
   const u = a.user
@@ -323,6 +347,8 @@ export function AccountMenu() {
         title={u ? u.name + ' · account' : 'Sign in'}
         aria-label={u ? 'Account: ' + u.name : 'Sign in'}
         onClick={() => {
+          // A manual open counts as the session's invite: no auto popup later.
+          markInvited()
           warmAuth()
           setOpen(true)
         }}

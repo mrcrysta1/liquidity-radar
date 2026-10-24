@@ -14,20 +14,29 @@ export interface Liq {
 let ws: WebSocket | null = null
 let retry = 0
 let alive = false
+let retryTimer: ReturnType<typeof setTimeout> | null = null
 
 export function initLiquidations(): void {
   alive = true
-  connect()
+  if (!ws && !retryTimer) connect() // never a second socket
 }
 
 export function stopLiquidations(): void {
   alive = false
+  if (retryTimer) clearTimeout(retryTimer)
+  retryTimer = null
+  const old = ws
+  ws = null
+  if (!old) return
+  // Detached first: an intentional close must not report the stream as down
+  // or schedule a reconnect.
+  old.onopen = old.onmessage = old.onclose = old.onerror = null
+  state.liqWs = 'closed'
   try {
-    ws?.close()
+    old.close()
   } catch {
     /* ignore */
   }
-  ws = null
 }
 
 const LIQ_URL = 'wss://fstream.binance.com/ws/!forceOrder@arr'
@@ -65,6 +74,8 @@ function connect(): void {
     state.liqWs = 'open'
   }
   self.onclose = () => {
+    if (ws !== self) return
+    ws = null
     state.liqWs = 'closed'
     noteStream(LIQ_URL, false)
     if (!alive) return
@@ -78,7 +89,9 @@ function connect(): void {
 function schedule(): void {
   retry++
   const delay = Math.min(30000, 1200 * Math.pow(2, Math.min(retry, 5)))
-  setTimeout(() => {
-    if (alive) connect()
+  if (retryTimer) clearTimeout(retryTimer)
+  retryTimer = setTimeout(() => {
+    retryTimer = null
+    if (alive && !ws) connect()
   }, delay)
 }

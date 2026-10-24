@@ -17,6 +17,7 @@ import { instrumentOf, isInstrument } from '../../constants/instruments'
 import { signalData, signalHitRate, signalLearning } from '../../features/signals/signals'
 import { useTick } from '../useTick'
 import { CoinBadge } from '../common/CoinBadge'
+import { TileSkeleton } from '../home/Skeleton'
 
 type Candle = { t: number; o: number; h: number; l: number; c: number; v: number }
 type Side = 'BUY' | 'SELL' | 'WAIT'
@@ -428,6 +429,15 @@ export function SignalsBoard() {
           </button>
         </div>
         <div className="sg-grid" id="sgGrid">
+          {!list.length && (
+            // The same caption the Dashboard's signals tile shows, so the
+            // blank skeleton cards (a long empty column on a phone) say why.
+            <div style={{ gridColumn: '1 / -1' }}>
+              <TileSkeleton shape="list" rows={2} stallMs={150_000}>
+                Scanner is warming up — it sweeps ten majors every two minutes.
+              </TileSkeleton>
+            </div>
+          )}
           {!list.length && Array.from({ length: 6 }, (_, i) => <div key={i} className="sg-card sg-skel" />)}
           {shown.map((s) => <SignalCard key={s.sym} s={s} />)}
           {list.length > 0 && !shown.length && (

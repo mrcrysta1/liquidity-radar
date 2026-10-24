@@ -8,6 +8,7 @@
 import { applyChartTheme, isLightTheme } from '../charts/chartRender'
 import { applyCompanionTheme } from '../charts/companionCharts'
 import { mcApplyTheme } from '../charts/multiCharts'
+import { subscribeChartTz } from '../charts/timezone'
 import { applySigAnaTheme } from '../signals'
 import { storageGetRaw, storageSetRaw } from '../../services/storage'
 import { $, closeModal, openModal } from '../../utils/dom'
@@ -680,6 +681,12 @@ export function initTheme(): void {
     document.documentElement.setAttribute('data-theme', 'light')
   }
   applyPalette(storageGetRaw(PALETTE_KEY) || 'navy')
+  // A new chart time zone re-applies the charts' options (formatters included).
+  subscribeChartTz(function () {
+    applyChartTheme()
+    applyCompanionTheme()
+    mcApplyTheme()
+  })
   $('paletteBtn')!.addEventListener('click', function () {
     renderPalettePicker()
     openModal('thModal')

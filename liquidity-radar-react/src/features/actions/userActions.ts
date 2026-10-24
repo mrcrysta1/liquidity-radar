@@ -7,6 +7,7 @@ import { $ } from '../../utils/dom'
 import { isInstrument } from '../../constants/instruments'
 import { primeInstrument } from '../../services/instrumentFeed'
 import { state } from '../../services/store'
+import { resetCandles } from '../../services/marketData'
 import { placeChartForTab } from '../charts/chartHost'
 import type { StreamsCallbacks } from '../../services/streams'
 import { resetDelta } from '../delta/delta'
@@ -77,13 +78,40 @@ export function switchTab(tab: string): void {
   window.scrollTo({ top: 0 })
 }
 
-export async function setSymbol(sym: string): Promise<void> {
+/**
+ * Make `sym` the app's coin. By default this also brings up the Radar tab;
+ * `keepTab` leaves the user where they are (e.g. picking a chart in a layout).
+ */
+const symbolListeners: Array<() => void> = []
+/** Called whenever the charted coin changes. */
+export function subscribeSymbol(fn: () => void): () => void {
+  symbolListeners.push(fn)
+  return () => {
+    const i = symbolListeners.indexOf(fn)
+    if (i !== -1) symbolListeners.splice(i, 1)
+  }
+}
+
+export async function setSymbol(sym: string, opts: { keepTab?: boolean } = {}): Promise<void> {
   if (!sym) return
   if (state.symbol === sym) {
-    switchTab('radar')
+    if (!opts.keepTab) switchTab('radar')
     return
   }
   state.symbol = sym
+  // Everything below is per-symbol. Clear it before anyone (listeners, the
+  // analytics, the alert engine) looks, so the previous coin's candles,
+  // funding, open interest and books are never read as this coin's while the
+  // new ones load — or forever, when this coin has no futures market.
+  resetCandles()
+  state.fr = null
+  state.oi = null
+  state.ob = { bids: [], asks: [] }
+  state.deepOb = null
+  state.oiHist = null
+  state.ls = null
+  state.crossEx = []
+  symbolListeners.slice().forEach((fn) => fn())
   Object.keys(state.ctxCache).forEach((k) => delete state.ctxCache[k])
   state._liq = null
   state._sr = null
@@ -97,6 +125,13 @@ export async function setSymbol(sym: string): Promise<void> {
   resetRL()
   $('heroPrice')!.textContent = '—'
   $('heroPrice')!.dataset.p = '0'
+  // The funding/OI cards are written straight into the DOM by the analytics
+  // pass, which only runs once this coin's candles land. Dash them now so the
+  // previous coin's numbers never sit under the new coin's name meanwhile.
+  for (const id of ['mFR', 'mFRNext', 'mOI', 'mOISub', 'hsMark', 'liqMark']) {
+    const el = $(id)
+    if (el) el.textContent = '—'
+  }
   $('wsKlineState')!.textContent = 'SYNCING'
   $('wsKlineState')!.className = 'badge b-amber'
   const sel = $('symSelect')! as HTMLSelectElement
@@ -109,7 +144,7 @@ export async function setSymbol(sym: string): Promise<void> {
   }
   sel.value = sym
   cbs!.renderTicker()
-  switchTab('radar')
+  if (!opts.keepTab) switchTab('radar')
   // Stop the previous coin's streams now: left running through the fetches
   // below, they kept writing its prices into this coin's state.
   cbs!.disconnectStreams(cbs!.streamCb)

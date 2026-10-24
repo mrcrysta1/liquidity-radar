@@ -215,7 +215,7 @@ export function OverlayTogglePicker() {
     <div className="panes-picker" ref={wrapRef}>
       <button
         type="button"
-        className={'cs-rail-btn panes-btn' + (open ? ' on' : '')}
+        className={'chart-tool-btn tvb-icon panes-btn' + (open ? ' open' : '')}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="Panes"
@@ -223,7 +223,7 @@ export function OverlayTogglePicker() {
       >
         <PanesIcon />
         {onCount > 0 && <span className="rail-count">{onCount}</span>}
-        <span className="cs-rail-tip">Panes</span>
+        <span className="tvb-tip">Panes &amp; overlays</span>
       </button>
 
       {open && (

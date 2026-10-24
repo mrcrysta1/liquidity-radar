@@ -14,6 +14,13 @@ import {
 } from '../../features/charts/chartStyle'
 import type { ChartStyleId } from '../../features/charts/chartStyle'
 import { rangeSizeInfo } from '../../features/charts/series/rangeView'
+import { LineFamilyIcon } from './LineFamilyIcon'
+import {
+  isReversalStyle,
+  rangeSizeLabel,
+  subscribeReversalSettings,
+} from '../../features/charts/series/reversalSettings'
+import { ReversalSettings } from './ReversalSettings'
 import { state } from '../../services/store'
 import { pfmt } from '../../utils/format'
 
@@ -24,6 +31,8 @@ const PRI = 'var(--primary)'
 /** A miniature of the style, in the palette's own colours. */
 function StyleIcon({ id, size = 16 }: { id: ChartStyleId; size?: number }) {
   const p = { width: size, height: size, viewBox: '0 0 24 24', 'aria-hidden': true as const }
+  const lineFamily = LineFamilyIcon({ id, size })
+  if (lineFamily) return lineFamily
   if (id === 'candle' || id === 'hollow') {
     const hollow = id === 'hollow'
     return (
@@ -68,6 +77,45 @@ function StyleIcon({ id, size = 16 }: { id: ChartStyleId; size?: number }) {
           strokeWidth="1.7"
           strokeLinecap="round"
         />
+      </svg>
+    )
+  }
+  if (id === 'heikin') {
+    // Three smoothed candles in a run: no lower wick on the up legs.
+    return (
+      <svg {...p}>
+        <path d="M5 9v2M12 5v2" stroke={UP} strokeWidth="1.4" strokeLinecap="round" />
+        <rect x="3" y="11" width="4" height="9" rx=".8" fill={UP} />
+        <rect x="10" y="7" width="4" height="10" rx=".8" fill={UP} />
+        <path d="M19 20v2" stroke={DN} strokeWidth="1.4" strokeLinecap="round" />
+        <rect x="17" y="14" width="4" height="6" rx=".8" fill={DN} />
+      </svg>
+    )
+  }
+  if (id === 'hlc') {
+    return (
+      <svg {...p}>
+        <path d="M7.5 3v18M7.5 10h3.5" stroke={UP} strokeWidth="1.7" strokeLinecap="round" />
+        <path d="M16.5 3v18M16.5 15H20" stroke={DN} strokeWidth="1.7" strokeLinecap="round" />
+      </svg>
+    )
+  }
+  if (id === 'highlow') {
+    return (
+      <svg {...p}>
+        <rect x="3.5" y="9" width="4" height="11" rx=".8" fill={PRI} />
+        <rect x="10" y="4" width="4" height="12" rx=".8" fill={PRI} />
+        <rect x="16.5" y="7" width="4" height="8" rx=".8" fill={PRI} />
+      </svg>
+    )
+  }
+  if (id === 'columns') {
+    return (
+      <svg {...p}>
+        <rect x="3" y="12" width="4" height="9" fill={UP} opacity=".75" />
+        <rect x="8.5" y="7" width="4" height="14" fill={UP} opacity=".75" />
+        <rect x="14" y="10" width="4" height="11" fill={DN} opacity=".75" />
+        <rect x="19.5" y="13" width="2.5" height="8" fill={DN} opacity=".75" />
       </svg>
     )
   }
@@ -153,6 +201,49 @@ function StyleIcon({ id, size = 16 }: { id: ChartStyleId; size?: number }) {
       </svg>
     )
   }
+  if (id === 'renko') {
+    // Equal bricks on a staircase, three up then a reversal — no wicks.
+    return (
+      <svg {...p}>
+        <rect x="2.5" y="14" width="4" height="6" fill={UP} stroke={UP} strokeWidth="1" />
+        <rect x="7.5" y="8" width="4" height="6" fill={UP} stroke={UP} strokeWidth="1" />
+        <rect x="12.5" y="2" width="4" height="6" fill={UP} stroke={UP} strokeWidth="1" />
+        <rect x="17.5" y="8" width="4" height="6" fill={DN} stroke={DN} strokeWidth="1" />
+      </svg>
+    )
+  }
+  if (id === 'linebreak') {
+    // Wickless boxes: steps up, then a reversal box down.
+    return (
+      <svg {...p}>
+        <rect x="2.5" y="14" width="4.5" height="6" fill={UP} />
+        <rect x="7.5" y="9" width="4.5" height="5" fill={UP} />
+        <rect x="12.5" y="4" width="4.5" height="5" fill={UP} />
+        <rect x="17.5" y="4" width="4.5" height="10" fill={DN} />
+      </svg>
+    )
+  }
+  if (id === 'kagi') {
+    // Thick yang line rising through the shoulder, thin yin falling back.
+    return (
+      <svg {...p} fill="none" strokeLinecap="square">
+        <path d="M3 20V13h5v4h4" stroke={DN} strokeWidth="1.3" />
+        <path d="M12 17V5h5" stroke={UP} strokeWidth="2.8" />
+        <path d="M17 5v4h4v9" stroke={DN} strokeWidth="1.3" />
+      </svg>
+    )
+  }
+  if (id === 'pnf') {
+    return (
+      <svg {...p} fill="none" strokeWidth="1.5" strokeLinecap="round">
+        <path d="M3 13l4 4M7 13l-4 4M3 8l4 4M7 8l-4 4M3 3l4 4M7 3l-4 4" stroke={UP} />
+        <circle cx="12" cy="7" r="2" stroke={DN} />
+        <circle cx="12" cy="12" r="2" stroke={DN} />
+        <circle cx="12" cy="17" r="2" stroke={DN} />
+        <path d="M17 13l4 4M21 13l-4 4M17 8l4 4M21 8l-4 4" stroke={UP} />
+      </svg>
+    )
+  }
   if (id === 'sessionvp') {
     return (
       <svg {...p}>
@@ -195,11 +286,12 @@ function StyleIcon({ id, size = 16 }: { id: ChartStyleId; size?: number }) {
 }
 
 /**
- * Range bar size: automatic from ATR(14), or a manual size for the coin on
- * screen. The manual value is applied on Enter or when the field loses focus,
- * not per keystroke — every change rebuilds every bar.
+ * Range bar size / renko box size: automatic from ATR(14), or a manual size
+ * for the coin on screen. The manual value is applied on Enter or when the
+ * field loses focus, not per keystroke — every change rebuilds every bar.
  */
-function RangeSettings() {
+function RangeSettings({ id, label }: { id: ChartStyleId; label?: string }) {
+  label = label ?? (id === 'renko' ? 'Box size' : 'Range size')
   const sym = String(state.symbol || '')
   const rs = getRangeSettings()
   const info = rangeSizeInfo()
@@ -215,10 +307,10 @@ function RangeSettings() {
   return (
     <div className="range-set" onKeyDown={(e) => e.stopPropagation()}>
       <div className="range-set-head">
-        <span>Range size</span>
+        <span>{label}</span>
         <b>{info.size > 0 ? pfmt(info.size) : '—'}</b>
       </div>
-      <div className="range-set-modes" role="radiogroup" aria-label="Range size">
+      <div className="range-set-modes" role="radiogroup" aria-label={label}>
         <button
           type="button"
           role="radio"
@@ -250,8 +342,10 @@ function RangeSettings() {
             type="text"
             inputMode="decimal"
             value={text}
-            placeholder={info.auto > 0 ? pfmt(info.auto) : 'price range'}
-            aria-label={'Manual range for ' + sym}
+            placeholder={
+              info.auto > 0 ? pfmt(info.auto) : id === 'renko' ? 'box size' : 'price range'
+            }
+            aria-label={(id === 'renko' ? 'Manual box size for ' : 'Manual range for ') + sym}
             onChange={(e) => setText(e.target.value)}
             onBlur={apply}
           />
@@ -259,7 +353,9 @@ function RangeSettings() {
         </form>
       )}
       {info.manual && info.floor > 0 && info.size === info.floor && (
-        <small className="range-set-note">Raised to {pfmt(info.floor)} to keep the bar count sane</small>
+        <small className="range-set-note">
+          Raised to {pfmt(info.floor)} to keep the bar count sane
+        </small>
       )}
     </div>
   )
@@ -271,6 +367,8 @@ export function ChartStylePicker() {
   const wrapRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => subscribeChartStyle(() => force((n) => n + 1)), [])
+  // Kagi's ATR/percent switch decides whether the size block shows.
+  useEffect(() => subscribeReversalSettings(() => force((n) => n + 1)), [])
 
   useEffect(() => {
     if (!open) return
@@ -321,7 +419,14 @@ export function ChartStylePicker() {
       {open && (
         <div className="style-menu" role="menu" aria-label="Chart style">
           {/* On top, so it is in view the moment range bars are picked. */}
-          {def.rangeBars && <RangeSettings key={String(state.symbol || '')} />}
+          {isReversalStyle(def.id) && <ReversalSettings id={def.id} />}
+          {def.rangeBars && rangeSizeLabel(def.id) && (
+            <RangeSettings
+              key={current + '|' + String(state.symbol || '')}
+              id={current}
+              label={rangeSizeLabel(def.id)!}
+            />
+          )}
           {CHART_STYLES.map((s) => (
             <button
               key={s.id}
@@ -345,9 +450,10 @@ export function ChartStylePicker() {
                     <i
                       className="style-est"
                       title={
-                        s.rangeBars
+                        s.estNote ??
+                        (s.rangeBars
                           ? 'Built from candles, walking each one open → low → high → close'
-                          : 'Built from a model of where volume traded inside each bar'
+                          : 'Built from a model of where volume traded inside each bar')
                       }
                     >
                       est

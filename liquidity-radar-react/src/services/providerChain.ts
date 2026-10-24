@@ -51,6 +51,17 @@ export interface ChainOptions<R> {
   staleTtlMs: number
   now: () => number
   store: ChainStore<R>
+  /** Cache key for a request's arguments. Default: JSON of all of them. */
+  keyOf?: (args: unknown[]) => string
+}
+
+/**
+ * A request the caller abandoned before it was sent (api/slotQueue's
+ * StaleRequestError, matched by name to keep this file dependency-free). Not a
+ * provider failure: it must not trip a breaker or fall through to a fallback.
+ */
+function isDropped(e: unknown): boolean {
+  return e instanceof Error && e.name === 'StaleRequestError'
 }
 
 interface Breaker {
@@ -112,11 +123,15 @@ export class ProviderChain<A extends unknown[], R> {
 
   /** Last good copy for these arguments, if any — without fetching. */
   cached(...args: A): CacheEntry<R> | undefined {
-    return this.opts.store.get(JSON.stringify(args))
+    return this.opts.store.get(this.key(args))
+  }
+
+  private key(args: A): string {
+    return this.opts.keyOf ? this.opts.keyOf(args) : JSON.stringify(args)
   }
 
   async get(...args: A): Promise<ChainResult<R>> {
-    const key = JSON.stringify(args)
+    const key = this.key(args)
     const errs: string[] = []
     for (let i = 0; i < this.providers.length; i++) {
       const p = this.providers[i]
@@ -129,6 +144,7 @@ export class ProviderChain<A extends unknown[], R> {
       try {
         data = await p.fn(...args)
       } catch (e) {
+        if (isDropped(e)) throw e
         const msg = p.name + ': ' + (e instanceof Error ? e.message : String(e))
         errs.push(msg)
         this.fail(p.id)

@@ -12,12 +12,14 @@ import { LogoMark } from './Logo'
 import { BellIcon, MoonIcon, PaletteIcon, SunIcon } from './icons'
 import { WhaleLegend } from './chart/WhaleLegend'
 import { ChartStylePicker } from './chart/ChartStylePicker'
+import { ChartBottomBar, ChartNavOverlay } from './chart/ScaleNav'
 import { lazy, Suspense } from 'react'
 const loadLiqHeatmap = () => import('./analysis/LiqHeatmap')
 const loadCrossExchange = () => import('./analysis/CrossExchangeTable')
 const LiqHeatmap = lazy(() => loadLiqHeatmap().then((m) => ({ default: m.LiqHeatmap })))
 const CrossExchangeTable = lazy(() => loadCrossExchange().then((m) => ({ default: m.CrossExchangeTable })))
-import { DrawToolPicker } from './chart/DrawToolPicker'
+import { DrawEditTools, DrawQuickTools, DrawToolPicker } from './chart/DrawToolPicker'
+import { ScreenshotButton } from './chart/ScreenshotButton'
 import { OverlayTogglePicker } from './chart/OverlayTogglePicker'
 import { OBImbalanceGauge } from './chart/OBImbalanceGauge'
 import { DivergenceBanner } from './chart/DivergenceBanner'
@@ -64,8 +66,10 @@ import { ClockChip } from './home/ClockChip'
 import { HeaderSearch } from './search/HeaderSearch'
 import { WhenTab } from './WhenTab'
 const loadSettings = () => import('./SettingsPage')
+const loadScreener = () => import('./screener/Screener')
 const loadCalendar = () => import('./news/EconomicCalendar')
 const SettingsPage = lazy(() => loadSettings().then((m) => ({ default: m.SettingsPage })))
+const Screener = lazy(() => loadScreener().then((m) => ({ default: m.Screener })))
 const AiAssistant = lazy(() => import('./chat/AiAssistant').then((m) => ({ default: m.AiAssistant })))
 const EconomicCalendar = lazy(() => loadCalendar().then((m) => ({ default: m.EconomicCalendar })))
 import { useEffect, useRef } from 'react'
@@ -178,41 +182,55 @@ export function Shell() {
         <div className="card" id="radarChartCard">
           <div className="sec-head">
             <div className="sec-title" id="chartTitle">Price Action · 15m Candles</div>
-            <div className="chart-toolbar">
-              <TimeframePicker />
-              <CoinPicker />
+            {/* TradingView's top toolbar: symbol, intervals, chart type,
+                indicators and layout, then replay / snapshot / full screen. */}
+            <div className="chart-toolbar tvb" role="toolbar" aria-label="Chart toolbar">
+              <CoinPicker keepTab />
               {/* Filled and kept in sync by the engine; the picker above is its face. */}
               <select id="symSelect" hidden aria-hidden="true" tabIndex={-1}></select>
-              <span className="badge b-cyan" id="wsKlineState">WS SYNCING</span>
+              <span className="tvb-sep" aria-hidden="true" />
+              <TimeframePicker />
+              <span className="tvb-sep" aria-hidden="true" />
+              <ChartStylePicker />
+              <span className="tvb-sep" aria-hidden="true" />
+              <IndicatorPicker />
+              <span className="tvb-sep" aria-hidden="true" />
               <LayoutPicker />
-              <button className="chart-tool-btn" id="fsBtn" title="Full screen [F]" aria-label="Full screen">⛶</button>
+              <span className="badge b-cyan" id="wsKlineState">WS SYNCING</span>
+              <span className="tvb-sep tvb-sep-end" aria-hidden="true" />
+              <ReplayButton />
+              <ScreenshotButton />
+              {/* The engine swaps this button's glyph and title on toggle; the
+                  icon and tooltip are drawn in CSS so they survive that. */}
+              <button className="chart-tool-btn tvb-icon" id="fsBtn" title="Full screen [F]" aria-label="Full screen">⛶</button>
             </div>
           </div>
-      
+
           <ReplayBar />
           <div className="chart-stage">
+            {/* TradingView's left drawing toolbar. */}
+            <div className="tv-drawbar" role="toolbar" aria-orientation="vertical" aria-label="Drawing tools">
+              <DrawQuickTools />
+              <DrawToolPicker />
+              <span className="tvd-sep" aria-hidden="true" />
+              <DrawEditTools />
+              <span className="tvd-sep" aria-hidden="true" />
+              <OverlayTogglePicker />
+            </div>
             <div className="chart-layout" id="chartLayout">
               <div className="chart-wrap" id="chartWrap">
                 <div className="legend" id="legendOHLC">Loading chart…</div>
                 <div id="chart"></div>
                 <span className="chart-draw-hint" id="drawHint"></span>
                 <Guard name="Whale legend"><WhaleLegend /></Guard>
+                <Guard name="Chart navigation"><ChartNavOverlay /></Guard>
               </div>
             </div>
             <Guard name="Chart side panel">
-              <ChartSidePanel
-                tools={
-                  <>
-                    <ChartStylePicker />
-                    <DrawToolPicker />
-                    <IndicatorPicker />
-                    <OverlayTogglePicker />
-                    <ReplayButton />
-                  </>
-                }
-              />
+              <ChartSidePanel />
             </Guard>
           </div>
+          <Guard name="Chart bottom bar"><ChartBottomBar /></Guard>
         </div>
         </div>
         <Guard name="Radar side"><RadarSide /></Guard>
@@ -324,6 +342,11 @@ export function Shell() {
         </div>
       </section>
       
+      <section className="tab-section" id="tab-screener">
+        <DashHead zone="analytics" name="Screener" sub="Every tracked coin, sortable and filterable, with daily indicators and a technical rating" />
+        <Guard name="Screener"><WhenTab tab="screener" preload={loadScreener}><Suspense fallback={null}><Screener /></Suspense></WhenTab></Guard>
+      </section>
+
       <section className="tab-section mk-tab" id="tab-market">
         <MarketHead />
         <Guard name="Coin wishlist"><CoinWishlist /></Guard>

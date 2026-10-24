@@ -5,6 +5,7 @@
 import { jget } from '../../api/client'
 import { isInstrument } from '../../constants/instruments'
 import { state } from '../../services/store'
+import { futuresSymbolOf, symbolScoped } from '../../services/symbolScope'
 import { VENUES, isUsdQuoted } from './venues'
 
 export interface DeepOb {
@@ -24,6 +25,8 @@ export interface LongShortRow {
 export interface CrossExRow {
   id: string
   name: string
+  /** The base this row quotes (BTC, ETH…), so a held row never crosses coins. */
+  base?: string
   kind: 'spot' | 'perp'
   /** Quoted in USD rather than USDT — comparable, but worth flagging. */
   usd: boolean
@@ -36,52 +39,86 @@ export interface CrossExRow {
 
 const baseOf = (sym: string): string => sym.replace(/USDT$/i, '')
 
+// Each fetch is scoped to the symbol it asked for (services/symbolScope): a
+// response for a coin the user has since left is dropped, and a failure for
+// the current coin clears the field rather than leaving the previous coin's
+// data standing in for it.
+const current = (): string => state.symbol
+
 export async function fetchDeepOB(): Promise<void> {
-  try {
-    const d = (await jget(
-      'https://api.binance.com/api/v3/depth?symbol=' + state.symbol + '&limit=500',
-    )) as { bids: Array<[string | number, string | number]>; asks: Array<[string | number, string | number]> }
-    if (!d || !Array.isArray(d.bids) || !d.bids.length) throw new Error('empty')
-    state.deepOb = {
-      bids: d.bids.map((b) => ({ price: +b[0], size: +b[1] })),
-      asks: d.asks.map((a) => ({ price: +a[0], size: +a[1] })),
-    }
-  } catch (e) {
-    console.warn('deepOB', e)
-  }
+  await symbolScoped(
+    current,
+    (sym) =>
+      jget('https://api.binance.com/api/v3/depth?symbol=' + sym + '&limit=500') as Promise<{
+        bids: Array<[string | number, string | number]>
+        asks: Array<[string | number, string | number]>
+      }>,
+    (d) => {
+      if (!d || !Array.isArray(d.bids) || !d.bids.length) throw new Error('empty')
+      state.deepOb = {
+        bids: d.bids.map((b) => ({ price: +b[0], size: +b[1] })),
+        asks: d.asks.map((a) => ({ price: +a[0], size: +a[1] })),
+      }
+    },
+    (e) => {
+      console.warn('deepOB', e)
+      state.deepOb = null
+    },
+  )
 }
 
 export async function fetchOIHist(): Promise<void> {
-  try {
-    const d = (await jget(
-      'https://fapi.binance.com/futures/data/openInterestHist?symbol=' +
-        state.symbol +
-        '&period=1h&limit=96',
-    )) as Array<{ sumOpenInterest: string; timestamp: number }>
-    if (!Array.isArray(d) || !d.length) throw new Error('empty')
-    state.oiHist = d.map((x) => ({ ts: Number(x.timestamp), openInterest: +x.sumOpenInterest }))
-  } catch (e) {
-    console.warn('oiHist', e)
+  const fut = futuresSymbolOf(state.symbol)
+  if (!fut) {
+    state.oiHist = null
+    return
   }
+  await symbolScoped(
+    current,
+    () =>
+      jget(
+        'https://fapi.binance.com/futures/data/openInterestHist?symbol=' + fut.sym + '&period=1h&limit=96',
+      ) as Promise<Array<{ sumOpenInterest: string; timestamp: number }>>,
+    (d) => {
+      if (!Array.isArray(d) || !d.length) throw new Error('empty')
+      // In spot units, like state.oi (a 1000PEPE contract is 1000 PEPE).
+      state.oiHist = d.map((x) => ({ ts: Number(x.timestamp), openInterest: +x.sumOpenInterest * fut.mult }))
+    },
+    (e) => {
+      console.warn('oiHist', e)
+      state.oiHist = null
+    },
+  )
 }
 
 export async function fetchLongShort(): Promise<void> {
-  try {
-    const d = (await jget(
-      'https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=' +
-        state.symbol +
-        '&period=1h&limit=96',
-    )) as Array<{ longAccount: string; shortAccount: string; longShortRatio: string; timestamp: number }>
-    if (!Array.isArray(d) || !d.length) throw new Error('empty')
-    state.ls = d.map((x) => ({
-      ts: Number(x.timestamp),
-      longAccount: +x.longAccount,
-      shortAccount: +x.shortAccount,
-      ratio: +x.longShortRatio,
-    }))
-  } catch (e) {
-    console.warn('longShort', e)
+  const fut = futuresSymbolOf(state.symbol)
+  if (!fut) {
+    state.ls = null
+    return
   }
+  await symbolScoped(
+    current,
+    () =>
+      jget(
+        'https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=' +
+          fut.sym +
+          '&period=1h&limit=96',
+      ) as Promise<Array<{ longAccount: string; shortAccount: string; longShortRatio: string; timestamp: number }>>,
+    (d) => {
+      if (!Array.isArray(d) || !d.length) throw new Error('empty')
+      state.ls = d.map((x) => ({
+        ts: Number(x.timestamp),
+        longAccount: +x.longAccount,
+        shortAccount: +x.shortAccount,
+        ratio: +x.longShortRatio,
+      }))
+    },
+    (e) => {
+      console.warn('longShort', e)
+      state.ls = null
+    },
+  )
 }
 
 async function safe<T>(p: Promise<T>): Promise<{ ok: true; v: T } | { ok: false }> {
@@ -123,17 +160,21 @@ export async function fetchCrossExchange(): Promise<void> {
     }))
     return
   }
-  const base = baseOf(state.symbol)
+  const asked = state.symbol
+  const base = baseOf(asked)
   const rows = await Promise.all(
     VENUES.map(async (v): Promise<CrossExRow> => {
       const sym = v.symbol(base)
-      const row: CrossExRow = { id: v.id, name: v.name, kind: v.kind, usd: isUsdQuoted(v.id) }
+      const row: CrossExRow = { id: v.id, name: v.name, base, kind: v.kind, usd: isUsdQuoted(v.id) }
       // No market here is an answer, not a failure — say which it is.
       if (!sym) return { ...row, err: 'no market' }
       const wait = venueRetryIn(v.id)
       if (wait) {
-        // Keep showing the last good quote while it waits, if there is one.
-        const prev = state.crossEx?.find((r: CrossExRow) => r.id === v.id && r.last != null)
+        // Keep showing the last good quote while it waits, if there is one —
+        // for this coin only, or BTC's price would sit in ETH's table.
+        const prev = state.crossEx?.find(
+          (r: CrossExRow) => r.id === v.id && r.base === base && r.last != null,
+        )
         return prev ? { ...prev } : { ...row, err: 'unreachable · retry in ' + Math.ceil(wait / 1000) + 's' }
       }
       const res = await Promise.all(v.urls(sym).map((u) => safe(jget(u))))
@@ -151,5 +192,7 @@ export async function fetchCrossExchange(): Promise<void> {
       return { ...row, last: q.last, vol: q.vol, spread, funding: q.funding }
     }),
   )
+  // The user moved on while the venues answered: these rows are not theirs.
+  if (state.symbol !== asked) return
   state.crossEx = rows
 }

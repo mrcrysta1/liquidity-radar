@@ -35,6 +35,21 @@ export function noteRateLimit(untilMs: number): void {
 }
 
 /**
+ * True for Binance's production REST hosts (api/fapi/dapi.binance.com,
+ * data-api.binance.vision), whose 429/418 is a cooldown on this IP that every
+ * other Binance call must respect. Other hosts — CoinGecko, Bybit, OKX, Yahoo,
+ * Forex Factory, and Binance's futures testnet, which has its own separate
+ * limits — must never trip the Binance guard with their own 429.
+ */
+export function isBinanceUrl(url: string): boolean {
+  try {
+    return /(^|\.)binance\.(com|vision)$/.test(new URL(url).hostname.toLowerCase())
+  } catch {
+    return false
+  }
+}
+
+/**
  * Pull the cooldown out of a 418/429. Binance sends `Retry-After` in seconds
  * and, for a ban, an expiry timestamp in the body: "IP banned until 1700000000000".
  */

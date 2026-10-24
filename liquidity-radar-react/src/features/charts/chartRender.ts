@@ -13,19 +13,40 @@ import {
   refreshIndicatorColors,
   renderIndicators,
 } from './indicators/render'
-import { onIndicatorsChange } from './indicators/store'
+import { onIndicatorsChange, removeIndicator, toggleIndicator } from './indicators/store'
 import { isReplayOn, onReplayChange, visibleCandles } from './replay'
 import {
   getChartStyle,
-  isOhlcStyle,
   onChartStyleChange,
   onRangeSettingsChange,
   styleDef,
 } from './chartStyle'
-import { CUSTOM_VIEWS, toCandleData } from './series/customSeries'
+import type { ChartStyleId } from './chartStyle'
+import type { CandleFlat } from '../../services/market'
+import { CUSTOM_VIEWS, hollowCandleData, toCandleData } from './series/customSeries'
+import { BASIC_VIEWS, basicSeriesOptions } from './series/basicSeries'
+import { heikinAshiBar, heikinAshiOf } from './series/heikinAshi'
+import {
+  createLineFamilySeries,
+  stopBaselineBase,
+  syncBaselineBase,
+  themeLineFamilySeries,
+} from './series/lineFamily'
+import type { LineFamilyColors } from './series/lineFamily'
 import { displayCandles, isRangeMode, snapChartTime, timeOnlyCandles } from './series/rangeView'
+import { renkoSeriesOptions } from './series/renko'
+import { subscribeReversalSettings } from './series/reversalSettings'
 import { tfDef } from '../../services/timeframe'
 import { mountCloseTimer, updateCloseTimer } from './closeTimer'
+import { getTimeframe, tfLabel } from './timeframes'
+import { fmtChartDate, isDailyTf } from './timezone'
+import {
+  chartPalette,
+  resetTvLastPrice,
+  tvChartOptions,
+  tvLastPrice,
+  tvWatermark,
+} from './chartPalette'
 import {
   drawToolDef,
   getDrawTool,
@@ -45,6 +66,8 @@ import { attachWhaleBubbles, renderWhaleBubbles, watchLiveWhales } from './whale
 import { attachVolumeProfile, renderVolumeProfile } from './volumeProfileOverlay'
 import { onDeltaChange } from '../delta/delta'
 import { onOverlayTogglesChange } from './overlayToggles'
+import { afterChartFit, attachScaleNav } from './scaleNav'
+import { registerCrosshairSync } from './crosshairSync'
 
 type Any = any
 ;(window as Any).LightweightCharts = LightweightCharts
@@ -93,84 +116,230 @@ export function cv(name: string): string {
             : '#0D1628')
   )
 }
+/**
+ * Chart colours. The default palette draws as TradingView, the others keep
+ * their own colours — see ./chartPalette.
+ */
 export function chartTheme(): Any {
-  if (isLightTheme())
-    return {
-      bg: cv('card'),
-      txt: cv('muted'),
-      grid: '#E5E7EB',
-      border: cv('border'),
-      up: cv('green'),
-      dn: cv('red'),
-      pline: cv('primary'),
-    }
-  return {
-    bg: cv('card'),
-    txt: cv('muted'),
-    grid: '#12203A',
-    border: cv('border'),
-    up: cv('green'),
-    dn: cv('red'),
-    pline: cv('primary'),
-  }
+  return { ...chartPalette(), pline: cv('primary') }
 }
 export function applyChartTheme(): void {
   if (!chart) return
-  const th = chartTheme()
-  chart.applyOptions({
-    layout: { background: { type: 'solid', color: th.bg }, textColor: th.txt },
-    grid: { vertLines: { color: th.grid }, horzLines: { color: th.grid } },
-    rightPriceScale: { borderColor: th.border },
-    timeScale: { borderColor: th.border },
-  })
-  // Only feed each series the options it actually has — a line series has no
-  // wick colours, and unknown keys are silently ignored, hiding mistakes.
+  chart.applyOptions({ ...tvChartOptions(undefined, mainIsDaily), ...tvWatermark(watermarkText()) })
   if (candleSeries) {
-    const id = getChartStyle()
-    const pRGB = cv('pRGB') || '41 98 255'
-    if (CUSTOM_VIEWS[id]) {
-      candleSeries.applyOptions({
-        upColor: th.up,
-        downColor: th.dn,
-        wickColor: th.txt,
-        textColor: th.txt,
-        gridColor: isLightTheme() ? 'rgba(75,85,99,.3)' : 'rgba(143,160,181,.25)',
-        priceLineColor: th.pline,
-      })
-    } else if (id === 'candle' || id === 'hollow' || id === 'range') {
-      candleSeries.applyOptions({
-        upColor: id === 'hollow' ? 'rgba(0,0,0,0)' : th.up,
-        downColor: id === 'hollow' ? 'rgba(0,0,0,0)' : th.dn,
-        borderVisible: id === 'hollow',
-        borderUpColor: th.up,
-        borderDownColor: th.dn,
-        wickUpColor: th.up,
-        wickDownColor: th.dn,
-        priceLineColor: th.pline,
-      })
-    } else if (id === 'bar') {
-      candleSeries.applyOptions({ upColor: th.up, downColor: th.dn, priceLineColor: th.pline })
-    } else if (id === 'area') {
-      candleSeries.applyOptions({
-        lineColor: cv('primary'),
-        topColor: 'rgb(' + pRGB + ' / .34)',
-        bottomColor: 'rgb(' + pRGB + ' / 0)',
-        priceLineColor: th.pline,
-      })
-    } else if (id === 'baseline') {
-      candleSeries.applyOptions({
-        topLineColor: th.up,
-        bottomLineColor: th.dn,
-        priceLineColor: th.pline,
-      })
-    } else {
-      candleSeries.applyOptions({ color: cv('primary'), priceLineColor: th.pline })
-    }
+    themePriceSeries(candleSeries, getChartStyle())
+    resetTvLastPrice(candleSeries)
+    const shown = displayCandles()
+    syncLastPrice(shown[shown.length - 1])
+    // Hollow candles carry their colours per bar: re-colour the data too.
+    if (getChartStyle() === 'hollow' && shown.length)
+      candleSeries.setData(priceSeriesData('hollow', shown))
   }
   refreshIndicatorColors()
+  renderLiveLegend()
+}
+
+/** Daily-or-longer bars on the main chart: dated by UTC session (./timezone). */
+const mainIsDaily = (): boolean => !isRangeMode() && isDailyTf(getTimeframe())
+
+/** "BTCUSDT, 15m" — the watermark TradingView prints behind the bars. */
+function watermarkText(): string {
+  return legendSymbol(state.symbol) + ', ' + tfLabel(getTimeframe())
+}
+let watermarkShown = ''
+function syncWatermark(): void {
+  const text = watermarkText()
+  if (text === watermarkShown) return
+  watermarkShown = text
+  chart.applyOptions(tvWatermark(text))
+}
+/** Ticker as TradingView prints it: BTCUSDT for a Binance pair, the base otherwise. */
+export function legendSymbol(sym: string): string {
+  const base = baseOf(sym)
+  return venueOf(sym) === 'BINANCE SPOT' ? base + 'USDT' : base
+}
+/** Exchange name in TradingView's legend casing ("Binance", "Yahoo"). */
+export function legendExchange(sym: string): string {
+  return venueOf(sym) === 'BINANCE SPOT' ? 'Binance' : 'Yahoo'
+}
+/** Last-price label and line in the colour of the last bar's direction. */
+function syncLastPrice(lc: Any): void {
+  if (lc) tvLastPrice(candleSeries, lc.c >= lc.o)
+}
+
+/**
+ * Re-colour a price series made by createPriceSeries for style `id`.
+ * Only feed each series the options it actually has — a line series has no
+ * wick colours, and unknown keys are silently ignored, hiding mistakes.
+ */
+export function themePriceSeries(series: Any, id: ChartStyleId): void {
+  const th = chartTheme()
+  if (BASIC_VIEWS[id]) {
+    series.applyOptions(basicSeriesOptions(th, cv('primary')))
+  } else if (CUSTOM_VIEWS[id]) {
+    series.applyOptions({
+      upColor: th.up,
+      downColor: th.dn,
+      wickColor: th.txt,
+      textColor: th.txt,
+      gridColor: isLightTheme() ? 'rgba(75,85,99,.3)' : 'rgba(143,160,181,.25)',
+      priceLineColor: th.pline,
+    })
+  } else if (
+    id === 'candle' ||
+    id === 'hollow' ||
+    id === 'range' ||
+    id === 'heikin' ||
+    id === 'linebreak'
+  ) {
+    series.applyOptions({
+      upColor: id === 'hollow' ? 'rgba(0,0,0,0)' : th.up,
+      downColor: id === 'hollow' ? 'rgba(0,0,0,0)' : th.dn,
+      borderVisible: id === 'hollow',
+      borderUpColor: th.up,
+      borderDownColor: th.dn,
+      wickUpColor: th.up,
+      wickDownColor: th.dn,
+      priceLineColor: th.pline,
+    })
+  } else if (id === 'renko') {
+    series.applyOptions({ ...renkoSeriesOptions(), priceLineColor: th.pline })
+  } else if (id === 'bar' || id === 'hlc') {
+    series.applyOptions({ upColor: th.up, downColor: th.dn, priceLineColor: th.pline })
+  } else {
+    themeLineFamilySeries(series, id, lineFamilyColors())
+  }
+}
+/** The palette the line-family styles (series/lineFamily) are drawn in. */
+function lineFamilyColors(): LineFamilyColors {
+  const th = chartTheme()
+  return { primary: cv('primary'), up: th.up, dn: th.dn, neutral: th.txt, pline: th.pline }
 }
 export function mapCandle(c: Any): Any {
   return { time: Math.floor(c.t / 1000), open: c.o, high: c.h, low: c.l, close: c.c }
+}
+
+/**
+ * Series data for style `id`: custom bars, OHLC, or a single closing value.
+ * `prev` is the bar before `candles[0]`, which hollow candles (coloured by
+ * the previous close) and the custom styles (sessions) need for a live bar.
+ */
+export function priceSeriesData(
+  id: ChartStyleId,
+  candles: CandleFlat[],
+  prev?: CandleFlat | null,
+): Any[] {
+  const def = styleDef(id)
+  // Heikin Ashi re-primes its memo here, so live ticks build on these bars.
+  if (id === 'heikin') return heikinAshiOf(candles, true).map(mapCandle)
+  if (def.custom) return toCandleData(candles, prev)
+  if (id === 'hollow') {
+    const th = chartTheme()
+    return hollowCandleData(candles, th.up, th.dn, prev)
+  }
+  if (def.ohlc) return candles.map(mapCandle)
+  return candles.map((c) => ({ time: Math.floor(c.t / 1000), value: c.c }))
+}
+/**
+ * One bar of series data for style `id` — what series.update() takes.
+ * `prev` is the bar before `c` (hollow candles and sessions need it). `src`
+ * is the candle array `c` belongs to: Heikin Ashi needs the bars before it,
+ * since each HA open is built from the previous HA bar.
+ */
+export function priceSeriesPoint(
+  id: ChartStyleId,
+  c: CandleFlat,
+  prev?: CandleFlat | null,
+  src?: CandleFlat[],
+): Any {
+  if (id === 'heikin') return mapCandle(heikinAshiBar(src || [c], c))
+  return priceSeriesData(id, [c], prev)[0]
+}
+/** The bar before the one starting at `t` in `bars` (searched from the end). */
+export function barBefore(bars: CandleFlat[], t: number): CandleFlat | null {
+  for (let i = bars.length - 1; i >= 0; i--) if (bars[i].t < t) return bars[i]
+  return null
+}
+/**
+ * The bars the OHLC legend reports for style `id`: the candles themselves, or
+ * on Heikin Ashi the HA bars actually drawn.
+ */
+export function legendCandles(id: ChartStyleId, candles: CandleFlat[]): CandleFlat[] {
+  return id === 'heikin' ? heikinAshiOf(candles) : candles
+}
+
+/**
+ * Add the price series for style `id` to chart `c`. The main chart and the
+ * multi-chart companions share it, so a style looks the same in every cell.
+ * `baseline` is the Baseline style's starting base price (see syncBaselineBase).
+ */
+export function createPriceSeries(c: Any, id: ChartStyleId, baseline = 0): Any {
+  const th = chartTheme()
+  const basic = BASIC_VIEWS[id]
+  const custom = CUSTOM_VIEWS[id]
+  if (basic) {
+    // Columns and High-low (series/basicSeries).
+    return c.addCustomSeries(basic(), {
+      ...basicSeriesOptions(th, cv('primary')),
+      priceLineStyle: 2,
+    })
+  } else if (custom) {
+    // Our own pane renderer, drawing inside the chart's price scale.
+    return c.addCustomSeries(custom(), {
+      upColor: th.up,
+      downColor: th.dn,
+      wickColor: th.txt,
+      textColor: th.txt,
+      gridColor: isLightTheme() ? 'rgba(75,85,99,.3)' : 'rgba(143,160,181,.25)',
+      rows: 14,
+      priceLineColor: th.pline,
+      priceLineStyle: 2,
+    })
+  } else if (id === 'hollow') {
+    return c.addCandlestickSeries({
+      upColor: 'rgba(0,0,0,0)',
+      downColor: 'rgba(0,0,0,0)',
+      borderVisible: true,
+      borderUpColor: th.up,
+      borderDownColor: th.dn,
+      wickUpColor: th.up,
+      wickDownColor: th.dn,
+      priceLineColor: th.pline,
+      priceLineStyle: 2,
+    })
+  } else if (id === 'renko') {
+    // Bricks: TradingView's renko colours, boxes with no wicks.
+    return c.addCandlestickSeries({
+      ...renkoSeriesOptions(),
+      priceLineColor: th.pline,
+      priceLineStyle: 2,
+    })
+  } else if (id === 'bar' || id === 'hlc') {
+    // HLC bars are bars without the open tick.
+    return c.addBarSeries({
+      upColor: th.up,
+      downColor: th.dn,
+      // TradingView's bars are thin OHLC ticks, not body-width blocks.
+      thinBars: true,
+      openVisible: id !== 'hlc',
+      priceLineColor: th.pline,
+      priceLineStyle: 2,
+    })
+  }
+  // Line, line with markers, step line, area, HLC area and baseline.
+  const line = createLineFamilySeries(c, id, lineFamilyColors(), baseline)
+  if (line) return line
+  // Candles, Heikin Ashi (HA bars, see priceSeriesData), and range bars
+  // (OHLC bars built off the clock).
+  return c.addCandlestickSeries({
+    upColor: th.up,
+    downColor: th.dn,
+    borderVisible: false,
+    wickUpColor: th.up,
+    wickDownColor: th.dn,
+    priceLineColor: th.pline,
+    priceLineStyle: 2,
+  })
 }
 
 // ---- Overlay / pane series management ----
@@ -184,6 +353,7 @@ export function mapCandle(c: Any): Any {
 function applyChartStyle(): void {
   if (!chart) return
   if (chartState.styleSeries) {
+    stopBaselineBase(chartState.styleSeries)
     try {
       chart.removeSeries(chartState.styleSeries)
     } catch (e) {
@@ -193,83 +363,8 @@ function applyChartStyle(): void {
   chartState.styleSeries = null
   candleSeries = null
 
-  const th = chartTheme()
-  const id = getChartStyle()
-  const pRGB = cv('pRGB') || '41 98 255'
-  const custom = CUSTOM_VIEWS[id]
-  if (custom) {
-    // Our own pane renderer, drawing inside the chart's price scale.
-    candleSeries = chart.addCustomSeries(custom(), {
-      upColor: th.up,
-      downColor: th.dn,
-      wickColor: th.txt,
-      textColor: th.txt,
-      gridColor: isLightTheme() ? 'rgba(75,85,99,.3)' : 'rgba(143,160,181,.25)',
-      rows: 14,
-      priceLineColor: th.pline,
-      priceLineStyle: 2,
-    })
-  } else if (id === 'hollow') {
-    candleSeries = chart.addCandlestickSeries({
-      upColor: 'rgba(0,0,0,0)',
-      downColor: 'rgba(0,0,0,0)',
-      borderVisible: true,
-      borderUpColor: th.up,
-      borderDownColor: th.dn,
-      wickUpColor: th.up,
-      wickDownColor: th.dn,
-      priceLineColor: th.pline,
-      priceLineStyle: 2,
-    })
-  } else if (id === 'bar') {
-    candleSeries = chart.addBarSeries({
-      upColor: th.up,
-      downColor: th.dn,
-      thinBars: false,
-      priceLineColor: th.pline,
-      priceLineStyle: 2,
-    })
-  } else if (id === 'area') {
-    candleSeries = chart.addAreaSeries({
-      lineColor: cv('primary'),
-      lineWidth: 2,
-      topColor: 'rgb(' + pRGB + ' / .34)',
-      bottomColor: 'rgb(' + pRGB + ' / 0)',
-      priceLineColor: th.pline,
-      priceLineStyle: 2,
-    })
-  } else if (id === 'line') {
-    candleSeries = chart.addLineSeries({
-      color: cv('primary'),
-      lineWidth: 2,
-      priceLineColor: th.pline,
-      priceLineStyle: 2,
-    })
-  } else if (id === 'baseline') {
-    const base = state.candles.length ? state.candles[0].c : 0
-    candleSeries = chart.addBaselineSeries({
-      baseValue: { type: 'price', price: base },
-      topLineColor: th.up,
-      topFillColor1: 'rgba(0,230,118,.28)',
-      topFillColor2: 'rgba(0,230,118,.02)',
-      bottomLineColor: th.dn,
-      bottomFillColor1: 'rgba(255,23,68,.02)',
-      bottomFillColor2: 'rgba(255,23,68,.28)',
-      lineWidth: 2,
-      priceLineColor: th.pline,
-      priceLineStyle: 2,
-    })
-  } else {
-    candleSeries = chart.addCandlestickSeries({
-      upColor: th.up,
-      downColor: th.dn,
-      borderVisible: false,
-      wickUpColor: th.up,
-      wickDownColor: th.dn,
-      priceLineColor: th.pline,
-      priceLineStyle: 2,
-    })
-  }
+  const base = state.candles.length ? state.candles[0].c : 0
+  candleSeries = createPriceSeries(chart, getChartStyle(), base)
   chartState.styleSeries = candleSeries
   priceSeriesSubs.forEach((f) => f(candleSeries))
 }
@@ -280,28 +375,29 @@ export function initChart(): void {
     return
   }
   const el = $('chart')!
-  const th = chartTheme()
+  // TradingView's canvas: palette colours, fonts, dashed grey crosshair and a
+  // faint symbol watermark (see ./chartPalette).
+  const tv: Any = tvChartOptions(undefined, mainIsDaily)
+  watermarkShown = watermarkText()
   chart = LightweightCharts.createChart(el, {
     // autoSize lets the library watch the container itself. Passing explicit
     // width/height instead makes it write inline sizes onto the element, which
     // then override the CSS — that is what used to leave the chart stuck at
     // whatever height the side panel had stretched it to.
     autoSize: true,
-    layout: {
-      background: { type: 'solid', color: th.bg },
-      textColor: th.txt,
-      fontSize: 11,
-      fontFamily: "'JetBrains Mono', monospace",
+    ...tv,
+    ...tvWatermark(watermarkShown),
+    timeScale: {
+      ...tv.timeScale,
+      timeVisible: true,
+      secondsVisible: false,
+      rightOffset: 10,
+      barSpacing: 7,
     },
-    grid: { vertLines: { color: th.grid }, horzLines: { color: th.grid } },
-    rightPriceScale: { borderColor: th.border },
-    timeScale: { borderColor: th.border, timeVisible: true, secondsVisible: false, rightOffset: 6 },
-    crosshair: {
-      mode: 0,
-      vertLine: { color: th.pline, labelBackgroundColor: th.pline },
-      horzLine: { color: th.pline, labelBackgroundColor: th.pline },
-    },
+    // Normal (free) crosshair, as before; magnet snapping is the drawing tools'.
+    crosshair: { ...tv.crosshair, mode: 0 },
     localization: {
+      ...tv.localization,
       priceFormatter: function (p: number) {
         return pfmt(p)
       },
@@ -316,22 +412,20 @@ export function initChart(): void {
   // replaces the series does not strand it.
   // Range bars do not close on the clock, so there is nothing to count down.
   mountCloseTimer(chart, () => (isRangeMode() ? null : candleSeries))
+  // Price-scale modes, zoom/scroll buttons and the date-range bar (scaleNav).
+  attachScaleNav({ chart, el, getSeries: () => candleSeries, onSeriesChange: onPriceSeriesChange })
   // While the cursor is over a bar the legend shows that bar; live ticks must
   // not overwrite it, and leaving the chart hands it back to the live candle.
-  chart.subscribeCrosshairMove((param: Any) => {
-    const cp =
-      param.time && param.point
-        ? displayCandles().find((c) => Math.floor(c.t / 1000) === param.time)
-        : null
-    if (!cp) {
-      if (hoverTime != null) {
-        hoverTime = null
-        renderLiveLegend()
-      }
-      return
-    }
-    hoverTime = param.time as number
-    renderLegend(cp.o, cp.h, cp.l, cp.c, cp.v, true)
+  chart.subscribeCrosshairMove((param: Any) =>
+    hoverLegend(param.time && param.point ? param.time : null),
+  )
+  // Crosshair sync with the layout's other cells (./crosshairSync); a synced
+  // crosshair drives the legend too.
+  registerCrosshairSync({
+    chart,
+    series: () => candleSeries,
+    bars: () => legendCandles(getChartStyle(), displayCandles()),
+    onSync: hoverLegend,
   })
   chart.timeScale().subscribeVisibleTimeRangeChange(function () {
     redrawDrawings()
@@ -348,13 +442,17 @@ export function initChart(): void {
     updateCloseTimer()
   }).observe(el)
   setupDrawLayer()
+  wireLegendActions()
   initChartToolbar()
   initFullScreen()
   // Adding, editing or replaying an indicator redraws through the same path as
   // a fresh data load, so there is one place where series are built.
   onIndicatorsChange(() => updateChartData(false))
   onReplayChange((modeChanged: boolean) => updateChartData(modeChanged))
-  let wasRange = isRangeMode()
+  // Which derived bars are on screen ('' for time candles): range ↔ renko
+  // rebuilds the bars as surely as leaving them does.
+  const derivedKind = (): string => (isRangeMode() ? getChartStyle() : '')
+  let wasRange = derivedKind()
   onChartStyleChange(() => {
     // Same bars, drawn differently — keep whatever the user has zoomed or
     // panned to instead of snapping back to the newest candle. The range is
@@ -363,8 +461,9 @@ export function initChart(): void {
     // the bars themselves change, so that view is refitted instead.
     const ts = chart.timeScale()
     const keep = ts.getVisibleLogicalRange()
-    const refit = wasRange !== isRangeMode()
-    wasRange = isRangeMode()
+    // Between two non-time styles (range bars → Kagi, say) the bars change too.
+    const refit = wasRange !== derivedKind()
+    wasRange = derivedKind()
     applyChartStyle()
     attachWhaleBubbles(chart, candleSeries, $('chartWrap')!)
     attachVolumeProfile(chart, candleSeries, $('chartWrap')!)
@@ -378,6 +477,10 @@ export function initChart(): void {
   })
   // A new range size rebuilds every bar: a new dataset, so refit.
   onRangeSettingsChange(() => updateChartData(true))
+  // Same for the Line break / Kagi / Point & Figure settings, on those styles.
+  subscribeReversalSettings(() => {
+    if (isRangeMode()) updateChartData(true)
+  })
   watchForOlderHistory()
   // Delta bars stream in far faster than the chart should repaint — coalesce
   // to the next frame, same reasoning as the live-tick indicator refresh
@@ -401,29 +504,77 @@ export function initChart(): void {
 }
 /** Bar time (seconds) under the crosshair, or null when the cursor is off the chart. */
 let hoverTime: number | null = null
-function renderLiveLegend(): void {
-  const candles = displayCandles()
-  const lc = candles[candles.length - 1]
-  if (lc) renderLegend(lc.o, lc.h, lc.l, lc.c, lc.v, false)
+/** The legend for the bar at `time` (seconds), or the live bar when null / no bar there. */
+function hoverLegend(time: Any): void {
+  // Heikin Ashi: the legend reads the HA bars, as drawn.
+  const shown = time ? legendCandles(getChartStyle(), displayCandles()) : null
+  const i = shown ? shown.findIndex((c) => Math.floor(c.t / 1000) === time) : -1
+  const cp = shown && i >= 0 ? shown[i] : null
+  if (!shown || !cp) {
+    if (hoverTime != null) {
+      hoverTime = null
+      renderLiveLegend()
+    }
+    return
+  }
+  hoverTime = time as number
+  renderLegend(cp.o, cp.h, cp.l, cp.c, cp.v, true, shown[i - 1]?.c)
 }
-function renderLegend(o: Any, h: Any, l: Any, c: Any, v: Any, isCross: Any): void {
+function renderLiveLegend(): void {
+  const candles = legendCandles(getChartStyle(), displayCandles())
+  const lc = candles[candles.length - 1]
+  const prev = candles[candles.length - 2]
+  if (lc) renderLegend(lc.o, lc.h, lc.l, lc.c, lc.v, false, prev?.c)
+}
+const fmtChg = (d: number): string => (d >= 0 ? '+' : '\u2212') + pfmt(Math.abs(d))
+/**
+ * The TradingView legend: "BTCUSDT · 15m · Binance", then O H L C in the
+ * bar's direction colour and the change from the previous close — for the
+ * bar under the crosshair, else the live one. Indicator lines follow below.
+ */
+function renderLegend(
+  o: Any,
+  h: Any,
+  l: Any,
+  c: Any,
+  v: Any,
+  isCross: Any,
+  prevClose?: number,
+): void {
   if (!isFinite(o)) return
-  const up = c >= o
+  const pal = chartPalette()
+  const col = c >= o ? pal.up : pal.dn
+  // Change against the previous close, as TradingView reports it; the first
+  // loaded bar has none, so it falls back to its own open.
+  const ref = prevClose != null && isFinite(prevClose) && prevClose > 0 ? prevClose : o
+  const d = c - ref
+  const pct = ref ? (d / ref) * 100 : 0
+  const val = (k: string, x: Any) =>
+    '<span class="leg-k">' + k + '</span><b style="color:' + col + '">' + pfmt(x) + '</b>'
   $('legendOHLC')!.innerHTML =
-    '<span>O <b style="color:' +
-    (up ? 'var(--green)' : 'var(--red)') +
+    '<div class="leg-main' +
+    (isCross ? ' leg-cross' : '') +
+    '"><span class="leg-sym">' +
+    legendSymbol(state.symbol) +
+    '<i>\u00b7</i>' +
+    tfLabel(getTimeframe()) +
+    '<i>\u00b7</i>' +
+    legendExchange(state.symbol) +
+    '</span><span class="leg-ohlc">' +
+    val('O', o) +
+    val('H', h) +
+    val('L', l) +
+    val('C', c) +
+    '<b style="color:' +
+    col +
     '">' +
-    pfmt(o) +
-    '</b></span><span>H <b>' +
-    pfmt(h) +
-    '</b></span><span>L <b>' +
-    pfmt(l) +
-    '</b></span><span>C <b style="color:' +
-    (up ? 'var(--green)' : 'var(--red)') +
-    '">' +
-    pfmt(c) +
-    '</b></span>' +
-    (v != null ? '<span>VOL <b>' + nfmt(v) + '</b></span>' : '') +
+    fmtChg(d) +
+    ' (' +
+    (pct >= 0 ? '+' : '\u2212') +
+    Math.abs(pct).toFixed(2) +
+    '%)</b>' +
+    (v != null ? '<span class="leg-k">Vol</span><b>' + nfmt(v) + '</b>' : '') +
+    '</span></div>' +
     indicatorLegendHtml()
 }
 
@@ -443,13 +594,21 @@ export function refreshIndicatorLegend(): void {
 function indicatorLegendHtml(): string {
   return indLegendHtml
 }
+const EYE_ON =
+  '<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>'
+const EYE_OFF =
+  '<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4 4 20 20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>'
+const REMOVE =
+  '<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M6 6 18 18M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
 function buildIndicatorLegend(): string {
   const rows = indicatorLegend(displayCandles())
   if (!rows.length) return ''
   return rows
     .map(
       (r) =>
-        '<span class="leg-ind"><i>' +
+        '<div class="leg-ind' +
+        (r.hidden ? ' off' : '') +
+        '"><i>' +
         r.label +
         '</i>' +
         r.parts
@@ -462,9 +621,34 @@ function buildIndicatorLegend(): string {
               '</b>',
           )
           .join('') +
-        '</span>',
+        '<span class="leg-act"><button type="button" data-act="eye" data-uid="' +
+        r.uid +
+        '" title="' +
+        (r.hidden ? 'Show' : 'Hide') +
+        '" aria-pressed="' +
+        !r.hidden +
+        '">' +
+        (r.hidden ? EYE_OFF : EYE_ON) +
+        '</button><button type="button" data-act="rm" data-uid="' +
+        r.uid +
+        '" title="Remove">' +
+        REMOVE +
+        '</button></span></div>',
     )
     .join('')
+}
+/** The legend's eye and remove buttons drive the indicator store. */
+function wireLegendActions(): void {
+  const el = $('legendOHLC')
+  if (!el) return
+  el.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest('button[data-act]') as HTMLElement | null
+    const uid = btn?.dataset.uid
+    if (!btn || !uid) return
+    e.stopPropagation()
+    if (btn.dataset.act === 'eye') toggleIndicator(uid)
+    else removeIndicator(uid)
+  })
 }
 /**
  * Redraw the series.
@@ -483,19 +667,15 @@ export function updateChartData(fit = false): void {
   syncSecondsVisible()
   const keep = fit ? null : ts.getVisibleLogicalRange()
   const prevFirst = chartState.firstBarTime as number | undefined
-  if (styleDef(getChartStyle()).custom) {
-    candleSeries.setData(toCandleData(candles))
-  } else if (isOhlcStyle()) {
-    candleSeries.setData(candles.map(mapCandle))
-  } else {
-    candleSeries.setData(candles.map((c) => ({ time: Math.floor(c.t / 1000), value: c.c })))
-  }
+  candleSeries.setData(priceSeriesData(getChartStyle(), candles))
+  if (getChartStyle() === 'baseline') syncBaselineBase(chart, candleSeries, displayCandles)
   rangeShown = isRangeMode() ? candles : []
   renderIndicators(candles)
   renderDeltaPane(timeOnlyCandles(), indicatorPaneCount())
   renderWhaleBubbles()
   if (fit) {
     ts.fitContent()
+    afterChartFit()
   } else if (keep) {
     // Older candles land in front of index 0, so the same bars now sit that
     // many indices further along — shift the range to stay put.
@@ -511,9 +691,12 @@ export function updateChartData(fit = false): void {
     })
   }
   chartState.firstBarTime = candles[0].t
-  const lc = candles[candles.length - 1]
+  const lc = legendCandles(getChartStyle(), candles)[candles.length - 1]
   refreshIndicatorLegend()
-  if (hoverTime == null) renderLegend(lc.o, lc.h, lc.l, lc.c, lc.v, false)
+  if (hoverTime == null)
+    renderLegend(lc.o, lc.h, lc.l, lc.c, lc.v, false, candles[candles.length - 2]?.c)
+  syncLastPrice(lc)
+  syncWatermark()
   redrawDrawings()
   updateCloseTimer()
 }
@@ -563,11 +746,11 @@ function pushRangeLive(): void {
     (k === prev.length || next[k].t === prev[k].t)
   if (tailOnly) {
     for (let i = Math.max(k, prev.length - 1); i < next.length; i++)
-      candleSeries.update(mapCandle(next[i]))
+      candleSeries.update(priceSeriesPoint(getChartStyle(), next[i]))
   } else {
     const ts = chart.timeScale()
     const keep = ts.getVisibleLogicalRange()
-    candleSeries.setData(next.map(mapCandle))
+    candleSeries.setData(priceSeriesData(getChartStyle(), next))
     if (keep) ts.setVisibleLogicalRange(keep)
   }
   rangeShown = next
@@ -621,19 +804,24 @@ export function updateChartLast(c: Any): void {
     pushRangeLive()
     const lb = rangeShown[rangeShown.length - 1]
     if (lb) c = lb
-  } else if (styleDef(getChartStyle()).custom) {
-    candleSeries.update(toCandleData([c])[0])
-  } else if (isOhlcStyle()) {
-    candleSeries.update(mapCandle(c))
   } else {
-    candleSeries.update({ time: Math.floor(c.t / 1000), value: c.c })
+    const shown = displayCandles()
+    candleSeries.update(priceSeriesPoint(getChartStyle(), c, barBefore(shown, c.t), shown))
+    // Heikin Ashi: the legend reports the HA bar just drawn (memoised, so cheap).
+    if (getChartStyle() === 'heikin') c = heikinAshiBar(shown, c)
+    if (getChartStyle() === 'baseline') syncBaselineBase(chart, candleSeries, displayCandles)
   }
   // The candle follows the tape frame by frame, but indicators and the legend
   // are recomputed over the whole series — far too much work to repeat on every
   // trade print, and nothing the eye could read that fast anyway.
   // Hovering an older bar keeps its values; hovering the live one follows it.
+  // Previous close for the change readout: the bar before the live one.
+  const arr: Any[] = isRangeMode() ? rangeShown : state.candles
+  const at = arr.length - 1
+  const prevBar = at >= 0 && arr[at].t === c.t ? arr[at - 1] : arr[at]
   if (hoverTime == null || hoverTime === Math.floor(c.t / 1000))
-    renderLegend(c.o, c.h, c.l, c.c, c.v, hoverTime != null)
+    renderLegend(c.o, c.h, c.l, c.c, c.v, hoverTime != null, prevBar?.c)
+  syncLastPrice(c)
   const now = Date.now()
   if (!indPending && now - indLast >= IND_REFRESH_MS) {
     indPending = true
@@ -645,8 +833,10 @@ export function updateChartLast(c: Any): void {
         renderIndicators(shown)
         renderDeltaPane(timeOnlyCandles(), indicatorPaneCount())
         refreshIndicatorLegend()
-        const lc = shown[shown.length - 1]
-        if (lc && hoverTime == null) renderLegend(lc.o, lc.h, lc.l, lc.c, lc.v, false)
+        const lcs = legendCandles(getChartStyle(), shown)
+        const lc = lcs[lcs.length - 1]
+        if (lc && hoverTime == null)
+          renderLegend(lc.o, lc.h, lc.l, lc.c, lc.v, false, lcs[lcs.length - 2]?.c)
       }
       updateCloseTimer()
     })
@@ -1136,7 +1326,7 @@ function mapCtx(cw: number, ch: number): MapCtx {
       return displayCandles().filter((k) => k.t >= lo && k.t <= hi).length
     },
     timeLabel(t: number) {
-      return new Date(t * 1000).toLocaleString(undefined, {
+      return fmtChartDate(t * 1000, {
         month: 'short',
         day: 'numeric',
         hour: '2-digit',

@@ -14,6 +14,7 @@ type TabId =
   | 'radar'
   | 'multichart'
   | 'signals'
+  | 'screener'
   | 'market'
   | 'bubbles'
   | 'analysis'
@@ -64,6 +65,12 @@ function NavIcon({ id }: { id: TabId }) {
       return (
         <svg {...p}>
           <path d="M13.2 2.8 4.6 13.4h5.6l-1.4 7.8 8.6-10.6h-5.6l1.4-7.8Z" {...S} />
+        </svg>
+      )
+    case 'screener':
+      return (
+        <svg {...p}>
+          <path d="M3.6 5.2h16.8l-6.4 7.4v5.6l-4 2v-7.6L3.6 5.2Z" {...S} />
         </svg>
       )
     case 'market':
@@ -139,6 +146,7 @@ const NAV: Array<{ id: TabId; label: string; key: string; group: string }> = [
   { id: 'radar', label: 'Radar', key: 'R', group: 'main' },
   { id: 'multichart', label: 'Charts', key: 'C', group: 'main' },
   { id: 'signals', label: 'Signals', key: 'S', group: 'trade' },
+  { id: 'screener', label: 'Screener', key: '', group: 'trade' },
   { id: 'analysis', label: 'Analysis', key: 'A', group: 'trade' },
   { id: 'neuralnet', label: 'Neural Net', key: '', group: 'trade' },
   { id: 'selflearn', label: 'Self Learning', key: '', group: 'trade' },
