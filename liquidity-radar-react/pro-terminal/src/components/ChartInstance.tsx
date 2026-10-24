@@ -22,6 +22,8 @@ export function ChartInstance({ cfg, active, compact }: { cfg: ChartConfig; acti
   const lines = useRef<Record<string, ISeriesApi<any>>>({}); const vpPrim = useRef<VolumeProfilePrimitive | undefined>(undefined);
   const priceLines = useRef<{ s: ISeriesApi<any>; l: IPriceLine }[]>([]); const markers = useRef<Map<string, ISeriesMarkersPluginApi<Time>>>(new Map());
   const [menu, setMenu] = useState(false); const [symInput, setSymInput] = useState(cfg.symbol);
+  // The header search and watchlist also change this chart's symbol: keep the input in step.
+  useEffect(() => { setSymInput(cfg.symbol); }, [cfg.symbol]);
   // Bar replay
   const [replay, setReplay] = useState<{ on: boolean; idx: number; playing: boolean; speed: number }>({ on: false, idx: 0, playing: false, speed: 1 });
 
