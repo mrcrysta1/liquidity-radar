@@ -1,12 +1,23 @@
 // Signed client for Binance USDⓈ-M Futures — the testnet by default.
 //
-// Safety: the base URL defaults to the testnet, and pointing it anywhere else
-// requires ALLOW_MAINNET=yes as well. Keys only ever come from the
-// environment; they are never logged.
+// Safety: TESTNET ONLY. The base URL must be one of the exact testnet hosts in
+// TESTNET_BASES; anything else (mainnet, a typo, a look-alike host, a URL with
+// credentials or a path) makes the constructor throw, so the bot refuses to
+// start. There is no override. Keys only ever come from the environment; they
+// are never logged.
 import { createHmac } from 'node:crypto'
 
 export const TESTNET = 'https://demo-fapi.binance.com'
-const MAINNET = 'https://fapi.binance.com'
+/** The only base URLs the client will ever sign requests for (Binance Futures testnet / Demo). */
+export const TESTNET_BASES: readonly string[] = Object.freeze(['https://demo-fapi.binance.com', 'https://testnet.binancefuture.com'])
+
+/** The base URL, trailing slashes removed, if it is an allowed testnet base; otherwise throws. */
+export function assertTestnetBase(base: unknown): string {
+  const b = typeof base === 'string' ? base.trim().replace(/\/+$/, '') : ''
+  if (!TESTNET_BASES.includes(b))
+    throw new Error(`Refusing to start: ${JSON.stringify(base)} is not a Binance Futures testnet base URL (allowed: ${TESTNET_BASES.join(', ')})`)
+  return b
+}
 
 export function sign(query: string, secret: string): string {
   return createHmac('sha256', secret).update(query).digest('hex')
@@ -60,16 +71,14 @@ export class Futures {
   private offset = 0
 
   constructor(key: string, secret: string, base = TESTNET) {
-    const b = base.replace(/\/+$/, '')
-    if (b === MAINNET && process.env.ALLOW_MAINNET !== 'yes')
-      throw new Error('Refusing to trade on mainnet: set ALLOW_MAINNET=yes if that is really intended.')
-    this.base = b
+    this.base = assertTestnetBase(base)
     this.key = key
     this.secret = secret
   }
 
+  /** Always true: the constructor refuses any base URL that is not an allowed testnet. */
   get isTestnet(): boolean {
-    return this.base !== MAINNET
+    return TESTNET_BASES.includes(this.base)
   }
 
   /**
@@ -106,7 +115,8 @@ export class Futures {
       qs.set('timestamp', String(Date.now() + this.offset - 1000))
       qs.set('signature', sign(qs.toString(), this.secret))
     }
-    const url = this.base + path + (qs.size ? '?' + qs.toString() : '')
+    // Defence in depth: never sign or send anything to a host off the allowlist.
+    const url = assertTestnetBase(this.base) + path + (qs.size ? '?' + qs.toString() : '')
     const send = () =>
       fetch(url, {
         method,
