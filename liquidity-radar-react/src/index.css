@@ -4365,6 +4365,12 @@ td .sk,b .sk{display:inline-block;vertical-align:middle}
 .mc-sym{display:flex;min-width:0}
 .mc-sym .cp-ico{display:none}
 .mc-sym .cp-trigger{padding:2px 8px}
+/* The header is narrow next to its controls: every panel is a USDT pair, so
+   drop the "/USDT" suffix and clip a long ticker instead of running it under
+   the caret. */
+.mc-sym .cp-id{overflow:hidden}
+.mc-sym .cp-id b{max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.mc-sym .cp-id b i{display:none}
 .mc-px{display:flex;gap:6px;font-family:var(--mono);font-size:11.5px}
 .mc-px b{color:var(--txt);font-weight:700}
 .mc-px i{font-style:normal;font-weight:700}
