@@ -24,7 +24,9 @@ class ReconnectingWS {
     this.ws.onerror = () => this.ws?.close();
   }
   private retry() { if (this.closed) return; const d = Math.min(30_000, 500 * 2 ** this.attempt++) + Math.random() * 300; setTimeout(() => this.open(), d); }
-  close() { this.closed = true; this.ws?.close(); }
+  // Detach first: the old socket's close event lands after a replacement may already be open,
+  // and would otherwise report 'closed' for the new stream (header stuck on "reconnecting…").
+  close() { this.closed = true; this.onStatus = undefined; if (this.ws) { this.ws.onopen = this.ws.onmessage = this.ws.onclose = this.ws.onerror = null; this.ws.close(); } }
 }
 
 export class BinanceStreams {
@@ -35,7 +37,7 @@ export class BinanceStreams {
   private spotBase = (import.meta as any).env?.VITE_BINANCE_WS ?? 'wss://stream.binance.com:9443';
 
   subscribe(symbol: string) {
-    this.close();
+    this.close(); this.status = { spot: 'connecting', fut: 'connecting' };
     const s = toBinance(symbol).toLowerCase();
     this.spot = new ReconnectingWS(`${this.spotBase}/stream?streams=${s}@depth@100ms/${s}@aggTrade`, m => {
       const d = m.data; if (!d) return;
