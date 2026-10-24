@@ -30,6 +30,10 @@ class FakeExchange implements Exchange {
   algo: Array<{ algoId: number; side: 'BUY' | 'SELL'; trigger: number }> = []
   limits: Array<{ orderId: number; side: 'BUY' | 'SELL'; qty: number; price: number }> = []
   failStop = false
+  /** Reduce-only market orders that fail (a timeout) before one goes through. */
+  failFlatten = 0
+  /** Post-only target rejected as it would cross (Binance -5022). */
+  rejectTp = false
   private id = 1
 
   async rules(): Promise<SymbolRules> {
@@ -56,6 +60,10 @@ class FakeExchange implements Exchange {
     this.log.push({ id: this.id++, orderId, time: Date.now(), side, price, qty, realizedPnl: pnl, commission: fee, commissionAsset: 'USDT' })
   }
   async marketOrder(_s: string, side: 'BUY' | 'SELL', quantity: string, reduceOnly = false) {
+    if (reduceOnly && this.failFlatten > 0) {
+      this.failFlatten--
+      throw new Error('simulated timeout')
+    }
     const orderId = this.id++
     const q = reduceOnly ? Math.min(Number(quantity), Math.abs(this.pos.amt)) : Number(quantity)
     if (q > 0) this.exec(side, q, this.price, false, orderId)
@@ -68,6 +76,7 @@ class FakeExchange implements Exchange {
     return { algoId }
   }
   async takeProfitLimit(_s: string, side: 'BUY' | 'SELL', quantity: string, price: string) {
+    if (this.rejectTp) throw Object.assign(new Error('Binance 400 -5022: post only order will be rejected'), { code: -5022 })
     const orderId = this.id++
     this.limits.push({ orderId, side, qty: Number(quantity), price: Number(price) })
     return { orderId, status: 'NEW' }
@@ -333,4 +342,41 @@ test('setup rules block real entries: cooldown after a stop-out, and the open-po
   await t2.tick(true, Date.now())
   assert.equal(await store.openTrade('BTCUSDT'), null)
   assert.equal((await pg.query("select msg from bot_events where msg like '%4 positions open (max 4)%'")).rows.length, 1)
+})
+
+test('a close that fails is retried every tick (even after a restart); a crossed post-only target is taken', async () => {
+  const { db, pg } = await freshDb()
+  const store = new BotStore(db)
+  const ex = new FakeExchange()
+  const { hist, state, cfg } = setup('explore')
+  const t = new SymbolTrader(ex, store, 'BTCUSDT', cfg)
+  await t.init()
+
+  // The stop is rejected and the emergency close times out: no stop, still in.
+  ex.price = hist[state.idx - 1].c
+  ex.failStop = true
+  ex.failFlatten = 1
+  await assert.rejects(t.tick(true, Date.now()))
+  assert.notEqual(ex.pos.amt, 0)
+  ex.failStop = false
+  // Next tick, in a restarted process: the close is tried again at once.
+  const t2 = new SymbolTrader(ex, store, 'BTCUSDT', cfg)
+  await t2.init()
+  await t2.tick(true, Date.now())
+  assert.equal(ex.pos.amt, 0, 'unprotected position closed on the retry')
+  await t2.tick(true, Date.now())
+  let row = (await pg.query<Record<string, unknown>>('select * from bot_trades order by id desc limit 1')).rows[0]
+  assert.equal(row.status, 'closed')
+  assert.equal(row.exit_reason, 'error')
+
+  // Binance rejects the post-only target with -5022 (price already through it): take the profit.
+  state.idx++
+  ex.price = hist[state.idx - 1].c
+  ex.rejectTp = true
+  await t2.tick(true, Date.now())
+  assert.equal(ex.pos.amt, 0, 'closed instead of left without a target')
+  await t2.tick(true, Date.now())
+  row = (await pg.query<Record<string, unknown>>('select * from bot_trades order by id desc limit 1')).rows[0]
+  assert.equal(row.exit_reason, 'tp')
+  assert.equal(ex.algo.length, 0, 'leftover stop cancelled')
 })
