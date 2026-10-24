@@ -56,9 +56,11 @@ export async function fetchMarketCaps(): Promise<void> {
     ids +
     '&price_change_percentage=1h,7d&per_page=250'
   const started = Date.now()
+  let noted = false
   try {
     const r = await fetch(url)
     noteCall(url, r.ok, r.status, Date.now() - started)
+    noted = true
     if (!r.ok) throw new Error('HTTP ' + r.status)
     const rows = (await r.json()) as CgRow[]
     const byId = new Map(rows.map((row) => [row.id, row]))
@@ -76,7 +78,8 @@ export async function fetchMarketCaps(): Promise<void> {
     }
     state.marketCaps = out
   } catch (e) {
-    noteCall(url, false, 0, Date.now() - started)
+    // Recorded once: an HTTP error was already noted with its status above.
+    if (!noted) noteCall(url, false, 0, Date.now() - started)
     console.warn('coingecko marketCaps', e)
   }
 }
