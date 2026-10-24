@@ -173,6 +173,11 @@ export async function loadCandles(
 let historyKey = ''
 let historyBusy = false
 let historyDone = false
+/**
+ * Bumped by every reset, so a page started before a symbol/interval change
+ * cannot, on landing, clear the busy flag of a page started after it.
+ */
+let historyRun = 0
 
 function historyIdent(): string {
   return mdSym(state.symbol) + '|' + mdTf(state.tf || DEFAULT_TF)
@@ -185,6 +190,7 @@ export function resetHistory(): void {
   historyKey = historyIdent()
   historyBusy = false
   historyDone = false
+  historyRun++
 }
 
 /**
@@ -203,6 +209,7 @@ export async function fetchOlderKlines(): Promise<number> {
     return 0
   }
   historyBusy = true
+  const run = historyRun
   try {
     const tf = mdTf(state.tf || DEFAULT_TF)
     const def = tfDef(tf)
@@ -218,7 +225,9 @@ export async function fetchOlderKlines(): Promise<number> {
       // dropped unsent if the symbol/interval changes first.
       { priority: 'high', isStale: () => ident !== historyIdent() },
     )
-    if (ident !== historyIdent()) return 0 // symbol/interval changed mid-flight
+    // Symbol/interval changed mid-flight, or the candles were reloaded (a reset)
+    // and this page no longer abuts the oldest one held.
+    if (ident !== historyIdent() || run !== historyRun) return 0
     // Every provider failed and this is a cached copy: not proof the history
     // has ended, so leave it retryable rather than marking it done.
     if (source && (source.freshness === 'STALE' || source.freshness === 'OFFLINE')) return 0
@@ -239,7 +248,7 @@ export async function fetchOlderKlines(): Promise<number> {
     mdDebug.log('klines', 'older page failed')
     return 0
   } finally {
-    historyBusy = false
+    if (run === historyRun) historyBusy = false
   }
 }
 
