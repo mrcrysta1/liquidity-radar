@@ -41,12 +41,20 @@ export function getSeries(sym: string, r: Range): Array<[number, number]> {
   return series.get(sym + '|' + r)?.pts ?? []
 }
 
+// The dashboard asks again on every 2s tick until a fetch succeeds, so a
+// failure (CoinGecko 429, offline) would otherwise be retried every 2s.
+const failedAt = new Map<string, number>()
+const RETRY_AFTER_FAIL_MS = 60_000
+
 async function once(key: string, fn: () => Promise<void>): Promise<void> {
   if (inflight.has(key)) return
+  if (Date.now() - (failedAt.get(key) ?? 0) < RETRY_AFTER_FAIL_MS) return
   inflight.add(key)
   try {
     await fn()
+    failedAt.delete(key)
   } catch (e) {
+    failedAt.set(key, Date.now())
     console.warn('home data ' + key, e)
   } finally {
     inflight.delete(key)
