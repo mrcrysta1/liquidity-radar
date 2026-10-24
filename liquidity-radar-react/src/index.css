@@ -2857,6 +2857,8 @@ footer{border-top:1px solid var(--border);margin-top:26px;padding:18px 14px;text
 .ec-toggle input{accent-color:var(--primary)}
 
 .ec-scroll{overflow-y:auto;overflow-x:auto;max-height:min(560px,58vh)}
+/* The card has no padding of its own; keep the error / empty notes off its edge. */
+.ec-scroll>.fc-note{padding:0 12px}
 .ec-day-count{
   float:right;font-family:var(--mono);font-size:var(--text-xs);font-weight:600;color:var(--dim);
   border:1px solid var(--border2);border-radius:9px;padding:0 7px;
