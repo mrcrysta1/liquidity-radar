@@ -11,7 +11,7 @@
 //
 // Local-only control/status data. No secrets, keys or credentials are read or exposed.
 import { createServer } from 'node:http'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, resolve, extname, normalize } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
@@ -173,7 +173,8 @@ function safeResolve(publicDir, urlPath) {
   }
   const rootNorm = normalize(publicDir)
   if (path !== rootNorm && !path.startsWith(rootNorm + '\\') && !path.startsWith(rootNorm + '/')) return null
-  if (!existsSync(path)) return null
+  // A directory (e.g. "/%2F") would make readFileSync throw EISDIR and crash the server.
+  if (!existsSync(path) || !statSync(path).isFile()) return null
   return path
 }
 
@@ -182,7 +183,16 @@ export function createControlCenterServer(opts = {}) {
   const publicDir = opts.publicDir || PUBLIC_DIR
 
   return createServer((req, res) => {
-    const url = new URL(req.url || '/', 'http://localhost')
+    // A request target of "//x" would parse as a protocol-relative URL and throw,
+    // crashing the server; answer 400 instead.
+    let url
+    try {
+      url = new URL(req.url || '/', 'http://localhost')
+    } catch {
+      res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' })
+      res.end('bad request')
+      return
+    }
     const path = url.pathname
 
     if (path === '/api/state') {
