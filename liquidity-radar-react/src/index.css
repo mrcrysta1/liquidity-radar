@@ -5843,6 +5843,7 @@ html[data-palette="glass"] .acct-card{background:linear-gradient(145deg,rgba(255
 .sig-picker,.sig-picker .cp-trigger{width:100%}
 .sig-picker .cp-trigger{padding:10px 14px;border-radius:11px}
 .sig-picker .cp-id b{font-family:inherit;font-weight:600;color:var(--dim)}
+.sig-picker .cp-id small{max-width:100%}
 .al-sym{flex:1 1 140px}
 .al-sym .cp-trigger{width:100%;padding:6px 10px 6px 5px}
 .lab-btf .lab-fld{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted)}
