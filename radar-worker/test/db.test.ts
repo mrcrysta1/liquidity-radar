@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { PGlite } from '@electric-sql/pglite'
 import { groupAggTrades } from '../../liquidity-radar-react/src/features/whales/whaleMath.ts'
-import { DbSink, loadCoverage, loadSettings, saveSettings } from '../src/db.ts'
+import { DbSink, connect, loadCoverage, loadSettings, saveSettings } from '../src/db.ts'
 import type { Db } from '../src/db.ts'
 import { backfillChain, splitTail } from '../src/tape.ts'
 import type { Agg } from '../src/tape.ts'
@@ -87,4 +87,12 @@ test('the anon role can read but not write', async () => {
   const r = await pg.query('select symbol from whale_symbols')
   assert.equal(r.rows.length, 1)
   await assert.rejects(pg.exec("insert into whale_symbols (symbol, floor, auto) values ('X', 1, 2)"))
+})
+
+test('connect: an idle-client error from the pool is handled, not an uncaught exception', async () => {
+  const pool = connect('postgres://u:p@localhost:1/x')
+  assert.ok(pool.listenerCount('error') > 0)
+  // Would throw (and kill the process) if nothing listened.
+  pool.emit('error', new Error('terminating connection due to administrator command'), undefined as never)
+  await pool.end()
 })

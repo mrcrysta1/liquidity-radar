@@ -12,13 +12,18 @@ export type Db = pg.Pool
 
 export function connect(url: string, caFile?: string): Db {
   const local = /@(localhost|127\.0\.0\.1)[:/]/.test(url)
-  return new pg.Pool({
+  const pool = new pg.Pool({
     connectionString: url,
     max: 4,
     // Supabase needs TLS. With its CA certificate (Database settings → SSL)
     // the server is verified; without one the link is still encrypted.
     ssl: local ? false : caFile ? { ca: readFileSync(caFile, 'utf8') } : { rejectUnauthorized: false },
   })
+  // An idle client dropped by the server (pooler restart, idle timeout) makes
+  // the pool emit 'error'; with no listener that is an uncaught exception that
+  // kills the process. The pool discards the client and reconnects on demand.
+  pool.on('error', (e) => console.error(new Date().toISOString(), 'database: idle client error:', e.message))
+  return pool
 }
 
 export async function loadSettings(db: Db, symbol: string): Promise<{ floor: number; auto: number } | null> {
