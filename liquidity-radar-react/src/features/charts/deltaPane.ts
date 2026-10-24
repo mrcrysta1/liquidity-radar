@@ -4,6 +4,7 @@
 import type { CandleFlat } from '../../services/market'
 import { cumulativeDelta, getDeltaBars } from '../delta/delta'
 import { getShowDelta } from './overlayToggles'
+import { paneBottom } from './indicators/render'
 
 export type CvdDivergence = 'bullish' | 'bearish' | null
 
@@ -82,8 +83,11 @@ function layout(hasPane: boolean, otherPanes: number): void {
     // Delta gets its own thin strip at the very bottom, under any indicator
     // panes; the price scale's bottom margin is nudged to make room.
     const deltaSlice = hasPane ? 0.12 : 0
+    // Same room for the indicator panes as their renderer gives them
+    // (paneBottom): this runs after it, so a different figure here pulled the
+    // candles down over the top of the panes (one RSI pane: 0.22 vs 0.3).
     chart.priceScale('right').applyOptions({
-      scaleMargins: { top: 0.08, bottom: Math.min(0.7, (otherPanes ? 0.22 * otherPanes : 0) + deltaSlice) },
+      scaleMargins: { top: 0.08, bottom: Math.min(0.7, paneBottom(otherPanes) + deltaSlice) },
     })
     if (hasPane) {
       chart.priceScale(SCALE_ID).applyOptions({
