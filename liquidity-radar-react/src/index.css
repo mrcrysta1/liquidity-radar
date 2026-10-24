@@ -3273,7 +3273,8 @@ header.top,.container{margin-left:var(--nav-w);transition:margin-left .22s cubic
     transform:translateY(102%);visibility:hidden;
     transition:transform .28s cubic-bezier(.2,.8,.2,1),visibility .28s;
   }
-  .navsheet.show{transform:none;visibility:visible}
+  /* Visible at once on the way up, so focus can move into it straight away. */
+  .navsheet.show{transform:none;visibility:visible;transition:transform .28s cubic-bezier(.2,.8,.2,1),visibility 0s}
 
   .navsheet-grip{
     flex-shrink:0;display:grid;place-items:center;width:100%;padding:11px 0 5px;
