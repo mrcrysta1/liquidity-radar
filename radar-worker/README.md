@@ -103,9 +103,29 @@ than two minutes old.
 
 ## Trading bot (Binance Futures testnet)
 
-`npm run bot` trades BTCUSDT and XAUUSDT (gold perpetual, follows XAUUSD) on 4h bars, long and
-short, by itself, with no confirmation. It uses **fake testnet money** unless you
-deliberately change two settings.
+`npm run bot` trades BTCUSDT, ETHUSDT, SOLUSDT, BNBUSDT and XAUUSDT (gold perpetual, follows
+XAUUSD; set `BOT_SYMBOLS`) on 4h bars by default, long and short, by itself, with no
+confirmation. It uses **fake testnet money only**: `FUTURES_BASE` must be exactly
+`https://demo-fapi.binance.com` or `https://testnet.binancefuture.com`, otherwise the
+bot refuses to start. There is no mainnet override.
+
+**Setup rules** (all must pass before any order; `src/bot/setup.ts`, env in `.env.example`)
+- R:R ≥ 1.5 after estimated fees and slippage, and a round-trip cost ≤ 0.15R.
+- 30 min cooldown on a symbol after a stop-out.
+- At most 4 positions open and 120 trades a day, across all symbols.
+- Calibrated model expected value > 0 (and ≥ `BOT_MIN_EV`), plus the hard limits below.
+
+**Learning from every trade** (`src/bot/learning.ts`, `sql/005_bot_learning.sql`)
+- A setup turned down only by the model's verdict (EV, or the gate in gated mode)
+  becomes a **shadow trade**: no order, resolved on market bars (target or stop first).
+- Every closed real or shadow trade updates an online win-probability
+  **calibration** per symbol, side and regime (`bot_calibration`), which outlives retrains.
+- Every hour, or after 20 closed trades, a **challenger** is trained on bars plus the
+  stored trade outcomes. It replaces the **champion** only if it does better on a
+  held-out recent slice on both log loss and expectancy. Every version is kept in
+  `bot_models` with its version number, role and held-out scores.
+- Win rate, expectancy, profit factor, max drawdown, trades/day, model versions and
+  calibration error are written hourly to `bot_state` key `metrics` and `bot_metrics`.
 
 **How it decides**
 - **Features:** 18 per bar, computed from closed bars only (momentum,
@@ -152,7 +172,7 @@ the database doesn't know about are closed.
 - Hourly equity, and an event log explaining each decision.
 
 **Setup**
-1. Run `sql/002_bot.sql` in Supabase.
+1. Run `sql/002_bot.sql`, then `sql/005_bot_learning.sql`, in Supabase.
 2. Put your testnet keys in `.env` (Binance → Demo Trading → API Management).
 3. Choose the mode: `BOT_MODE=gated` (default, trades only a proven model) or
    `BOT_MODE=explore` (trades its best idea anyway, to gather real testnet fills).

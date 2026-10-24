@@ -105,24 +105,42 @@ function rows(b: Bar[], ind: Ind, k: Bracket, from: number, to: number): Row[] {
   return out
 }
 
-function fitSide(train_: Row[], side: 'long' | 'short', cfg: WfConfig, seed: number): SideModel | null {
-  const r = train_.filter((x) => x[side])
+/**
+ * A labelled example from outside the bar history: a closed real or shadow
+ * trade, with the features the model saw and its result in R before costs.
+ */
+export interface Sample {
+  x: number[]
+  side: 1 | -1
+  r: number
+}
+
+function fitSide(samples: Array<{ x: number[]; r: number }>, cfg: WfConfig, seed: number): SideModel | null {
+  const r = samples
   if (r.length < 200) return null
   const scaler = fitScaler(r.map((x) => x.x))
   const X = r.map((x) => applyScaler(scaler, x.x))
   // Positive = the trade made money before costs (target first, or a green time exit).
-  const y = r.map((x) => (x[side]!.r > 0 ? 1 : 0))
-  const wins = r.map((x) => x[side]!.r).filter((v) => v > 0)
-  const losses = r.map((x) => x[side]!.r).filter((v) => v <= 0)
+  const y = r.map((x) => (x.r > 0 ? 1 : 0))
+  const wins = r.map((x) => x.r).filter((v) => v > 0)
+  const losses = r.map((x) => x.r).filter((v) => v <= 0)
   const winR = wins.length ? wins.reduce((a, v) => a + v, 0) / wins.length : 0
   const lossR = losses.length ? -losses.reduce((a, v) => a + v, 0) / losses.length : 1
   return { w: train(X, y, { ...cfg.mlp, seed }), scaler, winR, lossR }
 }
 
-export function fitModel(b: Bar[], ind: Ind, from: number, to: number, cfg: WfConfig, seed = 1): Model | null {
+/**
+ * Fit both sides on bars [from, to). `extra` adds real/shadow trade outcomes
+ * (most recent last, so early stopping validates on them).
+ */
+export function fitModel(b: Bar[], ind: Ind, from: number, to: number, cfg: WfConfig, seed = 1, extra: Sample[] = []): Model | null {
   const tr = rows(b, ind, cfg.bracket, from, to)
-  const long = fitSide(tr, 'long', cfg, seed)
-  const short = fitSide(tr, 'short', cfg, seed + 1)
+  const side = (k: 'long' | 'short', s: 1 | -1) => [
+    ...tr.filter((x) => x[k]).map((x) => ({ x: x.x, r: x[k]!.r })),
+    ...extra.filter((e) => e.side === s).map((e) => ({ x: e.x, r: e.r })),
+  ]
+  const long = fitSide(side('long', 1), cfg, seed)
+  const short = fitSide(side('short', -1), cfg, seed + 1)
   if (!long || !short) return null
   return { long, short, features: FEATURES, cfg, trainedFrom: b[from]?.t ?? 0, trainedTo: b[Math.min(b.length - 1, to)]?.t ?? 0 }
 }

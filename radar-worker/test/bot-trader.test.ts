@@ -10,11 +10,12 @@ import { BotStore } from '../src/bot/store.ts'
 import { DEFAULT_TRADER, SymbolTrader } from '../src/bot/trader.ts'
 import type { Exchange, TraderConfig } from '../src/bot/trader.ts'
 import { DEFAULT_WF } from '../src/bot/walkforward.ts'
+import { DEFAULT_SETUP } from '../src/bot/setup.ts'
 
 async function freshDb() {
   const pg = new PGlite()
   await pg.exec('create role anon;')
-  for (const f of ['001_whales.sql', '002_bot.sql']) await pg.exec(readFileSync(new URL('../sql/' + f, import.meta.url), 'utf8'))
+  for (const f of ['001_whales.sql', '002_bot.sql', '005_bot_learning.sql']) await pg.exec(readFileSync(new URL('../sql/' + f, import.meta.url), 'utf8'))
   const q = (text: string, params?: unknown[]) => pg.query(text, params as never)
   return { db: { query: q, connect: async () => ({ query: q, release() {} }), end: async () => {} } as unknown as Db, pg }
 }
@@ -126,6 +127,9 @@ function setup(mode: 'gated' | 'explore') {
     // These replays treat old simulated bars as "now".
     maxLateMs: Infinity,
     wf: { ...DEFAULT_WF, trainBars: 600, testBars: 200, minEvR: mode === 'explore' ? -99 : DEFAULT_WF.minEvR, mlp: { ...DEFAULT_WF.mlp, epochs: 6 } },
+    // These replays exercise the order flow, so the EV rule and the cooldown are
+    // relaxed here; they have their own tests (bot-setup, and below).
+    setup: { ...DEFAULT_SETUP, minEvR: -1e9, cooldownMs: 0 },
     bars: async (_s, _i, n) => hist.slice(0, state.idx).slice(-n),
   }
   return { hist, state, cfg }
@@ -242,4 +246,91 @@ test('scheduled runs (BOT_ONCE): each bar decided once across restarts; late bar
   await strict.init()
   await strict.tick(true, Date.now())
   assert.equal(await store.openTrade('BTCUSDT'), null, 'stale bar skipped')
+})
+
+test('rejected only by the EV rule → a shadow trade, resolved on bars, learned from, and it triggers a challenger', async () => {
+  const { db, pg } = await freshDb()
+  const store = new BotStore(db)
+  const ex = new FakeExchange()
+  const { hist, state, cfg } = setup('explore')
+  cfg.setup = { ...cfg.setup, minEvR: 1e9 } // no idea can clear this bar
+  cfg.learn = { ...cfg.learn, everyTrades: 1 }
+  const t = new SymbolTrader(ex, store, 'BTCUSDT', cfg)
+  await t.init()
+  ex.price = hist[state.idx - 1].c
+  await t.tick(true, Date.now())
+  assert.equal(await store.openTrade('BTCUSDT'), null, 'no real trade')
+  assert.equal(ex.pos.amt, 0, 'no order sent')
+  let sh = (await pg.query<Record<string, unknown>>('select * from bot_shadow_trades order by id')).rows
+  assert.equal(sh.length, 1)
+  assert.equal(sh[0].status, 'open')
+  assert.match(String(sh[0].reject_reason), /below the 1000000000R bar/)
+  assert.equal(Number(sh[0].bar_time instanceof Date ? (sh[0].bar_time as Date).getTime() : 0), hist[state.idx - 1].t)
+
+  // A risk-limit (hard) rejection on the next bar adds no second shadow, and the open one is not doubled.
+  state.idx++
+  await t.tick(false, Date.now())
+  assert.equal((await pg.query('select id from bot_shadow_trades')).rows.length, 1)
+
+  // Enough bars for the bracket to finish: the shadow closes, the calibration
+  // learns from it, and (everyTrades = 1) a challenger is trained at once.
+  state.idx += cfg.wf.bracket.horizon
+  await t.tick(true, Date.now())
+  sh = (await pg.query<Record<string, unknown>>('select * from bot_shadow_trades order by id')).rows
+  assert.equal(sh[0].status, 'closed')
+  assert.ok(['tp', 'sl', 'time'].includes(String(sh[0].exit_reason)))
+  assert.ok(isFinite(Number(sh[0].r_net)) && Number(sh[0].r_net) < Number(sh[0].r_gross), 'costs taken off')
+  assert.equal(sh[0].learned, true)
+  const cal = (await pg.query<{ n: number; side: number; regime: string }>('select * from bot_calibration')).rows
+  assert.equal(cal.length, 1)
+  assert.equal(cal[0].n, 1)
+  assert.equal(cal[0].side, sh[0].side)
+  assert.equal(cal[0].regime, sh[0].regime)
+  // The closed shadow is training data now, and the challenger was stored with its held-out scores.
+  assert.equal((await store.experience('BTCUSDT', cfg.wf.bracket)).length, 1)
+  const models = (await pg.query<Record<string, unknown>>('select id, version, role, holdout from bot_models order by id')).rows
+  assert.equal(models.length, 2)
+  assert.deepEqual(models.map((m) => m.version), [1, 2])
+  assert.equal(models.filter((m) => m.role === 'champion').length, 1, 'exactly one champion')
+  const h = models[1].holdout as { trigger: string; challenger: { n: number }; champion: { n: number } | null }
+  assert.match(h.trigger, /new closed trades/)
+  assert.ok(h.challenger.n > 0 && h.champion && h.champion.n === h.challenger.n, 'both scored on the same rows')
+  assert.equal(t.model!.version, models.find((m) => m.role === 'champion')!.version)
+})
+
+test('setup rules block real entries: cooldown after a stop-out, and the open-position cap', async () => {
+  const { db, pg } = await freshDb()
+  const store = new BotStore(db)
+  const ex = new FakeExchange()
+  const { hist, state, cfg } = setup('explore')
+  cfg.setup = { ...cfg.setup, cooldownMs: 30 * 60_000 }
+  const t = new SymbolTrader(ex, store, 'BTCUSDT', cfg)
+  await t.init()
+  ex.price = hist[state.idx - 1].c
+  await t.tick(true, Date.now())
+  const open = await store.openTrade('BTCUSDT')
+  assert.ok(open, 'entered')
+  ex.move(open!.sl - open!.side * 0.05)
+  await t.tick(true, Date.now())
+  // Next bar, right after the stop-out: no entry.
+  state.idx++
+  ex.price = hist[state.idx - 1].c
+  await t.tick(true, Date.now())
+  assert.equal(await store.openTrade('BTCUSDT'), null)
+  assert.equal((await pg.query("select msg from bot_events where msg like '%cooldown after a stop-out%'")).rows.length, 1)
+  assert.equal((await pg.query('select id from bot_shadow_trades')).rows.length, 0, 'a hard rejection is not shadowed')
+
+  // Four positions open elsewhere: the fifth is refused.
+  for (const s of ['ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XAUUSDT'])
+    await store.insertTrade({
+      symbol: s, modelId: t.model!.id, mode: 'explore', venue: 'fake', side: 1, openedAt: Date.now(), barTime: Date.now(), entry: 1, qty: 1,
+      sl: 0.9, tp: 1.2, atr: 0.05, riskUsd: 0.1, pWin: 0.5, evR: 0.1, features: {}, entryOrderId: 1,
+    })
+  const t2 = new SymbolTrader(ex, store, 'BTCUSDT', { ...cfg, setup: { ...cfg.setup, cooldownMs: 0 } })
+  await t2.init()
+  state.idx++
+  ex.price = hist[state.idx - 1].c
+  await t2.tick(true, Date.now())
+  assert.equal(await store.openTrade('BTCUSDT'), null)
+  assert.equal((await pg.query("select msg from bot_events where msg like '%4 positions open (max 4)%'")).rows.length, 1)
 })
