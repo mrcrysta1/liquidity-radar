@@ -1512,7 +1512,8 @@ html.radar-fs .sn-bar{flex-shrink:0;margin-top:6px}
   .sn-ranges{display:none}
   .sn-range-menu{display:flex}
 }
-@media(max-width:380px){
+/* Up to 420px: with the zone label the clock pushes the ⋯ menu off the card. */
+@media(max-width:420px){
   .sn-bar{gap:4px}
   .sn-clock i{display:none}
   .sn-bar>.sn-btn{padding:3px 6px}
