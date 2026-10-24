@@ -691,10 +691,13 @@ export function updateChartData(fit = false): void {
     })
   }
   chartState.firstBarTime = candles[0].t
-  const lc = legendCandles(getChartStyle(), candles)[candles.length - 1]
+  // Heikin Ashi: both the bar and the close it is compared with are HA bars,
+  // as in renderLiveLegend — the raw previous close gave a different change.
+  const lcs = legendCandles(getChartStyle(), candles)
+  const lc = lcs[lcs.length - 1]
   refreshIndicatorLegend()
   if (hoverTime == null)
-    renderLegend(lc.o, lc.h, lc.l, lc.c, lc.v, false, candles[candles.length - 2]?.c)
+    renderLegend(lc.o, lc.h, lc.l, lc.c, lc.v, false, lcs[lcs.length - 2]?.c)
   syncLastPrice(lc)
   syncWatermark()
   redrawDrawings()
@@ -816,7 +819,8 @@ export function updateChartLast(c: Any): void {
   // trade print, and nothing the eye could read that fast anyway.
   // Hovering an older bar keeps its values; hovering the live one follows it.
   // Previous close for the change readout: the bar before the live one.
-  const arr: Any[] = isRangeMode() ? rangeShown : state.candles
+  // On Heikin Ashi `c` is the HA bar, so its previous close must be the HA one.
+  const arr: Any[] = isRangeMode() ? rangeShown : legendCandles(getChartStyle(), state.candles)
   const at = arr.length - 1
   const prevBar = at >= 0 && arr[at].t === c.t ? arr[at - 1] : arr[at]
   if (hoverTime == null || hoverTime === Math.floor(c.t / 1000))

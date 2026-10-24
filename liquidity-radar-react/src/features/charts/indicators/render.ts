@@ -53,6 +53,11 @@ export interface IndicatorRenderer {
   paneCount(): number
 }
 
+/** The fraction of the chart's height `n` indicator panes take at the bottom. */
+export function paneBottom(n: number): number {
+  return n <= 0 ? 0 : n === 1 ? 0.3 : Math.min(0.62, 0.22 * n)
+}
+
 /** A renderer for one chart, drawing whatever `getItems` returns. */
 export function createIndicatorRenderer(
   getItems: () => IndicatorInstance[],
@@ -134,7 +139,7 @@ export function createIndicatorRenderer(
     if (!chart) return
     const panes = paneOrder
     const n = panes.length
-    const bottom = n === 0 ? 0 : n === 1 ? 0.3 : Math.min(0.62, 0.22 * n)
+    const bottom = paneBottom(n)
     try {
       if (opts.priceLayout) opts.priceLayout(chart, bottom)
       else chart.priceScale('right').applyOptions({ scaleMargins: { top: 0.08, bottom } })

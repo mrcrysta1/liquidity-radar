@@ -391,11 +391,19 @@ export class SymbolTrader {
     if (pos.amt === 0) return this.finalize(open, now)
     const H = this.cfg.wf.bracket.horizon
     const deadline = open.barTime + (H + 1) * INTERVAL_MS[this.cfg.interval]
+    // A close we started earlier (failed stop, target already crossed, time
+    // exit) that did not go through — e.g. the reduce-only order timed out —
+    // is retried every tick until the position is really gone; otherwise a
+    // position without a stop could sit unmanaged until the time exit.
+    if (!this.closing.has(open.id)) {
+      const stored = await this.store.getState<'time' | 'tp' | 'error' | null>('closing:' + open.id, null)
+      if (stored) this.closing.set(open.id, stored)
+    }
     if (now >= deadline && !this.closing.has(open.id)) {
       await this.markClosing(open.id, 'time')
       await this.store.event('info', this.symbol, `time exit after ${H} bars`)
-      await this.flatten(pos)
     }
+    if (this.closing.has(open.id)) await this.flatten(pos)
   }
 
   private async finalize(open: OpenTrade, now: number): Promise<void> {
@@ -569,7 +577,12 @@ export class SymbolTrader {
         await this.flatten(await this.ex.position(this.symbol))
       } else tpOrder = t.orderId
     } catch (e) {
-      await this.store.event('warn', this.symbol, `trade #${id}: target not placed (${(e as Error).message}); the stop and time exit still apply`)
+      if ((e as { code?: number }).code === -5022) {
+        // USDⓈ-M futures reject (rather than expire) a post-only order that would
+        // cross on arrival: price is already through the target. Take it.
+        await this.markClosing(id, 'tp')
+        await this.flatten(await this.ex.position(this.symbol))
+      } else await this.store.event('warn', this.symbol, `trade #${id}: target not placed (${(e as Error).message}); the stop and time exit still apply`)
     }
     await this.store.setLegs(id, tpOrder, slAlgo)
     await this.store.event('info', this.symbol, `${summary} — opened #${id} ${buy ? 'LONG' : 'SHORT'} ${qty} @ ${fill} · SL ${sl} · TP ${tp} · risk $${(qty * Math.abs(fill - sl)).toFixed(2)}`)

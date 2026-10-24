@@ -25,9 +25,13 @@ async function rawFetch(url: string, to?: number): Promise<unknown> {
   const c = new AbortController()
   const h = setTimeout(() => c.abort(), to || 12000)
   const started = Date.now()
+  // Each request is recorded once: an HTTP error or a bad body thrown below
+  // must not be counted a second time as a network failure.
+  let noted = false
   try {
     const r = await fetch(url, { signal: c.signal })
     noteCall(url, r.ok, r.status, Date.now() - started)
+    noted = true
     if (!r.ok) {
       // 429/418 from Binance mean slow down or you are banned. Read the
       // cooldown out of the response and record it, so nothing retries into a
@@ -47,7 +51,7 @@ async function rawFetch(url: string, to?: number): Promise<unknown> {
     }
     return await r.json()
   } catch (e) {
-    if (!(e instanceof RateLimitedError)) noteCall(url, false, 0, Date.now() - started)
+    if (!noted) noteCall(url, false, 0, Date.now() - started)
     throw e
   } finally {
     clearTimeout(h)
@@ -91,6 +95,9 @@ export async function jget2(
       attempt++
       return new Promise<void>((r2) => setTimeout(r2, delay + attempt * 250)).then(function () {
         if (o.dedup !== false) delete mdReqs[url]
+        // Another request may have earned a Binance cooldown while this one
+        // waited to retry: retrying into it would only extend the ban.
+        if (isBinanceUrl(url) && isRateLimited()) throw new RateLimitedError(Date.now() + cooldownLeft())
         return rawFetch(url, to)
       })
     })
@@ -134,7 +141,16 @@ const WINDOW_MS = 60_000
 function weightOf(url: string): number {
   const lim = Number(/[?&]limit=(\d+)/.exec(url)?.[1] || 0)
   if (url.indexOf('/exchangeInfo') !== -1) return 20
-  if (url.indexOf('/ticker/24hr') !== -1) return /[?&]symbols?=/.test(url) ? 80 : 2
+  if (url.indexOf('/ticker/24hr') !== -1) {
+    // One symbol is cheap; the whole market (no symbol at all) is the
+    // expensive call; a symbols=[...] list is priced by its length.
+    if (/[?&]symbol=/.test(url)) return 2
+    const list = /[?&]symbols=([^&]*)/.exec(url)
+    if (!list) return 80
+    // Commas arrive encoded (%2C); counting them needs no decode that could throw.
+    const n = list[1].split(/,|%2C/i).length
+    return n <= 20 ? 2 : n <= 100 ? 40 : 80
+  }
   if (url.indexOf('/trades') !== -1 || url.indexOf('/aggTrades') !== -1) return lim > 100 ? 25 : 5
   if (url.indexOf('/depth') !== -1) return lim > 500 ? 50 : lim > 100 ? 25 : lim > 5 ? 5 : 2
   if (url.indexOf('/klines') !== -1) return lim > 1000 ? 10 : lim > 500 ? 10 : 2

@@ -64,7 +64,10 @@ export function loadExchangeInfo(): Promise<void> {
           })
         binanceSymbols.sort((a, b) => a.base.localeCompare(b.base))
       } catch {
-        /* silent — callers render their own empty state */
+        // Silent — callers render their own empty state. Forget the attempt so
+        // the next caller retries, rather than one boot-time blip leaving the
+        // search without Binance's list for the rest of the session.
+        fetching = null
       }
     })()
   }

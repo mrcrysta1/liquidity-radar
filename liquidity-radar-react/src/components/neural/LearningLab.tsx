@@ -417,7 +417,7 @@ function BotActivity() {
   useEffect(() => {
     if (!SERVER_BOT) return
     let alive = true
-    const load = () => loadBot().then((x) => alive && setD(x)).catch((e) => alive && setErr(String(e)))
+    const load = () => loadBot().then((x) => { if (alive) { setD(x); setErr('') } }).catch((e) => alive && setErr(String(e)))
     load()
     const id = setInterval(load, 60_000)
     return () => {

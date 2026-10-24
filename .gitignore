@@ -1,5 +1,10 @@
 .aider*
 
+# Secrets: Aider (launched from this root) reads API keys from a root .env.
+.env
+.env.*
+!.env.example
+
 # local archives / scratch artifacts
 *.zip
 aider-autonomy-test.txt

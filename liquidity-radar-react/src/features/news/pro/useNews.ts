@@ -70,17 +70,33 @@ export function useProNews(): ProNewsState {
         // failed request per load and nothing else.
         [FF_URLS.thisWeek, FF_URLS.nextWeek].map((u) => fetchText(u)),
       )
-      const parsed = weeks.flatMap((r) => (r.status === 'fulfilled' ? parseFF(r.value) : []))
+      // One unreadable week file must not throw away the other one.
+      let firstError: unknown = null
+      const parsed = weeks.flatMap((r) => {
+        if (r.status !== 'fulfilled') {
+          firstError ??= r.reason
+          return []
+        }
+        try {
+          return parseFF(r.value)
+        } catch (e) {
+          firstError ??= e
+          return []
+        }
+      })
       let merged = mergeCalendar(parsed)
       // Guarantee ≥ one month of data: top up with a month-depth feed if the
       // FF files alone don't span 28 days.
       if (calendarSpanDays(merged) < MONTH_MS / 86400e3) {
         try {
           merged = mergeCalendar(parsed, parseXoomar(await fetchText(XOOMAR_URL)))
-        } catch {
+        } catch (e) {
           /* keep the week(s) we already have */
+          firstError ??= e
         }
       }
+      // Every source failed: that is an outage, not an empty calendar.
+      if (!merged.length && firstError) throw firstError
       setCalendar(merged)
       setCalendarStatus('ok')
       setLastCalendar(Date.now())

@@ -644,6 +644,19 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
     'not a url',
   ]) ok('ratelimit: non-Binance host never trips the guard — ' + u, !isBinanceUrl(u))
 }
+{
+  // A fresh copy of the module, with no ban recorded yet. A local clock ahead
+  // of Binance's reads a live ban's expiry as past; the 418 itself still means
+  // "stop", so Retry-After (or the default) must set the cooldown.
+  const rl = await import(src('api/rateLimit.ts') + '?skew')
+  rl.noteLimitResponse(418, '30', 'IP banned until ' + (Date.now() - 5_000))
+  ok('ratelimit: a ban expiry behind our clock still sets a cooldown', rl.isRateLimited())
+  ok(
+    'ratelimit: that cooldown comes from Retry-After',
+    Math.abs(rl.cooldownLeft() - 30_000) < 2000,
+    rl.cooldownLeft(),
+  )
+}
 
 // ----------------------------------------------------------------- format
 {
@@ -698,6 +711,8 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   eq('newsSimplify: javascript thumbnail dropped', bad.img, null)
   eq('newsSimplify: missing link becomes #', simp({ title: 'x' }).url, '#')
   eq('newsSimplify: data: enclosure dropped', simp({ title: 'x', enclosure: { link: 'data:image/svg+xml,<svg onload=alert(1)>' } }).img, null)
+  eq('newsSimplify: RFC 822 pubDate parsed', simp({ title: 'x', pubDate: 'Fri, 24 Oct 2026 10:00:00 +0000' }).time, Date.UTC(2026, 9, 24, 10))
+  eq('newsSimplify: unparseable pubDate is 0, not NaN', simp({ title: 'x', pubDate: 'garbage' }).time, 0)
   eq('newsSimplify: empty title skipped', simp({ title: '  ', link: 'https://a.example' }), null)
 }
 

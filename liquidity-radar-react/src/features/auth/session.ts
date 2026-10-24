@@ -72,6 +72,11 @@ function getClient(): Promise<SupabaseClient> {
         else if (event === 'SIGNED_OUT') void signedOut()
       })
       return client
+    }).catch((e) => {
+      // A failed chunk load (offline, flaky network) must not stick: the next
+      // attempt loads it again instead of reusing the cached rejection.
+      clientP = null
+      throw e
     })
   return clientP
 }
@@ -196,23 +201,33 @@ function reload(): void {
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
+// The forms only await these; a thrown failure (auth chunk did not load,
+// network down) must reach the dialog's error line, not vanish unhandled.
 export async function signIn(email: string, password: string): Promise<void> {
   set({ error: '', notice: '' })
-  const c = await getClient()
-  const { error } = await c.auth.signInWithPassword({ email, password })
-  if (error) set({ error: error.message })
+  try {
+    const c = await getClient()
+    const { error } = await c.auth.signInWithPassword({ email, password })
+    if (error) set({ error: error.message })
+  } catch (e) {
+    set({ error: msg(e) })
+  }
 }
 
 export async function signUp(email: string, password: string, name: string): Promise<void> {
   set({ error: '', notice: '' })
-  const c = await getClient()
-  const { data, error } = await c.auth.signUp({
-    email,
-    password,
-    options: { data: { full_name: name }, emailRedirectTo: location.origin },
-  })
-  if (error) return set({ error: error.message })
-  if (!data.session) set({ notice: `Almost there — we sent a confirmation link to ${email}. Open it to finish signing up.` })
+  try {
+    const c = await getClient()
+    const { data, error } = await c.auth.signUp({
+      email,
+      password,
+      options: { data: { full_name: name }, emailRedirectTo: location.origin },
+    })
+    if (error) return set({ error: error.message })
+    if (!data.session) set({ notice: `Almost there — we sent a confirmation link to ${email}. Open it to finish signing up.` })
+  } catch (e) {
+    set({ error: msg(e) })
+  }
 }
 
 export async function signInWithGoogle(): Promise<void> {
@@ -237,24 +252,37 @@ export async function signInWithGoogle(): Promise<void> {
 
 export async function resetPassword(email: string): Promise<void> {
   set({ error: '', notice: '' })
-  const c = await getClient()
-  const { error } = await c.auth.resetPasswordForEmail(email, { redirectTo: location.origin })
-  if (error) set({ error: error.message })
-  else set({ notice: `If an account exists for ${email}, a reset link is on its way.` })
+  try {
+    const c = await getClient()
+    const { error } = await c.auth.resetPasswordForEmail(email, { redirectTo: location.origin })
+    if (error) set({ error: error.message })
+    else set({ notice: `If an account exists for ${email}, a reset link is on its way.` })
+  } catch (e) {
+    set({ error: msg(e) })
+  }
 }
 
 export async function setNewPassword(password: string): Promise<void> {
   set({ error: '', notice: '' })
-  const c = await getClient()
-  const { error } = await c.auth.updateUser({ password })
-  if (error) set({ error: error.message })
-  else set({ recovery: false, notice: 'Password updated.' })
+  try {
+    const c = await getClient()
+    const { error } = await c.auth.updateUser({ password })
+    if (error) set({ error: error.message })
+    else set({ recovery: false, notice: 'Password updated.' })
+  } catch (e) {
+    set({ error: msg(e) })
+  }
 }
 
 export async function signOut(): Promise<void> {
   await push().catch(() => {})
-  const c = await getClient()
-  await c.auth.signOut()
+  try {
+    const c = await getClient()
+    await c.auth.signOut()
+  } catch (e) {
+    set({ error: 'Could not sign out: ' + msg(e) })
+    throw e
+  }
 }
 
 /** Make sure the client is loaded (the dialog calls this on open). */
