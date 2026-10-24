@@ -191,7 +191,12 @@ export function newsSimplify(
   return function (it) {
     if (!it || !it.title || typeof it.title !== 'string' || !it.title.trim()) return null
     const title = it.title.trim()
-    const p = it.pubDate ? new Date(it.pubDate.replace(' ', 'T')).getTime() : Date.now()
+    // rss2json sends "2026-10-24 10:00:00"; the /api/fetch proxy hands over the
+    // raw RFC 822 pubDate ("Fri, 24 Oct 2026 10:00:00 +0000"), which the
+    // space-to-T rewrite turns into NaN ("NaNd ago", and a NaN sort key).
+    let p = it.pubDate ? new Date(it.pubDate.replace(' ', 'T')).getTime() : Date.now()
+    if (!Number.isFinite(p)) p = it.pubDate ? new Date(it.pubDate).getTime() : NaN
+    if (!Number.isFinite(p)) p = 0
     // Links and thumbnails come straight from third-party feeds and end up in
     // href/src attributes (and in the lr_news_cache copy), so only http(s).
     const img = (it.thumbnail as string | undefined) || (it.enclosure && it.enclosure.link) || null

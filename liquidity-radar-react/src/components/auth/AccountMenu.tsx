@@ -186,8 +186,13 @@ function SignedIn({ close }: { close: () => void }) {
           disabled={busy}
           onClick={async () => {
             setBusy(true)
-            await signOut()
-            close()
+            try {
+              await signOut()
+              close()
+            } catch {
+              // The reason is on the sync line above; let them try again.
+              setBusy(false)
+            }
           }}
         >
           {busy ? 'Signing out…' : 'Sign out'}
