@@ -18,6 +18,7 @@ import * as tf from '@tensorflow/tfjs'
 import type { CandleFlat } from '../../services/market'
 import { FEATURE_NAMES, allSteps } from './features'
 import type { StepData } from './features'
+import { ensureCpuBackend } from './tfBackend'
 
 /** Round-trip cost estimate (fee + slippage) charged whenever the agent
  * flips position — without this a policy learns to flip every bar for free. */
@@ -260,6 +261,7 @@ export async function trainPolicy(
 ): Promise<RLPolicy | null> {
   const steps = allSteps(candles)
   if (steps.length < MIN_STEPS) return null
+  await ensureCpuBackend()
 
   const splitAt = Math.floor(steps.length * 0.75)
   const trainSteps = steps.slice(0, splitAt)

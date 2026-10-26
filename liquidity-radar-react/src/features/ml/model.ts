@@ -10,6 +10,7 @@ import type { CandleFlat } from '../../services/market'
 import { FEATURE_NAMES, buildDataset, latestFeatures } from './features'
 import type { Sample } from './features'
 import { majorityBaseline } from './edge'
+import { ensureCpuBackend } from './tfBackend'
 
 export interface Standardizer {
   mean: number[]
@@ -73,15 +74,17 @@ async function fit(model: tf.LayersModel, train: Sample[], epochs: number): Prom
   try {
     // yieldEvery defaults to 'auto', which hands the main thread back only
     // about every 125ms — long enough that every frame during training misses
-    // its deadline and the page stops scrolling on a phone. Yielding per
-    // batch costs wall-clock time but changes nothing about the maths or the
-    // resulting model, and the page stays interactive while it runs.
+    // its deadline and the page stops scrolling on a phone. A 30ms budget
+    // keeps every task short of the 50ms long-task mark. Yielding after every
+    // batch did too, but on the CPU backend (tfBackend.ts) a batch is far
+    // cheaper than a frame, so that spent most of training waiting: ~23s to a
+    // prediction headless vs ~6s now. Neither changes the maths or the model.
     await model.fit(xs, ys, {
       epochs,
       batchSize: 32,
       shuffle: true,
       verbose: 0,
-      yieldEvery: 'batch',
+      yieldEvery: 30,
     })
   } finally {
     xs.dispose()
@@ -127,6 +130,7 @@ export async function trainModel(
 ): Promise<TrainedModel | null> {
   const dataset = buildDataset(candles, horizon)
   if (dataset.length < MIN_SAMPLES) return null
+  await ensureCpuBackend()
 
   const splitAt = Math.floor(dataset.length * 0.75)
   // Each label looks `horizon` bars ahead, so the last `horizon` training
