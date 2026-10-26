@@ -43,8 +43,26 @@ export interface PerpQuote {
   qvol: number
 }
 
+/**
+ * Two loops ask for the same quote: the gold ticker (every 5s) and the
+ * self-learning engine (BTC and gold, every 3s). A request made within this
+ * window answers both, so gold is no longer fetched twice for one moment's
+ * price, and neither loop sees a price older than its own period.
+ */
+const SHARE_MS = 2500
+const recent = new Map<string, { at: number; p: Promise<PerpQuote | null> }>()
+
 /** 24h stats, the same fields the spot ticker map carries. */
-export async function perp24h(sym: string): Promise<PerpQuote | null> {
+export function perp24h(sym: string): Promise<PerpQuote | null> {
+  const hit = recent.get(sym)
+  const now = Date.now()
+  if (hit && now - hit.at < SHARE_MS) return hit.p
+  const p = load24h(sym)
+  recent.set(sym, { at: now, p })
+  return p
+}
+
+async function load24h(sym: string): Promise<PerpQuote | null> {
   try {
     const d = (await get('/fapi/v1/ticker/24hr?symbol=' + sym)) as Record<string, string>
     const last = Number(d.lastPrice)
