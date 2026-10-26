@@ -123,6 +123,9 @@ for (const s of SYMBOLS) {
 
 let stopping = false
 let lastEquityAt = 0
+/** Last equity actually read; shown in the heartbeat when a read fails. */
+let lastEquity: number | null = null
+let balanceMissing = false
 let lastMetricsAt = 0
 
 // Performance figures for the website (bot_state 'metrics' + bot_metrics), hourly.
@@ -147,16 +150,26 @@ async function mirrorAccount(now: number): Promise<void> {
 async function tick(): Promise<void> {
   const now = Date.now()
   const control = await store.getState<{ enabled?: boolean }>('control', { enabled: true })
-  const equity = await ex.balanceUsdt()
-  const lim = checkLimits(await store.risk(), equity, now, cfg.risk)
+  // A missing USDT row or a failed read is "unknown", not 0: reading it as 0
+  // would trip the drawdown kill switch. The limits are skipped this tick.
+  const read = await ex.balanceUsdt().catch((e) => {
+    console.warn('balance read failed', (e as Error).message)
+    return null
+  })
+  // One event per outage, not one per tick.
+  if (read == null && !balanceMissing) await store.event('warn', null, 'USDT balance unavailable — risk limits skipped until it can be read')
+  balanceMissing = read == null
+  if (read != null) lastEquity = read
+  const equity = lastEquity
+  const lim = checkLimits(await store.risk(), read, now, cfg.risk)
   await store.setState('risk', lim.state)
   if (lim.state.halted && lim.state.haltReason !== (await store.getState<string>('lastHalt', ''))) {
     await store.event('warn', null, 'entries halted — ' + lim.state.haltReason)
     await store.setState('lastHalt', lim.state.haltReason)
   }
-  if (ONCE || now - lastEquityAt >= 3_600_000) {
+  if (read != null && (ONCE || now - lastEquityAt >= 3_600_000)) {
     lastEquityAt = now
-    await store.equity(now - (now % 3_600_000), equity)
+    await store.equity(now - (now % 3_600_000), read)
   }
   await store.setState('heartbeat', { t: now, equity, mode: cfg.mode, venue: ex.base })
   await mirrorAccount(now).catch((e) => console.error('account mirror', (e as Error).message))

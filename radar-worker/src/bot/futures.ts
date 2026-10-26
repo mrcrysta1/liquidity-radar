@@ -177,10 +177,13 @@ export class Futures {
     }
   }
 
-  async balanceUsdt(): Promise<number> {
+  /** USDT equity (wallet + unrealized), or null when the USDT row is missing or unreadable — never a false 0. */
+  async balanceUsdt(): Promise<number | null> {
     const rows = (await this.request('GET', '/fapi/v2/balance')) as Array<{ asset: string; balance: string; crossUnPnl: string }>
-    const u = rows.find((x) => x.asset === 'USDT')
-    return u ? Number(u.balance) + Number(u.crossUnPnl || 0) : 0
+    const u = Array.isArray(rows) ? rows.find((x) => x.asset === 'USDT') : undefined
+    if (!u) return null
+    const v = Number(u.balance) + Number(u.crossUnPnl || 0)
+    return Number.isFinite(v) ? v : null
   }
 
   async position(symbol: string): Promise<Position> {
@@ -197,7 +200,15 @@ export class Futures {
 
   async setup(symbol: string, leverage: number): Promise<void> {
     await this.request('POST', '/fapi/v1/marginType', { symbol, marginType: 'ISOLATED' }).catch((e) => {
-      if (!(e instanceof BinanceError) || e.code !== -4046) throw e // -4046: already isolated
+      if (!(e instanceof BinanceError)) throw e
+      if (e.code === -4046) return // already isolated
+      // -4047 / -4048: margin type cannot change while orders / a position are
+      // open. Keep the current margin type rather than retrying startup forever.
+      if (e.code === -4047 || e.code === -4048) {
+        console.warn(`[futures] ${symbol}: margin type left unchanged (${e.message})`)
+        return
+      }
+      throw e
     })
     await this.request('POST', '/fapi/v1/leverage', { symbol, leverage })
   }
