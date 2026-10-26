@@ -272,7 +272,13 @@ export function TimeframePicker() {
                               className="tf-row-main"
                               role="option"
                               aria-selected={sel}
-                              onClick={() => setTimeframe(t.id)}
+                              onClick={() => {
+                                // Picking an interval is the whole gesture, as
+                                // on TradingView: the menu used to stay open
+                                // over the chart it had just reloaded.
+                                setTimeframe(t.id)
+                                setMenu(false)
+                              }}
                             >
                               <span className="tf-row-id">{t.label}</span>
                               <span className="tf-row-long">
