@@ -1,4 +1,6 @@
 node_modules/
 .env
 .scratch/
+# Offline evaluation: cached market data and result files (npm run eval).
+.cache/
 *.log

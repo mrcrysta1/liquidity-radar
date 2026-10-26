@@ -205,6 +205,9 @@ Actions → "Bot self-test (testnet)" → Run workflow.
 ```bash
 npm test                              # tape reader, model, risk, trading loop, real SQL
 npm run train                         # walk-forward report (no keys needed)
+npm run eval                          # offline evaluation, live settings: purged walk-forward,
+                                      # metrics, calibration, baselines (scripts/eval.ts)
+npm run eval -- compare --champion mlp --challenger base-rate   # bootstrap CI on expectancy
 node test/mock-supabase.ts 4790 90    # local stand-in: real Binance data, Supabase-style API
 ```
 
