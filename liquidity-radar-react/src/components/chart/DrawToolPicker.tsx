@@ -1,6 +1,7 @@
 // Drawing tools dropdown — the full catalogue grouped like TradingView's
 // drawing toolbar, with a search box, the magnet toggle, undo and clear-all.
 import { useEffect, useRef, useState } from 'react'
+import { useFitMenu } from './useFitMenu'
 import {
   DRAW_GROUPS,
   DRAW_TOOLS,
@@ -417,6 +418,9 @@ export function DrawToolPicker() {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const wrapRef = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  // It flies out beside the strip; low on a 768px screen its foot ran off the bottom.
+  useFitMenu(menuRef, open)
 
   useEffect(() => subscribeDrawTools(() => force((n) => n + 1)), [])
 
@@ -482,7 +486,7 @@ export function DrawToolPicker() {
       </button>
 
       {open && (
-        <div className="draw-menu" role="menu" aria-label="Drawing tools">
+        <div className="draw-menu" role="menu" aria-label="Drawing tools" ref={menuRef}>
           <div className="draw-menu-head">
             <input
               className="draw-search"

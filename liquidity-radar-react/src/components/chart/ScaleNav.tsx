@@ -39,6 +39,7 @@ import type { ScaleMode } from '../../features/charts/scaleNavMath'
 import { getActiveCell, subscribeLayout } from '../../features/charts/companionCharts'
 import { addPriceRule, alertPriceText } from '../../features/alerts/alerts'
 import { state } from '../../services/store'
+import { useFitMenu } from './useFitMenu'
 
 function useScaleNav() {
   const [, force] = useState(0)
@@ -165,6 +166,47 @@ export function ChartNavOverlay() {
 
   useDismiss(!!s.menu, menuRef, closeScaleMenu)
 
+  // On a narrow chart (1366px with the side panel) the bottom-centre zoom bar
+  // landed on the whale-orders legend in the bottom-left corner. Sit just
+  // above the legend whenever the two would overlap; measured as the cursor
+  // enters the chart (the bar only shows on hover) and on resize.
+  const zoomRef = useRef<HTMLDivElement>(null)
+  const [lift, setLift] = useState(0)
+  const base = s.tsH + 8
+  useEffect(() => {
+    const wrap = document.getElementById('chartWrap')
+    if (!wrap || !s.ready) return
+    const measure = () => {
+      const z = zoomRef.current
+      const wl = wrap.querySelector('.whale-legend')
+      let next = 0
+      if (z && wl) {
+        const wr = wrap.getBoundingClientRect()
+        const lr = wl.getBoundingClientRect()
+        const zr = z.getBoundingClientRect()
+        // Where the bar sits unlifted: `base` above the wrap's bottom.
+        const zBottom = wr.bottom - base
+        const zTop = zBottom - zr.height
+        const overlap =
+          lr.height > 0 &&
+          zr.left < lr.right + 6 &&
+          zr.right > lr.left - 6 &&
+          zTop < lr.bottom &&
+          zBottom > lr.top
+        if (overlap) next = Math.round(wr.bottom - lr.top + 6)
+      }
+      setLift((cur) => (cur === next ? cur : next))
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(wrap)
+    wrap.addEventListener('pointerenter', measure)
+    return () => {
+      ro.disconnect()
+      wrap.removeEventListener('pointerenter', measure)
+    }
+  }, [s.ready, base, s.psW])
+
   if (!s.ready) return null
   return (
     <div className="sn-overlay">
@@ -172,7 +214,8 @@ export function ChartNavOverlay() {
         className="sn-zoom"
         role="group"
         aria-label="Chart navigation"
-        style={{ bottom: s.tsH + 8, left: `calc(50% - ${s.psW / 2}px)` }}
+        ref={zoomRef}
+        style={{ bottom: lift || base, left: `calc(50% - ${s.psW / 2}px)` }}
       >
         <button type="button" title="Zoom out" aria-label="Zoom out" onClick={() => zoomChart(-1)}>
           <Icon d={MINUS} />
@@ -288,6 +331,8 @@ function TimeZoneMenu() {
     btnRef.current?.focus()
   }
   useDismiss(open, ref, close)
+  // Eighteen zones, opening up and leftwards: on a phone it ran off the top and left.
+  useFitMenu(listRef, open)
 
   // Opening moves focus onto the chosen zone, so the keyboard can pick at once.
   useEffect(() => {
@@ -364,6 +409,10 @@ export function ChartBottomBar() {
   const closeMore = () => setMoreOpen(false)
   useDismiss(rangeOpen, rangeRef, closeRange)
   useDismiss(moreOpen, moreRef, closeMore)
+  const rangeMenuRef = useRef<HTMLDivElement>(null)
+  const moreMenuRef = useRef<HTMLDivElement>(null)
+  useFitMenu(rangeMenuRef, rangeOpen)
+  useFitMenu(moreMenuRef, moreOpen)
 
   const sel = RANGE_PRESETS.find((p) => p.id === s.range)
   return (
@@ -394,7 +443,12 @@ export function ChartBottomBar() {
           <Icon d="M6 9l6 6 6-6" size={12} />
         </button>
         {rangeOpen ? (
-          <div className="sn-menu up sn-range-list" role="menu" aria-label="Date range">
+          <div
+            className="sn-menu up sn-range-list"
+            role="menu"
+            aria-label="Date range"
+            ref={rangeMenuRef}
+          >
             {RANGE_PRESETS.map((p) => (
               <MenuItem
                 key={p.id}
@@ -455,7 +509,7 @@ export function ChartBottomBar() {
           <Icon d="M5 12h.01M12 12h.01M19 12h.01" size={14} />
         </button>
         {moreOpen ? (
-          <div className="sn-menu up right" role="menu" aria-label="Price scale">
+          <div className="sn-menu up right" role="menu" aria-label="Price scale" ref={moreMenuRef}>
             <ScaleMenuItems done={closeMore} />
           </div>
         ) : null}
