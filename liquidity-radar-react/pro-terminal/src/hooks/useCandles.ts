@@ -36,7 +36,7 @@ export function useCandles(symbol: string, timeframe: string) {
         });
       });
     } catch (e) { /* stream cap reached — chart still polls */ }
-    const poll = setInterval(() => { klines.get(symbol, timeframe as any, 500).then(e => { if (!alive) return; setEnv(prev => { if (!prev || prev.data.length <= 500) return e; const merged = [...prev.data.filter(c => c.time < e.data[0].time), ...e.data]; return { ...e, data: merged }; }); }).catch(() => {}); }, 15_000);
+    const poll = setInterval(() => { klines.get(symbol, timeframe as any, 500).then(e => { if (!alive) return; setEnv(prev => { if (!prev || prev.data.length <= 500) return e; if (!e.data.length) return prev; /* empty page: keep history, don't throw on e.data[0] */ const merged = [...prev.data.filter(c => c.time < e.data[0].time), ...e.data]; return { ...e, data: merged }; }); }).catch(() => {}); }, 15_000);
     return () => { alive = false; off?.(); clearInterval(poll); };
   }, [symbol, timeframe]);
 

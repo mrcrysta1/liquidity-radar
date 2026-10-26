@@ -21,7 +21,7 @@ export function IndicatorMenu({ chartId, instances, computed, onClose }: { chart
   const apply = () => { if (!compile(code)) return; const m = /indicator\s*\(\s*["']([^"']+)/.exec(code) ?? /study\s*\(\s*["']([^"']+)/.exec(code); const t = m?.[1] ?? name; addPine(chartId, code, t); setMsg(`Added "${t}" to chart`); };
   const sourceOptions = (before?: string) => { const opts: { v: string; l: string }[] = SOURCES.map(s => ({ v: s, l: s })); for (const i of instances) { if (i.uid === before) break; const d = i.type === 'pine' ? undefined : indicatorDef(i.type); d?.outputs.forEach(o => opts.push({ v: `${i.uid}.${o.key}`, l: `${d.name}(${Object.values(i.params).join(',')}) → ${o.label}` })); const pc = computed.find(c => c.uid === i.uid && c.pine); pc?.def.outputs.forEach(o => opts.push({ v: `${i.uid}.${o.key}`, l: `${pc.def.name} → ${o.label}` })); } return opts; };
   return (
-    <div className="menu" role="dialog" aria-label="Indicators">
+    <div className="menu" role="dialog" aria-label="Indicators" onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } }}>
       <div className="menu-head">
         <button className={tab === 'search' ? 'on' : ''} onClick={() => setTab('search')}>Indicators</button>
         <button className={tab === 'editor' ? 'on' : ''} onClick={() => setTab('editor')}>Pine editor</button>
