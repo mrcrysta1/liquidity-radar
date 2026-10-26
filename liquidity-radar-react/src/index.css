@@ -1512,7 +1512,9 @@ html.radar-fs .sn-bar{flex-shrink:0;margin-top:6px}
   .sn-ranges{display:none}
   .sn-range-menu{display:flex}
 }
-@media(max-width:380px){
+/* Up to the common 390-414px phones: at 380px the bar was still 31px too
+   wide on a 390px screen, which pushed the scale-settings button off the card. */
+@media(max-width:420px){
   .sn-bar{gap:4px}
   .sn-clock i{display:none}
   .sn-bar>.sn-btn{padding:3px 6px}
@@ -5954,6 +5956,19 @@ html[data-palette="glass"] .acct-card{background:linear-gradient(145deg,rgba(255
 .legend .leg-act button{display:inline-grid;place-items:center;width:20px;height:20px;padding:0;border:0;border-radius:3px;background:transparent;color:var(--muted);cursor:pointer}
 .legend .leg-act button:hover{background:rgb(var(--pRGB)/.14);color:var(--txt)}
 @media (hover:none){.legend .leg-act{opacity:1}}
+/* The main chart as one cell of a 4-16 chart layout (cw-* set by chartRender
+   from the plot width): the full legend wrapped to three lines over the
+   candles and the whale box covered them. Narrow: symbol, then close and
+   change on one line, no whale box. Tiny: the symbol row only. */
+.chart-layout.multi .cw-narrow .legend{max-width:calc(100% - 64px)}
+.chart-layout.multi .cw-narrow .legend .leg-main{flex-wrap:nowrap;flex-direction:column;gap:0;min-width:0;max-width:100%}
+.chart-layout.multi .cw-narrow .legend .leg-sym,
+.chart-layout.multi .cw-narrow .legend .leg-ohlc{flex-wrap:nowrap;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;font-size:12px}
+.chart-layout.multi .cw-narrow .legend .leg-ohlc>:nth-child(-n+6),
+.chart-layout.multi .cw-narrow .legend .leg-ohlc>:nth-child(n+10){display:none}
+.chart-layout.multi .cw-narrow .legend .leg-k:nth-child(7){margin-left:0}
+.chart-layout.multi .cw-narrow .whale-legend{display:none}
+.chart-layout.multi .cw-tiny .legend .leg-ohlc,.chart-layout.multi .cw-tiny .legend .leg-ind{display:none}
 /* Companion cells: the same legend a size smaller, on one line */
 .rc-legend{
   background:none;padding:0;border-radius:0;

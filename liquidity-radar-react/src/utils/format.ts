@@ -10,15 +10,19 @@ export function fmt(n: number, d?: number): string {
   return n.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })
 }
 
-export function pfmt(p: number): string {
-  if (!isFinite(p)) return '—'
+/** The decimals pfmt shows for a price of this size. */
+export function priceDecimals(p: number): number {
   // Decimals follow the magnitude, so a short is formatted like a long.
   const a = Math.abs(p)
   // Below a millionth, 8 decimals keep fewer than two digits (or none):
   // show about four significant digits instead.
   const tiny = a > 0 && a < 1e-6 ? Math.min(20, Math.ceil(-Math.log10(a)) + 3) : 0
-  const d = a >= 100 ? 2 : a >= 1 ? 4 : a >= 0.01 ? 5 : a >= 0.0001 ? 6 : tiny || 8
-  return fmt(p, d)
+  return a >= 100 ? 2 : a >= 1 ? 4 : a >= 0.01 ? 5 : a >= 0.0001 ? 6 : tiny || 8
+}
+
+export function pfmt(p: number): string {
+  if (!isFinite(p)) return '—'
+  return fmt(p, priceDecimals(p))
 }
 
 export function cfmt(n: number): string {
