@@ -112,6 +112,42 @@ test('setup: margin type that cannot change (-4048, -4047) or is already set (-4
   }
 })
 
+test('balanceUsdt: a missing USDT row reads as null (unknown), not 0', async () => {
+  const real = globalThis.fetch
+  let rows: unknown = [{ asset: 'BNB', balance: '2', crossUnPnl: '0' }]
+  globalThis.fetch = (async (url: string) => {
+    const u = new URL(url)
+    assert.ok(TESTNET_BASES.includes(u.origin), 'only the testnet is called')
+    if (u.pathname === '/fapi/v1/time') return new Response(JSON.stringify({ serverTime: Date.now() }))
+    return new Response(JSON.stringify(rows))
+  }) as typeof fetch
+  try {
+    const f = new Futures('k', 's')
+    assert.equal(await f.balanceUsdt(), null)
+    rows = [{ asset: 'USDT', balance: 'oops', crossUnPnl: '0' }]
+    assert.equal(await f.balanceUsdt(), null)
+    rows = [{ asset: 'USDT', balance: '4000', crossUnPnl: '-50' }]
+    assert.equal(await f.balanceUsdt(), 3950)
+  } finally {
+    globalThis.fetch = real
+  }
+})
+
+test('an unknown balance skips the limits for that tick instead of tripping the drawdown kill switch', () => {
+  const day1 = Date.UTC(2026, 0, 1, 12)
+  let { state } = checkLimits({ day: '', dayStartEquity: 0, peakEquity: 0, halted: false, haltReason: '' }, 10_000, day1, DEFAULT_RISK)
+  const before = { ...state }
+  const r = checkLimits(state, null, day1 + 60_000, DEFAULT_RISK)
+  assert.equal(r.canEnter, true)
+  assert.deepEqual(r.state, before, 'state untouched')
+  assert.equal(checkLimits(state, NaN, day1 + 60_000, DEFAULT_RISK).canEnter, true)
+  // A real 0 is still a real loss.
+  assert.equal(checkLimits(state, 0, day1 + 60_000, DEFAULT_RISK).canEnter, false)
+  // An existing halt stays in force while the balance is unknown.
+  ;({ state } = checkLimits(state, 8_000, day1 + 120_000, DEFAULT_RISK))
+  assert.equal(checkLimits(state, null, day1 + 180_000, DEFAULT_RISK).canEnter, false)
+})
+
 test('rounding follows exchange steps', () => {
   assert.equal(roundStep(0.123456, 0.001, 3), '0.123')
   assert.equal(roundStep(0.3, 0.1, 1), '0.3', 'no float drift below the step')

@@ -177,10 +177,13 @@ export class Futures {
     }
   }
 
-  async balanceUsdt(): Promise<number> {
+  /** USDT equity (wallet + unrealized), or null when the USDT row is missing or unreadable — never a false 0. */
+  async balanceUsdt(): Promise<number | null> {
     const rows = (await this.request('GET', '/fapi/v2/balance')) as Array<{ asset: string; balance: string; crossUnPnl: string }>
-    const u = rows.find((x) => x.asset === 'USDT')
-    return u ? Number(u.balance) + Number(u.crossUnPnl || 0) : 0
+    const u = Array.isArray(rows) ? rows.find((x) => x.asset === 'USDT') : undefined
+    if (!u) return null
+    const v = Number(u.balance) + Number(u.crossUnPnl || 0)
+    return Number.isFinite(v) ? v : null
   }
 
   async position(symbol: string): Promise<Position> {

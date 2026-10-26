@@ -25,7 +25,7 @@ class FakeExchange implements Exchange {
   base = 'fake://testnet'
   price = 100
   pos = { amt: 0, entry: 0 }
-  balance = 10_000
+  balance: number | null = 10_000
   log: Fill[] = []
   algo: Array<{ algoId: number; side: 'BUY' | 'SELL'; trigger: number }> = []
   limits: Array<{ orderId: number; side: 'BUY' | 'SELL'; qty: number; price: number }> = []
@@ -59,7 +59,7 @@ class FakeExchange implements Exchange {
     const fee = price * qty * (maker ? 0.0002 : 0.0005)
     const next = +(this.pos.amt + signed).toFixed(8)
     this.pos = { amt: next, entry: next === 0 ? 0 : this.pos.amt === 0 ? price : this.pos.entry }
-    this.balance += pnl - fee
+    if (this.balance != null) this.balance += pnl - fee
     this.log.push({ id: this.id++, orderId, time: Date.now(), side, price, qty, realizedPnl: pnl, commission: fee / this.feeAssetUsdt, commissionAsset: this.feeAsset })
   }
   async marketOrder(_s: string, side: 'BUY' | 'SELL', quantity: string, reduceOnly = false) {
@@ -450,4 +450,19 @@ test('fees paid in BNB are converted to USDT; without a price they are left out 
       assert.equal(warn.length, 1)
     }
   }
+})
+
+test('an unreadable balance means no entry this bar, not a zero-equity order', async () => {
+  const { db, pg } = await freshDb()
+  const store = new BotStore(db)
+  const ex = new FakeExchange()
+  const { hist, state, cfg } = setup('explore')
+  const t = new SymbolTrader(ex, store, 'BTCUSDT', cfg)
+  await t.init()
+  ex.price = hist[state.idx - 1].c
+  ex.balance = null
+  await t.tick(true, Date.now())
+  assert.equal(await store.openTrade('BTCUSDT'), null)
+  assert.equal(ex.pos.amt, 0, 'no order sent')
+  assert.equal((await pg.query("select msg from bot_events where msg like '%USDT balance unavailable%'")).rows.length, 1)
 })

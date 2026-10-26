@@ -33,7 +33,8 @@ import type { Calib } from './learning.ts'
 export interface Exchange {
   base: string
   rules(symbol: string): Promise<SymbolRules>
-  balanceUsdt(): Promise<number>
+  /** null when the balance cannot be read (no USDT row). */
+  balanceUsdt(): Promise<number | null>
   position(symbol: string): Promise<Position>
   setup(symbol: string, leverage: number): Promise<void>
   marketOrder(symbol: string, side: 'BUY' | 'SELL', quantity: string, reduceOnly?: boolean, clientId?: string): Promise<{ orderId: number; avgPrice: string; executedQty: string }>
@@ -559,6 +560,10 @@ export class SymbolTrader {
       return
     }
     const equity = await this.ex.balanceUsdt()
+    if (equity == null) {
+      await this.store.event('warn', this.symbol, `${summary} — no trade: USDT balance unavailable`)
+      return
+    }
     const sz = size(equity, last.c, slDist, this.rules, this.cfg.risk)
     if (Number(sz.qty) <= 0) {
       await this.store.event('warn', this.symbol, `${summary} — no trade: ${sz.reason}`)
