@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { storageGetRaw, storageSetRaw } from '../services/storage'
 import { LogoMark } from './Logo'
 import { getActiveTab, subscribeActiveTab, switchTab } from '../features/actions/userActions'
+import { trapFocus } from '../utils/dom'
 
 type TabId =
   | 'home'
@@ -182,6 +183,7 @@ export function Sidebar() {
   const [drag, setDrag] = useState(0)
   const startY = useRef<number | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
+  const sheetRef = useRef<HTMLDivElement>(null)
 
   const closeSheet = useCallback(() => {
     startY.current = null
@@ -216,7 +218,12 @@ export function Sidebar() {
       if (e.key === 'Escape') closeSheet()
     }
     document.addEventListener('keydown', onKey, true)
-    return () => document.removeEventListener('keydown', onKey, true)
+    // It is a modal dialog: keep Tab inside it and hand focus back on close.
+    const release = sheetRef.current ? trapFocus(sheetRef.current) : null
+    return () => {
+      document.removeEventListener('keydown', onKey, true)
+      release?.()
+    }
   }, [sheet, closeSheet])
 
   const toggle = () => {
@@ -302,6 +309,7 @@ export function Sidebar() {
       />
       <div
         className={'navsheet' + (sheet ? ' show' : '')}
+        ref={sheetRef}
         role="dialog"
         aria-modal="true"
         aria-label="More sections"

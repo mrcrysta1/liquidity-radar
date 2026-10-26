@@ -240,6 +240,13 @@ function renderNewsProblem(phase: 'empty' | 'error'): void {
         '<button type="button" class="dt-cta" style="display:inline-flex;margin-left:6px" data-news-retry="1">Retry</button></div>'
   $('newsCount')!.textContent = phase === 'empty' ? '0 STORIES' : 'OFFLINE'
   $('newsMore')!.style.display = 'none'
+  // Trending is ranked from the feed, so it has nothing to wait for either.
+  const trend = $('trendingList')
+  if (trend)
+    trend.innerHTML =
+      '<div class="fc-note">' +
+      (phase === 'empty' ? 'No coins mentioned in the current feed yet.' : 'Trends need the news feed, which is unavailable right now.') +
+      '</div>'
   const btn = list.querySelector('[data-news-retry]') as HTMLButtonElement | null
   if (btn) btn.onclick = () => retryNews()
 }
