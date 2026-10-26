@@ -444,7 +444,9 @@ async function backfill(g: number, s: string, earliest: number, budget: number):
     let cursor = newest[0].a - 1
     let pages = 1
     let oldestT = newest[0].T
-    while (pages < budget && cursor >= 0 && oldestT > earliest) {
+    // Re-check the generation every round: a coin switch (resetWhaleFlow) must
+    // stop this loop before it requests another batch of the old coin's pages.
+    while (g === gen && pages < budget && cursor >= 0 && oldestT > earliest) {
       const batch: number[] = []
       let c = cursor
       while (batch.length < CONCURRENCY && pages + batch.length < budget) {
@@ -537,7 +539,7 @@ export function scanFurther(): void {
 
 /** Whether older chart history exists that the tape has not been scanned for. */
 export function canScanFurther(): boolean {
-  if (!coverage.length || loading) return false
+  if (!sym || !coverage.length || loading) return false
   return Math.min(...coverage.map((c) => c.t0)) > earliestT + 60_000
 }
 
@@ -611,9 +613,25 @@ export function ingestWhaleAgg(
   if (!flushTimer) flushTimer = setTimeout(flushLive, 250)
 }
 
-/** A symbol switch: drop the half-read tape and the live coverage run. */
+/**
+ * A symbol switch: drop the half-read tape and the live coverage run, and
+ * retire the old coin's backfill now rather than when the new coin's candles
+ * reach syncWhaleSymbol. Bumping the generation makes every in-flight request
+ * for the old coin stop and discard its result; clearing `sym` makes the next
+ * syncWhaleSymbol start a fresh backfill even when it names the same coin again
+ * (A -> B -> A before B's candles land), so `loading` — released here because
+ * the retired backfill no longer will — is always owned by a live backfill.
+ */
 export function resetWhaleFlow(): void {
   liveCov = null
   pending = []
   held = -1
+  if (!sym) return
+  save()
+  sym = ''
+  gen++
+  if (loading) {
+    loading = false
+    emit()
+  }
 }

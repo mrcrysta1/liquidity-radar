@@ -70,7 +70,33 @@ const chatReq = (headers, body) => ({
 {
   const rules = chat.originRules('')
   ok(chat.isAllowedOrigin('https://liquidity-radar-seven.vercel.app', rules), 'chat origin: production allowed')
-  ok(chat.isAllowedOrigin('https://liquidity-radar-git-fix-zq.vercel.app', rules), 'chat origin: preview allowed')
+  ok(
+    chat.isAllowedOrigin('https://liquidity-radar-rkg55qghg-mrcrystals-projects.vercel.app', rules),
+    'chat origin: hash preview of this project allowed',
+  )
+  ok(
+    chat.isAllowedOrigin('https://liquidity-radar-git-fix-whale-backfill-mrcrystals-projects.vercel.app', rules),
+    'chat origin: branch preview of this project allowed',
+  )
+  // Any other Vercel project (or team) whose name merely contains ours.
+  ok(!chat.isAllowedOrigin('https://liquidity-radar-git-fix-zq.vercel.app', rules), 'chat origin: unscoped look-alike refused')
+  ok(
+    !chat.isAllowedOrigin('https://liquidity-radar-rkg55qghg-attacker-projects.vercel.app', rules),
+    'chat origin: same project name, other team refused',
+  )
+  ok(
+    !chat.isAllowedOrigin('https://evil-liquidity-radar-rkg55qghg-mrcrystals-projects.vercel.app', rules),
+    'chat origin: prefixed project name refused',
+  )
+  ok(
+    !chat.isAllowedOrigin('https://liquidity-radar-steal-rkg55qghg-mrcrystals-projects.vercel.app', rules),
+    'chat origin: other project of the team refused',
+  )
+  ok(!chat.isAllowedOrigin('https://my-liquidity-radar.vercel.app', rules), 'chat origin: name-contains project refused')
+  ok(
+    !chat.isAllowedOrigin('https://liquidity-radar-rkg55qghg-mrcrystals-projects.vercel.app.evil.com', rules),
+    'chat origin: preview suffix trick refused',
+  )
   ok(chat.isAllowedOrigin('http://localhost:5173', rules), 'chat origin: localhost any port')
   ok(chat.isAllowedOrigin('http://127.0.0.1:8717', rules), 'chat origin: 127.0.0.1 any port')
   ok(!chat.isAllowedOrigin('https://evil.example.com', rules), 'chat origin: foreign refused')

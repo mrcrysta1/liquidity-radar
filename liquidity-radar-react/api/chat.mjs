@@ -56,8 +56,10 @@ function clean(s, cap) {
 
 const DEFAULT_ORIGINS = [
   'https://liquidity-radar-seven.vercel.app',
-  // Vercel preview deployments of this project.
-  /^https:\/\/[a-z0-9-]*liquidity-radar[a-z0-9-]*\.vercel\.app$/,
+  // Vercel preview deployments of this project, in this team's scope only:
+  // <project>-<9-char hash>-<team> and <project>-git-<branch>-<team>. Any other
+  // project merely named like this one must not spend the Groq key.
+  /^https:\/\/liquidity-radar-(?:[a-z0-9]{9}|git-[a-z0-9-]+)-mrcrystals-projects\.vercel\.app$/,
   // Local dev and preview servers on any port.
   /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/,
 ]

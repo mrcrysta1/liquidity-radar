@@ -6,9 +6,9 @@ import type { Agg } from './tape.ts'
 const REST = ['https://data-api.binance.vision', 'https://api.binance.com']
 export const STREAM = 'wss://data-stream.binance.vision/ws/'
 
-async function getJson(path: string): Promise<unknown> {
+async function getJson(path: string, attempts = 5): Promise<unknown> {
   let err: unknown
-  for (let attempt = 0; attempt < 5; attempt++) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
     for (const host of REST) {
       try {
         const r = await fetch(host + path, { signal: AbortSignal.timeout(15_000) })
@@ -35,6 +35,14 @@ export async function aggTradesFrom(symbol: string, fromId: number, limit: numbe
     `/api/v3/aggTrades?symbol=${symbol}&fromId=${fromId}&limit=${Math.min(1000, Math.max(1, limit))}`,
   )) as Agg[]
   return Array.isArray(rows) ? rows : []
+}
+
+/** Latest spot price (public market data, unsigned); throws if it cannot be read. */
+export async function lastPrice(symbol: string): Promise<number> {
+  const r = (await getJson('/api/v3/ticker/price?symbol=' + encodeURIComponent(symbol), 2)) as { price?: string }
+  const p = Number(r?.price)
+  if (!(p > 0)) throw new Error('no price for ' + symbol)
+  return p
 }
 
 export async function quoteVolume24h(symbol: string): Promise<number> {

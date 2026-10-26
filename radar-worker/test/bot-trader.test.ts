@@ -25,7 +25,7 @@ class FakeExchange implements Exchange {
   base = 'fake://testnet'
   price = 100
   pos = { amt: 0, entry: 0 }
-  balance = 10_000
+  balance: number | null = 10_000
   log: Fill[] = []
   algo: Array<{ algoId: number; side: 'BUY' | 'SELL'; trigger: number }> = []
   limits: Array<{ orderId: number; side: 'BUY' | 'SELL'; qty: number; price: number }> = []
@@ -34,6 +34,9 @@ class FakeExchange implements Exchange {
   failFlatten = 0
   /** Post-only target rejected as it would cross (Binance -5022). */
   rejectTp = false
+  /** Asset fees are paid in (BNB with the fee discount), and its USDT price. */
+  feeAsset = 'USDT'
+  feeAssetUsdt = 1
   private id = 1
 
   async rules(): Promise<SymbolRules> {
@@ -56,8 +59,8 @@ class FakeExchange implements Exchange {
     const fee = price * qty * (maker ? 0.0002 : 0.0005)
     const next = +(this.pos.amt + signed).toFixed(8)
     this.pos = { amt: next, entry: next === 0 ? 0 : this.pos.amt === 0 ? price : this.pos.entry }
-    this.balance += pnl - fee
-    this.log.push({ id: this.id++, orderId, time: Date.now(), side, price, qty, realizedPnl: pnl, commission: fee, commissionAsset: 'USDT' })
+    if (this.balance != null) this.balance += pnl - fee
+    this.log.push({ id: this.id++, orderId, time: Date.now(), side, price, qty, realizedPnl: pnl, commission: fee / this.feeAssetUsdt, commissionAsset: this.feeAsset })
   }
   async marketOrder(_s: string, side: 'BUY' | 'SELL', quantity: string, reduceOnly = false) {
     if (reduceOnly && this.failFlatten > 0) {
@@ -379,4 +382,87 @@ test('a close that fails is retried every tick (even after a restart); a crossed
   row = (await pg.query<Record<string, unknown>>('select * from bot_trades order by id desc limit 1')).rows[0]
   assert.equal(row.exit_reason, 'tp')
   assert.equal(ex.algo.length, 0, 'leftover stop cancelled')
+})
+
+test('finalize counts only this trade’s entry fill, not an earlier same-side fill (e.g. the last trade’s close)', async () => {
+  for (const legacy of [false, true]) {
+    const { db, pg } = await freshDb()
+    const store = new BotStore(db)
+    const ex = new FakeExchange()
+    const { hist, state, cfg } = setup('explore')
+    const t = new SymbolTrader(ex, store, 'BTCUSDT', cfg)
+    await t.init()
+    ex.price = hist[state.idx - 1].c
+    const now = Date.now()
+    await t.tick(true, now)
+    const open = await store.openTrade('BTCUSDT')
+    assert.ok(open)
+    assert.equal(typeof open!.entryOrderId, 'number', 'entry order id is read back')
+    // A row written before entry_order_id was kept falls back to the time window.
+    if (legacy) await pg.query('update bot_trades set entry_order_id = null where id = $1', [open!.id])
+    // A same-side fill from just before this trade opened, with a large fee.
+    const side = open!.side > 0 ? 'BUY' : 'SELL'
+    ex.log.unshift({ id: 9999, orderId: 9999, time: open!.openedAt - 2000, side, price: ex.price, qty: 1, realizedPnl: 0, commission: 50, commissionAsset: 'USDT' })
+    ex.move(open!.tp + open!.side * 0.05)
+    await t.tick(true, Date.now())
+    const row = (await pg.query<Record<string, unknown>>('select * from bot_trades order by id desc limit 1')).rows[0]
+    assert.equal(row.status, 'closed')
+    const expected = ex.log.filter((f) => f.orderId !== 9999).reduce((a, f) => a + f.commission, 0)
+    assert.ok(Math.abs(Number(row.fees_usd) - expected) < 1e-6, `fees ${row.fees_usd} = ${expected} (legacy ${legacy})`)
+  }
+})
+
+test('fees paid in BNB are converted to USDT; without a price they are left out with a warning, not a crash', async () => {
+  for (const priced of [true, false]) {
+    const { db, pg } = await freshDb()
+    const store = new BotStore(db)
+    const ex = new FakeExchange()
+    ex.feeAsset = 'BNB'
+    ex.feeAssetUsdt = 600
+    const { hist, state, cfg } = setup('explore')
+    const asked: string[] = []
+    cfg.price = async (s) => {
+      asked.push(s)
+      if (!priced) throw new Error('offline')
+      return 600
+    }
+    const t = new SymbolTrader(ex, store, 'BTCUSDT', cfg)
+    await t.init()
+    ex.price = hist[state.idx - 1].c
+    await t.tick(true, Date.now())
+    const open = await store.openTrade('BTCUSDT')
+    assert.ok(open)
+    ex.move(open!.tp + open!.side * 0.05)
+    await t.tick(true, Date.now())
+    const row = (await pg.query<Record<string, unknown>>('select * from bot_trades order by id desc limit 1')).rows[0]
+    assert.equal(row.status, 'closed')
+    assert.equal(row.exit_reason, 'tp')
+    assert.deepEqual(asked, ['BNBUSDT'])
+    const gross = ex.log.reduce((a, f) => a + f.realizedPnl, 0)
+    const feesUsdt = ex.log.reduce((a, f) => a + f.commission * 600, 0)
+    if (priced) {
+      assert.ok(feesUsdt > 0)
+      assert.ok(Math.abs(Number(row.fees_usd) - feesUsdt) < 1e-6, `fees ${row.fees_usd} = ${feesUsdt}`)
+      assert.ok(Math.abs(Number(row.pnl_usd) - (gross - feesUsdt)) < 1e-6, 'PnL is net of the BNB fees')
+    } else {
+      assert.equal(Number(row.fees_usd), 0)
+      const warn = (await pg.query<{ msg: string }>("select msg from bot_events where level = 'warn' and msg like '%BNB in fees left out%'")).rows
+      assert.equal(warn.length, 1)
+    }
+  }
+})
+
+test('an unreadable balance means no entry this bar, not a zero-equity order', async () => {
+  const { db, pg } = await freshDb()
+  const store = new BotStore(db)
+  const ex = new FakeExchange()
+  const { hist, state, cfg } = setup('explore')
+  const t = new SymbolTrader(ex, store, 'BTCUSDT', cfg)
+  await t.init()
+  ex.price = hist[state.idx - 1].c
+  ex.balance = null
+  await t.tick(true, Date.now())
+  assert.equal(await store.openTrade('BTCUSDT'), null)
+  assert.equal(ex.pos.amt, 0, 'no order sent')
+  assert.equal((await pg.query("select msg from bot_events where msg like '%USDT balance unavailable%'")).rows.length, 1)
 })
