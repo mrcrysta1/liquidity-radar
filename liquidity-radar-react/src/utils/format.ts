@@ -4,10 +4,21 @@ export const esc = (s: string): string =>
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
   )
 
+// One formatter per digit count, built once. Number#toLocaleString with
+// options builds a fresh Intl.NumberFormat on every call; fmt runs for every
+// price on every trade frame and chart axis label, which made it the single
+// most expensive function in a load profile. The output is identical.
+const formatters = new Map<number, Intl.NumberFormat>()
+
 export function fmt(n: number, d?: number): string {
   const digits = d == null ? 2 : d
   if (!isFinite(n)) return '—'
-  return n.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })
+  let f = formatters.get(digits)
+  if (!f) {
+    f = new Intl.NumberFormat('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })
+    formatters.set(digits, f)
+  }
+  return f.format(n)
 }
 
 export function pfmt(p: number): string {
