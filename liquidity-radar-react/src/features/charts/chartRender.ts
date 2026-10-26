@@ -600,7 +600,7 @@ function renderLegend(
   const pct = ref ? (d / ref) * 100 : 0
   const val = (k: string, x: Any) =>
     '<span class="leg-k">' + k + '</span><b style="color:' + col + '">' + pfmt(x) + '</b>'
-  $('legendOHLC')!.innerHTML =
+  const html =
     '<div class="leg-main' +
     (isCross ? ' leg-cross' : '') +
     '"><span class="leg-sym">' +
@@ -625,7 +625,21 @@ function renderLegend(
     (v != null ? '<span class="leg-k">Vol</span><b>' + nfmt(v) + '</b>' : '') +
     '</span></div>' +
     indicatorLegendHtml()
+  // The crosshair and every trade print land here; most of the time nothing
+  // in the legend changed (same bar, same price). Rewriting it anyway rebuilt
+  // the DOM and forced a layout for the overlays read straight after.
+  const el = $('legendOHLC')!
+  if (legendHtml === html && legendNode && el.firstChild === legendNode) return
+  el.innerHTML = html
+  legendHtml = html
+  legendNode = el.firstChild
 }
+/**
+ * What renderLegend last wrote, and the node it made. Other writers (the load
+ * error messages) replace that node, which is how a stale cache is noticed.
+ */
+let legendHtml = ''
+let legendNode: ChildNode | null = null
 
 /**
  * The active indicators' latest values, appended to the OHLC legend.

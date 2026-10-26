@@ -4,10 +4,22 @@ export const esc = (s: string): string =>
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
   )
 
+// toLocaleString with options builds a fresh Intl.NumberFormat on every call,
+// and the chart formats every axis label and legend value through here on
+// every paint. One formatter per digit count gives the same strings.
+const numFormats = new Map<number, Intl.NumberFormat>()
 export function fmt(n: number, d?: number): string {
   const digits = d == null ? 2 : d
   if (!isFinite(n)) return '—'
-  return n.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })
+  let f = numFormats.get(digits)
+  if (!f) {
+    f = new Intl.NumberFormat('en-US', {
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+    })
+    numFormats.set(digits, f)
+  }
+  return f.format(n)
 }
 
 /** The decimals pfmt shows for a price of this size. */
