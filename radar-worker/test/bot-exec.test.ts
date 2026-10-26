@@ -83,6 +83,35 @@ test('a -1021 clock rejection re-syncs and retries once; stamps stay behind serv
   }
 })
 
+test('setup: margin type that cannot change (-4048, -4047) or is already set (-4046) is not fatal; other errors are', async () => {
+  const real = globalThis.fetch
+  const quiet = console.warn
+  console.warn = () => {}
+  let code = -4048
+  const calls: string[] = []
+  globalThis.fetch = (async (url: string) => {
+    const u = new URL(url)
+    assert.ok(TESTNET_BASES.includes(u.origin), 'only the testnet is called')
+    calls.push(u.pathname)
+    if (u.pathname === '/fapi/v1/time') return new Response(JSON.stringify({ serverTime: Date.now() }))
+    if (u.pathname === '/fapi/v1/marginType') return new Response(JSON.stringify({ code, msg: 'margin type' }), { status: 400 })
+    return new Response(JSON.stringify({ leverage: 3, symbol: 'BTCUSDT' }))
+  }) as typeof fetch
+  try {
+    const f = new Futures('k', 's')
+    for (code of [-4048, -4047, -4046]) {
+      calls.length = 0
+      await f.setup('BTCUSDT', 3)
+      assert.ok(calls.includes('/fapi/v1/leverage'), `leverage still set after ${code}`)
+    }
+    code = -1102
+    await assert.rejects(f.setup('BTCUSDT', 3), /-1102/)
+  } finally {
+    globalThis.fetch = real
+    console.warn = quiet
+  }
+})
+
 test('rounding follows exchange steps', () => {
   assert.equal(roundStep(0.123456, 0.001, 3), '0.123')
   assert.equal(roundStep(0.3, 0.1, 1), '0.3', 'no float drift below the step')
