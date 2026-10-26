@@ -298,9 +298,14 @@ export function footprintView(): Any {
       const rows = rowsPerBar[i - vis.from]
       const x = bar.x * hRatio
       const left = x - cellW / 2
-      rows.forEach((cell) => {
+      // Each row's low is the row below's high (the same sum, so the same
+      // number): convert every edge once instead of twice. This repaints on
+      // every live tick, and the conversions were most of its cost.
+      let below: number | null = null
+      rows.forEach((cell, k) => {
+        const yBot = k > 0 ? below : toY(cell.lo)
         const yTop = toY(cell.hi)
-        const yBot = toY(cell.lo)
+        below = yTop
         if (yTop == null || yBot == null) return
         const h = Math.max(1, yBot - yTop)
         const sellW = maxCell ? (cell.sell / maxCell) * (cellW / 2) : 0
