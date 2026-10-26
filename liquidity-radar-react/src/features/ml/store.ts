@@ -108,7 +108,7 @@ export function setMLWanted(v: boolean): void {
   if (v) runForLatest()
 }
 
-function runForLatest(): void {
+function runForLatest(now = false): void {
   if (!latest) return
   const { symbol, tf, candles } = latest
   const same = state.symbol === symbol && state.tf === tf
@@ -119,7 +119,27 @@ function runForLatest(): void {
     void refreshPrediction(candles)
     return
   }
-  void trainForSymbol(symbol, tf, candles)
+  if (now) void trainForSymbol(symbol, tf, candles)
+  else scheduleTrain()
+}
+
+// Training is wanted the moment the Radar tab opens, which is also the moment
+// the tab and its chart are first rendering. Start it once the browser is
+// idle instead, so the chart paints and responds first; the check is re-run
+// then against whatever candles are latest by that point.
+let trainScheduled = false
+function scheduleTrain(): void {
+  if (trainScheduled) return
+  trainScheduled = true
+  const run = () => {
+    trainScheduled = false
+    if (wanted) runForLatest(true)
+  }
+  const w = globalThis as typeof globalThis & {
+    requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number
+  }
+  if (w.requestIdleCallback) w.requestIdleCallback(run, { timeout: 2000 })
+  else setTimeout(run, 200)
 }
 
 /** Re-run the live prediction against fresh candles without retraining —
