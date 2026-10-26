@@ -20,9 +20,61 @@ import type { IndicatorInstance, IndicatorStore } from '../../features/charts/in
 import { PINE_TYPE, pineStatus, subscribePine } from '../../features/charts/pine/indicator'
 import type { PineInput } from '../../features/charts/pine/runtime'
 import { editPineInstance } from '../../features/charts/pine/draft'
+import { useFitMenu } from './useFitMenu'
 // The Pine editor and its example scripts load on first open of the Pine tab,
 // not with the first screen.
 const PinePanel = lazy(() => import('./PinePanel').then((m) => ({ default: m.PinePanel })))
+
+/**
+ * A number setting that can be retyped. Clamping on every keystroke snapped a
+ * cleared field straight back to the minimum, so selecting "14" and typing
+ * "21" gave "121". The text is kept as typed; a value in range applies at
+ * once, anything else is clamped (or restored) when the field loses focus.
+ */
+function NumberField({
+  value,
+  min,
+  max,
+  step,
+  int,
+  onCommit,
+}: {
+  value: number
+  min?: number
+  max?: number
+  step?: number | 'any'
+  int?: boolean
+  onCommit: (v: number) => void
+}) {
+  const [draft, setDraft] = useState<string | null>(null)
+  const clamp = (v: number) => {
+    if (int) v = Math.round(v)
+    if (min != null) v = Math.max(min, v)
+    if (max != null) v = Math.min(max, v)
+    return v
+  }
+  return (
+    <input
+      type="number"
+      min={min}
+      max={max}
+      step={step}
+      value={draft ?? String(value)}
+      onChange={(e) => {
+        const text = e.target.value
+        setDraft(text)
+        const v = Number(text)
+        if (text !== '' && isFinite(v) && clamp(v) === v) onCommit(v)
+      }}
+      onBlur={() => {
+        if (draft == null) return
+        const v = Number(draft)
+        if (draft !== '' && isFinite(v) && clamp(v) !== value) onCommit(clamp(v))
+        setDraft(null)
+      }}
+    />
+  )
+}
 
 /** One Pine input, in the same settings grid as a built-in's params. */
 function PineInputField({
@@ -70,20 +122,13 @@ function PineInputField({
     )
   else
     field = (
-      <input
-        type="number"
+      <NumberField
         min={input.min}
         max={input.max}
         step={input.step ?? (input.type === 'int' ? 1 : 'any')}
+        int={input.type === 'int'}
         value={Number(cur)}
-        onChange={(e) => {
-          let v = Number(e.target.value)
-          if (e.target.value === '' || !isFinite(v)) return
-          if (input.type === 'int') v = Math.round(v)
-          if (input.min != null) v = Math.max(input.min, v)
-          if (input.max != null) v = Math.min(input.max, v)
-          set(v)
-        }}
+        onCommit={set}
       />
     )
   return (
@@ -171,6 +216,10 @@ export function IndicatorPicker({
       window.removeEventListener('scroll', place, true)
     }
   }, [open, panel])
+
+  // The toolbar's menu opens left-aligned under its button, which ran past
+  // the right edge at 1366px. A panel's menu places itself (above).
+  useFitMenu(menuRef, open && !panel, [tab])
 
   useEffect(() => {
     if (!open) return
@@ -367,13 +416,12 @@ export function IndicatorPicker({
                       {def.params.map((p) => (
                         <label key={p.key}>
                           <span>{p.label}</span>
-                          <input
-                            type="number"
+                          <NumberField
                             min={p.min}
                             max={p.max}
                             step={p.step}
                             value={inst.params[p.key]}
-                            onChange={(e) => setParam(inst.uid, p.key, Number(e.target.value))}
+                            onCommit={(v) => setParam(inst.uid, p.key, v)}
                           />
                         </label>
                       ))}

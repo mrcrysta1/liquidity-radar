@@ -4,6 +4,7 @@
 // way chart style, drawing tools and indicators are.
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { CvdBadge } from './CvdBadge'
+import { useFitMenu } from './useFitMenu'
 import {
   getShowConfluence,
   getShowDelta,
@@ -186,6 +187,8 @@ export function OverlayTogglePicker() {
   const [, force] = useState(0)
   const [open, setOpen] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  useFitMenu(menuRef, open)
 
   useEffect(() => onOverlayTogglesChange(() => force((n) => n + 1)), [])
 
@@ -227,7 +230,7 @@ export function OverlayTogglePicker() {
       </button>
 
       {open && (
-        <div className="panes-menu rail-menu" role="menu" aria-label="Panes">
+        <div className="panes-menu rail-menu" role="menu" aria-label="Panes" ref={menuRef}>
           <div className="rail-menu-head">
             <span>Panes</span>
             <small>{onCount} on</small>
