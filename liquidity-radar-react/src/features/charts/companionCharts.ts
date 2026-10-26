@@ -580,7 +580,26 @@ function initChart(p: Panel): void {
     bars: () => legendCandles(p.style, p.shown),
     onSync: (t) => hoverLegend(p, t),
   })
-  p.ro = null
+  // autoSize keeps the bar spacing as the cell grows (full screen, a wider
+  // window, a smaller layout), which left the candles bunched in the right
+  // part of the cell with blank space before them. When the whole history is
+  // already in view, fit it to the new width; a zoomed-in view is left alone.
+  let lastW = body.clientWidth
+  p.ro = new ResizeObserver(() => {
+    const w = body.clientWidth
+    if (!w || w <= lastW + 1) {
+      lastW = w || lastW
+      return
+    }
+    lastW = w
+    requestAnimationFrame(() => {
+      // Torn down meanwhile (destroyPanel sets the token to -1).
+      if (p.token === -1 || p.chart !== chart || !p.shown.length) return
+      const r = chart.timeScale().getVisibleLogicalRange()
+      if (r && r.from <= 0) chart.timeScale().fitContent()
+    })
+  })
+  p.ro.observe(body)
   reload(p)
 }
 
