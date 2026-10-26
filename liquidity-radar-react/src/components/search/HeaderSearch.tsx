@@ -56,7 +56,11 @@ export function HeaderSearch() {
               setOpen(false)
               void setSymbol(sym)
             }}
-            onClose={() => setOpen(false)}
+            onClose={() => {
+              setOpen(false)
+              // Escape: put the caret back where it came from, not on <body>.
+              document.getElementById('searchBtn')?.focus()
+            }}
           />
         </div>
       )}

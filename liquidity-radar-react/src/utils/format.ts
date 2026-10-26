@@ -4,21 +4,37 @@ export const esc = (s: string): string =>
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
   )
 
+// toLocaleString with options builds a fresh Intl.NumberFormat on every call,
+// and the chart formats every axis label and legend value through here on
+// every paint. One formatter per digit count gives the same strings.
+const numFormats = new Map<number, Intl.NumberFormat>()
 export function fmt(n: number, d?: number): string {
   const digits = d == null ? 2 : d
   if (!isFinite(n)) return '—'
-  return n.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })
+  let f = numFormats.get(digits)
+  if (!f) {
+    f = new Intl.NumberFormat('en-US', {
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+    })
+    numFormats.set(digits, f)
+  }
+  return f.format(n)
 }
 
-export function pfmt(p: number): string {
-  if (!isFinite(p)) return '—'
+/** The decimals pfmt shows for a price of this size. */
+export function priceDecimals(p: number): number {
   // Decimals follow the magnitude, so a short is formatted like a long.
   const a = Math.abs(p)
   // Below a millionth, 8 decimals keep fewer than two digits (or none):
   // show about four significant digits instead.
   const tiny = a > 0 && a < 1e-6 ? Math.min(20, Math.ceil(-Math.log10(a)) + 3) : 0
-  const d = a >= 100 ? 2 : a >= 1 ? 4 : a >= 0.01 ? 5 : a >= 0.0001 ? 6 : tiny || 8
-  return fmt(p, d)
+  return a >= 100 ? 2 : a >= 1 ? 4 : a >= 0.01 ? 5 : a >= 0.0001 ? 6 : tiny || 8
+}
+
+export function pfmt(p: number): string {
+  if (!isFinite(p)) return '—'
+  return fmt(p, priceDecimals(p))
 }
 
 export function cfmt(n: number): string {

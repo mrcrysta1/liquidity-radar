@@ -287,8 +287,8 @@ export function EconomicCalendar() {
       <div className="ec-scroll">
         {calendarStatus === 'error' && (
           <div className="fc-note">
-            Calendar unavailable: {calendarError}. The feed is fetched via the proxy (allow-listed
-            host nfs.faireconomy.media).
+            The calendar feed did not answer ({calendarError}). It retries every five minutes, or
+            press ↻ to try now.
           </div>
         )}
         <table className="ff-table ec-table">

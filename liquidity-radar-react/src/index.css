@@ -538,7 +538,12 @@ html.radar-fs #chart{height:100% !important}
   padding:2px 4px;font-size:var(--text-xs);font-family:var(--mono);outline:none;max-width:78px;
 }
 .rc-controls select:focus{border-color:var(--primary)}
-.rc-body{flex:1;position:relative;min-height:0}
+.rc-body{flex:1;position:relative;min-height:0;container-type:inline-size}
+/* A narrow cell (many charts, or a phone) has no room for the OHLC legend: it
+   wrapped into a column over the candles. The cell head still names the coin
+   and interval, and the price scale shows the last price. A plain status
+   ("Loading…", "Data unavailable") has no child elements and stays. */
+@container (max-width:259px){.rc-body>.rc-legend:has(*){display:none}}
 /* Layout cells: the toolbar drives the active chart; any other cell is a click away. */
 .rc-cell{cursor:pointer;transition:border-color .15s,box-shadow .15s}
 .rc-cell:hover{border-color:var(--border2)}
@@ -1512,7 +1517,9 @@ html.radar-fs .sn-bar{flex-shrink:0;margin-top:6px}
   .sn-ranges{display:none}
   .sn-range-menu{display:flex}
 }
-@media(max-width:380px){
+/* Up to the common 390-414px phones: at 380px the bar was still 31px too
+   wide on a 390px screen, which pushed the scale-settings button off the card. */
+@media(max-width:420px){
   .sn-bar{gap:4px}
   .sn-clock i{display:none}
   .sn-bar>.sn-btn{padding:3px 6px}
@@ -2207,7 +2214,6 @@ html.radar-fs #radarChartCard #fsBtn::before{
   background:var(--hair-2);color:var(--cyan);
 }
 .msg>div{margin:2px 0}
-.msg>br+br{display:none}
 .msg{max-width:88%;padding:11px 14px;border-radius:14px;font-size:13.5px;line-height:1.55;animation:fadeUp .25s ease;word-wrap:break-word}
 .msg.user{align-self:flex-end;background:linear-gradient(135deg,var(--primary),color-mix(in srgb,var(--primary) 66%,#000));border-bottom-right-radius:4px;box-shadow:0 4px 14px rgb(var(--pRGB)/.3)}
 .msg.ai{align-self:flex-start;background:var(--card2);border:1px solid var(--border2);border-bottom-left-radius:4px}
@@ -2407,10 +2413,11 @@ html.radar-fs #radarChartCard #fsBtn::before{
 
 footer{border-top:1px solid var(--border);margin-top:26px;padding:18px 14px;text-align:center;color:var(--dim);font-size:11.5px;font-family:var(--mono);line-height:1.7}
 
+/* Above the modals: the alerts form reports its result in a toast. */
 .toast{
   position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(80px);
   background:var(--card2);border:1px solid var(--red);color:var(--txt);
-  padding:10px 18px;border-radius:11px;font-size:12.5px;z-index:99;
+  padding:10px 18px;border-radius:11px;font-size:12.5px;z-index:1400;
   opacity:0;transition:.35s cubic-bezier(.2,.8,.2,1);transition-property:var(--tr-visual);pointer-events:none;
   box-shadow:var(--shade-2);
 }
@@ -2857,6 +2864,8 @@ footer{border-top:1px solid var(--border);margin-top:26px;padding:18px 14px;text
 .ec-toggle input{accent-color:var(--primary)}
 
 .ec-scroll{overflow-y:auto;overflow-x:auto;max-height:min(560px,58vh)}
+/* The card has no padding of its own; keep the error / empty notes off its edge. */
+.ec-scroll>.fc-note{padding:0 12px}
 .ec-day-count{
   float:right;font-family:var(--mono);font-size:var(--text-xs);font-weight:600;color:var(--dim);
   border:1px solid var(--border2);border-radius:9px;padding:0 7px;
@@ -3271,7 +3280,8 @@ header.top,.container{margin-left:var(--nav-w);transition:margin-left .22s cubic
     transform:translateY(102%);visibility:hidden;
     transition:transform .28s cubic-bezier(.2,.8,.2,1),visibility .28s;
   }
-  .navsheet.show{transform:none;visibility:visible}
+  /* Visible at once on the way up, so focus can move into it straight away. */
+  .navsheet.show{transform:none;visibility:visible;transition:transform .28s cubic-bezier(.2,.8,.2,1),visibility 0s}
 
   .navsheet-grip{
     flex-shrink:0;display:grid;place-items:center;width:100%;padding:11px 0 5px;
@@ -4360,6 +4370,12 @@ td .sk,b .sk{display:inline-block;vertical-align:middle}
 .mc-sym{display:flex;min-width:0}
 .mc-sym .cp-ico{display:none}
 .mc-sym .cp-trigger{padding:2px 8px}
+/* The header is narrow next to its controls: every panel is a USDT pair, so
+   drop the "/USDT" suffix and clip a long ticker instead of running it under
+   the caret. */
+.mc-sym .cp-id{overflow:hidden}
+.mc-sym .cp-id b{max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.mc-sym .cp-id b i{display:none}
 .mc-px{display:flex;gap:6px;font-family:var(--mono);font-size:11.5px}
 .mc-px b{color:var(--txt);font-weight:700}
 .mc-px i{font-style:normal;font-weight:700}
@@ -5840,6 +5856,7 @@ html[data-palette="glass"] .acct-card{background:linear-gradient(145deg,rgba(255
 .sig-picker,.sig-picker .cp-trigger{width:100%}
 .sig-picker .cp-trigger{padding:10px 14px;border-radius:11px}
 .sig-picker .cp-id b{font-family:inherit;font-weight:600;color:var(--dim)}
+.sig-picker .cp-id small{max-width:100%}
 .al-sym{flex:1 1 140px}
 .al-sym .cp-trigger{width:100%;padding:6px 10px 6px 5px}
 .lab-btf .lab-fld{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted)}
@@ -5954,6 +5971,19 @@ html[data-palette="glass"] .acct-card{background:linear-gradient(145deg,rgba(255
 .legend .leg-act button{display:inline-grid;place-items:center;width:20px;height:20px;padding:0;border:0;border-radius:3px;background:transparent;color:var(--muted);cursor:pointer}
 .legend .leg-act button:hover{background:rgb(var(--pRGB)/.14);color:var(--txt)}
 @media (hover:none){.legend .leg-act{opacity:1}}
+/* The main chart as one cell of a 4-16 chart layout (cw-* set by chartRender
+   from the plot width): the full legend wrapped to three lines over the
+   candles and the whale box covered them. Narrow: symbol, then close and
+   change on one line, no whale box. Tiny: the symbol row only. */
+.chart-layout.multi .cw-narrow .legend{max-width:calc(100% - 64px)}
+.chart-layout.multi .cw-narrow .legend .leg-main{flex-wrap:nowrap;flex-direction:column;gap:0;min-width:0;max-width:100%}
+.chart-layout.multi .cw-narrow .legend .leg-sym,
+.chart-layout.multi .cw-narrow .legend .leg-ohlc{flex-wrap:nowrap;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;font-size:12px}
+.chart-layout.multi .cw-narrow .legend .leg-ohlc>:nth-child(-n+6),
+.chart-layout.multi .cw-narrow .legend .leg-ohlc>:nth-child(n+10){display:none}
+.chart-layout.multi .cw-narrow .legend .leg-k:nth-child(7){margin-left:0}
+.chart-layout.multi .cw-narrow .whale-legend{display:none}
+.chart-layout.multi .cw-tiny .legend .leg-ohlc,.chart-layout.multi .cw-tiny .legend .leg-ind{display:none}
 /* Companion cells: the same legend a size smaller, on one line */
 .rc-legend{
   background:none;padding:0;border-radius:0;

@@ -94,8 +94,24 @@ function profileFor(candles: CandleFlat[], rows: number, valueArea: number): Vol
   return memoVp
 }
 
+/**
+ * Repaint on the next frame. The chart asks on every trade print and every
+ * step of a pan or zoom, often several times a frame, and each paint reads the
+ * layout (the canvas and plot sizes) right after the chart and legend have
+ * written to the DOM — a forced reflow per call. Coalesced, it paints once a
+ * frame, alongside the chart's own repaint.
+ */
+let frame = 0
 export function renderVolumeProfile(candles: CandleFlat[]): void {
   lastCandles = candles
+  if (frame) return
+  frame = requestAnimationFrame(() => {
+    frame = 0
+    paint(lastCandles)
+  })
+}
+
+function paint(candles: CandleFlat[]): void {
   if (!canvas || !chart || !candleSeries) return
   resizeCanvas()
   const ctx = canvas.getContext('2d')

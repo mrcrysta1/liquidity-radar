@@ -4,6 +4,8 @@ import { NEWS_SOURCES, importance, type NewsItem } from '@/core/news/rss';
 import { groupByDay, actualTone, type CalendarEvent, type Impact } from '@/core/news/forexFactory';
 
 const ago = (ts: number) => { const m = Math.max(0, Math.round((Date.now() - ts) / 60000)); return m < 1 ? 'now' : m < 60 ? `${m}m` : m < 1440 ? `${Math.floor(m / 60)}h` : `${Math.floor(m / 1440)}d`; };
+/** updated 5m ago, or updated just now (not updated now ago). */
+const updated = (ts: number) => { const a = ago(ts); return a === 'now' ? 'updated just now' : `updated ${a} ago`; };
 const CATS: { id: NewsItem['category'] | 'all'; l: string }[] = [{ id: 'all', l: 'All' }, { id: 'crypto', l: 'Crypto' }, { id: 'markets', l: 'Markets' }, { id: 'macro', l: 'Macro' }, { id: 'regulatory', l: 'Regulatory' }];
 const IMPACTS: Impact[] = ['High', 'Medium', 'Low', 'Holiday'];
 const CCY = ['USD', 'EUR', 'GBP', 'JPY', 'AUD', 'CAD', 'CHF', 'NZD', 'CNY'];
@@ -26,13 +28,13 @@ export function NewsView({ compact = false }: { compact?: boolean }) {
           <input className="q" placeholder="Search headlines" value={q} onChange={e => setQ(e.target.value)} />
           <div className="seg">{CATS.map(c => <button key={c.id} className={cat === c.id ? 'on' : ''} onClick={() => setCat(c.id)}>{c.l}</button>)}</div>
           <select value={src} onChange={e => setSrc(e.target.value)}><option value="all">All sources</option>{NEWS_SOURCES.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}</select>
-          <span className="spacer" /><span className="stat-chip"><i className={okCount ? 'dot ok' : 'dot bad'} />{okCount}/{NEWS_SOURCES.length} feeds · {lastNews ? `updated ${ago(lastNews)} ago` : 'loading…'}</span>
+          <span className="spacer" /><span className="stat-chip"><i className={okCount ? 'dot ok' : 'dot bad'} />{okCount}/{NEWS_SOURCES.length} feeds · {lastNews ? updated(lastNews) : 'loading…'}</span>
           <button onClick={refreshNews}>Refresh</button>
         </> : <>
           <div className="seg"><button className={calendarWeek === 'this' ? 'on' : ''} onClick={() => refreshCalendar('this')}>This week</button><button className={calendarWeek === 'next' ? 'on' : ''} onClick={() => refreshCalendar('next')}>Next week</button></div>
           <div className="seg impact-filter">{IMPACTS.map(i => <button key={i} className={imp.has(i) ? 'on' : ''} onClick={() => toggle(imp, i, setImp)} title={`${i} impact`}><span className={`ff-impact ${i.toLowerCase()}`} />{i}</button>)}</div>
           <div className="seg ccy-filter">{CCY.map(c => <button key={c} className={ccy.has(c) ? 'on' : ''} onClick={() => toggle(ccy, c, setCcy)}>{c}</button>)}</div>
-          <span className="spacer" /><span className="stat-chip"><i className={`dot ${calendarStatus === 'ok' ? 'ok' : calendarStatus === 'error' ? 'bad' : ''}`} />Forex Factory · {calendarStatus === 'ok' && lastCalendar ? `updated ${ago(lastCalendar)} ago` : calendarStatus === 'error' ? 'unavailable' : 'loading…'}</span>
+          <span className="spacer" /><span className="stat-chip"><i className={`dot ${calendarStatus === 'ok' ? 'ok' : calendarStatus === 'error' ? 'bad' : ''}`} />Forex Factory · {calendarStatus === 'ok' && lastCalendar ? updated(lastCalendar) : calendarStatus === 'error' ? 'unavailable' : 'loading…'}</span>
           <button onClick={() => refreshCalendar()}>Refresh</button>
         </>}
       </header>

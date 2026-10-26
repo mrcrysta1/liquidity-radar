@@ -6,6 +6,7 @@
 // @ts-nocheck
 import * as LightweightCharts from 'lightweight-charts'
 import { COINS, CELEBS, TICKER_COINS } from '../constants/market'
+import { binancePerpOf } from '../constants/instruments'
 import { esc, fmt, pfmt, timeAgo, chgCls, sigOf } from '../utils/format'
 import {
   calcRSI,
@@ -127,6 +128,33 @@ const streamCb={
   onAnalytics:runAnalytics,
 };
 
+// Gold refreshes every 5s. Rebuilding the whole ticker tape for it re-created
+// every row, coin logos included (22 <img> elements, each a fresh image
+// request when the cache is cold), for one changed price. Write just those
+// rows' price and change instead, exactly as renderTicker would. Returns false
+// when a full render is still needed: a row is missing or still a placeholder,
+// or a coin logo has arrived since the tape was last drawn.
+const goldSyms=TICKER_COINS.map(k=>COINS[k].sym).filter(s=>!!binancePerpOf(s));
+function patchTickerPrices(syms){
+  const track=$('tickerTrack');
+  if(!track)return false;
+  const logos=TICKER_COINS.filter(k=>/^https:\/\//.test(state.marketCaps?.[k]?.image||'')).length*2;
+  if(track.querySelectorAll('.tk-ico img').length!==logos)return false;
+  for(const sym of syms){
+    const t=state.tickers[sym];
+    const rows=track.querySelectorAll('[data-sym="'+sym+'"]');
+    if(!t||!rows.length)return false;
+    for(const el of rows){
+      const tp=el.querySelector('.tp'),c=el.querySelector('.chg');
+      if(!tp||!c||tp.textContent==='…')return false;
+      tp.textContent='$'+pfmt(t.last);
+      c.className='chg '+chgCls(t.pct);
+      c.textContent=(t.pct>0?'+':'')+t.pct.toFixed(2)+'%';
+    }
+  }
+  return true;
+}
+
 $('tickerTrack').addEventListener('click',e=>{
   const t=e.target.closest('[data-sym]');
   if(t)setSymbol(t.dataset.sym);
@@ -179,7 +207,7 @@ function init(){
 
   // Wave 0 — the screen the user is looking at. Price, chart, live stream.
   fetchTickers();
-  const goldQuotes=()=>refreshPerpQuotes().then(()=>{renderTicker();renderTopCoins()});
+  const goldQuotes=()=>refreshPerpQuotes().then(()=>{if(!patchTickerPrices(goldSyms))renderTicker();renderTopCoins()});
   goldQuotes();
   fetchKlines(state.symbol);
   connectStreams(streamCb);

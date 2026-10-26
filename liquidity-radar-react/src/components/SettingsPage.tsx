@@ -253,7 +253,7 @@ function SystemSettings() {
           ))}
         </div>
         <div className="fc-note">
-          Light and dark are switched with the <b>D</b>/<b>L</b> button in the header; each palette
+          Light and dark are switched with the <b>sun / moon</b> button in the header; each palette
           carries both faces.
         </div>
       </div>

@@ -1,7 +1,7 @@
 import * as LightweightCharts from 'lightweight-charts'
 import { venueOf } from '../../utils/coins'
 import { COINS, TICKER_COINS } from '../../constants/market'
-import { pfmt, nfmt, cfmt, chgHtml } from '../../utils/format'
+import { fmt, pfmt, nfmt, cfmt, chgHtml, priceDecimals } from '../../utils/format'
 import { baseOf, coinMeta } from '../../utils/coins'
 import { $, showToast } from '../../utils/dom'
 import { state } from '../../services/store'
@@ -66,7 +66,7 @@ import { attachWhaleBubbles, renderWhaleBubbles, watchLiveWhales } from './whale
 import { attachVolumeProfile, renderVolumeProfile } from './volumeProfileOverlay'
 import { onDeltaChange } from '../delta/delta'
 import { onOverlayTogglesChange } from './overlayToggles'
-import { afterChartFit, attachScaleNav } from './scaleNav'
+import { afterChartFit, attachScaleNav, subscribeScaleNav } from './scaleNav'
 import { registerCrosshairSync } from './crosshairSync'
 
 type Any = any
@@ -369,6 +369,12 @@ function applyChartStyle(): void {
   priceSeriesSubs.forEach((f) => f(candleSeries))
 }
 export { renderWhaleBubbles } from './whaleBubbles'
+/** A value on the main chart, in at most the instrument's own price precision. */
+function chartPrice(p: number): string {
+  const last = state.candles[state.candles.length - 1]
+  if (!last || !isFinite(p)) return pfmt(p)
+  return fmt(p, Math.min(priceDecimals(p), priceDecimals(last.c)))
+}
 export function initChart(): void {
   if (!(window as Any).LightweightCharts) {
     $('legendOHLC')!.textContent = 'Chart library failed to load'
@@ -398,9 +404,10 @@ export function initChart(): void {
     crosshair: { ...tv.crosshair, mode: 0 },
     localization: {
       ...tv.localization,
-      priceFormatter: function (p: number) {
-        return pfmt(p)
-      },
+      // Never more decimals than the instrument's own price: per-label
+      // decimals printed "0.00000000" where a BTC axis crosses zero and
+      // switched from 4 to 5 decimals as a coin's ticks crossed 1.00.
+      priceFormatter: chartPrice,
     },
   } as Any)
   applyChartStyle()
@@ -414,6 +421,7 @@ export function initChart(): void {
   mountCloseTimer(chart, () => (isRangeMode() ? null : candleSeries))
   // Price-scale modes, zoom/scroll buttons and the date-range bar (scaleNav).
   attachScaleNav({ chart, el, getSeries: () => candleSeries, onSeriesChange: onPriceSeriesChange })
+  followPriceScale(el)
   // While the cursor is over a bar the legend shows that bar; live ticks must
   // not overwrite it, and leaving the chart hands it back to the live candle.
   chart.subscribeCrosshairMove((param: Any) =>
@@ -435,9 +443,16 @@ export function initChart(): void {
   // first fit happens at zero width and leaves the candles crammed into the
   // right half once a chart tab opens. Re-fit the first time it has a width.
   let fitW = el.clientWidth
+  const wrapEl = $('chartWrap')
   new ResizeObserver(() => {
     if (fitW < 60 && el.clientWidth >= 60 && state.candles.length) chart.timeScale().fitContent()
     fitW = el.clientWidth
+    // Size classes for the legend and whale box: in a 4-16 cell layout the
+    // full OHLC legend wrapped to three lines over the candles (index.css).
+    if (wrapEl && fitW > 0) {
+      wrapEl.classList.toggle('cw-narrow', fitW < 480)
+      wrapEl.classList.toggle('cw-tiny', fitW < 260)
+    }
     redrawDrawings()
     updateCloseTimer()
   }).observe(el)
@@ -502,6 +517,34 @@ export function initChart(): void {
   watchLiveWhales()
   updateChartData(true)
 }
+/**
+ * The overlays drawn on our own canvases (drawings, volume profile, whale
+ * bubbles, the bar countdown) map prices to pixels themselves. The library
+ * reports time-scale moves but not price-scale ones, so dragging the price
+ * axis or switching log / % / auto left them at their old height until the
+ * next live tick. Follow those too: during a drag and after a scale change,
+ * two frames on, once the library has repainted with the new range.
+ */
+let overlayFrame = 0
+function redrawOverlaysSoon(): void {
+  if (overlayFrame) return
+  overlayFrame = requestAnimationFrame(() => {
+    overlayFrame = requestAnimationFrame(() => {
+      overlayFrame = 0
+      redrawDrawings()
+      updateCloseTimer()
+    })
+  })
+}
+function followPriceScale(el: HTMLElement): void {
+  el.addEventListener('pointermove', (e) => {
+    if (e.buttons) redrawOverlaysSoon()
+  })
+  el.addEventListener('pointerup', redrawOverlaysSoon)
+  el.addEventListener('dblclick', redrawOverlaysSoon)
+  el.addEventListener('touchmove', redrawOverlaysSoon, { passive: true })
+  subscribeScaleNav(redrawOverlaysSoon)
+}
 /** Bar time (seconds) under the crosshair, or null when the cursor is off the chart. */
 let hoverTime: number | null = null
 /** The legend for the bar at `time` (seconds), or the live bar when null / no bar there. */
@@ -526,7 +569,13 @@ function renderLiveLegend(): void {
   const prev = candles[candles.length - 2]
   if (lc) renderLegend(lc.o, lc.h, lc.l, lc.c, lc.v, false, prev?.c)
 }
-const fmtChg = (d: number): string => (d >= 0 ? '+' : '\u2212') + pfmt(Math.abs(d))
+/**
+ * The change in the price's own precision, as TradingView prints it: pfmt
+ * picks decimals from the magnitude, so on BTC a +66.66 move read "+66.6600"
+ * and no move at all "+0.00000000".
+ */
+const fmtChg = (d: number, ref: number): string =>
+  (d >= 0 ? '+' : '\u2212') + fmt(Math.abs(d), priceDecimals(ref))
 /**
  * The TradingView legend: "BTCUSDT · 15m · Binance", then O H L C in the
  * bar's direction colour and the change from the previous close — for the
@@ -551,7 +600,7 @@ function renderLegend(
   const pct = ref ? (d / ref) * 100 : 0
   const val = (k: string, x: Any) =>
     '<span class="leg-k">' + k + '</span><b style="color:' + col + '">' + pfmt(x) + '</b>'
-  $('legendOHLC')!.innerHTML =
+  const html =
     '<div class="leg-main' +
     (isCross ? ' leg-cross' : '') +
     '"><span class="leg-sym">' +
@@ -568,7 +617,7 @@ function renderLegend(
     '<b style="color:' +
     col +
     '">' +
-    fmtChg(d) +
+    fmtChg(d, ref) +
     ' (' +
     (pct >= 0 ? '+' : '\u2212') +
     Math.abs(pct).toFixed(2) +
@@ -576,7 +625,21 @@ function renderLegend(
     (v != null ? '<span class="leg-k">Vol</span><b>' + nfmt(v) + '</b>' : '') +
     '</span></div>' +
     indicatorLegendHtml()
+  // The crosshair and every trade print land here; most of the time nothing
+  // in the legend changed (same bar, same price). Rewriting it anyway rebuilt
+  // the DOM and forced a layout for the overlays read straight after.
+  const el = $('legendOHLC')!
+  if (legendHtml === html && legendNode && el.firstChild === legendNode) return
+  el.innerHTML = html
+  legendHtml = html
+  legendNode = el.firstChild
 }
+/**
+ * What renderLegend last wrote, and the node it made. Other writers (the load
+ * error messages) replace that node, which is how a stale cache is noticed.
+ */
+let legendHtml = ''
+let legendNode: ChildNode | null = null
 
 /**
  * The active indicators' latest values, appended to the OHLC legend.
@@ -617,7 +680,7 @@ function buildIndicatorLegend(): string {
               '<b style="color:' +
               p.color +
               '">' +
-              (p.big ? nfmt(p.value) : pfmt(p.value)) +
+              (p.big ? nfmt(p.value) : chartPrice(p.value)) +
               '</b>',
           )
           .join('') +
