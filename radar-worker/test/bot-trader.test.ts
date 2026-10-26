@@ -380,3 +380,31 @@ test('a close that fails is retried every tick (even after a restart); a crossed
   assert.equal(row.exit_reason, 'tp')
   assert.equal(ex.algo.length, 0, 'leftover stop cancelled')
 })
+
+test('finalize counts only this trade’s entry fill, not an earlier same-side fill (e.g. the last trade’s close)', async () => {
+  for (const legacy of [false, true]) {
+    const { db, pg } = await freshDb()
+    const store = new BotStore(db)
+    const ex = new FakeExchange()
+    const { hist, state, cfg } = setup('explore')
+    const t = new SymbolTrader(ex, store, 'BTCUSDT', cfg)
+    await t.init()
+    ex.price = hist[state.idx - 1].c
+    const now = Date.now()
+    await t.tick(true, now)
+    const open = await store.openTrade('BTCUSDT')
+    assert.ok(open)
+    assert.equal(typeof open!.entryOrderId, 'number', 'entry order id is read back')
+    // A row written before entry_order_id was kept falls back to the time window.
+    if (legacy) await pg.query('update bot_trades set entry_order_id = null where id = $1', [open!.id])
+    // A same-side fill from just before this trade opened, with a large fee.
+    const side = open!.side > 0 ? 'BUY' : 'SELL'
+    ex.log.unshift({ id: 9999, orderId: 9999, time: open!.openedAt - 2000, side, price: ex.price, qty: 1, realizedPnl: 0, commission: 50, commissionAsset: 'USDT' })
+    ex.move(open!.tp + open!.side * 0.05)
+    await t.tick(true, Date.now())
+    const row = (await pg.query<Record<string, unknown>>('select * from bot_trades order by id desc limit 1')).rows[0]
+    assert.equal(row.status, 'closed')
+    const expected = ex.log.filter((f) => f.orderId !== 9999).reduce((a, f) => a + f.commission, 0)
+    assert.ok(Math.abs(Number(row.fees_usd) - expected) < 1e-6, `fees ${row.fees_usd} = ${expected} (legacy ${legacy})`)
+  }
+})

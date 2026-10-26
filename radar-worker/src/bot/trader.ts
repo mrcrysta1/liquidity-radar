@@ -419,7 +419,14 @@ export class SymbolTrader {
       await this.store.event('error', this.symbol, `trade #${open.id}: position closed with no exit fills`)
       return
     }
-    const entries = fills.filter((f) => f.side === entrySide && f.time >= open.openedAt - 5000 && f.time <= exits[exits.length - 1].time)
+    // This trade's entry fills only: by the stored entry order id; on older rows
+    // without one, same-side fills from when the entry order was sent onwards —
+    // never earlier, where a previous trade's closing fill can sit.
+    const entries = fills.filter(
+      (f) =>
+        f.side === entrySide &&
+        (open.entryOrderId != null ? f.orderId === open.entryOrderId : f.time >= open.openedAt && f.time <= exits[exits.length - 1].time),
+    )
     const fees = [...entries, ...exits].filter((f) => f.commissionAsset === 'USDT').reduce((a, f) => a + f.commission, 0)
     const gross = exits.reduce((a, f) => a + f.realizedPnl, 0)
     const pnl = gross - fees
