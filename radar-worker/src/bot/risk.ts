@@ -66,9 +66,14 @@ export function utcDay(t: number): string {
   return new Date(t).toISOString().slice(0, 10)
 }
 
-/** Roll the day, track the peak, and decide whether new entries are allowed. */
-export function checkLimits(s: RiskState, equity: number, now: number, r: RiskConfig): { state: RiskState; canEnter: boolean; reason: string } {
+/**
+ * Roll the day, track the peak, and decide whether new entries are allowed.
+ * equity null (balance missing or unreadable): the checks are skipped for this
+ * tick and the state is kept as it was — an unknown balance is not a loss.
+ */
+export function checkLimits(s: RiskState, equity: number | null, now: number, r: RiskConfig): { state: RiskState; canEnter: boolean; reason: string } {
   const st = { ...s }
+  if (equity == null || !Number.isFinite(equity)) return { state: st, canEnter: !st.halted, reason: st.haltReason }
   const day = utcDay(now)
   if (st.day !== day) {
     st.day = day

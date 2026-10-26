@@ -14,6 +14,7 @@
 // trade outcomes and replaces the champion only if it does better on a
 // held-out recent slice. The walk-forward gate is refreshed every retrainMs.
 import { closedBars, INTERVAL_MS } from './data.ts'
+import { lastPrice } from '../binance.ts'
 import { FEATURES, WARMUP, costR, featureAt, indicators } from './features.ts'
 import { roundStep, roundTick } from './futures.ts'
 import type { Fill, Position, SymbolRules } from './futures.ts'
@@ -32,7 +33,8 @@ import type { Calib } from './learning.ts'
 export interface Exchange {
   base: string
   rules(symbol: string): Promise<SymbolRules>
-  balanceUsdt(): Promise<number>
+  /** null when the balance cannot be read (no USDT row). */
+  balanceUsdt(): Promise<number | null>
   position(symbol: string): Promise<Position>
   setup(symbol: string, leverage: number): Promise<void>
   marketOrder(symbol: string, side: 'BUY' | 'SELL', quantity: string, reduceOnly?: boolean, clientId?: string): Promise<{ orderId: number; avgPrice: string; executedQty: string }>
@@ -58,6 +60,8 @@ export interface TraderConfig {
   learn: LearnConfig
   /** Injected for tests; defaults to Binance spot klines. */
   bars?: (symbol: string, interval: string, count: number) => Promise<Bar[]>
+  /** Injected for tests; defaults to the Binance spot ticker (public, unsigned). Prices non-USDT fees. */
+  price?: (symbol: string) => Promise<number>
 }
 
 export interface LearnConfig {
@@ -406,6 +410,31 @@ export class SymbolTrader {
     if (this.closing.has(open.id)) await this.flatten(pos)
   }
 
+  /**
+   * Commissions in USDT. Fees paid in another asset (BNB fee discount) are
+   * converted at <ASSET>USDT from public market data; if that price cannot be
+   * read, those fees are left out and a warning is logged.
+   */
+  private async feesUsdt(tradeId: number, fills: Fill[]): Promise<number> {
+    const byAsset = new Map<string, number>()
+    for (const f of fills) if (f.commission) byAsset.set(f.commissionAsset, (byAsset.get(f.commissionAsset) || 0) + f.commission)
+    let total = 0
+    for (const [asset, amount] of byAsset) {
+      if (asset === 'USDT') {
+        total += amount
+        continue
+      }
+      try {
+        const p = await (this.cfg.price ?? lastPrice)(asset + 'USDT')
+        if (!(p > 0)) throw new Error('bad price ' + p)
+        total += amount * p
+      } catch (e) {
+        await this.store.event('warn', this.symbol, `trade #${tradeId}: ${amount} ${asset} in fees left out — no ${asset}USDT price (${(e as Error).message})`)
+      }
+    }
+    return total
+  }
+
   private async finalize(open: OpenTrade, now: number): Promise<void> {
     const entrySide = open.side > 0 ? 'BUY' : 'SELL'
     const fills = await this.ex.fills(this.symbol, open.openedAt - 5000)
@@ -419,8 +448,15 @@ export class SymbolTrader {
       await this.store.event('error', this.symbol, `trade #${open.id}: position closed with no exit fills`)
       return
     }
-    const entries = fills.filter((f) => f.side === entrySide && f.time >= open.openedAt - 5000 && f.time <= exits[exits.length - 1].time)
-    const fees = [...entries, ...exits].filter((f) => f.commissionAsset === 'USDT').reduce((a, f) => a + f.commission, 0)
+    // This trade's entry fills only: by the stored entry order id; on older rows
+    // without one, same-side fills from when the entry order was sent onwards —
+    // never earlier, where a previous trade's closing fill can sit.
+    const entries = fills.filter(
+      (f) =>
+        f.side === entrySide &&
+        (open.entryOrderId != null ? f.orderId === open.entryOrderId : f.time >= open.openedAt && f.time <= exits[exits.length - 1].time),
+    )
+    const fees = await this.feesUsdt(open.id, [...entries, ...exits])
     const gross = exits.reduce((a, f) => a + f.realizedPnl, 0)
     const pnl = gross - fees
     const stored = await this.store.getState<'time' | 'tp' | 'error' | null>('closing:' + open.id, null)
@@ -524,6 +560,10 @@ export class SymbolTrader {
       return
     }
     const equity = await this.ex.balanceUsdt()
+    if (equity == null) {
+      await this.store.event('warn', this.symbol, `${summary} — no trade: USDT balance unavailable`)
+      return
+    }
     const sz = size(equity, last.c, slDist, this.rules, this.cfg.risk)
     if (Number(sz.qty) <= 0) {
       await this.store.event('warn', this.symbol, `${summary} — no trade: ${sz.reason}`)
