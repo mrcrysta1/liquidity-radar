@@ -3337,6 +3337,52 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('invite: no storage at all never nags', wasInvited(null), true)
 }
 
+// ---- drawings: select / move / handle maths ----------------------------------------
+{
+  const E = await import(src('features/charts/drawings/edit.ts'))
+  const sh = {
+    segs: [{ x1: 0, y1: 0, x2: 100, y2: 0 }],
+    fills: [],
+    arcs: [],
+    labels: [{ x: 200, y: 50, text: 'Note', box: true }],
+    handles: [
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+    ],
+  }
+  eq('edit: a click on the line hits', E.hitShape(sh, 50, 5), true)
+  eq('edit: a click well off the line misses', E.hitShape(sh, 50, 20), false)
+  eq('edit: a click on a boxed label hits', E.hitShape(sh, 210, 48), true)
+  eq('edit: handle under the cursor', E.handleAt(sh, 97, 3), 1)
+  eq('edit: no handle away from the anchors', E.handleAt(sh, 50, 0), -1)
+  eq('edit: segment distance past the end', E.pointToSegment(110, 0, 0, 0, 100, 0), 10)
+  const times = [100, 200, 300, 400, 500]
+  eq('edit: nearest bar exact', E.nearestBar(times, 300), 2)
+  eq('edit: nearest bar between', E.nearestBar(times, 340), 2)
+  eq('edit: nearest bar before data', E.nearestBar(times, 0), 0)
+  eq('edit: nearest bar after data', E.nearestBar(times, 999), 4)
+  const pts = [
+    { time: 200, price: 10 },
+    { time: 300, price: 20 },
+  ]
+  const up = (p) => p + 5
+  eq('edit: move by bars and price', E.shiftPoints(pts, 1, times, up), [
+    { time: 300, price: 15 },
+    { time: 400, price: 25 },
+  ])
+  eq('edit: fractional bar shift rounds', E.shiftPoints(pts, 1.4, times, up)[0].time, 300)
+  eq('edit: clamped at the right end keeps the shape', E.shiftPoints(pts, 9, times, up), [
+    { time: 400, price: 15 },
+    { time: 500, price: 25 },
+  ])
+  eq('edit: clamped at the left end', E.shiftPoints(pts, -9, times, up)[0].time, 100)
+  eq('edit: vertical-only drag keeps off-bar times', E.shiftPoints([{ time: 250, price: 1 }], 0, times, up), [
+    { time: 250, price: 6 },
+  ])
+  eq('edit: unmappable price stays put', E.shiftPoints(pts, 0, times, () => null)[1].price, 20)
+  eq('edit: start points are not mutated', pts[0], { time: 200, price: 10 })
+}
+
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')
 if (fails.length) {
   fails.forEach((f) => console.log('  FAIL  ' + f))

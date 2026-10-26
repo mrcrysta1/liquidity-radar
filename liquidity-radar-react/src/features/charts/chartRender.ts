@@ -60,6 +60,7 @@ import {
 } from './drawTools'
 import { shape } from './drawings/geometry'
 import type { Drawing, MapCtx, Shape } from './drawings/geometry'
+import { handleAt, hitShape, shiftPoints } from './drawings/edit'
 import { fetchOlderKlines, historyExhausted } from '../../services/marketData'
 import { attachDeltaPane, renderDeltaPane } from './deltaPane'
 import { attachWhaleBubbles, renderWhaleBubbles, watchLiveWhales } from './whaleBubbles'
@@ -919,6 +920,7 @@ function initChartToolbar(): void {
     chartState.drawBuf = []
     chartState._preview = null
     chartState._eraseHit = -1
+    chartState._sel = -1
     updateDrawHit()
     syncDrawHint()
     redrawDrawings()
@@ -928,6 +930,7 @@ function initChartToolbar(): void {
     chartState.drawings = []
     chartState.drawBuf = []
     chartState._eraseHit = -1
+    chartState._sel = -1
     saveDrawings()
     publishDrawingCount()
     redrawDrawings()
@@ -937,6 +940,7 @@ function initChartToolbar(): void {
     if (chartState.drawBuf.length) chartState.drawBuf = []
     else if (currentDrawings().pop()) saveDrawings()
     chartState._eraseHit = -1
+    chartState._sel = -1
     publishDrawingCount()
     redrawDrawings()
   })
@@ -967,6 +971,8 @@ function currentDrawings(): Any[] {
     chartState.drawBuf = []
     chartState._preview = null
     chartState._eraseHit = -1
+    chartState._sel = -1
+    chartState._drag = null
     chartState._freehand = null
     chartState._freeXY = null
     chartState._captionDraft = null
@@ -1129,6 +1135,7 @@ function setupDrawLayer(): void {
       currentDrawings().splice(i, 1)
       saveDrawings()
       chartState._eraseHit = -1
+      chartState._sel = -1
       publishDrawingCount()
       redrawDrawings()
       return
@@ -1220,6 +1227,7 @@ function setupDrawLayer(): void {
   })
   chartState.drawHit = overlay
   updateDrawHit()
+  setupDrawSelect(wrap)
 }
 function updateDrawHit(): void {
   if (!chartState.drawHit) return
@@ -1412,38 +1420,173 @@ function shapeOf(d: Any, cw: number, ch: number): Shape | null {
   }
 }
 
-/** Index of the drawing under a pixel position, or -1. */
-const HIT_PX = 7
-function drawingAt(x: Any, y: Any): number {
+/**
+ * Horizontal extent of the plot area in canvas pixels — the canvas spans the
+ * price axis too, and drawings stop at its edge (as on TradingView).
+ */
+function plotSpan(cw: number): [number, number] {
+  try {
+    const left = chart.priceScale('left').width() || 0
+    const w = chart.timeScale().width()
+    if (w > 0) return [left, Math.min(cw, left + w)]
+  } catch {
+    /* chart not laid out yet */
+  }
+  return [0, cw]
+}
+
+/** Canvas size in CSS pixels. */
+function drawCanvasSize(): [number, number] {
   const cv = chartState.drawCanvas
-  if (!cv) return -1
   const dpr = window.devicePixelRatio || 1
-  const cw = cv.width / dpr
-  const ch = cv.height / dpr
+  return cv ? [cv.width / dpr, cv.height / dpr] : [0, 0]
+}
+
+/** Index of the drawing under a pixel position, or -1. */
+function drawingAt(x: Any, y: Any): number {
+  if (!chartState.drawCanvas) return -1
+  const [cw, ch] = drawCanvasSize()
+  const [px0, px1] = plotSpan(cw)
+  if (x < px0 || x > px1) return -1
   const drawings = currentDrawings()
   for (let i = drawings.length - 1; i >= 0; i--) {
     const sh = shapeOf(drawings[i], cw, ch)
-    if (!sh) continue
-    for (const g of sh.segs) {
-      if (pointToSegment(x, y, g.x1, g.y1, g.x2, g.y2) <= HIT_PX) return i
-    }
-    for (const l of sh.labels) {
-      if (l.box && Math.abs(l.x - x) < 60 && Math.abs(l.y - y) < 12) return i
-    }
+    if (sh && hitShape(sh, x, y)) return i
   }
   return -1
 }
 
-function pointToSegment(px: Any, py: Any, x1: Any, y1: Any, x2: Any, y2: Any): number {
-  const dx = x2 - x1
-  const dy = y2 - y1
-  const len = dx * dx + dy * dy
-  let t = len ? ((px - x1) * dx + (py - y1) * dy) / len : 0
-  t = Math.max(0, Math.min(1, t))
-  return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy))
+// ---- Selecting and editing drawings (cursor tool) ----
+// With no tool armed the chart gets every pointer event, so this listens in
+// the capture phase on #chartWrap: a press on a drawing (or on a handle of the
+// selected one) is taken from the chart and becomes a move; a press anywhere
+// else deselects and is left alone, so the chart pans as before.
+function setupDrawSelect(wrap: HTMLElement): void {
+  const local = (e: { clientX: number; clientY: number }): [number, number] => {
+    const r = wrap.getBoundingClientRect()
+    return [e.clientX - r.left, e.clientY - r.top]
+  }
+  const onMove = (e: PointerEvent) => {
+    const drag = chartState._drag
+    if (!drag || e.pointerId !== drag.pointerId) return
+    const [x, y] = local(e)
+    if (!drag.moved && Math.hypot(x - drag.x0, y - drag.y0) < 3) return
+    drag.moved = true
+    const d = currentDrawings()[drag.i]
+    if (!d) return
+    if (drag.handle >= 0) {
+      const pt = snapToCandle(x, y)
+      if (!pt) return
+      d.points = drag.start.map((p: Any, k: number) => (k === drag.handle ? pt : { ...p }))
+    } else {
+      const ts = chart.timeScale()
+      const l0 = ts.coordinateToLogical(drag.x0)
+      const l1 = ts.coordinateToLogical(x)
+      const dBars = l0 != null && l1 != null ? l1 - l0 : 0
+      const dy = y - drag.y0
+      const times = displayCandles().map((k) => Math.floor(k.t / 1000))
+      d.points = shiftPoints(drag.start, dBars, times, (pr) => {
+        const py = candleSeries ? candleSeries.priceToCoordinate(pr) : null
+        return py == null ? null : candleSeries.coordinateToPrice(py + dy)
+      })
+    }
+    redrawDrawings()
+  }
+  const end = (e: PointerEvent) => {
+    const drag = chartState._drag
+    if (!drag || e.pointerId !== drag.pointerId) return
+    chartState._drag = null
+    window.removeEventListener('pointermove', onMove, true)
+    window.removeEventListener('pointerup', end, true)
+    window.removeEventListener('pointercancel', end, true)
+    const d = currentDrawings()[drag.i]
+    if (d && e.type === 'pointercancel') d.points = drag.start
+    else if (d && drag.moved) saveDrawings()
+    redrawDrawings()
+  }
+  wrap.addEventListener(
+    'pointerdown',
+    function (e) {
+      if (getDrawTool() || chartState._drag || e.button !== 0 || !chart) return
+      const t = e.target as Element | null
+      if (t && t.closest('button, input, select, textarea, a, [role="button"]')) return
+      const [x, y] = local(e)
+      const [cw, ch] = drawCanvasSize()
+      const drawings = currentDrawings()
+      // The selected drawing's handles win over anything drawn on top.
+      const sel = chartState._sel
+      const selShape = sel >= 0 && drawings[sel] ? shapeOf(drawings[sel], cw, ch) : null
+      const handle = selShape ? handleAt(selShape, x, y) : -1
+      const i = handle >= 0 ? sel : drawingAt(x, y)
+      if (i === -1) {
+        if (sel >= 0) {
+          chartState._sel = -1
+          redrawDrawings()
+        }
+        return
+      }
+      // Ours: keep the chart from panning or scrolling under the drag.
+      e.preventDefault()
+      e.stopPropagation()
+      chartState._sel = i
+      chartState._drag = {
+        pointerId: e.pointerId,
+        i,
+        handle,
+        x0: x,
+        y0: y,
+        moved: false,
+        start: drawings[i].points.map((p: Any) => ({ ...p })),
+      }
+      window.addEventListener('pointermove', onMove, true)
+      window.addEventListener('pointerup', end, true)
+      window.addEventListener('pointercancel', end, true)
+      redrawDrawings()
+    },
+    true,
+  )
+  // The chart listens for mouse and touch events, not only pointer ones.
+  const swallow = (e: Event) => {
+    if (chartState._drag) {
+      e.stopPropagation()
+      if (e.cancelable && e.type === 'touchmove') e.preventDefault()
+    }
+  }
+  ;['mousedown', 'mousemove', 'touchstart', 'touchmove'].forEach((type) =>
+    wrap.addEventListener(type, swallow, { capture: true, passive: false }),
+  )
+  // Delete / Backspace removes the selection, Esc drops it.
+  window.addEventListener(
+    'keydown',
+    function (e) {
+      if (!(chartState._sel >= 0) || e.ctrlKey || e.metaKey || e.altKey) return
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable))
+        return
+      // Only while the chart is on screen; a hidden tab keeps its selection.
+      if (!wrap.isConnected || !wrap.offsetParent) return
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault()
+        e.stopPropagation()
+        if (currentDrawings()[chartState._sel]) {
+          currentDrawings().splice(chartState._sel, 1)
+          saveDrawings()
+        }
+        chartState._sel = -1
+        chartState._drag = null
+        publishDrawingCount()
+        redrawDrawings()
+      } else if (e.key === 'Escape') {
+        e.stopPropagation()
+        chartState._sel = -1
+        redrawDrawings()
+      }
+    },
+    true,
+  )
 }
 
-function paintShape(ctx: Any, sh: Shape, base: string, doomed: boolean): void {
+function paintShape(ctx: Any, sh: Shape, base: string, doomed: boolean, selected = false): void {
   const stroke = doomed ? cv('red') || '#FF1744' : base
   sh.fills.forEach((f) => {
     if (f.pts.length < 6) return
@@ -1496,8 +1639,18 @@ function paintShape(ctx: Any, sh: Shape, base: string, doomed: boolean): void {
     ctx.save()
     ctx.fillStyle = doomed ? stroke : base
     ctx.beginPath()
-    ctx.arc(h.x, h.y, 2.6, 0, Math.PI * 2)
-    ctx.fill()
+    if (selected) {
+      // Selected: hollow grab handles, as on TradingView.
+      ctx.fillStyle = isLightTheme() ? '#ffffff' : '#0b1220'
+      ctx.strokeStyle = base
+      ctx.lineWidth = 1.6
+      ctx.arc(h.x, h.y, 4.5, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.stroke()
+    } else {
+      ctx.arc(h.x, h.y, 2.6, 0, Math.PI * 2)
+      ctx.fill()
+    }
     ctx.restore()
   })
   sh.labels.forEach((l) => {
@@ -1535,7 +1688,7 @@ function redrawDrawings(includePreview?: Any): void {
 
   currentDrawings().forEach(function (d: Any, i: number) {
     const sh = shapeOf(d, cw, ch)
-    if (sh) paintShape(ctx, sh, d.color, i === chartState._eraseHit)
+    if (sh) paintShape(ctx, sh, d.color, i === chartState._eraseHit, i === chartState._sel)
   })
 
   // A text drawing waiting for its caption stays visible while it is typed.
