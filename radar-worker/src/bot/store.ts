@@ -28,6 +28,8 @@ export interface OpenTrade {
   riskUsd: number
   tpOrderId: number | null
   slAlgoId: number | null
+  /** The market order that opened the trade (null on rows from before it was stored). */
+  entryOrderId: number | null
 }
 
 export interface NewTrade {
@@ -167,7 +169,7 @@ export class BotStore {
   async openTrade(symbol: string): Promise<OpenTrade | null> {
     const r = await this.db.query(
       `select id, symbol, side, extract(epoch from opened_at) * 1000 as opened, extract(epoch from bar_time) * 1000 as bar,
-              entry, qty, sl, tp, risk_usd, tp_order_id, sl_algo_id
+              entry, qty, sl, tp, risk_usd, tp_order_id, sl_algo_id, entry_order_id
        from bot_trades where symbol = $1 and status = 'open' limit 1`,
       [symbol],
     )
@@ -186,6 +188,7 @@ export class BotStore {
       riskUsd: Number(x.risk_usd),
       tpOrderId: x.tp_order_id == null ? null : Number(x.tp_order_id),
       slAlgoId: x.sl_algo_id == null ? null : Number(x.sl_algo_id),
+      entryOrderId: x.entry_order_id == null ? null : Number(x.entry_order_id),
     }
   }
 
