@@ -1686,6 +1686,14 @@ function redrawDrawings(includePreview?: Any): void {
   const ch = cv.height / dpr
   if (!candleSeries) return
 
+  // Keep every drawing off the price axis: a horizontal line used to run
+  // straight across the axis labels.
+  const [px0, px1] = plotSpan(cw)
+  ctx.save()
+  ctx.beginPath()
+  ctx.rect(px0, 0, px1 - px0, ch)
+  ctx.clip()
+
   currentDrawings().forEach(function (d: Any, i: number) {
     const sh = shapeOf(d, cw, ch)
     if (sh) paintShape(ctx, sh, d.color, i === chartState._eraseHit, i === chartState._sel)
@@ -1725,6 +1733,7 @@ function redrawDrawings(includePreview?: Any): void {
       }
     }
   }
+  ctx.restore()
 }
 
 // ---- Hero / overview renders ----
