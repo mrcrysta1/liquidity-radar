@@ -131,9 +131,19 @@ async function signedIn(u: User, googleToken: string | null): Promise<void> {
     if (prev !== u.id) {
       // Coming from the guest profile (or another account): put the guest's
       // settings aside, load this user's, and restart on them.
-      if (!prev) localStorage.setItem(K.guest, JSON.stringify(collect()))
+      const before = collect()
+      if (!prev) localStorage.setItem(K.guest, JSON.stringify(before))
       apply(remote?.data ?? {})
       localStorage.setItem(K.uid, u.id)
+      // Nothing to change on screen: skip the reload (the common case for a
+      // returning user on their own device) and carry on signed in.
+      if (remote && same(remote.data, before)) {
+        localStorage.setItem(K.synced, String(remote.at))
+        lastPushed = remote.data
+        set({ status: 'user', user: acct, syncedAt: remote.at, error: '' })
+        startSyncing(push)
+        return
+      }
       if (!remote) {
         // A new account starts from the defaults — no indicators, the default
         // look — and gets its row straight away.
@@ -226,13 +236,21 @@ export async function signInWithGoogle(): Promise<void> {
         // Only Google's basic scopes (name, email, photo): nothing sensitive,
         // so Google shows no "unverified app" screen. The rest of the profile
         // is entered by the user in the account dialog.
-        queryParams: { prompt: 'select_account' },
+        // No forced account picker: a returning user with one Google session goes straight through.
       },
     })
     if (error) set({ error: error.message })
   } catch (e) {
     set({ error: msg(e) })
   }
+}
+
+/** A Google ID token from the on-site button or One Tap (see google.ts). */
+export async function signInWithGoogleToken(token: string, nonce: string): Promise<void> {
+  set({ error: '', notice: '' })
+  const c = await getClient()
+  const { error } = await c.auth.signInWithIdToken({ provider: 'google', token, nonce })
+  if (error) set({ error: error.message })
 }
 
 export async function resetPassword(email: string): Promise<void> {
@@ -284,7 +302,12 @@ export function initAuth(): void {
     // Signed in before, but the session token is gone: back to the guest profile.
     restoreGuest()
     reload()
-  } else set({ status: 'guest' })
+  } else {
+    set({ status: 'guest' })
+    // Signing in is required, so have the client ready before the first click.
+    const idle = (window as unknown as { requestIdleCallback?: (f: () => void) => void }).requestIdleCallback
+    ;(idle || ((f: () => void) => setTimeout(f, 1200)))(() => void getClient())
+  }
 }
 
 /** Save the profile details the user entered in the account dialog. */

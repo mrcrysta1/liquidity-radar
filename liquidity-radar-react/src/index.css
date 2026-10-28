@@ -5179,3 +5179,6 @@ html[data-palette="glass"] .acct-card{background:linear-gradient(145deg,rgba(255
 .acct-form select option{background:var(--card);color:var(--txt)}
 @media(max-width:420px){.acct-2{grid-template-columns:1fr}}
 .acct-form label{min-width:0}.acct-form input,.acct-form select{width:100%;min-width:0;box-sizing:border-box}
+.acct-gbtn{display:flex;justify-content:center;min-height:44px;color-scheme:normal}
+.acct-gbtn iframe{margin:0 auto!important}
+.acct-glink{align-self:center;margin-top:-6px;background:none;border:none;color:var(--dim);font-size:11px;text-decoration:underline;cursor:pointer}

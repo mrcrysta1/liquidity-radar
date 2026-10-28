@@ -1,7 +1,7 @@
 // The account button in the top bar and its dialog: sign in or create an
 // account with email and password, continue with Google, reset a password,
 // and — once signed in — see what is saved to the account and sign out.
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { createPortal } from 'react-dom'
 import {
@@ -10,6 +10,7 @@ import {
   setNewPassword,
   signIn,
   signInWithGoogle,
+  signInWithGoogleToken,
   signOut,
   signUp,
   updateProfile,
@@ -18,6 +19,7 @@ import {
 } from '../../features/auth/session'
 import { useFavorites } from '../../features/favorites/favorites'
 import { toEdit } from '../../features/auth/profile'
+import { GOOGLE_CLIENT_ID, initGis, oneTap, renderGoogleButton } from '../../features/auth/google'
 import type { ProfileEdit } from '../../features/auth/profile'
 import { getIndicators } from '../../features/charts/indicators/store'
 import { useTick } from '../useTick'
@@ -193,6 +195,39 @@ function SignedIn({ close }: { close: () => void }) {
   )
 }
 
+const onGoogleToken = (t: string, n: string) => void signInWithGoogleToken(t, n)
+
+/** Google's own button, on this site (popup, no redirect); the redirect flow if it cannot load. */
+function GoogleButton() {
+  const ref = useRef<HTMLDivElement>(null)
+  const [gis, setGis] = useState(!!GOOGLE_CLIENT_ID)
+  useEffect(() => {
+    if (!GOOGLE_CLIENT_ID) return
+    let alive = true
+    initGis(onGoogleToken)
+      .then(() => {
+        const el = ref.current
+        if (alive && el) return renderGoogleButton(el, el.clientWidth, document.documentElement.dataset.theme !== 'light')
+      })
+      .catch(() => alive && setGis(false))
+    return () => {
+      alive = false
+    }
+  }, [])
+  if (!gis)
+    return (
+      <button type="button" className="acct-google" onClick={() => void signInWithGoogle()}>
+        <GoogleG /> Continue with Google
+      </button>
+    )
+  return (
+    <>
+      <div className="acct-gbtn" ref={ref} />
+      <button type="button" className="acct-glink" onClick={() => void signInWithGoogle()}>Google button not working? Sign in another way</button>
+    </>
+  )
+}
+
 function SignInForm() {
   const a = useAuth()
   const [mode, setMode] = useState<Mode>('in')
@@ -221,9 +256,7 @@ function SignInForm() {
       )}
       {mode !== 'forgot' && (
         <>
-          <button type="button" className="acct-google" onClick={() => void signInWithGoogle()}>
-            <GoogleG /> Continue with Google
-          </button>
+          <GoogleButton />
           <p className="acct-note acct-perm">Google shares only your name, email and profile photo.</p>
           <div className="acct-or"><span>or with email</span></div>
         </>
@@ -278,7 +311,7 @@ function Dialog({ close }: { close: () => void }) {
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [close])
-  const title = a.recovery ? 'Reset password' : a.status === 'user' ? 'Your account' : 'Welcome to Liquidity Radar'
+  const title = a.recovery ? 'Reset password' : a.status === 'user' ? 'Your account' : 'Sign in to Liquidity Radar'
   return createPortal(
     <div className="acct-overlay" role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.target === e.currentTarget && close()}>
       <div className="acct-card">
@@ -312,6 +345,42 @@ function Dialog({ close }: { close: () => void }) {
 export function AccountMenu() {
   const a = useAuth()
   const [open, setOpen] = useState(false)
+  const gated = a.status === 'guest' || a.status === 'loading'
+
+  // Sign-in is required: a visitor can look, but any click or key press
+  // outside the sign-in dialog opens it instead of doing anything.
+  useEffect(() => {
+    if (!gated) return
+    const inDialog = (t: EventTarget | null) => t instanceof Element && !!t.closest('.acct-overlay')
+    const block = (e: Event) => {
+      if (inDialog(e.target)) return
+      e.preventDefault()
+      e.stopPropagation()
+      if (e.type === 'pointerdown') {
+        warmAuth()
+        setOpen(true)
+      }
+    }
+    const keys = (e: KeyboardEvent) => {
+      if (inDialog(e.target) || ['Tab', 'Shift', 'Escape'].includes(e.key)) return
+      e.preventDefault()
+      e.stopPropagation()
+      setOpen(true)
+    }
+    const types = ['pointerdown', 'mousedown', 'click', 'dblclick', 'contextmenu', 'touchstart']
+    types.forEach((t) => document.addEventListener(t, block, { capture: true, passive: false }))
+    document.addEventListener('keydown', keys, true)
+    return () => {
+      types.forEach((t) => document.removeEventListener(t, block, { capture: true }))
+      document.removeEventListener('keydown', keys, true)
+    }
+  }, [gated])
+
+  // Returning Google users: One Tap signs them in with a single click.
+  useEffect(() => {
+    if (a.status !== 'guest' || !GOOGLE_CLIENT_ID) return
+    initGis(onGoogleToken).then(oneTap).catch(() => {})
+  }, [a.status])
   // A password-reset link opens the dialog on its own.
   const show = open || a.recovery
   const u = a.user

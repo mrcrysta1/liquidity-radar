@@ -43,7 +43,6 @@ import { RadarHero, RadarLower, RadarMetrics, RadarSide } from './radar/RadarVie
 import { ChartIntel, QuickTools, WorkspaceHead } from './charts/ChartsViews'
 import { SignalsBoard, SignalsHead } from './signals/SignalsViews'
 import { AccountMenu } from './auth/AccountMenu'
-import { initAuth } from '../features/auth/session'
 import {
   AiAnalysis,
   AnalysisHead,
@@ -67,11 +66,6 @@ import { useEffect, useRef } from 'react'
 const w = window as any
 
 export function Shell() {
-  // Accounts: restores a stored session (or finishes a sign-in link) and
-  // loads that user's settings. A no-op until sign-in is configured.
-  useEffect(() => {
-    initAuth()
-  }, [])
   // The self-learning engine trades on its own, whichever tab is open. It is
   // started once the page has settled so it never competes with first paint.
   useEffect(() => {

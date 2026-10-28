@@ -39,55 +39,6 @@ export interface ProfileEdit {
   organization: string
 }
 
-type Person = {
-  names?: Array<{ displayName?: string; givenName?: string; familyName?: string; metadata?: { primary?: boolean } }>
-  emailAddresses?: Array<{ value?: string; metadata?: { primary?: boolean; verified?: boolean } }>
-  photos?: Array<{ url?: string; default?: boolean; metadata?: { primary?: boolean } }>
-  locales?: Array<{ value?: string }>
-}
-
-// Readable with the default `profile email` scopes.
-const FIELDS = 'names,emailAddresses,photos,locales'
-const primary = <T extends { metadata?: { primary?: boolean } }>(a?: T[]) => a?.find((x) => x.metadata?.primary) ?? a?.[0]
-
-/** The Google-provided part of the profile: from the People API when it answers, else the sign-in data. */
-async function googleBasics(u: User, token: string | null): Promise<{ row: Partial<Profile>; raw: Person | null }> {
-  const m = (u.user_metadata || {}) as Record<string, string>
-  const row: Partial<Profile> = {
-    provider: 'google',
-    name: m.full_name || m.name || null,
-    email: u.email ?? null,
-    email_verified: !!u.email_confirmed_at || null,
-    photo_url: m.avatar_url || m.picture || null,
-  }
-  if (!token) return { row, raw: null }
-  try {
-    const r = await fetch('https://people.googleapis.com/v1/people/me?personFields=' + FIELDS, {
-      headers: { Authorization: 'Bearer ' + token },
-    })
-    if (!r.ok) return { row, raw: null }
-    const p = (await r.json()) as Person
-    const n = primary(p.names)
-    const e = primary(p.emailAddresses)
-    const photo = primary(p.photos)
-    return {
-      raw: p,
-      row: {
-        ...row,
-        name: n?.displayName ?? row.name,
-        given_name: n?.givenName ?? null,
-        family_name: n?.familyName ?? null,
-        email: e?.value ?? row.email,
-        email_verified: e?.metadata?.verified ?? row.email_verified,
-        photo_url: photo && !photo.default && photo.url ? photo.url : row.photo_url,
-        locale: p.locales?.[0]?.value ?? null,
-      },
-    }
-  } catch {
-    return { row, raw: null }
-  }
-}
-
 function basics(u: User): Partial<Profile> {
   const m = (u.user_metadata || {}) as Record<string, string>
   return {
@@ -109,18 +60,22 @@ export async function captureProfile(
   u: User,
   googleToken: string | null,
 ): Promise<{ profile: Profile | null; error: string }> {
-  const google = (u.app_metadata?.provider as string) === 'google'
-  const { row, raw } = google ? await googleBasics(u, googleToken) : { row: basics(u), raw: null }
+  void googleToken // name, email and photo already arrive with the sign-in; no extra call to Google
+  const row = basics(u)
   const { data: existing } = await c.from('user_profiles').select('*').eq('user_id', u.id).maybeSingle()
   // Empty provider values never blank a field.
   const patch = Object.fromEntries(Object.entries(row).filter(([, v]) => v != null && v !== ''))
   // A name already on the profile may be the user's own edit: keep it.
   if (existing?.name) delete patch.name
-  const { error } = await c
+  // Nothing new since last time: no write.
+  if (existing && Object.entries(patch).every(([k, v]) => JSON.stringify(existing[k]) === JSON.stringify(v)))
+    return { profile: existing as Profile, error: '' }
+  const { data, error } = await c
     .from('user_profiles')
-    .upsert({ user_id: u.id, ...patch, ...(raw ? { raw } : {}), updated_at: new Date().toISOString() })
-  const { data } = await c.from('user_profiles').select('*').eq('user_id', u.id).maybeSingle()
-  return { profile: (data as Profile) ?? null, error: error ? error.message : '' }
+    .upsert({ user_id: u.id, ...patch, updated_at: new Date().toISOString() })
+    .select('*')
+    .single()
+  return { profile: (data as Profile) ?? (existing as Profile) ?? null, error: error ? error.message : '' }
 }
 
 export function toEdit(p: Profile | null): ProfileEdit {
