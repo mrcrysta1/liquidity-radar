@@ -6,14 +6,18 @@
 # safety net that restarts the chain if it ever breaks.
 #
 # The bot ticks every 15 s: mirrors the Binance Demo account for the website,
-# manages any open trade, and decides on each newly closed 5-minute candle
-# (BOT_INTERVAL) for five markets. Every idea must pass the setup rules (R:R
-# >= 1.5 and cost <= 0.15R after fees, cooldown after a stop-out, <= 4 open,
-# <= 120 trades/day, calibrated EV > 0); ideas rejected only for EV become
-# shadow trades. On 5m bars fees are ~0.9R of a 1.5-ATR stop, so the bracket
-# is widened to 9 / 18 ATR (about a 1% stop on BTC) with an 8 h time exit,
-# which keeps the cost rule satisfiable. It learns from every closed real and
-# shadow trade and trains a challenger model hourly or every 20 closed trades.
+# manages any open trade, and decides on each newly closed 4-hour candle
+# (BOT_INTERVAL) for five markets. GATED: a market trades only while its model
+# passes the walk-forward gate (out-of-sample expectancy >= 0.05R, profit
+# factor >= 1.15, recent test blocks positive); the rest stay flat and learn
+# from shadow trades until they earn it. Bracket 1.5 / 2.25 ATR (1:1.5) with a
+# 2-day time exit, entries only at EV >= 0.1R after fees. Chosen by a sweep
+# (2026-10-28) of 15m/1h/4h × six brackets × EV bars: 15m had no
+# profitable setting and 1h one marginal one; on 4h this setting was positive
+# out of sample for BTC (+0.18R/trade, 93 trades) and gold (+0.17R, 70) and
+# negative for ETH, SOL and BNB, which the gate keeps flat. It learns from
+# every closed real and shadow trade and trains a challenger every 4 h or
+# every 20 closed trades. Clear a tripped kill switch with npm run reset-risk.
 # Requires radar-worker/sql/005_bot_learning.sql to be applied first.
 #
 # GitHub's runners are in the US, where Binance's main API is blocked; the
@@ -90,22 +94,23 @@ jobs:
         run: node src/bot.ts
         env:
           BOT_RUN_MINUTES: '340'
-          BOT_MODE: explore
+          BOT_MODE: gated
           BOT_SYMBOLS: BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XAUUSDT
-          BOT_INTERVAL: 5m
-          BOT_MIN_EV: any
+          BOT_INTERVAL: 4h
+          BOT_MIN_EV: '0.1'
           BOT_MIN_MARGIN: '100'
-          BOT_SL_ATR: '9'
-          BOT_TP_ATR: '18'
-          BOT_HORIZON: '96'
-          BOT_MIN_RR: '1.5'
+          BOT_SL_ATR: '1.5'
+          BOT_TP_ATR: '2.25'
+          BOT_HORIZON: '12'
+          # 2.25 / 1.5 = 1:1.5 before fees, about 1:1.35 after them on 4h bars.
+          BOT_MIN_RR: '1.3'
           BOT_MAX_COST_R: '0.15'
-          BOT_COOLDOWN_MIN: '30'
+          BOT_COOLDOWN_MIN: '240'
           BOT_MAX_OPEN: '4'
-          BOT_MAX_TRADES_DAY: '120'
+          BOT_MAX_TRADES_DAY: '10'
           BOT_SHADOW: '1'
           BOT_SHADOW_MAX_OPEN: '1'
-          BOT_LEARN_EVERY_MIN: '60'
+          BOT_LEARN_EVERY_MIN: '240'
           BOT_LEARN_EVERY_TRADES: '20'
           FUTURES_BASE: https://testnet.binancefuture.com
           DATABASE_URL: ${{ secrets.DATABASE_URL }}

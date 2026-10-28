@@ -12,6 +12,7 @@
     "bot": "node src/bot.ts",
     "train": "node src/train.ts",
     "selftest": "node src/selftest.ts",
+    "reset-risk": "node scripts/reset-risk.mjs",
     "test": "node --test \"test/**/*.test.ts\""
   },
   "dependencies": {
