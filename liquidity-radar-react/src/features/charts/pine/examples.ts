@@ -190,4 +190,51 @@ else
     streak := 0
 plot(avg, "Average", color=streak > 3 ? color.lime : color.orange, linewidth=2)`,
   },
+  {
+    id: 'ex_ma_strategy',
+    name: 'MA Cross strategy (Strategy Tester)',
+    script: `//@version=5
+strategy("MA Cross Strategy", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=100, commission_value=0.1)
+fastLen = input.int(9, "Fast", minval=1)
+slowLen = input.int(21, "Slow", minval=1)
+tp = input.float(4, "Take profit %", minval=0.1)
+sl = input.float(2, "Stop loss %", minval=0.1)
+fast = ta.ema(close, fastLen)
+slow = ta.ema(close, slowLen)
+pf = plot(fast, "Fast", color=color.teal)
+ps = plot(slow, "Slow", color=color.orange)
+fill(pf, ps, color=color.new(color.teal, 85))
+longCond = ta.crossover(fast, slow)
+shortCond = ta.crossunder(fast, slow)
+if longCond
+    strategy.entry("Long", strategy.long)
+if shortCond
+    strategy.entry("Short", strategy.short)
+// Brackets in price: take profit and stop loss as a percentage of the entry.
+avgPrice = strategy.position_avg_price
+if strategy.position_size > 0
+    strategy.exit("TP/SL L", "Long", limit=avgPrice * (1 + tp / 100), stop=avgPrice * (1 - sl / 100))
+if strategy.position_size < 0
+    strategy.exit("TP/SL S", "Short", limit=avgPrice * (1 - tp / 100), stop=avgPrice * (1 + sl / 100))
+alertcondition(longCond, "Long entry", "Fast EMA crossed above slow EMA")
+alertcondition(shortCond, "Short entry", "Fast EMA crossed below slow EMA")`,
+  },
+  {
+    id: 'ex_array_median',
+    name: 'Rolling median (arrays)',
+    script: `//@version=5
+indicator("Rolling median", overlay=true)
+len = input.int(15, "Length", minval=1, maxval=500)
+var window = array.new<float>()
+window.push(close)
+if window.size() > len
+    window.shift()
+med = array.median(window)
+hi = array.max(window)
+lo = array.min(window)
+pm = plot(med, "Median", color=color.purple, linewidth=2)
+ph = plot(hi, "Max", color=color.new(color.gray, 50))
+pl = plot(lo, "Min", color=color.new(color.gray, 50))
+fill(ph, pl, color=color.new(color.purple, 92))`,
+  },
 ]

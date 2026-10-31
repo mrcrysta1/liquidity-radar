@@ -3583,6 +3583,171 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('pine gradient: clamped at the ends', RT.gradientColor(150, 0, 100, '#000000', '#ffffff'), 'rgba(255,255,255,1.00)')
 }
 
+{
+  // r3-strategy: broker emulator, arrays, fill/alertcondition, error hints.
+  const { runPine } = await import(src('features/charts/pine/runtime.ts'))
+  const S = await import(src('features/charts/pine/strategy.ts'))
+  const P = await import(src('features/charts/pine/indicator.ts'))
+  const bar = (i, o, h, l, c) => ({ t: i * 60000, o, h, l, c, v: 1 })
+  const cfg = (x = {}) => ({ ...S.DEFAULT_STRATEGY, mintick: 1, ...x })
+  const lastOf = (a) => a[a.length - 1]
+  const catchErr = (fn) => {
+    try {
+      fn()
+      return null
+    } catch (e) {
+      return e
+    }
+  }
+
+  // Path model: open → nearer extreme → farther extreme → close.
+  eq('broker path: high nearer goes up first', S.barPath(bar(0, 100, 104, 94, 100)), [100, 104, 94, 100])
+  eq('broker path: low nearer goes down first', S.barPath(bar(0, 100, 108, 95, 100)), [100, 95, 108, 100])
+  eq('broker reach: gap past the level fills at the open', S.reach([100, 104, 94, 100], 98, true), [0, 100])
+  eq('broker reach: crossing fills at the level', S.reach([100, 104, 94, 100], 102, true), [0.5, 102])
+  eq('broker reach: never reached', S.reach([100, 104, 94, 100], 110, true), null)
+
+  // Market entry next open, bracket exit in the same bar it is reached.
+  const runBroker = (bars, place, c) => {
+    const b = S.createBroker(cfg(c), bars)
+    bars.forEach((_, i) => {
+      b.beginBar(i)
+      place(b, i)
+      b.endBar(i)
+    })
+    return b.report()
+  }
+  const bracket = (b, i) => {
+    if (i === 0) {
+      b.entry('L', 1)
+      b.exit({ id: 'X', from: 'L', profit: 3, loss: 4 })
+    }
+  }
+  const up = runBroker([bar(0, 100, 101, 99, 100), bar(1, 100, 104, 94, 100)], bracket)
+  eq('broker: market entry fills at the next open', [up.trades[0].entryBar, up.trades[0].entryPrice], [1, 100])
+  eq('broker: take profit first when the high comes first', [up.trades[0].exitId, up.trades[0].exitPrice, up.trades[0].profit], ['X', 103, 3])
+  const dn = runBroker([bar(0, 100, 101, 99, 100), bar(1, 100, 108, 95, 100)], bracket)
+  eq('broker: stop first when the low comes first', [dn.trades[0].exitPrice, dn.trades[0].profit], [96, -4])
+  eq('broker: summary counts the loss', [dn.summary.totalTrades, dn.summary.losses, dn.summary.winRate, dn.summary.netProfit], [1, 1, 0, -4])
+  const lim = runBroker(
+    [bar(0, 100, 101, 99, 100), bar(1, 100, 101, 99, 100), bar(2, 97, 99, 90, 92)],
+    (b, i) => i === 0 && b.entry('B', 1, 1, 98),
+  )
+  eq('broker: buy limit gapped through fills at the open', [lim.trades[0].entryBar, lim.trades[0].entryPrice], [2, 97])
+  const stp = runBroker(
+    [bar(0, 100, 101, 99, 100), bar(1, 100, 106, 99, 105)],
+    (b, i) => i === 0 && b.entry('B', 1, 2, undefined, 103),
+    { slippage: 1 },
+  )
+  eq('broker: buy stop fills at the level plus slippage', [stp.trades[0].entryPrice, stp.trades[0].qty], [104, 2])
+  const trail = runBroker(
+    [bar(0, 100, 100, 100, 100), bar(1, 100, 110, 100, 110), bar(2, 110, 111, 104, 105)],
+    (b, i) => {
+      if (i === 0) {
+        b.entry('L', 1)
+        b.exit({ id: 'T', from: 'L', trailPoints: 5, trailOffset: 3 })
+      }
+    },
+  )
+  eq('broker: trailing stop follows the high', [trail.trades[0].exitBar, trail.trades[0].exitPrice], [2, 107])
+
+  // Through runPine: reversal, position_size, history, open trade.
+  const k = [bar(0, 10, 10, 10, 10), bar(1, 11, 12, 11, 12), bar(2, 13, 13, 13, 13), bar(3, 14, 14, 14, 14)]
+  const rv = runPine(`strategy("rev", initial_capital=1000)
+if bar_index == 0
+    strategy.entry("L", strategy.long, qty=2)
+if bar_index == 1
+    strategy.entry("S", strategy.short, qty=1)
+plot(strategy.position_size, "pos")
+plot(strategy.position_size[1], "prev")`, k)
+  eq('strategy: position_size per bar', rv.plots[0].values, [0, 2, -1, -1])
+  eq('strategy: position_size[1]', rv.plots[1].values.slice(1), [0, 2, -1])
+  eq('strategy: reversal closes the long at the open', [rv.strategy.trades[0].exitId, rv.strategy.trades[0].exitPrice, rv.strategy.trades[0].profit], ['S', 13, 4])
+  eq('strategy: the open short is marked at the last close', [rv.strategy.trades[1].open, rv.strategy.trades[1].profit], [true, -1])
+  eq('strategy: equity per bar', rv.strategy.equity, [1000, 1002, 1004, 1003])
+  eq('strategy: net profit, open P&L', [rv.strategy.summary.netProfit, rv.strategy.summary.openPL], [4, -1])
+  eq('strategy: markers for entries and exits', P.tradeShapes(rv.strategy).map((s) => [s.bar, s.text, s.shape]), [[1, 'L', 'arrowUp'], [2, 'S', 'arrowDown'], [2, 'S', 'arrowDown']])
+  const pyr = (n) => runPine(`strategy("p", pyramiding=${n})
+if bar_index < 3
+    strategy.entry("L", strategy.long)
+plot(close)`, k).strategy.trades.length
+  eq('strategy: pyramiding 0 allows one entry, 2 allows two', [pyr(0), pyr(2)], [1, 2])
+  const com = runPine(`strategy("c", initial_capital=1000, default_qty_type=strategy.percent_of_equity, default_qty_value=50, commission_type=strategy.commission.cash_per_order, commission_value=1)
+if bar_index == 0
+    strategy.entry("L", strategy.long)
+if bar_index == 1
+    strategy.close("L")
+plot(close)`, k).strategy
+  eq('strategy: % of equity sizing, cash commission, close', [com.trades[0].qty, com.trades[0].profit, com.summary.commission], [50, 98, 2])
+  const poc = runPine(`strategy("o", process_orders_on_close=true)
+if bar_index == 0
+    strategy.entry("L", strategy.long)
+plot(close)`, k).strategy
+  eq('strategy: process_orders_on_close fills at the signal bar close', [poc.trades[0].entryBar, poc.trades[0].entryPrice], [0, 10])
+  const ind = runPine('indicator("i")\nstrategy.entry("L", strategy.long)\nplot(close)', k)
+  eq('strategy: orders in an indicator are a warning', [ind.warnings, ind.strategy], [['strategy.entry'], undefined])
+
+  // Arrays.
+  const ar = runPine(`indicator("arr")
+var a = array.new_float(0)
+array.push(a, bar_index)
+b = array.from(3, 1, 2)
+array.sort(b)
+c = array.slice(b, 1)
+plot(array.size(a), "size")
+plot(array.sum(b), "sum")
+plot(array.get(b, -1), "last")
+plot(array.min(b) + 10 * array.max(b), "minmax")
+plot(array.avg(c), "avg")
+plot(array.includes(b, 2) ? 1 : 0, "incl")
+x = array.new_int(3, 7)
+array.set(x, 0, 1)
+array.unshift(x, 5)
+p = array.pop(x)
+s = array.shift(x)
+x.push(9)
+plot(p * 100 + s * 10 + x.size(), "ops")
+y = array.copy(x)
+array.clear(y)
+plot(array.size(y) + array.size(x) * 10, "clear")
+var array<float> q = array.new<float>(2, 1.5)
+plot(array.sum(q), "generic")`, k)
+  eq('array: var array persists across bars', lastOf(ar.plots[0].values), 4)
+  eq('array: from / sort / sum / get(-1)', [lastOf(ar.plots[1].values), lastOf(ar.plots[2].values)], [6, 3])
+  eq('array: min / max', lastOf(ar.plots[3].values), 31)
+  eq('array: slice / avg / includes', [lastOf(ar.plots[4].values), lastOf(ar.plots[5].values)], [2.5, 1])
+  eq('array: set / unshift / pop / shift / method push', lastOf(ar.plots[6].values), 753)
+  eq('array: copy / clear', lastOf(ar.plots[7].values), 30)
+  eq('array: array<float> type and array.new<float>', lastOf(ar.plots[8].values), 3)
+  const oob = catchErr(() => runPine('indicator("e")\na = array.new_float(2)\nplot(array.get(a, 5))', k))
+  ok('array: out of bounds names line and column', oob && oob.line === 3 && oob.col === 6 && /out of bounds/.test(oob.message), oob && oob.message)
+  const emp = catchErr(() => runPine('a = array.new_float()\nv = array.pop(a)', k))
+  ok('array: pop on an empty array is an error', emp && /empty/.test(emp.message), emp && emp.message)
+
+  // fill / bgcolor / alertcondition.
+  const fl = runPine(`indicator("f")
+p1 = plot(high, "h")
+p2 = plot(low, "l")
+h1 = hline(1)
+h2 = hline(2)
+fill(p1, p2, color=color.red)
+fill(h1, h2)
+bgcolor(close > 12 ? color.green : na)
+alertcondition(close > 12, "Up", "close above 12")`, k)
+  eq('fill: between two plots', [fl.fills[0].plot1 === fl.plots[0].key, fl.fills[0].plot2 === fl.plots[1].key, fl.fills[0].color], [true, true, '#f23645'])
+  eq('fill: between two hlines', [fl.fills[1].plot1, fl.fills[1].plot2], ['hline:0', 'hline:1'])
+  eq('bgcolor: per bar', fl.bgcolors, [undefined, undefined, '#089981', '#089981'])
+  eq('alertcondition: title, message, per-bar values', fl.alertconditions, [{ title: 'Up', message: 'close above 12', values: [false, false, true, true] }])
+
+  // Error hints.
+  const dy1 = catchErr(() => runPine('plot(clsoe)', k))
+  ok('pine error: did you mean an identifier', dy1 && /did you mean 'close'/.test(dy1.message) && dy1.col === 6, dy1 && dy1.message)
+  const dy2 = catchErr(() => runPine('plot(ta.ema2(close, 3))', k))
+  ok('pine error: did you mean a function', dy2 && /did you mean 'ta.ema'/.test(dy2.message), dy2 && dy2.message)
+  const dy3 = catchErr(() => runPine('plot(sma(close, 3))', k))
+  ok('pine error: missing namespace suggested', dy3 && /did you mean 'ta.sma'/.test(dy3.message), dy3 && dy3.message)
+}
+
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')
 if (fails.length) {
   fails.forEach((f) => console.log('  FAIL  ' + f))
