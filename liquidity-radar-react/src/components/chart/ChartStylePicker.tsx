@@ -244,6 +244,18 @@ function StyleIcon({ id, size = 16 }: { id: ChartStyleId; size?: number }) {
       </svg>
     )
   }
+  if (id === 'tick') {
+    // Uneven bar spacing: each bar is a fixed count of trades, not of time.
+    return (
+      <svg {...p}>
+        <path d="M4 6v12M10 3v14M15 8v12M20 5v10" stroke="var(--dim)" strokeWidth="1" />
+        <rect x="2.5" y="9" width="3" height="6" fill={UP} />
+        <rect x="8.5" y="5" width="3" height="8" fill={UP} />
+        <rect x="13.5" y="10" width="3" height="7" fill={DN} />
+        <rect x="18.5" y="7" width="3" height="5" fill={UP} />
+      </svg>
+    )
+  }
   if (id === 'sessionvp') {
     return (
       <svg {...p}>

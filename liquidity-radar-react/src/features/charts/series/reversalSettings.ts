@@ -14,6 +14,8 @@ import { buildDerivedBars } from './derivedBars'
 import { DEFAULT_LINE_BREAK, buildLineBreak, clampLineBreak } from './lineBreak'
 import { DEFAULT_KAGI_PCT, buildKagi } from './kagi'
 import { DEFAULT_PNF_REVERSAL, buildPointFigure, clampPnfReversal } from './pointFigure'
+import { DEFAULT_TICKS, clampTicks } from '../orderflow/tickBars'
+import { tickBarsFor, tickKey } from '../orderflow/tickSource'
 
 export type KagiMode = 'atr' | 'pct'
 export interface ReversalSettings {
@@ -24,6 +26,8 @@ export interface ReversalSettings {
   kagiPct: number
   /** Boxes a Point & Figure reversal needs. */
   pnfReversal: number
+  /** Trades per bar (Tick bars). */
+  ticks: number
 }
 
 export const MIN_KAGI_PCT = 0.05
@@ -43,6 +47,7 @@ let cur: ReversalSettings = (function () {
     kagiMode: r.kagiMode === 'pct' ? 'pct' : 'atr',
     kagiPct: r.kagiPct == null ? DEFAULT_KAGI_PCT : clampKagiPct(r.kagiPct),
     pnfReversal: r.pnfReversal == null ? DEFAULT_PNF_REVERSAL : clampPnfReversal(r.pnfReversal),
+    ticks: r.ticks == null ? DEFAULT_TICKS : clampTicks(r.ticks),
   }
 })()
 
@@ -66,6 +71,7 @@ export function setReversalSettings(patch: Partial<ReversalSettings>): void {
     kagiMode: (patch.kagiMode ?? cur.kagiMode) === 'pct' ? 'pct' : 'atr',
     kagiPct: clampKagiPct(patch.kagiPct ?? cur.kagiPct),
     pnfReversal: clampPnfReversal(patch.pnfReversal ?? cur.pnfReversal),
+    ticks: clampTicks(patch.ticks ?? cur.ticks),
   }
   if (JSON.stringify(next) === JSON.stringify(cur)) return
   cur = next
@@ -75,12 +81,12 @@ export function setReversalSettings(patch: Partial<ReversalSettings>): void {
 
 /** The reversal styles this module owns. */
 export function isReversalStyle(id: ChartStyleId): boolean {
-  return id === 'linebreak' || id === 'kagi' || id === 'pnf'
+  return id === 'linebreak' || id === 'kagi' || id === 'pnf' || id === 'tick'
 }
 
 /** Whether the style is sized by the shared range-bar size, and what to call it. */
 export function rangeSizeLabel(id: ChartStyleId): string | null {
-  if (id === 'linebreak') return null
+  if (id === 'linebreak' || id === 'tick') return null
   if (id === 'kagi') return cur.kagiMode === 'atr' ? 'Reversal' : null
   if (id === 'pnf' || id === 'renko') return 'Box size'
   return 'Range size'
@@ -91,6 +97,8 @@ export function reversalKey(id: ChartStyleId): string {
   if (id === 'linebreak') return 'lb' + cur.lineBreak
   if (id === 'kagi') return 'kg' + cur.kagiMode + cur.kagiPct
   if (id === 'pnf') return 'pf' + cur.pnfReversal
+  // The tape grows with every trade, so the key moves with it.
+  if (id === 'tick') return tickKey(cur.ticks)
   return ''
 }
 
@@ -103,5 +111,7 @@ export function buildStyleBars(id: ChartStyleId, src: CandleFlat[], size: number
   if (id === 'kagi')
     return cur.kagiMode === 'pct' ? buildKagi(src, cur.kagiPct, true) : buildKagi(src, size)
   if (id === 'pnf') return buildPointFigure(src, size, cur.pnfReversal)
+  // Not built from `src` at all: from the trade tape, for the focused symbol only.
+  if (id === 'tick') return tickBarsFor(src, cur.ticks)
   return buildDerivedBars(id, src, size)
 }

@@ -3,6 +3,7 @@
 // injected callback set so this module stays free of UI concerns.
 import { state } from './store'
 import { binancePerpOf, isInstrument } from '../constants/instruments'
+import { isSynthetic } from './syntheticSymbol'
 import { PERP_WS } from './perpData'
 import { spotBasis } from './spotGold'
 import {
@@ -46,6 +47,26 @@ let gapRefillAt = 0
 // onto an animation frame so a busy market cannot outrun the renderer.
 let tradeFrame = 0
 let tradePending: { p: number; q: number; T: number } | null = null
+/**
+ * One aggTrade of the charted symbol, for the order-flow views (real
+ * footprint, tick bars). `bar`/`barEnd` bound the chart bar it belongs to,
+ * bucketed by the trade's own time as the delta pane does; `tf` is the
+ * interval that bucketing used.
+ */
+export interface TradePrintInfo {
+  qty: number
+  /** Binance `m`: the buyer was the maker, so the aggressor sold. */
+  buyerMaker: boolean
+  time: number
+  bar: number
+  barEnd: number
+  tf: string
+}
+/** Called with every trade print of the charted symbol (price alerts read the tape). */
+const tradeListeners: Array<(sym: string, price: number, info: TradePrintInfo) => void> = []
+export function onTradePrint(fn: (sym: string, price: number, info: TradePrintInfo) => void): void {
+  tradeListeners.push(fn)
+}
 /** The last trade painted onto the live candle (price, trade time). */
 let lastTrade: { p: number; q: number; T: number } | null = null
 const raf: (fn: () => void) => number =
@@ -164,8 +185,10 @@ export function connectStreams(cb: StreamsCallbacks): void {
   // price is polled by services/instrumentFeed.
   // Gold is the exception: its Binance perpetual (XAUUSDT) streams exactly like
   // a spot pair, so it gets the full live set from the futures socket host.
+  // A ratio / spread (BTCUSDT/ETHUSDT) has no socket either: its bars are
+  // re-polled by services/marketData instead (see SYNTH_POLL_MS).
   const perp = binancePerpOf(state.symbol)
-  if (isInstrument(state.symbol) && !perp) {
+  if ((isInstrument(state.symbol) && !perp) || isSynthetic(state.symbol)) {
     syncCount()
     cb.onStatus()
     return
@@ -281,9 +304,25 @@ export function connectStreams(cb: StreamsCallbacks): void {
     // Delta/whale tracking runs on every print (not coalesced to rAF like the
     // tape paint below) — dropping ticks here would silently under-count CVD.
     const arr = state.candles
-    const bucketStart = arr.length ? arr[arr.length - 1].t : +d.T
+    // Bucket by the trade's own time: trades of a new bar arrive before the
+    // kline frame that opens it (~2s), and were credited to the bar that had
+    // just closed, skewing the delta pane and CVD divergence.
+    let bucketStart = arr.length ? arr[arr.length - 1].t : +d.T
+    if (arr.length) {
+      const end = bucketEnd(bucketStart, def)
+      if (+d.T >= end) bucketStart = end
+    }
     ingestTrade(state.symbol, bucketStart, +d.q, !!d.m)
     ingestWhaleAgg(state.symbol, +d.a, p, +d.q, +d.T, !!d.m)
+    const info: TradePrintInfo = {
+      qty: +d.q,
+      buyerMaker: !!d.m,
+      time: +d.T,
+      bar: bucketStart,
+      barEnd: bucketEnd(bucketStart, def),
+      tf,
+    }
+    tradeListeners.forEach((fn) => fn(state.symbol, p, info))
     tradePending = { p: p, q: +d.q, T: +d.T }
     if (!tradeFrame) tradeFrame = raf(flushTrade)
   })
@@ -293,7 +332,7 @@ export function connectStreams(cb: StreamsCallbacks): void {
   make('kl', WS + s + '@kline_' + def.base, function (d: Any) {
     const k = d.k
     const b = sb()
-    const base = { t: k.t, o: +k.o + b, h: +k.h + b, l: +k.l + b, c: +k.c + b, v: +k.v }
+    const base = { t: k.t, o: +k.o + b, h: +k.h + b, l: +k.l + b, c: +k.c + b, v: +k.v, tb: +k.V }
     if (!mdVal.candle(base)) return
     const folder = mainFolder.key === bufKey ? mainFolder.folder : null
     let c = def.factor > 1 ? (folder ? folder.push(base) : null) : base

@@ -8,6 +8,7 @@ import { LayoutPicker } from './chart/LayoutPicker'
 import { IndicatorPicker } from './chart/IndicatorPicker'
 import { ReplayBar, ReplayButton } from './chart/ReplayBar'
 import { CoinPicker } from './chart/CoinPicker'
+import { CompareButton } from './chart/CompareButton'
 import { LogoMark } from './Logo'
 import { BellIcon, MoonIcon, PaletteIcon, SunIcon } from './icons'
 import { WhaleLegend } from './chart/WhaleLegend'
@@ -140,7 +141,6 @@ export function Shell() {
       <section className="tab-section" id="tab-radar">
         <DashHead zone="overview" name="Overview" sub="Live price, derivatives and momentum at a glance" />
         <Guard name="Radar hero"><RadarHero /></Guard>
-        <Guard name="Radar metrics"><RadarMetrics /></Guard>
         {/* The engine writes into these ids without null checks; the new views above read the same state. */}
         <div className="rd-legacy" hidden>
         <div className="card hero-card">
@@ -189,6 +189,7 @@ export function Shell() {
                 indicators and layout, then replay / snapshot / full screen. */}
             <div className="chart-toolbar tvb" role="toolbar" aria-label="Chart toolbar">
               <CoinPicker keepTab />
+              <CompareButton />
               {/* Filled and kept in sync by the engine; the picker above is its face. */}
               <select id="symSelect" hidden aria-hidden="true" tabIndex={-1}></select>
               <span className="tvb-sep" aria-hidden="true" />
@@ -201,6 +202,23 @@ export function Shell() {
               <LayoutPicker />
               <span className="badge b-cyan" id="wsKlineState">WS SYNCING</span>
               <span className="tvb-sep tvb-sep-end" aria-hidden="true" />
+              {/* Phones: the drawing strip took 36px of a ~260px plot, so it
+                  hides behind this button (shown only on narrow screens). */}
+              <button
+                type="button"
+                className="chart-tool-btn tvb-icon tvb-draw-toggle"
+                aria-label="Drawing tools"
+                onClick={(e) => {
+                  const stage = (e.currentTarget.closest('#radarChartCard') as HTMLElement | null)?.querySelector('.chart-stage')
+                  const on = stage?.classList.toggle('draw-open')
+                  e.currentTarget.setAttribute('aria-pressed', on ? 'true' : 'false')
+                }}
+              >
+                <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+                  <path d="M4 20h4L19 9l-4-4L4 16v4ZM14 6l4 4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+                </svg>
+                <span className="tvb-tip">Drawing tools</span>
+              </button>
               <ReplayButton />
               <ScreenshotButton />
               {/* The engine swaps this button's tooltip and label on toggle;
@@ -244,6 +262,10 @@ export function Shell() {
         </div>
         <Guard name="Radar side"><RadarSide /></Guard>
         </div>
+        {/* The chart comes first, straight under the price header, as on
+            TradingView; the stat cards follow it (they pushed it below the
+            fold at 900px). */}
+        <Guard name="Radar metrics"><RadarMetrics /></Guard>
 
         <Guard name="Radar lower"><RadarLower /></Guard>
         <WhenTab tab="radar" preload={loadRadarPanels}>

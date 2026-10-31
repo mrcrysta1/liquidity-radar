@@ -146,8 +146,19 @@ export function lex(src: string): Tok[] {
       }
       if (/[A-Za-z_]/.test(ch)) {
         const m = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*/.exec(s.slice(i))!
-        out.push({ t: 'id', v: m[0], line: L, col })
-        i += m[0].length
+        let v = m[0]
+        let used = v.length
+        // Generic type arguments — `array<float>` as a type, `array.new<int>(…)`
+        // — stay part of the name, so they never parse as comparisons.
+        if (/^(array|matrix|map)$|\.new$/.test(v)) {
+          const g = /^<\s*[A-Za-z_][\w.]*(\s*,\s*[A-Za-z_][\w.]*)?\s*>/.exec(s.slice(i + v.length))
+          if (g) {
+            v += g[0].replace(/\s+/g, '')
+            used += g[0].length
+          }
+        }
+        out.push({ t: 'id', v, line: L, col })
+        i += used
         continue
       }
       const op = OPS.find((o) => s.startsWith(o, i))
@@ -215,7 +226,7 @@ const TYPE_NAMES = [
   'line',
   'label',
 ]
-const isTypeName = (v: string) => TYPE_NAMES.includes(v)
+const isTypeName = (v: string) => TYPE_NAMES.includes(v) || /^(array|matrix|map)</.test(v)
 
 export function parse(src: string): Stmt[] {
   const toks = lex(src)

@@ -37,6 +37,149 @@ export interface IndicatorInstance {
   script?: string
   title?: string
   pineInputs?: Record<string, InputValue>
+  /** Style tab: per-output overrides of the def's look, by output key. */
+  styles?: Record<string, OutputStyle>
+  /** Decimals on the indicator's axis; unset = fitted to the values. */
+  precision?: number
+  /** Guide levels replacing the def's (RSI 30/70 → 20/80); [] = none. */
+  levels?: number[]
+  /** Interval groups the instance is hidden on (false); unset = shown. */
+  tfVisibility?: Partial<Record<TfGroup, boolean>>
+}
+
+export type LineStyleName = 'solid' | 'dashed' | 'dotted'
+export interface OutputStyle {
+  color?: string
+  /** px, 1–4 */
+  width?: number
+  style?: LineStyleName
+  /** false hides this one output; the instance's other outputs still draw. */
+  visible?: boolean
+}
+
+/** TradingView's "Visibility" groups: by the chart's bar interval. */
+export type TfGroup = 's' | 'm' | 'h' | 'd'
+export const TF_GROUPS: Array<{ key: TfGroup; label: string }> = [
+  { key: 's', label: 'Seconds' },
+  { key: 'm', label: 'Minutes' },
+  { key: 'h', label: 'Hours' },
+  { key: 'd', label: 'Days, weeks, months' },
+]
+
+/** The interval group of bars `stepMs` apart. */
+export function tfGroupFor(stepMs: number): TfGroup {
+  if (!(stepMs > 0) || stepMs >= 86400000) return 'd'
+  return stepMs < 60000 ? 's' : stepMs < 3600000 ? 'm' : 'h'
+}
+
+/**
+ * The bar interval of a candle run: the smallest gap among the last few bars,
+ * so a weekend or an exchange outage does not read as a longer interval.
+ */
+export function barStepMs(c: Array<{ t: number }>): number {
+  let step = Infinity
+  for (let i = Math.max(1, c.length - 6); i < c.length; i++) {
+    const d = c[i].t - c[i - 1].t
+    if (d > 0 && d < step) step = d
+  }
+  return isFinite(step) ? step : 0
+}
+
+/** Is `inst` set to show on charts of this interval group? */
+export const shownOnTf = (inst: IndicatorInstance, g: TfGroup): boolean =>
+  inst.tfVisibility?.[g] !== false
+
+const COLOR_RE =
+  /^(#[0-9a-f]{3,8}|rgba?\(\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+\s*(,\s*[\d.]+\s*)?\))$/i
+const LINE_STYLES: LineStyleName[] = ['solid', 'dashed', 'dotted']
+
+function cleanStyle(raw: unknown): OutputStyle | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  const out: OutputStyle = {}
+  if (typeof r.color === 'string' && r.color.length <= 40 && COLOR_RE.test(r.color))
+    out.color = r.color
+  const w = Number(r.width)
+  if (r.width != null && Number.isInteger(w) && w >= 1 && w <= 4) out.width = w
+  if (LINE_STYLES.indexOf(r.style as LineStyleName) !== -1) out.style = r.style as LineStyleName
+  if (r.visible === false) out.visible = false
+  return Object.keys(out).length ? out : null
+}
+
+/**
+ * The Style / Visibility settings of a stored instance, cleaned: bad colours,
+ * widths and levels dropped, so hand-edited storage cannot break a series.
+ * Only the keys that are set come back, so an instance without any keeps
+ * exactly its old persisted shape.
+ */
+export function sanitizeLook(r: Record<string, unknown>): Partial<IndicatorInstance> {
+  const out: Partial<IndicatorInstance> = {}
+  if (r.styles && typeof r.styles === 'object') {
+    const styles: Record<string, OutputStyle> = {}
+    Object.entries(r.styles as Record<string, unknown>).forEach(([k, v]) => {
+      const st = cleanStyle(v)
+      if (st && k.length <= 40) styles[k] = st
+    })
+    if (Object.keys(styles).length) out.styles = styles
+  }
+  const prec = Number(r.precision)
+  if (r.precision != null && Number.isInteger(prec) && prec >= 0 && prec <= 10)
+    out.precision = prec
+  if (Array.isArray(r.levels))
+    out.levels = r.levels
+      .map(Number)
+      .filter((x) => isFinite(x))
+      .slice(0, 20)
+  if (r.tfVisibility && typeof r.tfVisibility === 'object') {
+    const tf: Partial<Record<TfGroup, boolean>> = {}
+    TF_GROUPS.forEach(({ key }) => {
+      if ((r.tfVisibility as Record<string, unknown>)[key] === false) tf[key] = false
+    })
+    if (Object.keys(tf).length) out.tfVisibility = tf
+  }
+  return out
+}
+
+/** The look fields of an instance, for persisting (unset ones left out). */
+function lookOf(i: IndicatorInstance): Partial<IndicatorInstance> {
+  const out: Partial<IndicatorInstance> = {}
+  if (i.styles && Object.keys(i.styles).length) out.styles = i.styles
+  if (i.precision != null) out.precision = i.precision
+  if (i.levels) out.levels = i.levels
+  if (i.tfVisibility && Object.keys(i.tfVisibility).length) out.tfVisibility = i.tfVisibility
+  return out
+}
+
+/** An instance without any Style / Visibility override. */
+function withoutLook(i: IndicatorInstance): IndicatorInstance {
+  const out = { ...i }
+  delete out.styles
+  delete out.precision
+  delete out.levels
+  delete out.tfVisibility
+  return out
+}
+
+/**
+ * A saved set (template) re-keyed with fresh uids, its indicator-on-indicator
+ * references following along. Applying the same template to two charts, or
+ * twice, must not hand two instances one uid: Pine results are cached by uid.
+ */
+export function remapUids(raw: unknown, mkUid: () => string): unknown[] {
+  if (!Array.isArray(raw)) return []
+  const map = new Map<string, string>()
+  raw.forEach((r) => {
+    const id = r && typeof r === 'object' ? (r as { uid?: unknown }).uid : null
+    if (typeof id === 'string' && !map.has(id)) map.set(id, mkUid())
+  })
+  return raw.map((r) => {
+    if (!r || typeof r !== 'object') return r
+    const o = { ...(r as Record<string, unknown>) }
+    o.uid = map.get(o.uid as string) ?? mkUid()
+    const ref = typeof o.source === 'string' ? sourceRef(o.source) : null
+    if (ref) o.source = map.has(ref.uid) ? map.get(ref.uid) + '.' + ref.key : 'close'
+    return o
+  })
 }
 
 /** The def an instance draws with — catalogue, or built from its Pine script. */
@@ -122,6 +265,7 @@ export function sanitizeIndicators(raw: unknown, max = MAX, prefix = 'i'): Indic
         script: r.script.slice(0, MAX_SCRIPT),
         title: cleanTitle(typeof r.title === 'string' ? r.title : scriptTitle(r.script)),
         pineInputs: sanitizeInputs(r.pineInputs),
+        ...sanitizeLook(r),
       })
       continue
     }
@@ -139,6 +283,7 @@ export function sanitizeIndicators(raw: unknown, max = MAX, prefix = 'i'): Indic
       params,
       source: def.sourced ? String(r.source ?? 'close') : 'close',
       visible: r.visible !== false,
+      ...sanitizeLook(r),
     })
   }
   // References are checked once every instance is known: a source may point
@@ -167,6 +312,7 @@ export function serializeIndicators(items: IndicatorInstance[]): unknown[] {
           script: i.script,
           title: i.title,
           pineInputs: i.pineInputs || {},
+          ...lookOf(i),
         }
       : {
           uid: i.uid,
@@ -174,6 +320,7 @@ export function serializeIndicators(items: IndicatorInstance[]): unknown[] {
           params: i.params,
           source: i.source,
           visible: i.visible,
+          ...lookOf(i),
         },
   )
 }
@@ -201,6 +348,16 @@ export interface IndicatorStore {
   sourceOptions(uid: string): Array<{ key: string; label: string }>
   setSource(uid: string, source: string): void
   resetIndicators(): void
+  /** Style tab: merge `patch` into one output's style; null clears it. */
+  setStyle(uid: string, outputKey: string, patch: OutputStyle | null): void
+  setPrecision(uid: string, precision: number | null): void
+  /** Replace the guide levels; null goes back to the def's. */
+  setLevels(uid: string, levels: number[] | null): void
+  setTfVisible(uid: string, group: TfGroup, on: boolean): void
+  /** Drop every Style / Visibility override of one instance. */
+  resetLook(uid: string): void
+  /** Replace the set with a saved template, under fresh uids. */
+  loadTemplate(data: unknown): void
   subscribe(fn: Listener): () => void
   /** Take over another chart's set (persisted form), e.g. when charts swap. */
   replace(data: unknown): void
@@ -237,6 +394,10 @@ export function createIndicatorStore(opts: IndicatorStoreOptions): IndicatorStor
     opts.save(serializeIndicators(items))
     notify()
     if (opts.onCommit) opts.onCommit()
+  }
+  function edit(uidToEdit: string, fn: (i: IndicatorInstance) => IndicatorInstance): void {
+    items = items.map((i) => (i.uid === uidToEdit ? fn(i) : i))
+    commit()
   }
 
   return {
@@ -344,6 +505,44 @@ export function createIndicatorStore(opts: IndicatorStoreOptions): IndicatorStor
     },
     resetIndicators() {
       items = seed()
+      commit()
+    },
+    setStyle(uidToEdit, key, patch) {
+      edit(uidToEdit, (i) => {
+        const styles = { ...(i.styles || {}) }
+        const st = patch ? cleanStyle({ ...(styles[key] || {}), ...patch }) : null
+        if (st) styles[key] = st
+        else delete styles[key]
+        return { ...i, styles }
+      })
+    },
+    setPrecision(uidToEdit, precision) {
+      edit(uidToEdit, (i) => {
+        const next = { ...i }
+        delete next.precision
+        return precision == null ? next : { ...next, ...sanitizeLook({ precision }) }
+      })
+    },
+    setLevels(uidToEdit, levels) {
+      edit(uidToEdit, (i) => {
+        const next = { ...i }
+        delete next.levels
+        return levels == null ? next : { ...next, ...sanitizeLook({ levels }) }
+      })
+    },
+    setTfVisible(uidToEdit, group, on) {
+      edit(uidToEdit, (i) => {
+        const tf = { ...(i.tfVisibility || {}) }
+        if (on) delete tf[group]
+        else tf[group] = false
+        return { ...i, tfVisibility: tf }
+      })
+    },
+    resetLook(uidToEdit) {
+      edit(uidToEdit, withoutLook)
+    },
+    loadTemplate(data) {
+      items = sanitizeIndicators(remapUids(data, () => uidWith(prefix)), max, prefix)
       commit()
     },
     subscribe(fn) {

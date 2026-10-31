@@ -11,8 +11,15 @@
 // and split into buy/sell by where the close sits within the range. That is a
 // standard approximation when tick data is not available — the UI labels these
 // as estimates rather than passing them off as exchange data.
+//
+// The footprint is the exception for bars the page has watched live: those
+// use the real aggTrades (orderflow/footprintSource), and only older bars
+// fall back to the model, drawn dimmer with a dashed body so the two are
+// never confused.
 import type { CandleFlat } from '../../../services/market'
 import { kagiView, pointFigureView } from './reversalViews.ts'
+import { realFootprint } from '../orderflow/footprintSource.ts'
+import { imbalances, pocRow, stackedImbalances } from '../orderflow/footprintBook.ts'
 
 type Any = any
 
@@ -271,12 +278,25 @@ export function compactVol(v: number): string {
   return a >= 10 ? v.toFixed(0) : v.toFixed(1)
 }
 
-/** Buy/sell volume per price bucket, printed inside each bar. */
+/** Diagonal buy/sell ratio that counts as an imbalance, and rows that make a stack. */
+const IMB_RATIO = 3
+const IMB_STACK = 3
+
+/**
+ * Buy/sell volume per price bucket, printed inside each bar. Bars the page
+ * saw trade live carry real taker volume per row, with diagonal imbalances,
+ * stacked imbalances and the bar's point of control marked; older bars are
+ * modelled (see distribute) and drawn dimmer with a dashed body. Imbalances
+ * and the POC are left off modelled bars on purpose: the model peaks at the
+ * close and splits every row in the same ratio, so marking them would only
+ * restate the model.
+ */
 export function footprintView(): Any {
   return makeView((r, data, o, toY) => {
     const { ctx, hRatio, vRatio } = r
     const vis = data.visibleRange
     if (!vis) return
+    const bars = data.bars
     // Never wider than a bar slot, so neighbouring footprints cannot overlap
     // when zoomed out; too narrow for a grid to read, the cell outlines go.
     const cellW = Math.max(1, data.barSpacing * 0.92) * hRatio
@@ -284,9 +304,18 @@ export function footprintView(): Any {
     const showText = data.barSpacing > 46
     let maxCell = 0
     const rowsPerBar: Array<ReturnType<typeof distribute>> = []
+    const realPerBar: Array<'real' | 'partial' | null> = []
     for (let i = vis.from; i < vis.to; i++) {
-      const rows = distribute(data.bars[i].originalData, o.rows)
+      const d: CandleData = bars[i].originalData
+      const real = realFootprint(
+        d,
+        i > 0 ? (bars[i - 1].originalData?.ms ?? null) : null,
+        i < bars.length - 1 ? (bars[i + 1].originalData?.ms ?? null) : null,
+        o.rows,
+      )
+      const rows = real ? real.rows : distribute(d, o.rows)
       rowsPerBar.push(rows)
+      realPerBar.push(real ? real.coverage : null)
       rows.forEach((c) => {
         maxCell = Math.max(maxCell, c.buy, c.sell)
       })
@@ -294,10 +323,19 @@ export function footprintView(): Any {
     ctx.font = Math.round(9 * vRatio) + 'px JetBrains Mono, monospace'
     ctx.textBaseline = 'middle'
     for (let i = vis.from; i < vis.to; i++) {
-      const bar = data.bars[i]
+      const bar = bars[i]
       const rows = rowsPerBar[i - vis.from]
+      const real = realPerBar[i - vis.from]
       const x = bar.x * hRatio
       const left = x - cellW / 2
+      let barMax = 0
+      rows.forEach((c) => (barMax = Math.max(barMax, c.buy, c.sell)))
+      // A side needs a few percent of the bar's biggest cell to count, so a
+      // stray print against an empty row does not light up.
+      const flags = real ? imbalances(rows, IMB_RATIO, barMax * 0.03) : null
+      const poc = real ? pocRow(rows) : -1
+      const tops: Array<number | null> = []
+      const bots: Array<number | null> = []
       // Each row's low is the row below's high (the same sum, so the same
       // number): convert every edge once instead of twice. This repaints on
       // every live tick, and the conversions were most of its cost.
@@ -306,17 +344,33 @@ export function footprintView(): Any {
         const yBot = k > 0 ? below : toY(cell.lo)
         const yTop = toY(cell.hi)
         below = yTop
+        tops.push(yTop)
+        bots.push(yBot)
         if (yTop == null || yBot == null) return
         const h = Math.max(1, yBot - yTop)
         const sellW = maxCell ? (cell.sell / maxCell) * (cellW / 2) : 0
         const buyW = maxCell ? (cell.buy / maxCell) * (cellW / 2) : 0
-        ctx.fillStyle = 'rgba(255,23,68,.34)'
+        const imb = flags ? flags[k] : null
+        ctx.fillStyle = imb?.sell
+          ? 'rgba(255,23,68,.8)'
+          : real
+            ? 'rgba(255,23,68,.38)'
+            : 'rgba(255,23,68,.18)'
         ctx.fillRect(x - sellW, yTop, sellW, h)
-        ctx.fillStyle = 'rgba(0,230,118,.34)'
+        ctx.fillStyle = imb?.buy
+          ? 'rgba(0,230,118,.8)'
+          : real
+            ? 'rgba(0,230,118,.38)'
+            : 'rgba(0,230,118,.18)'
         ctx.fillRect(x, yTop, buyW, h)
         if (showGrid) {
           ctx.strokeStyle = o.gridColor
           ctx.lineWidth = Math.max(0.5, 0.5 * vRatio)
+          ctx.strokeRect(left, yTop, cellW, h)
+        }
+        if (k === poc) {
+          ctx.strokeStyle = 'rgba(255,213,79,.95)'
+          ctx.lineWidth = Math.max(1, 1.2 * hRatio)
           ctx.strokeRect(left, yTop, cellW, h)
         }
         if (showText && h > 10 * vRatio) {
@@ -335,14 +389,42 @@ export function footprintView(): Any {
           }
         }
       })
-      // Outline the bar's open/close so the price action stays readable.
+      // Stacked imbalances: a strip down the side they lean to (buyers on
+      // the right, sellers on the left) spanning the stacked rows.
+      if (flags) {
+        stackedImbalances(flags, IMB_STACK).forEach((run) => {
+          const yT = tops[run.to]
+          const yB = bots[run.from]
+          if (yT == null || yB == null) return
+          const w = Math.max(2, 2.5 * hRatio)
+          ctx.fillStyle = run.side === 'buy' ? 'rgba(0,230,118,.95)' : 'rgba(255,23,68,.95)'
+          ctx.fillRect(run.side === 'buy' ? left + cellW : left - w, yT, w, Math.max(1, yB - yT))
+        })
+      }
+      // Outline the bar's open/close so the price action stays readable;
+      // dashed when the bar is modelled.
       const d: CandleData = bar.originalData
       const yO = toY(d.open)
       const yC = toY(d.close)
       if (yO != null && yC != null) {
         ctx.strokeStyle = d.close >= d.open ? o.upColor : o.downColor
         ctx.lineWidth = Math.max(1, 1.4 * hRatio)
+        if (!real) ctx.setLineDash([3 * hRatio, 2 * hRatio])
         ctx.strokeRect(left, Math.min(yO, yC), cellW, Math.max(1, Math.abs(yC - yO)))
+        ctx.setLineDash([])
+      }
+      // The bar the page joined part-way through: real trades, but not all
+      // of them. A hollow dot over its high says so.
+      if (real === 'partial') {
+        const yH = toY(d.high)
+        if (yH != null) {
+          const rad = Math.max(2, 2.5 * vRatio)
+          ctx.strokeStyle = o.textColor
+          ctx.lineWidth = Math.max(1, hRatio)
+          ctx.beginPath()
+          ctx.arc(x, yH - rad * 2.5, rad, 0, Math.PI * 2)
+          ctx.stroke()
+        }
       }
     }
   })

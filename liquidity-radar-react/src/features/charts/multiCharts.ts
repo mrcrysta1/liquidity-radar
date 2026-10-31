@@ -36,6 +36,8 @@ import { createIndicatorRenderer } from './indicators/render'
 import type { IndicatorRenderer } from './indicators/render'
 import { panelIndicatorStore, prunePanelSlots, shiftPanelSlots } from './indicators/panelStore'
 import { parseMcPanels } from './savedLayoutsMath'
+import { getLinkGroup, getSyncOptions, registerTimeSync, shiftLinkGroups, subscribeLinks } from './linkGroups'
+import type { TimeSyncHandle } from './linkGroups'
 
 type Any = any
 
@@ -56,6 +58,8 @@ interface McPanel {
   /** The chart body element the grid handed over (null while unmounted). */
   el?: HTMLElement | null
   ro?: ResizeObserver | null
+  /** Its place in its link group's time-range sync (./linkGroups). */
+  timeLink?: TimeSyncHandle | null
   [key: string]: Any
 }
 
@@ -163,8 +167,68 @@ export function initMultiCharts(): void {
   // Indicator sets saved for panels beyond these belong to charts that are gone.
   prunePanelSlots('mc', mcPanels.length)
   ready = true
+  if (!linksWatched) {
+    linksWatched = true
+    subscribeLinks(mcAlignLinks)
+  }
+  mcAlignLinks()
   changed() // the grid mounts the panels; each body creates its chart
   poll(mcRefreshAll, 15000)
+}
+
+let linksWatched = false
+const keyOf = (p: McPanel) => 'mc' + mcPanels.indexOf(p)
+
+/**
+ * Point panel `p` at a coin and interval. The one place both change, so a
+ * linked change (mcChangeSymbol / mcChangeInterval spreading to the group)
+ * goes through the same steps as the user's own.
+ */
+function mcRepoint(p: McPanel, sym: string, interval: string): boolean {
+  if (p.sym === sym && p.interval === interval) return false
+  p.sym = sym
+  p.interval = interval
+  // Drop the old bars before the new ones load: live bars of the new
+  // interval were appended onto them, and a failed load left the mix on
+  // screen. A fresh chart also clears the old time points.
+  p.candles = []
+  mcCloseWS(p)
+  // A panel with no chart body loads when the grid mounts it (mcInitChart).
+  if (p.el) {
+    mcDisposeChart(p)
+    mcInitChart(p)
+  }
+  return true
+}
+
+/**
+ * Panels sharing `p`'s link group take its coin and/or interval, per the
+ * grid's sync options.
+ */
+function mcSpread(p: McPanel): void {
+  const o = getSyncOptions('mc')
+  const g = getLinkGroup(keyOf(p))
+  if (!g || (!o.symbol && !o.interval)) return
+  mcPanels.forEach((q) => {
+    if (q === p || getLinkGroup(keyOf(q)) !== g) return
+    mcRepoint(q, o.symbol ? p.sym : q.sym, o.interval ? p.interval : q.interval)
+  })
+}
+
+/** Groups or options changed: each group lines up behind its first panel. */
+function mcAlignLinks(): void {
+  const o = getSyncOptions('mc')
+  if (!o.symbol && !o.interval) return
+  const lead = new Map<string, McPanel>()
+  let moved = false
+  mcPanels.forEach((p) => {
+    const g = getLinkGroup(keyOf(p))
+    if (!g) return
+    const l = lead.get(g)
+    if (!l) lead.set(g, p)
+    else if (mcRepoint(p, o.symbol ? l.sym : p.sym, o.interval ? l.interval : p.interval)) moved = true
+  })
+  if (moved && ready) changed()
 }
 
 function blankPanel(sym: string, interval: string): McPanel {
@@ -272,6 +336,8 @@ function mcUpdateLast(p: McPanel, c: Any): void {
 export function mcAdd(sym: string, interval: string): void {
   if (!mcCanAdd()) return
   mcPanels.push(blankPanel(sym || 'BTCUSDT', interval || '1h'))
+  // A new panel in a linked group joins it on the group's coin and interval.
+  mcAlignLinks()
   changed() // the grid mounts the new panel; its body creates the chart and loads data
 }
 
@@ -280,8 +346,11 @@ export function mcRemove(id: number): void {
   if (idx === -1) return
   // The panels after it move up a place, and their indicators with them.
   shiftPanelSlots('mc', idx, mcPanels.length)
+  const count = mcPanels.length
   mcTearDown(mcPanels[idx])
   mcPanels.splice(idx, 1)
+  // Link groups too, once the list matches: their listeners read it.
+  shiftLinkGroups('mc', idx, count)
   // Their charts stay; only their indicator renderers follow the new slots.
   mcPanels.slice(idx).forEach(mcBindIndicators)
   changed()
@@ -307,6 +376,8 @@ function mcCloseWS(p: McPanel): void {
  */
 function mcDisposeChart(p: McPanel): void {
   mcDropIndicators(p)
+  p.timeLink?.off()
+  p.timeLink = null
   p.ro?.disconnect()
   p.ro = null
   if (p.chart) {
@@ -371,6 +442,7 @@ function mcInitChart(p: McPanel): void {
       textColor: th.txt,
       fontSize: 10,
       fontFamily: "'JetBrains Mono', monospace",
+      panes: { separatorColor: th.grid },
     },
     grid: { vertLines: { color: th.grid }, horzLines: { color: th.grid } },
     rightPriceScale: { borderColor: th.border },
@@ -433,12 +505,22 @@ function mcInitChart(p: McPanel): void {
   const ro = new ResizeObserver(function () {
     if (!c || !el.clientWidth) return
     c.applyOptions({ width: el.clientWidth, height: el.clientHeight || 260 })
-    if (fitW < 60 && el.clientWidth >= 60 && p.candles.length) c.timeScale().fitContent()
+    if (fitW < 60 && el.clientWidth >= 60 && p.candles.length) {
+      c.timeScale().fitContent()
+      p.timeLink?.adopt()
+    }
     fitW = el.clientWidth
   })
   ro.observe(el)
   p.ro = ro
   p.chart = c
+  p.timeLink = registerTimeSync({
+    scope: 'mc',
+    key: () => keyOf(p),
+    chart: c,
+    owns: (t) => el.contains(t),
+    times: () => p.candles.map((k: Any) => Math.floor(k.t / 1000)),
+  })
   p.candleSeries = cs
   p.volSeries = vs
   p.rsiSeries = rs
@@ -448,6 +530,7 @@ function mcInitChart(p: McPanel): void {
   // goes back to the network.
   if (p.candles.length) {
     mcSetAll(p)
+    p.timeLink?.adopt()
     if (!p.ws || p.ws._dead) mcConnectWS(p)
   } else mcLoadData(p)
 }
@@ -501,6 +584,8 @@ function mcLoadData(p: McPanel): void {
       if (p.candleSeries) {
         mcSetAll(p)
         p.chart.timeScale().fitContent()
+        // Linked panels open on their group's time range.
+        p.timeLink?.adopt()
       }
       mcConnectWS(p)
     })
@@ -558,30 +643,20 @@ function mcConnectWS(p: McPanel): void {
 }
 
 export function mcChangeInterval(id: number, iv: string): void {
-  const p = mcPanels.find(function (x) {
-    return x.id === id
-  })
+  const p = mcPanels.find((x) => x.id === id)
   if (!p) return
-  p.interval = iv
-  mcCloseWS(p)
-  mcLoadData(p)
+  mcRepoint(p, p.sym, iv)
+  mcSpread(p)
   changed()
 }
 
 export function mcChangeSymbol(id: number, sym: string): void {
-  const p = mcPanels.find(function (x) {
-    return x.id === id
-  })
+  const p = mcPanels.find((x) => x.id === id)
   if (!p) return
-  p.sym = sym
-  p.candles = []
-  mcCloseWS(p)
-  // A fresh chart for this panel only (it loads the new symbol's data);
-  // every other panel keeps its chart.
-  if (p.el) {
-    mcDisposeChart(p)
-    mcInitChart(p)
-  }
+  // A fresh chart for this panel (and its linked panels) only; every other
+  // panel keeps its chart.
+  mcRepoint(p, sym, p.interval)
+  mcSpread(p)
   changed()
 }
 
@@ -614,6 +689,21 @@ function mcRefreshAll(): void {
   })
 }
 
+/** A new chart time zone: redraw each grid cell so its day labels move (see reweightTimeScale). */
+export function mcReweight(): void {
+  mcPanels.forEach((p) => {
+    if (!p.chart || !p.candleSeries || !p.candles.length) return
+    const ts = p.chart.timeScale()
+    const keep = ts.getVisibleLogicalRange()
+    p.candleSeries.setData([])
+    p.volSeries?.setData([])
+    p.rsiSeries?.setData([])
+    p.ind?.blank()
+    mcSetAll(p)
+    if (keep) ts.setVisibleLogicalRange(keep)
+  })
+}
+
 export function mcApplyTheme(): void {
   mcPanels.forEach(function (p) {
     if (p.chart) {
@@ -621,7 +711,7 @@ export function mcApplyTheme(): void {
       const tz = chartTzOptions(() => isDailyTf(p.interval))
       p.chart.applyOptions({
         localization: tz.localization,
-        layout: { background: { type: 'solid', color: th.bg }, textColor: th.txt },
+        layout: { background: { type: 'solid', color: th.bg }, textColor: th.txt, panes: { separatorColor: th.grid } },
         grid: { vertLines: { color: th.grid }, horzLines: { color: th.grid } },
         rightPriceScale: { borderColor: th.border },
         timeScale: { ...tz.timeScale, borderColor: th.border },

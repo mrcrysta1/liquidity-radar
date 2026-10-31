@@ -20,6 +20,7 @@ import {
 import { mainIndicatorStore } from '../../features/charts/indicators/store'
 import type { IndicatorStore } from '../../features/charts/indicators/store'
 import { getDraft, setDraft } from '../../features/charts/pine/draft'
+import { openStrategyTester } from './mountStrategyTester'
 
 const IND = '    '
 
@@ -70,6 +71,8 @@ export function PinePanel({ store = mainIndicatorStore }: { store?: IndicatorSto
   const inst = uid ? getIndicators().find((i) => i.uid === uid) : undefined
   const live = inst ? pineStatus(inst) : null
 
+  /** The last compile was a strategy() (Add then opens the tester). */
+  const isStrategy = useRef(false)
   const compile = (): boolean => {
     const r = checkScript(code)
     if (r.error) {
@@ -83,7 +86,12 @@ export function PinePanel({ store = mainIndicatorStore }: { store?: IndicatorSto
       res.hlines.length ? res.hlines.length + ' hline' + (res.hlines.length === 1 ? '' : 's') : '',
       res.inputs.length ? res.inputs.length + ' input' + (res.inputs.length === 1 ? '' : 's') : '',
       res.overlay ? 'price overlay' : 'own pane',
+      res.strategy ? 'strategy' : '',
+      res.alertconditions?.length
+        ? res.alertconditions.length + ' alert condition' + (res.alertconditions.length === 1 ? '' : 's')
+        : '',
     ].filter(Boolean)
+    isStrategy.current = !!res.strategy
     const ignored = res.warnings.length ? ' · ignored: ' + res.warnings.join(', ') : ''
     setMsg({ kind: 'ok', text: 'Compiled — ' + parts.join(' · ') + ignored })
     return true
@@ -99,6 +107,8 @@ export function PinePanel({ store = mainIndicatorStore }: { store?: IndicatorSto
     if (id) {
       setTarget({ uid: id })
       setMsg({ kind: 'ok', text: 'Added "' + title() + '" to the chart.' })
+      // As on TradingView, a strategy added to the chart opens its results.
+      if (isStrategy.current) openStrategyTester(store, id)
     }
   }
   const update = () => {
@@ -175,7 +185,7 @@ export function PinePanel({ store = mainIndicatorStore }: { store?: IndicatorSto
 
   const lineCount = code.split('\n').length
   const saved = savedScripts()
-  const errLine = msg?.kind === 'err' ? msg.line : undefined
+  const errLine = msg ? (msg.kind === 'err' ? msg.line : undefined) : live?.errorLine
 
   return (
     <div className="pine-panel">
@@ -259,6 +269,15 @@ export function PinePanel({ store = mainIndicatorStore }: { store?: IndicatorSto
         <button type="button" className="pine-btn" onClick={save}>
           {savedId && saved.some((s) => s.id === savedId) ? 'Save' : 'Save to My scripts'}
         </button>
+        {inst && live?.strategy ? (
+          <button
+            type="button"
+            className="pine-btn"
+            onClick={() => openStrategyTester(store, inst.uid)}
+          >
+            Strategy Tester
+          </button>
+        ) : null}
       </div>
 
       {msg ? (
@@ -273,12 +292,18 @@ export function PinePanel({ store = mainIndicatorStore }: { store?: IndicatorSto
       ) : live?.error ? (
         <div className="pine-msg err" role="alert">
           On chart: {live.error}
+          {live.errorLine ? (
+            <button type="button" className="pine-jump" onClick={() => jumpTo(live.errorLine!)}>
+              Go to line {live.errorLine}
+            </button>
+          ) : null}
         </div>
       ) : (
         <div className="pine-msg">
-          Pine v5 subset: indicator, input.*, plot, hline, plotshape/plotchar, var, :=, x[n],
-          if/for/while, functions, tuples, ta.*, math.*, color.*. Not run: strategy orders, drawings
-          (label/line/box/table), request.security.
+          Pine v5 subset: indicator, strategy (entry/exit/close/order — Strategy Tester), input.*,
+          plot, hline, fill, plotshape/plotchar, alertcondition, var, :=, x[n], if/for/while,
+          functions, tuples, array.*, ta.*, math.*, color.*. Not drawn: bgcolor/barcolor, drawings
+          (label/line/box/table). Not run: request.security.
         </div>
       )}
 

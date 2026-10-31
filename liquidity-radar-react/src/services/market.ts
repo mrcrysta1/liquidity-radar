@@ -42,12 +42,16 @@ export interface CandleFlat {
   l: number
   c: number
   v: number
+  /** Taker-buy volume (Binance klines): buy minus sell = 2 × tb − v. */
+  tb?: number
 }
 
 export function mdFlat(c: unknown): CandleFlat | null {
   if (!c) return null
   const x = c as CandleFlat
-  return { t: x.t, o: +x.o, h: +x.h, l: +x.l, c: +x.c, v: +x.v }
+  const out: CandleFlat = { t: x.t, o: +x.o, h: +x.h, l: +x.l, c: +x.c, v: +x.v }
+  if (x.tb != null && Number.isFinite(+x.tb)) out.tb = +x.tb
+  return out
 }
 
 export function mdFromK(k: unknown): CandleFlat | null {
@@ -60,6 +64,8 @@ export function mdFromK(k: unknown): CandleFlat | null {
     l: Number(a[3]),
     c: Number(a[4]),
     v: Number(a[5]),
+    // Binance rows carry the taker-buy volume at index 9 (other feeds do not).
+    ...(a.length > 9 && Number.isFinite(Number(a[9])) ? { tb: Number(a[9]) } : {}),
   }
 }
 

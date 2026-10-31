@@ -50,6 +50,49 @@ export function profileWindow(candles: CandleFlat[], windowMs = 24 * 60 * 60 * 1
 }
 
 /**
+ * What the chart overlay profiles, TradingView's volume-profile family:
+ *  - 'visible': the bars on screen — Visible Range VP, follows scroll and zoom;
+ *  - 'session': the current UTC day — Session VP;
+ *  - 'all': the recent loaded history (profileWindow), the original behaviour.
+ */
+export type VpMode = 'visible' | 'session' | 'all'
+export const VP_MODES: readonly VpMode[] = ['visible', 'session', 'all']
+export const VP_MODE_DEFAULT: VpMode = 'all'
+export function isVpMode(x: unknown): x is VpMode {
+  return typeof x === 'string' && (VP_MODES as readonly string[]).includes(x)
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000
+/** Most bars a visible-range profile reads: a fully zoomed-out 1m chart is ~5000. */
+const VISIBLE_MAX = 5000
+
+/**
+ * The candles a profile in `mode` covers. `range` is the visible time span in
+ * ms ('visible' only); without one (no chart laid out yet) it falls back to
+ * the loaded window rather than drawing nothing.
+ */
+export function profileCandles(
+  mode: VpMode,
+  candles: CandleFlat[],
+  range?: { from: number; to: number } | null,
+): CandleFlat[] {
+  if (!candles.length) return []
+  if (mode === 'session') {
+    // The UTC day the newest bar is in. On a daily-or-longer interval that is
+    // one bar, which still gives an honest (if coarse) single-bar profile.
+    const last = candles[candles.length - 1].t
+    const dayStart = Math.floor(last / DAY_MS) * DAY_MS
+    const w = candles.filter((c) => c.t >= dayStart)
+    return w.length ? w : candles.slice(-1)
+  }
+  if (mode === 'visible' && range && range.to >= range.from) {
+    const w = candles.filter((c) => c.t >= range.from && c.t <= range.to)
+    return w.length > VISIBLE_MAX ? w.slice(-VISIBLE_MAX) : w
+  }
+  return profileWindow(candles)
+}
+
+/**
  * Profile of exactly these candles. Each bar's volume is spread evenly over
  * every row its high–low range touches (not dumped at its close, which
  * skews the POC toward wherever bars happened to settle), and attributed to

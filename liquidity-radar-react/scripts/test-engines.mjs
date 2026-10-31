@@ -1643,7 +1643,7 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   const kl = (closes) => closes.map((c, i) => ({ t: i * 60000, o: c, h: c + 1, l: c - 1, c, v: 1 }))
   const ramp = (n, f) => Array.from({ length: n }, (_, i) => f(i))
 
-  eq('alerts: limits', ALERT_LIMITS, { price: 1000, technical: 1000, watchlist: 15 })
+  eq('alerts: limits', ALERT_LIMITS, { price: 1000, technical: 1000, watchlist: 15, cond: 400 })
 
   // The charted candles only stand in for a rule when they are that market's.
   {
@@ -3406,11 +3406,14 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
     { time: 400, price: 25 },
   ])
   eq('edit: fractional bar shift rounds', E.shiftPoints(pts, 1.4, times, up)[0].time, 300)
-  eq('edit: clamped at the right end keeps the shape', E.shiftPoints(pts, 9, times, up), [
-    { time: 400, price: 15 },
-    { time: 500, price: 25 },
+  // Past the loaded bars the shift carries on in whole bars (a target in the
+  // future, history not loaded yet), keeping the shape.
+  eq('edit: past the right end, in whole bars', E.shiftPoints(pts, 9, times, up), [
+    { time: 1100, price: 15 },
+    { time: 1200, price: 25 },
   ])
-  eq('edit: clamped at the left end', E.shiftPoints(pts, -9, times, up)[0].time, 100)
+  eq('edit: past the left end too', E.shiftPoints(pts, -9, times, up)[0].time, -700)
+  eq('edit: an anchor already in the future can move right', E.shiftPoints([{ time: 700, price: 1 }], 1, times, up)[0].time, 800)
   eq('edit: vertical-only drag keeps off-bar times', E.shiftPoints([{ time: 250, price: 1 }], 0, times, up), [
     { time: 250, price: 6 },
   ])
@@ -3540,6 +3543,717 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   Z.fillZonedWeights(inc, 10, 'Asia/Karachi', false)
   eq('zoned ticks: incremental fill equals a full fill', inc.slice(10).map((x) => x.timeWeight), part.slice(10).map((x) => x.timeWeight))
   eq('zoned ticks: year beats month beats day', [Z.weightBetween(Date.UTC(2027, 0, 1), Date.UTC(2026, 11, 31)), Z.weightBetween(Date.UTC(2026, 10, 1), Date.UTC(2026, 9, 31))], [70, 60])
+}
+
+// ---- round 2: reloads keep paged history; Pine results line up by time -----------
+{
+  const T = await import(src('services/timeframe.ts'))
+  const k = (t, c = t) => ({ t, o: c, h: c, l: c, c, v: 1 })
+  const current = [k(1), k(2), k(3), k(4), k(5)]
+  const fresh = [k(4, 40), k(5, 50), k(6, 60)]
+  eq('reload: older history kept, overlap replaced', T.mergeReload(current, fresh).map((c) => c.c), [1, 2, 3, 40, 50, 60])
+  eq('reload: capped at max, oldest dropped', T.mergeReload(current, fresh, 4).map((c) => c.t), [3, 4, 5, 6])
+  eq('reload: nothing on screen yet', T.mergeReload([], fresh).length, 3)
+  const P = await import(src('features/charts/pine/indicator.ts'))
+  const run = [k(10, 1), k(20, 2), k(30, 3)]
+  const series = { a: [100, 200, 300] }
+  eq('pine align: same candles as is', P.alignByTime(series, run, run).a, [100, 200, 300])
+  const paged = [k(0, 9), k(10, 1), k(20, 2), k(30, 3)]
+  eq('pine align: history paged in front', P.alignByTime(series, run, paged).a, [null, 100, 200, 300])
+  const other = [k(10, 7), k(20, 8), k(30, 9)]
+  eq('pine align: another coin draws nothing', P.alignByTime(series, run, other).a, [null, null, null])
+}
+
+// ---- round 2: intrabar alert crosses, on-close technicals, Pine context ----------
+{
+  const R = await import(src('features/alerts/rules.ts'))
+  const up = { condition: 'crosses_above', value: 100 }
+  eq('alert: a wick through the level between samples crosses', R.evalPrice(up, 99, 98, 0, { hi: 101, lo: 97 }), true)
+  eq('alert: no wick, no cross', R.evalPrice(up, 99, 98, 0, { hi: 99.5, lo: 97 }), false)
+  eq('alert: a plain cross still fires', R.evalPrice(up, 101, 99, 0), true)
+  const flat = Array.from({ length: 70 }, () => ({ c: 100 }))
+  const spike = flat.concat([{ c: 200 }])
+  const sma = { condition: 'close_above_sma', value: 50 }
+  eq('alert: forming bar judged by default', R.evalTechnical(sma, spike), true)
+  eq('alert: on bar close ignores the forming bar', R.evalTechnical({ ...sma, onClose: true }, spike), false)
+  const P = await import(src('features/charts/pine/indicator.ts'))
+  eq('pine period: minutes, hours, day, week, month, seconds', ['15m', '4h', '1d', '1w', '1M', '30s'].map(P.pinePeriod), ['15', '240', 'D', 'W', 'M', '30S'])
+  const RT = await import(src('features/charts/pine/runtime.ts'))
+  eq('pine gradient: midpoint blends', RT.gradientColor(50, 0, 100, '#000000', '#ffffff'), 'rgba(128,128,128,1.00)')
+  eq('pine gradient: clamped at the ends', RT.gradientColor(150, 0, 100, '#000000', '#ffffff'), 'rgba(255,255,255,1.00)')
+}
+
+// ---- r3-sync: link groups (features/charts/linkGroupsMath) ----
+{
+  const L = await import(src('features/charts/linkGroupsMath.ts'))
+  // Stored state: junk falls back to defaults; bad keys and groups are dropped.
+  const d = L.parseLinkState(null)
+  eq('link: default opts', d.opts.layout, { symbol: false, interval: false, time: true })
+  eq('link: default groups empty', d.groups, {})
+  const p = L.parseLinkState({
+    groups: { c1: 'B', mc0: null, mc2: 'Z', foo: 'A', c99x: 'A' },
+    opts: { layout: { symbol: true, time: 'yes' }, mc: 7 },
+  })
+  eq('link: parsed groups', p.groups, { c1: 'B', mc0: null })
+  eq('link: parsed opts keep good bools', p.opts.layout, { symbol: true, interval: false, time: true })
+  eq('link: junk scope opts default', p.opts.mc, { symbol: false, interval: false, time: true })
+  eq('link: unset key is in the default group', L.groupOf(p.groups, 'c3'), 'A')
+  eq('link: explicit none stays none', L.groupOf(p.groups, 'mc0'), null)
+  // Removing grid panel 1 of 4: panels 2 and 3 move up with their groups.
+  eq(
+    'link: shift after removal',
+    L.shiftGroups({ mc0: 'A', mc1: 'B', mc2: null, mc3: 'C' }, 'mc', 1, 4),
+    { mc0: 'A', mc1: null, mc2: 'C' },
+  )
+  eq('link: shift keeps other prefixes', L.shiftGroups({ c1: 'B', mc0: 'C' }, 'mc', 0, 1), { c1: 'B' })
+  // Time <-> index on hourly bars (seconds).
+  const H = 3600
+  const t0 = Date.UTC(2026, 9, 14, 0) / 1000
+  const hourly = Array.from({ length: 10 }, (_, i) => t0 + i * H)
+  eq('link: exact bar', L.timeToLogical(hourly, t0 + 3 * H), 3)
+  eq('link: between bars', L.timeToLogical(hourly, t0 + 3.5 * H), 3.5)
+  eq('link: past the live bar extrapolates', L.timeToLogical(hourly, t0 + 12 * H), 12)
+  eq('link: before the first bar extrapolates', L.timeToLogical(hourly, t0 - 2 * H), -2)
+  eq('link: no bars', L.timeToLogical([], t0), null)
+  eq('link: inverse inside', L.logicalToTime(hourly, 4.25), t0 + 4.25 * H)
+  eq('link: inverse right offset', L.logicalToTime(hourly, 11), t0 + 11 * H)
+  // A 1h view of bars 2..8 (+ 2 bars of right offset) on a 15m chart.
+  const q = Array.from({ length: 60 }, (_, i) => t0 + i * 900)
+  const w = L.rangeToTimes(hourly, { from: 2, to: 11 })
+  eq('link: window in time', w, { from: t0 + 2 * H, to: t0 + 11 * H })
+  eq('link: window on the 15m chart', L.timesToRange(q, w), { from: 8, to: 44 })
+  // A 15m window of one bar on the hourly chart widens to two bars.
+  const narrow = L.timesToRange(hourly, { from: t0 + 3 * H, to: t0 + 3 * H + 900 })
+  eq('link: narrow window widened', narrow, { from: 2.125, to: 4.125 })
+  eq('link: empty window rejected', L.rangeToTimes(hourly, { from: 3, to: 3 }), null)
+  // Round trip across a weekend gap stays on the same bars.
+  const gap = [t0, t0 + H, t0 + 50 * H, t0 + 51 * H]
+  eq('link: gap round trip', L.timeToLogical(gap, L.logicalToTime(gap, 1.5)), 1.5)
+}
+
+// ---- r3-compare: ratio / spread symbols, compare lines, volume-profile modes ----
+{
+  const S = await import(src('services/syntheticSymbol.ts'))
+  eq('synth: ratio parses', S.parseSynthetic('btcusdt/ethusdt'), { expr: 'BTCUSDT/ETHUSDT', a: 'BTCUSDT', op: '/', b: 'ETHUSDT', k: 0 })
+  eq('synth: spread with spaces', S.parseSynthetic(' BTCUSDT - ETHUSDT ')?.expr, 'BTCUSDT-ETHUSDT')
+  eq('synth: bare tickers get USDT', S.parseSynthetic('BTC/ETH')?.expr, 'BTCUSDT/ETHUSDT')
+  eq('synth: constant', S.parseSynthetic('BTCUSDT*2'), { expr: 'BTCUSDT*2', a: 'BTCUSDT', op: '*', b: null, k: 2 })
+  eq('synth: a pair written BTC/USDT is not a ratio', S.parseSynthetic('BTC/USDT'), null)
+  eq('synth: a pair written BTC-USDT is not a spread', S.parseSynthetic('BTC-USDT'), null)
+  eq('synth: plain symbol', S.parseSynthetic('BTCUSDT'), null)
+  eq('synth: divide by zero rejected', S.parseSynthetic('BTCUSDT/0'), null)
+  eq('synth: two operators rejected', S.parseSynthetic('A1/B1/C1'), null)
+  eq('synth: whole symbols kept', S.parseSynthetic('XAUUSD/BTC', (x) => x === 'XAUUSD')?.expr, 'XAUUSD/BTCUSDT')
+  const bar = (t, o, h, l, c, v = 1) => ({ t, o, h, l, c, v })
+  const A = [bar(3, 30, 33, 29, 32, 5), bar(1, 10, 12, 9, 11, 7), bar(2, 20, 22, 19, 21, 6)]
+  const B = [bar(1, 5, 6, 4, 5), bar(3, 10, 10, 10, 8)]
+  const r = S.combineSeries(A, B, '/')
+  eq('synth: joined on time only, sorted', r.map((x) => x.t), [1, 3])
+  eq('synth: ratio o/c per field', [r[0].o, r[0].c], [2, 2.2])
+  eq('synth: high/low widened to contain o/c', [r[1].h, r[1].l, r[1].c], [4, 2.9, 4])
+  eq('synth: volume is the first leg', r[1].v, 5)
+  const d = S.combineSeries(A, B, '-')
+  eq('synth: spread', [d[0].o, d[0].c, d[0].h, d[0].l], [5, 6, 6, 5])
+  eq('synth: scalar', S.scaleSeries([bar(1, 1, 2, 0.5, 1.5)], '*', 2)[0], bar(1, 2, 4, 1, 3))
+  eq('synth: zero denominator bar dropped', S.combineSeries([bar(1, 1, 1, 1, 1)], [bar(1, 0, 0, 0, 0)], '/'), [])
+
+  const C = await import(src('features/charts/compareMath.ts'))
+  const rows = [bar(100, 0, 0, 0, 10), bar(300, 0, 0, 0, 12)]
+  eq('compare: as-of join', C.asOfJoin([50, 100, 200, 300, 400], rows), [{ t: 100, v: 10 }, { t: 200, v: 10 }, { t: 300, v: 12 }, { t: 400, v: 12 }])
+  near('compare: pct from first visible', C.pctFrom([{ t: 1, v: 10 }, { t: 2, v: 20 }, { t: 3, v: 25 }], 2), 25)
+  eq('compare: pct with no points', C.pctFrom([], 0), null)
+  eq('compare: pct format', [C.fmtPct(1.234), C.fmtPct(-0.4), C.fmtPct(null)], ['+1.23%', '−0.40%', '—'])
+  eq('compare: depth stepped', [C.compareDepth(10), C.compareDepth(501), C.compareDepth(99999)], [500, 1000, 5000])
+  eq('compare: merge tail', C.mergeTail([bar(1, 0, 0, 0, 1), bar(2, 0, 0, 0, 2)], [bar(2, 0, 0, 0, 3), bar(3, 0, 0, 0, 4)]).map((x) => x.c), [1, 3, 4])
+
+  const V = await import(src('features/charts/volumeProfile.ts'))
+  const H = 3600_000
+  const day = Date.UTC(2026, 9, 30)
+  const cs = Array.from({ length: 48 }, (_, i) => bar(day - 24 * H + i * H, 1, 2, 0.5, 1.5, 1))
+  eq('vp mode: session starts at the current UTC day', V.profileCandles('session', cs)[0].t, day)
+  eq('vp mode: session bar count', V.profileCandles('session', cs).length, 24)
+  eq('vp mode: visible range', V.profileCandles('visible', cs, { from: day, to: day + 2 * H }).length, 3)
+  eq('vp mode: visible without a range falls back', V.profileCandles('visible', cs).length, V.profileWindow(cs).length)
+  eq('vp mode: all is the loaded window', V.profileCandles('all', cs).length, V.profileWindow(cs).length)
+  eq('vp mode: guard', [V.isVpMode('session'), V.isVpMode('x')], [true, false])
+}
+
+// ---- r3-drawings: angle constraint, stacking, position tool, anchored VWAP --------
+{
+  const O = await import(src('features/charts/drawings/ops.ts'))
+  eq('constrain: nearly flat snaps to horizontal', O.constrainAngle(0, 0, 100, 8), [100, 0])
+  eq('constrain: nearly vertical snaps to vertical', O.constrainAngle(0, 0, 6, -90), [0, -90])
+  const [dx, dy] = O.constrainAngle(0, 0, 50, 46)
+  ok('constrain: near 45 degrees snaps to the diagonal', Math.abs(dx - dy) < 1e-9 && dx > 45, [dx, dy])
+  eq('constrain: no movement stays put', O.constrainAngle(5, 5, 5, 5), [5, 5])
+  const L = ['a', 'b', 'c', 'd']
+  eq('order: bring to front returns the new index', O.reorder(L, 1, 'front'), 3)
+  eq('order: front moves it last (painted on top)', L, ['a', 'c', 'd', 'b'])
+  eq('order: send to back', [O.reorder(L, 2, 'back'), L], [0, ['d', 'a', 'c', 'b']])
+  eq('order: out of range is left alone', O.reorder(L, 9, 'front'), 9)
+  const orig = { type: 'trend', color: '#fff', points: [{ time: 1, price: 2 }], locked: true, hidden: true }
+  const copy = O.cloneDrawing(orig)
+  copy.points[0].price = 9
+  eq('clone: deep copy, never locked or hidden', [copy.locked, copy.hidden, orig.points[0].price, copy.type], [undefined, undefined, 2, 'trend'])
+  const st = O.positionStats('long', 100, 95, 110, 104, 10000, 1)
+  eq('position: quantity risks 1% at the stop', st.qty, 20)
+  eq('position: amounts and R:R', [st.riskAmt, st.rewardAmt, st.rr], [100, 200, 2])
+  eq('position: distances and % to target / stop', [st.targetDist, st.targetPct, st.stopDist, st.stopPct], [10, 10, -5, -5])
+  eq('position: open P&L at the last price', [st.pnl, st.pnlPct], [80, 0.8])
+  const sh = O.positionStats('short', 100, 105, 90, 104, 10000, 1)
+  eq('position: a short loses as price rises', [sh.qty, sh.pnl], [20, -80])
+  eq('position: no last price, no P&L', O.positionStats('long', 100, 95, 110, null).pnl, null)
+  eq('position: stop on the entry sizes nothing', O.positionStats('long', 100, 100, 110, 101).qty, 0)
+  const P = (e, s, t) => [{ time: 1, price: e }, { time: 2, price: s }, { time: 3, price: t }]
+  eq('sides: a long with the stop above entry is mirrored', O.fixPositionSides('long', P(100, 104, 110)).map((p) => p.price), [100, 96, 110])
+  eq('sides: a short with stop and target swapped', O.fixPositionSides('short', P(100, 95, 106)).map((p) => p.price), [100, 105, 94])
+  eq('sides: a correct long is untouched', O.fixPositionSides('long', P(100, 95, 110)).map((p) => p.price), [100, 95, 110])
+  eq('sides: dragging clamps just short of the entry', O.fixPositionSides('long', P(100, 104, 110), true)[1].price, 99.95)
+  eq('sides: other tools pass through', O.fixPositionSides('trend', P(1, 2, 3)).map((p) => p.price), [1, 2, 3])
+  const bars = [
+    { h: 12, l: 9, c: 9, v: 2 },
+    { h: 21, l: 18, c: 21, v: 0 },
+    { h: 33, l: 27, c: 30, v: 1 },
+  ]
+  eq('avwap: cumulative typical price x volume', O.anchoredVwap(bars), [10, 10, 50 / 3])
+  eq('avwap: no volume yet falls back to the typical price', O.anchoredVwap([{ h: 3, l: 1, c: 2, v: 0 }]), [2])
+}
+
+// ---- r3-replay: paper trading + replay position maths ----------------------------
+{
+  const PT = await import(src('features/charts/paperTrading.ts'))
+  let b = PT.emptyBook()
+  b = PT.buy(b, 2, 100, 1)
+  eq('paper: buy opens a long', [b.pos, b.avg, b.openT], [2, 100, 1])
+  b = PT.buy(b, 2, 110, 2)
+  eq('paper: adding averages the entry', [b.pos, b.avg], [4, 105])
+  near('paper: unrealised marks the position', PT.unrealized(b, 115), 40)
+  b = PT.sell(b, 1, 125, 3)
+  eq('paper: partial close books a trade', [b.pos, b.avg, b.trades.length, b.realized], [3, 105, 1, 20])
+  b = PT.sell(b, 5, 95, 4)
+  eq('paper: selling through flips short', [b.pos, b.avg, b.openT], [-2, 95, 4])
+  near('paper: the covered slice is realised', b.realized, 20 - 30)
+  near('paper: short gains as price falls', PT.unrealized(b, 90), 10)
+  b = PT.flatten(b, 90, 5)
+  eq('paper: flatten closes the short', [b.pos, b.avg, b.trades.length], [0, 0, 3])
+  eq('paper: flatten when flat is a no-op', PT.flatten(b, 80, 6), b)
+  eq('paper: a bad size is ignored', PT.buy(b, 0, 100, 7), b)
+  eq('paper: a bad price is ignored', PT.sell(b, 1, NaN, 7), b)
+  eq('paper: every fill is kept', b.fills.map((f) => f.side), ['buy', 'buy', 'sell', 'sell', 'buy'])
+  const s = PT.summary(b, 90)
+  eq('paper: summary counts round trips', [s.trades, s.wins, s.losses], [3, 2, 1])
+  near('paper: win rate', s.winRate, 2 / 3)
+  near('paper: net = realised when flat', s.net, 20 - 30 + 10)
+  eq('paper: best and worst trade', [s.best, s.worst], [20, -30])
+  const o = PT.buy(PT.emptyBook(), 0.3, 10, 1)
+  const c = PT.sell(PT.sell(PT.sell(o, 0.1, 10, 2), 0.1, 10, 3), 0.1, 10, 4)
+  eq('paper: float dust does not leave a position', [c.pos, c.avg], [0, 0])
+  eq('paper: empty summary', PT.summary(PT.emptyBook(), 1).winRate, 0)
+
+  const RM = await import(src('features/charts/replayMath.ts'))
+  const bars = [{ t: 10 }, { t: 20 }, { t: 30 }, { t: 40 }]
+  eq('replay: count at or before a time', [5, 10, 25, 40, 99].map((t) => RM.countAtOrBefore(bars, t)), [0, 1, 2, 4, 4])
+  eq('replay: date lands on the bar at or after it', [5, 20, 25, 99].map((t) => RM.countFromDate(bars, t)), [1, 2, 3, 4])
+  eq('replay: date on no bars', RM.countFromDate([], 5), 0)
+  const rs = [0, 0.5, 0.999999].map((r) => RM.randomCount(100, () => r))
+  eq('replay: random bar stays off the ends', rs, [10, 50, 90])
+  eq('replay: random on one bar', RM.randomCount(1, () => 0.7), 1)
+}
+
+// ---- round 3: alerts — conditions (AND), drawings, Pine, frequency, webhook ----
+{
+  const C = await import(src('features/alerts/conditions.ts'))
+  const R = await import(src('features/alerts/rules.ts'))
+  const k = (t, c, extra = {}) => ({ t, o: c, h: c, l: c, c, v: 1, ...extra })
+  const bars = [k(0, 10), k(1, 11), k(2, 13)]
+  const ctx = (outputs = {}, pine = {}) => ({ candles: bars, outputs, pine })
+  const close = { t: 'price', field: 'close' }
+  const val = (v) => ({ t: 'value', v })
+  // Lines: a segment ends where it was drawn; a ray runs on; a level holds from its start.
+  const seg = { t1: 0, p1: 10, t2: 2, p2: 14, span: 'segment' }
+  eq('cond line: segment interpolates', C.linePriceAt(seg, 1), 12)
+  eq('cond line: segment stops at its end', C.linePriceAt(seg, 3), null)
+  eq('cond line: ray extends forward', C.linePriceAt({ ...seg, span: 'ray' }, 3), 16)
+  eq('cond line: ray not before its start', C.linePriceAt({ ...seg, span: 'ray' }, -1), null)
+  eq('cond line: extended both ways', C.linePriceAt({ ...seg, span: 'extended' }, -1), 8)
+  eq('cond line: level', C.linePriceAt({ t1: 0, p1: 5, t2: 0, p2: 5, span: 'level' }, 99), 5)
+  // Drawings: chart seconds become candle ms; a parallel channel gives both sides.
+  const ch = C.drawingLines({ type: 'parallel', points: [{ time: 0, price: 10 }, { time: 2, price: 14 }, { time: 1, price: 15 }] })
+  eq('cond drawing: channel has two sides', ch.map((x) => x.label), ['Channel bottom', 'Channel top'])
+  eq('cond drawing: channel top offset by the third point', C.linePriceAt(ch[1].line, 1000), 15)
+  eq('cond drawing: hline is a level everywhere', C.drawingLines({ type: 'hline', points: [{ time: 50, price: 7 }] })[0].line.span, 'level')
+  eq('cond drawing: vline offers nothing', C.drawingLines({ type: 'vline', points: [{ time: 1, price: 1 }] }).length, 0)
+  // Operators.
+  eq('cond: crossing up a value', C.evalCond({ a: close, op: 'cross_up', b: val(12) }, ctx(), 2), true)
+  eq('cond: no cross on the first bar', C.evalCond({ a: close, op: 'cross', b: val(5) }, ctx(), 0), false)
+  eq('cond: crossing down is not crossing up', C.evalCond({ a: close, op: 'cross_down', b: val(12) }, ctx(), 2), false)
+  const sma = { t: 'out', uid: 'i1', key: 'v' }
+  eq('cond: greater than another series', C.evalCond({ a: close, op: 'gt', b: sma }, ctx({ 'i1.v': [9, 12, 12] }), 2), true)
+  eq('cond: missing series value never holds', C.evalCond({ a: close, op: 'gt', b: sma }, ctx({ 'i1.v': [9, 12, null] }), 2), false)
+  eq('cond: crossing a trend line', C.evalCond({ a: close, op: 'cross_up', b: { t: 'line', line: { t1: 0, p1: 11, t2: 2, p2: 12, span: 'segment' } } }, ctx(), 2), true)
+  const band = { op: 'enter', b: val(12), c: val(14) }
+  eq('cond: entering a channel', C.evalCond({ a: close, ...band }, ctx(), 2), true)
+  eq('cond: exiting needs to have been inside', C.evalCond({ a: close, ...band, op: 'exit' }, ctx(), 2), false)
+  eq('cond: inside channel (bounds in any order)', C.evalCond({ a: close, op: 'inside', b: val(14), c: val(12) }, ctx(), 2), true)
+  eq('cond: moving up % in N bars', C.evalCond({ a: close, op: 'up_pct', b: val(30), bars: 2 }, ctx(), 2), true)
+  eq('cond: moving up % below the threshold', C.evalCond({ a: close, op: 'up_pct', b: val(31), bars: 2 }, ctx(), 2), false)
+  const pineOp = { t: 'pine', uid: 'p1', idx: 0, title: 'Buy' }
+  const pine = { p1: [{ title: 'Sell', values: [true, true, true] }, { title: 'Buy', values: [false, false, true] }] }
+  eq('cond: Pine alertcondition found by title after an edit', C.evalCond({ a: pineOp, op: 'true' }, ctx({}, pine), 2), true)
+  eq('cond: Pine alertcondition false bar', C.evalCond({ a: pineOp, op: 'true' }, ctx({}, pine), 1), false)
+  eq('cond: AND of all conditions', C.evalConds([{ a: close, op: 'gt', b: val(12) }, { a: close, op: 'lt', b: val(14) }], ctx(), 2), true)
+  eq('cond: AND fails on one', C.evalConds([{ a: close, op: 'gt', b: val(12) }, { a: close, op: 'lt', b: val(13) }], ctx(), 2), false)
+  eq('cond: judged bar on close is the last closed one', [C.judgedBar(10, false), C.judgedBar(10, true)], [9, 8])
+  // Validation.
+  eq('cond norm: more than five rejected', C.normalizeConds(Array(6).fill({ a: close, op: 'gt', b: val(1) })), null)
+  eq('cond norm: channel needs both bounds', C.normalizeConds([{ a: close, op: 'enter', b: val(1) }]), null)
+  eq('cond norm: bars clamped', C.normalizeConds([{ a: close, op: 'up_pct', b: val(1), bars: 9999 }])[0].bars, 500)
+  eq('cond uids: outputs and Pine', C.condUids([{ a: sma, op: 'gt', b: { t: 'out', uid: 'i2', key: 'x' } }, { a: pineOp, op: 'true' }]), ['i1', 'i2', 'p1'])
+  const saved = R.normalizeRules([
+    { kind: 'cond', id: 'a', sym: 'BTCUSDT', tf: '1h', condition: 'conditions', value: 0, conds: [{ a: close, op: 'gt', b: val(1) }], inds: [{ uid: 'i1', type: 'sma', params: { len: 9 }, source: 'close' }], freq: 'bar', webhook: 'https://example.com/h', message: 'Hi {{ticker}}' },
+    { kind: 'cond', id: 'b', sym: 'BTCUSDT', condition: 'conditions', value: 0, conds: [] },
+    { kind: 'watchlist', id: 'c', condition: 'any_technical', tech: 'rsi_above', value: 70, tf: '1h' },
+    { kind: 'watchlist', id: 'd', condition: 'any_technical', tech: 'nope', value: 70 },
+    { kind: 'price', id: 'e', sym: 'BTCUSDT', condition: 'above', value: 1, webhook: 'http://example.com' },
+  ])
+  eq('rules norm: cond rule kept, empty conds dropped', saved.map((r) => r.id), ['a', 'c', 'e'])
+  eq('rules norm: cond extras kept', [saved[0].freq, saved[0].tf, saved[0].inds.length, saved[0].message], ['bar', '1h', 1, 'Hi {{ticker}}'])
+  eq('rules norm: watchlist technical keeps tech + tf', [saved[1].tech, saved[1].tf], ['rsi_above', '1h'])
+  eq('rules norm: http webhook dropped', saved[2].webhook, undefined)
+  // Frequency and expiry.
+  const base = { id: 'x', kind: 'cond', sym: 'BTCUSDT', condition: 'conditions', value: 0, once: false, enabled: true, created: 0, triggerCount: 0 }
+  const perBar = { ...base, freq: 'bar' }
+  const s1 = R.stepRule(perBar, true, 1000, undefined, 60000)
+  const s2 = R.stepRule(s1.next, true, 2000, undefined, 60000)
+  const s3 = R.stepRule(s2.next, true, 3000, undefined, 120000)
+  eq('freq bar: fires, not again in the bar, again next bar', [s1.fire, s2.fire, s3.fire], [true, false, true])
+  eq('freq: legacy once/every derived', [R.freqOf({ once: true }), R.freqOf({ once: false })], ['once', 'every'])
+  const exp = R.stepRule({ ...base, expires: 500 }, true, 1000)
+  eq('expiry: a rule past it switches off unfired', [exp.fire, exp.next.enabled], [false, false])
+  eq('every time: cooldown 0 refires on each new edge', R.stepRule({ ...base, cooldownMin: 0, lastTriggered: 999, lastState: false }, true, 1000).fire, true)
+  // Technical % moves and watchlist technicals.
+  const ramp = Array.from({ length: 70 }, (_, i) => ({ c: 100 }))
+  ramp.push({ c: 110 })
+  eq('tech: moving up % in N bars', R.evalTechnical({ condition: 'move_up_pct', value: 10, value2: 1 }, ramp), true)
+  eq('tech: moving down % not on a rise', R.evalTechnical({ condition: 'move_down_pct', value: 1, value2: 1 }, ramp), false)
+  const wt = R.evalWatchTech({ tech: 'move_up_pct', value: 5, value2: 1 }, [{ symbol: 'A', candles: ramp }, { symbol: 'B', candles: ramp.slice(0, 70) }])
+  eq('watchlist technical: only matching symbols', wt.matched, ['A'])
+  // Message templates and webhook URLs.
+  eq('template: placeholders filled, unknown kept', C.fillTemplate('{{ticker}} {{ close }} {{interval}} {{nope}}', { ticker: 'BTCUSDT', close: '1.5', interval: '1h' }), 'BTCUSDT 1.5 1h {{nope}}')
+  eq('webhook url: https host ok', C.validWebhookUrl(' https://hooks.example.com/x '), 'https://hooks.example.com/x')
+  eq('webhook url: http, IP, localhost, credentials refused', ['http://a.com', 'https://10.0.0.1/x', 'https://localhost/x', 'https://u:p@a.com'].map(C.validWebhookUrl), [null, null, null, null])
+  const W = await import(pathToFileURL(resolve(__dirname, '..', 'api', 'alert-webhook.mjs')).href)
+  eq('relay: private addresses', ['10.1.2.3', '127.0.0.1', '169.254.1.1', '172.20.0.1', '192.168.1.1', '100.64.0.1', '::1', 'fd00::1', '::ffff:10.0.0.1'].every(W.isPrivateAddress), true)
+  eq('relay: public addresses', ['8.8.8.8', '1.1.1.1', '2606:4700::1111'].some(W.isPrivateAddress), false)
+  eq('relay: target checks', ['https://a.example.com/h', 'https://a.example.com:8443/h', 'https://1.2.3.4/h', 'https://x.internal/h'].map((u) => !!W.webhookTarget(u)), [true, false, false, false])
+  eq('relay: JSON messages go out as JSON', [W.messageType('{"a":1}'), W.messageType('BTC up')], ['application/json', 'text/plain; charset=utf-8'])
+}
+
+// ---- r3-indicators: zigzag, auto fib, patterns, new indicators, style, templates ----
+{
+  const M = await import(src('features/charts/indicators/math.ts'))
+  const R = await import(src('features/charts/indicators/registry.ts'))
+  const S = await import(src('features/charts/indicators/store.ts'))
+  // A price path through the given turning points, 10 bars per leg.
+  const path = (pts, step = 60000) => {
+    const v = []
+    for (let k = 1; k < pts.length; k++)
+      for (let j = 0; j < 10; j++) v.push(pts[k - 1] + ((pts[k] - pts[k - 1]) * j) / 10)
+    v.push(pts[pts.length - 1])
+    return v.map((x, i) => ({ t: i * step, o: x, h: x, l: x, c: x, v: 1 }))
+  }
+  const turns = (z) => z.pivots.map((p) => [p.i, p.price, p.high])
+
+  // ZigZag: legs end on a 5% reversal; the last leg is still running.
+  const dt = path([100, 120, 105, 120, 100])
+  const z = M.zigzag(dt, 5, 3)
+  eq('zigzag: confirmed turns', turns(z), [[0, 100, false], [10, 120, true], [20, 105, false], [30, 120, true]])
+  eq('zigzag: running extreme of the live leg', [z.last.i, z.last.price, z.last.high], [40, 100, false])
+  eq('zigzag: a 20% deviation ignores the 12.5% dip', turns(M.zigzag(dt, 20, 3)), [[0, 100, false]])
+  // Depth: a leg shorter than `depth` bars cannot end.
+  eq('zigzag: depth 15 lets a 10-bar leg run on into the next', turns(M.zigzag(dt, 5, 15)), [[0, 100, false], [30, 120, true]])
+  const zl = M.zigzagLine(dt, 5, 3)
+  eq('zigzag line: values only at the turns', zl.map((v, i) => (v == null ? null : i)).filter((x) => x != null), [0, 10, 20, 30, 40])
+
+  // Auto Fib: last confirmed swing 105 (bar 20) → 120 (bar 30); 0 at 120.
+  const fib = M.autoFib(dt, 5, 3)
+  eq('auto fib: drawn from the swing start', fib.from, 20)
+  near('auto fib: 0 at the newest pivot', fib.levels[0], 120)
+  near('auto fib: 0.618 retracement', fib.levels[4], 120 - 15 * 0.618)
+  near('auto fib: 1 at the older pivot', fib.levels[6], 105)
+  eq('auto fib: nothing before the swing', [fib.series[4][19], fib.series[4][40]], [null, 120 - 15 * 0.618])
+  eq('auto fib: no swing, no levels', M.autoFib(path([100, 101]), 5, 3).levels, [])
+
+  // Chart patterns from pivots.
+  const kinds = (pts, dev = 5, tol = 1.5) =>
+    M.chartPatterns(M.zigzag(path(pts), dev, 3).pivots, tol).map((p) => p.kind)
+  eq('patterns: double top', kinds([90, 120, 100, 120.5, 95, 97]), ['dtop'])
+  eq('patterns: double bottom', kinds([130, 100, 120, 100.5, 125, 123]), ['dbot'])
+  eq('patterns: head & shoulders claims its pivots before a double bottom', kinds([100, 120, 110, 130, 110, 121, 95]), ['hs'])
+  eq('patterns: inverse head & shoulders', kinds([130, 110, 120, 100, 120, 109, 135]), ['ihs'])
+  eq('patterns: ascending triangle', kinds([90, 120, 100, 120, 110, 121, 100], 3), ['asc'])
+  eq('patterns: descending triangle', kinds([130, 100, 120, 100, 110, 99.5, 112], 3), ['desc'])
+  eq('patterns: symmetric triangle', kinds([90, 130, 100, 120, 108, 113], 3), ['sym'])
+  eq('patterns: unequal tops are no double top', kinds([90, 120, 100, 130, 95, 97]), [])
+  const hs = M.chartPatterns(M.zigzag(path([100, 120, 110, 130, 110, 121, 95]), 5, 3).pivots, 1.5)[0]
+  eq('patterns: H&S completes on the right shoulder, bearish', [hs.at, hs.bullish], [50, false])
+  const ps = M.patternSeries(70, [hs])
+  near('pattern series: outline interpolated between pivots', ps[0][15], 115)
+  eq('pattern series: gaps outside the pattern', [ps[0][9], ps[0][51], ps[2][15]], [null, null, null])
+  near('pattern series: neckline', ps[1][30], 110)
+
+  // Chandelier Exit: flat, then a collapse flips it short with a sell.
+  const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
+  const ceBars = Array.from({ length: 30 }, (_, i) => bar(i, 101, 99, 100)).concat([bar(30, 100, 80, 80)])
+  const ce = M.chandelier(ceBars, 5, 1)
+  near('chandelier: long stop = highest high - ATR', ce.long[20], 101 - 2)
+  eq('chandelier: no short stop while long', ce.short[20], null)
+  ok('chandelier: a close under the long stop flips short with a sell', ce.sell[30] != null && ce.long[30] == null && ce.short[30] != null)
+
+  // Fisher Transform: flat range reads the middle (0); trigger is a bar late.
+  const fl = M.fisher(Array.from({ length: 12 }, (_, i) => bar(i, 101, 99, 100)), 5)
+  near('fisher: flat range is 0', fl.fisher[11], 0)
+  eq('fisher: warms up after length bars', [fl.fisher[3], fl.fisher[4] != null], [null, true])
+  const rise = M.fisher(path([100, 200]), 9)
+  ok('fisher: a steady rise reads positive, trigger lags', rise.fisher[10] > 0 && rise.trigger[10] === rise.fisher[9])
+
+  // KST on a steady 1%-per-bar compounding rise: every ROC is constant.
+  const geo = Array.from({ length: 80 }, (_, i) => 100 * Math.pow(1.01, i))
+  const k = M.kst(geo, 1, 2, 3, 4, 2, 2, 2, 2, 3)
+  const r = (n) => (Math.pow(1.01, n) - 1) * 100
+  near('kst: weighted sum of smoothed ROCs', k.line[79], r(1) + 2 * r(2) + 3 * r(3) + 4 * r(4), 1e-9)
+  near('kst: signal is its SMA', k.signal[79], k.line[79], 1e-9)
+
+  // Pivot point levels by hand: H 110, L 90, C 100 (open 104 for Woodie).
+  const tr = M.pivotLevels(110, 90, 100, 1)
+  eq('pivots: traditional P/R1/S1/R2/S2/R3/S3', [tr.p, tr.r[0], tr.s[0], tr.r[1], tr.s[1], tr.r[2], tr.s[2]], [100, 110, 90, 120, 80, 130, 70])
+  const fb = M.pivotLevels(110, 90, 100, 2)
+  near('pivots: fibonacci R1', fb.r[0], 107.64)
+  const wd = M.pivotLevels(110, 90, 100, 3, 104)
+  eq('pivots: woodie pivot uses the new open', [wd.p, wd.r[0], wd.s[0]], [102, 114, 94])
+  const cm = M.pivotLevels(110, 90, 100, 4)
+  near('pivots: camarilla R1', cm.r[0], 100 + 22 / 12)
+  near('pivots: camarilla S4', cm.s[3], 100 - 11)
+  // Daily periods: day 2 draws day 1's levels, starting from its second bar.
+  const day = 86400000
+  const pp = M.pivotPoints([bar(0, 110, 90, 100), { ...bar(0, 105, 95, 100), t: day }, { ...bar(0, 106, 96, 101), t: day + 3600000 }], 1, 1)
+  eq('pivot points: first bar of a period is a break', [pp.p[0], pp.p[1], pp.p[2]], [null, null, 100])
+  eq('pivot points: R4 is Camarilla only', pp.r4[2], null)
+
+  // The registry carries the new indicators and they compute.
+  const ids = ['zigzag', 'autofib', 'chandelier', 'fisher', 'kst', 'pivotpts', 'patterns']
+  ok('registry: new indicators listed', ids.every((id) => R.indicatorDef(id)))
+  const pat = R.indicatorDef('patterns').compute([], path([100, 120, 110, 130, 110, 121, 95]), { dev: 5, depth: 3, tol: 1.5 })
+  eq('registry: pattern marker code names the pattern', R.indicatorDef('patterns').outputs[5].labelFrom.texts[pat.code[50]], 'H&S')
+  ok('registry: bearish marker on the completing bar', pat.bear[50] != null && pat.bull.every((v) => v == null))
+
+  // Interval groups for the Visibility tab.
+  eq('tf group: seconds / minutes / hours / days', [S.tfGroupFor(5000), S.tfGroupFor(300000), S.tfGroupFor(4 * 3600000), S.tfGroupFor(7 * day)], ['s', 'm', 'h', 'd'])
+  eq('bar step: smallest recent gap (a weekend gap ignored)', S.barStepMs([{ t: 0 }, { t: 3600000 }, { t: 3 * 86400000 }, { t: 3 * 86400000 + 3600000 }]), 3600000)
+
+  // Style settings: cleaned on load, persisted only when set.
+  const look = S.sanitizeLook({
+    styles: { v: { color: '#ff0000', width: 9, style: 'dotted', visible: false }, x: { color: 'url(evil)' } },
+    precision: 4,
+    levels: [20, 'x', 80],
+    tfVisibility: { s: false, m: true, zz: false },
+  })
+  eq('style: bad width and colour dropped', look.styles, { v: { color: '#ff0000', style: 'dotted', visible: false } })
+  eq('style: precision, levels, tf groups', [look.precision, look.levels, look.tfVisibility], [4, [20, 80], { s: false }])
+  eq('style: nothing set, nothing added', S.sanitizeLook({}), {})
+  let saved = null
+  const st = S.createIndicatorStore({ id: 't', max: 10, load: () => null, save: (d) => (saved = d), prefix: 't' })
+  st.addIndicator('rsi')
+  const u = st.getIndicators()[0].uid
+  eq('style: an untouched instance persists in its old shape', Object.keys(saved[0]).sort(), ['params', 'source', 'type', 'uid', 'visible'])
+  st.setStyle(u, 'v', { color: '#00ff00', width: 3 })
+  st.setStyle(u, 'v', { style: 'dashed' })
+  st.setPrecision(u, 3)
+  st.setLevels(u, [25, 75])
+  st.setTfVisible(u, 'd', false)
+  eq('style: setters merge and persist', [saved[0].styles, saved[0].precision, saved[0].levels, saved[0].tfVisibility], [{ v: { color: '#00ff00', width: 3, style: 'dashed' } }, 3, [25, 75], { d: false }])
+  eq('style: round-trips through sanitize', S.sanitizeIndicators(saved)[0].styles, saved[0].styles)
+  ok('style: hidden on the days group only', !S.shownOnTf(st.getIndicators()[0], 'd') && S.shownOnTf(st.getIndicators()[0], 'h'))
+  st.resetLook(u)
+  eq('style: defaults drop every override', Object.keys(saved[0]).sort(), ['params', 'source', 'type', 'uid', 'visible'])
+
+  // Templates: uids re-keyed, references follow.
+  let n = 0
+  const re = S.remapUids([{ uid: 'a1', type: 'obv', source: 'close' }, { uid: 'a2', type: 'rsi', source: 'a1.v' }, { uid: 'a3', type: 'sma', source: 'zz.v' }], () => 'n' + n++)
+  eq('templates: fresh uids, sources remapped, dangling to close', re.map((x) => [x.uid, x.source]), [['n0', 'close'], ['n1', 'n0.v'], ['n2', 'close']])
+
+  const mem = new Map()
+  const prevLS = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    writable: true,
+    value: {
+      getItem: (k) => (mem.has(k) ? mem.get(k) : null),
+      setItem: (k, v) => mem.set(k, String(v)),
+      removeItem: (k) => mem.delete(k),
+    },
+  })
+  const T = await import(src('features/charts/indicators/templates.ts'))
+  const other = S.createIndicatorStore({ id: 'o', max: 10, load: () => null, save: () => {}, prefix: 'o' })
+  st.addIndicator('obv')
+  const obvUid = st.getIndicators()[1].uid
+  st.setSource(u, obvUid + '.v')
+  st.setStyle(u, 'v', { color: '#123456' })
+  ok('templates: saved', T.saveTemplate('  My   set ', st.getIndicators()))
+  eq('templates: listed under a clean name', T.listTemplates().map((t) => t.name), ['My set'])
+  ok('templates: same name replaces', T.saveTemplate('my set', st.getIndicators()) && T.listTemplates().length === 1)
+  ok('templates: empty name refused', !T.saveTemplate('   ', st.getIndicators()))
+  ok('templates: applied', T.applyTemplate(other, 'my set'))
+  const got = other.getIndicators()
+  eq('templates: types and styles carried over', got.map((i) => [i.type, i.styles?.v?.color ?? null]), [['rsi', '#123456'], ['obv', null]])
+  ok('templates: applied under new uids with the reference kept', got[0].uid !== u && got[0].source === got[1].uid + '.v')
+  T.deleteTemplate('my set')
+  eq('templates: deleted', T.listTemplates(), [])
+  T.toggleFavourite('rsi')
+  T.toggleFavourite('kst')
+  T.toggleFavourite('rsi')
+  eq('favourites: toggled', T.favourites(), ['kst'])
+  if (prevLS) Object.defineProperty(globalThis, 'localStorage', prevLS)
+  else delete globalThis.localStorage
+}
+
+{
+  // r3-strategy: broker emulator, arrays, fill/alertcondition, error hints.
+  const { runPine } = await import(src('features/charts/pine/runtime.ts'))
+  const S = await import(src('features/charts/pine/strategy.ts'))
+  const P = await import(src('features/charts/pine/indicator.ts'))
+  const bar = (i, o, h, l, c) => ({ t: i * 60000, o, h, l, c, v: 1 })
+  const cfg = (x = {}) => ({ ...S.DEFAULT_STRATEGY, mintick: 1, ...x })
+  const lastOf = (a) => a[a.length - 1]
+  const catchErr = (fn) => {
+    try {
+      fn()
+      return null
+    } catch (e) {
+      return e
+    }
+  }
+
+  // Path model: open → nearer extreme → farther extreme → close.
+  eq('broker path: high nearer goes up first', S.barPath(bar(0, 100, 104, 94, 100)), [100, 104, 94, 100])
+  eq('broker path: low nearer goes down first', S.barPath(bar(0, 100, 108, 95, 100)), [100, 95, 108, 100])
+  eq('broker reach: gap past the level fills at the open', S.reach([100, 104, 94, 100], 98, true), [0, 100])
+  eq('broker reach: crossing fills at the level', S.reach([100, 104, 94, 100], 102, true), [0.5, 102])
+  eq('broker reach: never reached', S.reach([100, 104, 94, 100], 110, true), null)
+
+  // Market entry next open, bracket exit in the same bar it is reached.
+  const runBroker = (bars, place, c) => {
+    const b = S.createBroker(cfg(c), bars)
+    bars.forEach((_, i) => {
+      b.beginBar(i)
+      place(b, i)
+      b.endBar(i)
+    })
+    return b.report()
+  }
+  const bracket = (b, i) => {
+    if (i === 0) {
+      b.entry('L', 1)
+      b.exit({ id: 'X', from: 'L', profit: 3, loss: 4 })
+    }
+  }
+  const up = runBroker([bar(0, 100, 101, 99, 100), bar(1, 100, 104, 94, 100)], bracket)
+  eq('broker: market entry fills at the next open', [up.trades[0].entryBar, up.trades[0].entryPrice], [1, 100])
+  eq('broker: take profit first when the high comes first', [up.trades[0].exitId, up.trades[0].exitPrice, up.trades[0].profit], ['X', 103, 3])
+  const dn = runBroker([bar(0, 100, 101, 99, 100), bar(1, 100, 108, 95, 100)], bracket)
+  eq('broker: stop first when the low comes first', [dn.trades[0].exitPrice, dn.trades[0].profit], [96, -4])
+  eq('broker: summary counts the loss', [dn.summary.totalTrades, dn.summary.losses, dn.summary.winRate, dn.summary.netProfit], [1, 1, 0, -4])
+  const lim = runBroker(
+    [bar(0, 100, 101, 99, 100), bar(1, 100, 101, 99, 100), bar(2, 97, 99, 90, 92)],
+    (b, i) => i === 0 && b.entry('B', 1, 1, 98),
+  )
+  eq('broker: buy limit gapped through fills at the open', [lim.trades[0].entryBar, lim.trades[0].entryPrice], [2, 97])
+  const stp = runBroker(
+    [bar(0, 100, 101, 99, 100), bar(1, 100, 106, 99, 105)],
+    (b, i) => i === 0 && b.entry('B', 1, 2, undefined, 103),
+    { slippage: 1 },
+  )
+  eq('broker: buy stop fills at the level plus slippage', [stp.trades[0].entryPrice, stp.trades[0].qty], [104, 2])
+  const trail = runBroker(
+    [bar(0, 100, 100, 100, 100), bar(1, 100, 110, 100, 110), bar(2, 110, 111, 104, 105)],
+    (b, i) => {
+      if (i === 0) {
+        b.entry('L', 1)
+        b.exit({ id: 'T', from: 'L', trailPoints: 5, trailOffset: 3 })
+      }
+    },
+  )
+  eq('broker: trailing stop follows the high', [trail.trades[0].exitBar, trail.trades[0].exitPrice], [2, 107])
+
+  // Through runPine: reversal, position_size, history, open trade.
+  const k = [bar(0, 10, 10, 10, 10), bar(1, 11, 12, 11, 12), bar(2, 13, 13, 13, 13), bar(3, 14, 14, 14, 14)]
+  const rv = runPine(`strategy("rev", initial_capital=1000)
+if bar_index == 0
+    strategy.entry("L", strategy.long, qty=2)
+if bar_index == 1
+    strategy.entry("S", strategy.short, qty=1)
+plot(strategy.position_size, "pos")
+plot(strategy.position_size[1], "prev")`, k)
+  eq('strategy: position_size per bar', rv.plots[0].values, [0, 2, -1, -1])
+  eq('strategy: position_size[1]', rv.plots[1].values.slice(1), [0, 2, -1])
+  eq('strategy: reversal closes the long at the open', [rv.strategy.trades[0].exitId, rv.strategy.trades[0].exitPrice, rv.strategy.trades[0].profit], ['S', 13, 4])
+  eq('strategy: the open short is marked at the last close', [rv.strategy.trades[1].open, rv.strategy.trades[1].profit], [true, -1])
+  eq('strategy: equity per bar', rv.strategy.equity, [1000, 1002, 1004, 1003])
+  eq('strategy: net profit, open P&L', [rv.strategy.summary.netProfit, rv.strategy.summary.openPL], [4, -1])
+  eq('strategy: markers for entries and exits', P.tradeShapes(rv.strategy).map((s) => [s.bar, s.text, s.shape]), [[1, 'L', 'arrowUp'], [2, 'S', 'arrowDown'], [2, 'S', 'arrowDown']])
+  const pyr = (n) => runPine(`strategy("p", pyramiding=${n})
+if bar_index < 3
+    strategy.entry("L", strategy.long)
+plot(close)`, k).strategy.trades.length
+  eq('strategy: pyramiding 0 allows one entry, 2 allows two', [pyr(0), pyr(2)], [1, 2])
+  const com = runPine(`strategy("c", initial_capital=1000, default_qty_type=strategy.percent_of_equity, default_qty_value=50, commission_type=strategy.commission.cash_per_order, commission_value=1)
+if bar_index == 0
+    strategy.entry("L", strategy.long)
+if bar_index == 1
+    strategy.close("L")
+plot(close)`, k).strategy
+  eq('strategy: % of equity sizing, cash commission, close', [com.trades[0].qty, com.trades[0].profit, com.summary.commission], [50, 98, 2])
+  const poc = runPine(`strategy("o", process_orders_on_close=true)
+if bar_index == 0
+    strategy.entry("L", strategy.long)
+plot(close)`, k).strategy
+  eq('strategy: process_orders_on_close fills at the signal bar close', [poc.trades[0].entryBar, poc.trades[0].entryPrice], [0, 10])
+  const ind = runPine('indicator("i")\nstrategy.entry("L", strategy.long)\nplot(close)', k)
+  eq('strategy: orders in an indicator are a warning', [ind.warnings, ind.strategy], [['strategy.entry'], undefined])
+
+  // Arrays.
+  const ar = runPine(`indicator("arr")
+var a = array.new_float(0)
+array.push(a, bar_index)
+b = array.from(3, 1, 2)
+array.sort(b)
+c = array.slice(b, 1)
+plot(array.size(a), "size")
+plot(array.sum(b), "sum")
+plot(array.get(b, -1), "last")
+plot(array.min(b) + 10 * array.max(b), "minmax")
+plot(array.avg(c), "avg")
+plot(array.includes(b, 2) ? 1 : 0, "incl")
+x = array.new_int(3, 7)
+array.set(x, 0, 1)
+array.unshift(x, 5)
+p = array.pop(x)
+s = array.shift(x)
+x.push(9)
+plot(p * 100 + s * 10 + x.size(), "ops")
+y = array.copy(x)
+array.clear(y)
+plot(array.size(y) + array.size(x) * 10, "clear")
+var array<float> q = array.new<float>(2, 1.5)
+plot(array.sum(q), "generic")`, k)
+  eq('array: var array persists across bars', lastOf(ar.plots[0].values), 4)
+  eq('array: from / sort / sum / get(-1)', [lastOf(ar.plots[1].values), lastOf(ar.plots[2].values)], [6, 3])
+  eq('array: min / max', lastOf(ar.plots[3].values), 31)
+  eq('array: slice / avg / includes', [lastOf(ar.plots[4].values), lastOf(ar.plots[5].values)], [2.5, 1])
+  eq('array: set / unshift / pop / shift / method push', lastOf(ar.plots[6].values), 753)
+  eq('array: copy / clear', lastOf(ar.plots[7].values), 30)
+  eq('array: array<float> type and array.new<float>', lastOf(ar.plots[8].values), 3)
+  const oob = catchErr(() => runPine('indicator("e")\na = array.new_float(2)\nplot(array.get(a, 5))', k))
+  ok('array: out of bounds names line and column', oob && oob.line === 3 && oob.col === 6 && /out of bounds/.test(oob.message), oob && oob.message)
+  const emp = catchErr(() => runPine('a = array.new_float()\nv = array.pop(a)', k))
+  ok('array: pop on an empty array is an error', emp && /empty/.test(emp.message), emp && emp.message)
+
+  // fill / bgcolor / alertcondition.
+  const fl = runPine(`indicator("f")
+p1 = plot(high, "h")
+p2 = plot(low, "l")
+h1 = hline(1)
+h2 = hline(2)
+fill(p1, p2, color=color.red)
+fill(h1, h2)
+bgcolor(close > 12 ? color.green : na)
+alertcondition(close > 12, "Up", "close above 12")`, k)
+  eq('fill: between two plots', [fl.fills[0].plot1 === fl.plots[0].key, fl.fills[0].plot2 === fl.plots[1].key, fl.fills[0].color], [true, true, '#f23645'])
+  eq('fill: between two hlines', [fl.fills[1].plot1, fl.fills[1].plot2], ['hline:0', 'hline:1'])
+  eq('bgcolor: per bar', fl.bgcolors, [undefined, undefined, '#089981', '#089981'])
+  eq('alertcondition: title, message, per-bar values', fl.alertconditions, [{ title: 'Up', message: 'close above 12', values: [false, false, true, true] }])
+
+  // Error hints.
+  const dy1 = catchErr(() => runPine('plot(clsoe)', k))
+  ok('pine error: did you mean an identifier', dy1 && /did you mean 'close'/.test(dy1.message) && dy1.col === 6, dy1 && dy1.message)
+  const dy2 = catchErr(() => runPine('plot(ta.ema2(close, 3))', k))
+  ok('pine error: did you mean a function', dy2 && /did you mean 'ta.ema'/.test(dy2.message), dy2 && dy2.message)
+  const dy3 = catchErr(() => runPine('plot(sma(close, 3))', k))
+  ok('pine error: missing namespace suggested', dy3 && /did you mean 'ta.sma'/.test(dy3.message), dy3 && dy3.message)
+}
+
+{
+  // r3-orderflow: real footprint book, imbalances, tick bars, depth history.
+  const FB = await import(src('features/charts/orderflow/footprintBook.ts'))
+  const FS = await import(src('features/charts/orderflow/footprintSource.ts'))
+  const book = FB.createFootprintBook(2, 8)
+  const tr = (bar, price, qty, buyerMaker, time, key = 'BTC|1m') =>
+    FB.addFootprintTrade(book, { key, bar, end: bar + 60000, price, qty, buyerMaker, time })
+  tr(60000, 100, 2, false, 61000)
+  tr(60000, 100, 1, true, 61500)
+  tr(60000, 101, 3, false, 62000)
+  const b1 = book.bars.get(60000)
+  eq('fp: bar volume and range', [b1.vol, b1.lo, b1.hi], [6, 100, 101])
+  eq('fp: bar the page joined mid-way is partial', FB.barCoverage(book, b1), 'partial')
+  tr(120000, 102, 1, false, 120500)
+  eq('fp: bar opening after the first trade is real', FB.barCoverage(book, book.bars.get(120000)), 'real')
+  tr(180000, 103, 1, false, 180500)
+  eq('fp: oldest bar evicted past maxBars', [...book.bars.keys()], [120000, 180000])
+  for (let i = 0; i < 20; i++) tr(180000, 103 + i * 0.01, 1, false, 181000 + i)
+  const b3 = book.bars.get(180000)
+  ok('fp: cells coarsen to stay under maxCells', b3.cells.size <= 8 && b3.step > FB.initialStep(103), b3.cells.size)
+  const totalCells = [...b3.cells.values()].reduce((a, c) => a + c.buy + c.sell, 0)
+  eq('fp: coarsening keeps every unit of volume', Math.round(totalCells * 1e6) / 1e6, 21)
+  const rows = FB.rebucket(b1, 100, 101, 2)
+  eq('fp: rebucket into candle rows (taker buy / taker sell)', rows.map((r) => [r.buy, r.sell]), [[2, 1], [3, 0]])
+  tr(240000, 50, 1, false, 240500, 'ETH|1m')
+  eq('fp: a new symbol|interval key starts over', [...book.bars.keys()], [240000])
+  const R = (pairs) => pairs.map(([buy, sell], i) => ({ lo: i, hi: i + 1, buy, sell }))
+  const fl = FB.imbalances(R([[1, 2], [7, 1], [9, 1], [10, 3], [1, 1]]), 3)
+  eq('imbalance: diagonal buy vs sell one row below', fl.map((f) => f.buy), [false, true, true, true, false])
+  eq('imbalance: diagonal sell vs buy one row above', FB.imbalances(R([[1, 9], [2, 1]]), 3).map((f) => f.sell), [true, false])
+  eq('imbalance: minVol ignores tiny prints', FB.imbalances(R([[0, 0], [0.5, 0]]), 3, 1)[1].buy, false)
+  eq('imbalance: stacked run of 3', FB.stackedImbalances(fl, 3), [{ side: 'buy', from: 1, to: 3 }])
+  eq('imbalance: run of 2 is not stacked', FB.stackedImbalances(fl.slice(0, 3), 3), [])
+  eq('poc: row with most volume', FB.pocRow(R([[1, 1], [5, 4], [2, 2]])), 1)
+  eq('poc: empty bar', FB.pocRow(R([[0, 0]])), -1)
+  const own = FB.createFootprintBook()
+  FB.addFootprintTrade(own, { key: 'k', bar: 0, end: 60000, price: 100, qty: 1, buyerMaker: false, time: 0 })
+  eq('fp source: matching bar is used', FS.realFootprint({ ms: 0, low: 99, high: 101 }, null, 60000, 4, own)?.coverage, 'real')
+  eq('fp source: other interval rejected', FS.realFootprint({ ms: 0, low: 99, high: 101 }, null, 300000, 4, own), null)
+  eq('fp source: trades outside the bar rejected', FS.realFootprint({ ms: 0, low: 200, high: 210 }, null, 60000, 4, own), null)
+
+  const TB = await import(src('features/charts/orderflow/tickBars.ts'))
+  ok('tick: N clamped, junk falls back to default', TB.clampTicks(3) === 10 && TB.clampTicks('x') === TB.DEFAULT_TICKS)
+  const tape = TB.createTradeTape(100)
+  for (let i = 0; i < 25; i++) TB.pushTrade(tape, 100 + (i % 5), 2, 1000 + i * 10)
+  const t10 = TB.buildTickBars(tape, 10)
+  eq('tick: 25 trades / 10 = 2 closed + 1 forming', t10.length, 3)
+  eq('tick: bar OHLCV', [t10[0].o, t10[0].h, t10[0].l, t10[0].c, t10[0].v], [100, 104, 100, 104, 20])
+  ok('tick: times strictly increasing by >= 1s', t10.every((b, i) => i === 0 || b.t - t10[i - 1].t >= TB.TICK_STEP_MS))
+  eq('tick: forming bar volume', t10[2].v, 10)
+  const ring = TB.createTradeTape(25)
+  for (let i = 0; i < 37; i++) TB.pushTrade(ring, 1 + i, 1, i * 2000)
+  eq('tick: ring keeps bars pinned to the global trade count', TB.buildTickBars(ring, 10).map((b) => b.o), [21, 31])
+  TB.clearTape(ring)
+  eq('tick: cleared tape has no bars', TB.buildTickBars(ring, 10), [])
+
+  const DH = await import(src('features/charts/orderflow/depthHistory.ts'))
+  const hist = DH.createDepthHistory(3)
+  for (let i = 1; i <= 5; i++) DH.pushDepthSnap(hist, DH.mergeBook(i * 1000, [[100, 1]], null))
+  DH.pushDepthSnap(hist, DH.mergeBook(2000, [[100, 1]], null))
+  eq('depth: rolling window, out-of-order dropped', hist.snaps.map((s) => s.t), [3000, 4000, 5000])
+  eq('depth: snap at or before', [DH.snapAtOrBefore(hist.snaps, 4500), DH.snapAtOrBefore(hist.snaps, 10)], [1, -1])
+  const live = [[99, 1], [100, 2], [101, 3]]
+  const deep = [[90, 1], [90.5, 1], [99.5, 50], [110, 4], [111, 4]]
+  const m = DH.mergeBook(0, live, deep, 1)
+  eq('depth: deep levels inside the live band are dropped', Array.from(m.qty).reduce((a, b) => a + b, 0), 6 + 2 + 8)
+  eq('depth: deep bins at volume-weighted price', Array.from(m.price).slice(3), [90.25, 110.5])
+  const cells = new Float32Array(4)
+  DH.binSnapshot(m, (p) => (p >= 100 ? 0 : 5), 3, cells)
+  eq('depth: binned into pixel rows', Array.from(cells), [13, 3, 0, 0])
+  eq('depth: intensity cap is a percentile', DH.intensityCap([0, 1, 2, 3, 4, 100], 0.75), 4)
+  eq('depth: empty grid has no cap', DH.intensityCap([0, 0]), 0)
 }
 
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')

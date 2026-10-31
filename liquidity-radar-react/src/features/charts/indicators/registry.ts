@@ -8,8 +8,20 @@
 import type { CandleFlat } from '../../../services/market'
 import type { Series } from './math'
 import {
+  FIB_RATIOS,
+  PATTERN_KINDS,
+  PATTERN_LABELS,
   aroon,
   atr,
+  autoFib,
+  chandelier,
+  chartPatterns,
+  fisher,
+  kst,
+  patternSeries,
+  pivotPoints,
+  zigzag,
+  zigzagLine,
   awesome,
   bollinger,
   bollingerPctB,
@@ -93,11 +105,21 @@ export interface OutputDef {
   marker?: { shape: 'arrowUp' | 'arrowDown' | 'circle'; position: 'aboveBar' | 'belowBar' }
   /** line width in px (default 2, 1 when dashed). */
   width?: number
+  /** Null bars break the line (whitespace) instead of being skipped, so one
+   *  series can draw separate segments: pivot periods, pattern outlines. */
+  gaps?: boolean
+  /** Price-pane line that still shows its value (and label) on the axis. */
+  axisLabel?: boolean
+  /** signal: marker text read per bar from another (undrawn) output of the
+   *  compute result, as an index into `texts`. */
+  labelFrom?: { key: string; texts: string[] }
   /** Per-bar colour overriding `color` (Pine plots coloured by condition). */
   colors?: Array<string | undefined>
   /** signal: individual markers (Pine plotshape) instead of one per value. */
   markers?: Array<{
     i: number
+    /** Bar open time (ms), when set: placed by time rather than index. */
+    t?: number
     shape: 'arrowUp' | 'arrowDown' | 'circle' | 'square'
     position: 'aboveBar' | 'belowBar'
     color: string
@@ -162,6 +184,9 @@ const RIBBON = [
   '#1E7CEC',
   '#0B6FEA',
 ]
+
+/** Auto Fib levels, 0 → 1, in TradingView's default colours. */
+const FIB_COLORS = ['#787B86', '#F23645', '#FF9800', '#4CAF50', '#089981', '#00BCD4', '#787B86']
 
 export const INDICATORS: IndicatorDef[] = [
   {
@@ -564,6 +589,29 @@ export const INDICATORS: IndicatorDef[] = [
     },
   },
   {
+    id: 'pivotpts',
+    name: 'Pivot Points',
+    group: 'Trend',
+    params: [
+      L('kind', 'Type: 1 Trad · 2 Fib · 3 Woodie · 4 Camarilla', 1, 1, 4),
+      L('anchor', 'Period: 1 day · 2 week · 3 month', 1, 1, 3),
+    ],
+    outputs: [
+      { key: 'p', label: 'P', color: '#F0A04B', gaps: true, width: 1 },
+      { key: 'r1', label: 'R1', color: 'rgba(255,82,82,.8)', gaps: true, width: 1 },
+      { key: 'r2', label: 'R2', color: 'rgba(255,82,82,.65)', gaps: true, width: 1 },
+      { key: 'r3', label: 'R3', color: 'rgba(255,82,82,.5)', gaps: true, width: 1 },
+      { key: 'r4', label: 'R4', color: 'rgba(255,82,82,.4)', gaps: true, width: 1 },
+      { key: 's1', label: 'S1', color: 'rgba(52,195,143,.8)', gaps: true, width: 1 },
+      { key: 's2', label: 'S2', color: 'rgba(52,195,143,.65)', gaps: true, width: 1 },
+      { key: 's3', label: 'S3', color: 'rgba(52,195,143,.5)', gaps: true, width: 1 },
+      { key: 's4', label: 'S4', color: 'rgba(52,195,143,.4)', gaps: true, width: 1 },
+    ],
+    placement: 'overlay',
+    sourced: false,
+    compute: (_s, c, p) => pivotPoints(c, p.kind ?? 1, p.anchor ?? 1),
+  },
+  {
     id: 'adx',
     name: 'ADX / DMI',
     group: 'Trend',
@@ -774,6 +822,160 @@ export const INDICATORS: IndicatorDef[] = [
     guides: [0],
     sourced: false,
     compute: (_s, c, p) => ({ v: cmf(c, p.length) }),
+  },
+  {
+    id: 'zigzag',
+    name: 'ZigZag',
+    group: 'Trend',
+    params: [M('dev', 'Deviation %', 5, 0.1, 50), L('depth', 'Depth', 10, 1, 200)],
+    outputs: [{ key: 'v', label: 'ZigZag', color: '#F0A04B' }],
+    placement: 'overlay',
+    sourced: false,
+    compute: (_s, c, p) => ({ v: zigzagLine(c, p.dev, p.depth) }),
+  },
+  {
+    id: 'autofib',
+    name: 'Auto Fib Retracement',
+    group: 'Trend',
+    params: [M('dev', 'Deviation %', 5, 0.1, 50), L('depth', 'Depth', 10, 1, 200)],
+    // One horizontal line per ratio, from the swing's first pivot onward.
+    outputs: FIB_RATIOS.map((r, k) => ({
+      key: 'f' + k,
+      label: String(r),
+      color: FIB_COLORS[k],
+      width: 1,
+      axisLabel: true,
+    })),
+    placement: 'overlay',
+    sourced: false,
+    compute: (_s, c, p) => {
+      const out: Record<string, Series> = {}
+      autoFib(c, p.dev, p.depth).series.forEach((s, k) => (out['f' + k] = s))
+      return out
+    },
+  },
+  {
+    id: 'chandelier',
+    name: 'Chandelier Exit',
+    group: 'Bands & channels',
+    params: [L('length', 'ATR period', 22), M('mult', 'ATR multiplier', 3, 0.5, 10)],
+    outputs: [
+      { key: 'l', label: 'Long stop', color: '#34C38F', kind: 'step', width: 1 },
+      { key: 's', label: 'Short stop', color: '#FF5252', kind: 'step', width: 1 },
+      {
+        key: 'buy',
+        label: 'Buy',
+        color: '#00E676',
+        kind: 'signal',
+        marker: { shape: 'arrowUp', position: 'belowBar' },
+      },
+      {
+        key: 'sell',
+        label: 'Sell',
+        color: '#FF1744',
+        kind: 'signal',
+        marker: { shape: 'arrowDown', position: 'aboveBar' },
+      },
+    ],
+    placement: 'overlay',
+    sourced: false,
+    compute: (_s, c, p) => {
+      const x = chandelier(c, p.length, p.mult)
+      return { l: x.long, s: x.short, buy: x.buy, sell: x.sell }
+    },
+  },
+  {
+    id: 'fisher',
+    name: 'Fisher Transform',
+    group: 'Oscillators',
+    params: [L('length', 'Length', 9, 2)],
+    outputs: [
+      { key: 'v', label: 'Fisher', color: '#5BA8F5' },
+      { key: 't', label: 'Trigger', color: '#F0A04B', width: 1 },
+    ],
+    placement: 'pane',
+    guides: [-1.5, -0.75, 0, 0.75, 1.5],
+    sourced: false,
+    compute: (_s, c, p) => {
+      const f = fisher(c, p.length)
+      return { v: f.fisher, t: f.trigger }
+    },
+  },
+  {
+    id: 'kst',
+    name: 'Know Sure Thing',
+    group: 'Oscillators',
+    params: [
+      L('r1', 'ROC 1', 10),
+      L('r2', 'ROC 2', 15),
+      L('r3', 'ROC 3', 20),
+      L('r4', 'ROC 4', 30),
+      L('s1', 'SMA 1', 10),
+      L('s2', 'SMA 2', 10),
+      L('s3', 'SMA 3', 10),
+      L('s4', 'SMA 4', 15),
+      L('sig', 'Signal', 9),
+    ],
+    outputs: [
+      { key: 'v', label: 'KST', color: '#26A69A' },
+      { key: 's', label: 'Signal', color: '#FF5252' },
+    ],
+    placement: 'pane',
+    guides: [0],
+    sourced: true,
+    compute: (s, _c, p) => {
+      const k = kst(s, p.r1, p.r2, p.r3, p.r4, p.s1, p.s2, p.s3, p.s4, p.sig)
+      return { v: k.line, s: k.signal }
+    },
+  },
+  {
+    id: 'patterns',
+    name: 'Auto Chart Patterns',
+    group: 'Trend',
+    params: [
+      M('dev', 'ZigZag deviation %', 3, 0.1, 50),
+      L('depth', 'ZigZag depth', 5, 1, 200),
+      M('tol', 'Level tolerance %', 1.5, 0.1, 10),
+    ],
+    // Two slots of two lines (see patternSeries), so neighbouring patterns
+    // stay separate outlines; the markers name each pattern.
+    outputs: [
+      { key: 'a0', label: 'Outline', color: '#F0A04B', gaps: true, width: 2 },
+      { key: 'b0', label: 'Neckline', color: 'rgba(240,160,75,.7)', gaps: true, width: 1, dashed: true },
+      { key: 'a1', label: 'Outline 2', color: '#F0A04B', gaps: true, width: 2 },
+      { key: 'b1', label: 'Neckline 2', color: 'rgba(240,160,75,.7)', gaps: true, width: 1, dashed: true },
+      {
+        key: 'bull',
+        label: 'Bullish pattern',
+        color: '#00E676',
+        kind: 'signal',
+        marker: { shape: 'arrowUp', position: 'belowBar' },
+        labelFrom: { key: 'code', texts: PATTERN_LABELS },
+      },
+      {
+        key: 'bear',
+        label: 'Bearish pattern',
+        color: '#FF1744',
+        kind: 'signal',
+        marker: { shape: 'arrowDown', position: 'aboveBar' },
+        labelFrom: { key: 'code', texts: PATTERN_LABELS },
+      },
+    ],
+    placement: 'overlay',
+    sourced: false,
+    compute: (_s, c, p) => {
+      const pats = chartPatterns(zigzag(c, p.dev, p.depth).pivots, p.tol)
+      const [a0, b0, a1, b1] = patternSeries(c.length, pats)
+      const bull: Series = Array(c.length).fill(null)
+      const bear: Series = Array(c.length).fill(null)
+      // `code` is not an output: it only feeds the markers' text.
+      const code: Series = Array(c.length).fill(null)
+      pats.forEach((x) => {
+        ;(x.bullish ? bull : bear)[x.at] = x.bullish ? c[x.at].l : c[x.at].h
+        code[x.at] = PATTERN_KINDS.indexOf(x.kind)
+      })
+      return { a0, b0, a1, b1, bull, bear, code }
+    },
   },
 ]
 

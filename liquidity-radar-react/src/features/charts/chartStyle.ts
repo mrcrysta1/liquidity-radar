@@ -27,6 +27,7 @@ export type ChartStyleId =
   | 'linebreak'
   | 'kagi'
   | 'pnf'
+  | 'tick'
 
 export interface ChartStyleDef {
   id: ChartStyleId
@@ -84,10 +85,11 @@ export const CHART_STYLES: ChartStyleDef[] = [
   {
     id: 'footprint',
     name: 'Volume footprint',
-    hint: 'Buy/sell volume per price row',
+    hint: 'Buy/sell volume per price row, imbalances, POC',
     ohlc: true,
     custom: true,
     estimate: true,
+    estNote: 'Live trades since the page opened; older bars are modelled (dashed)',
   },
   {
     id: 'tpo',
@@ -146,6 +148,15 @@ export const CHART_STYLES: ChartStyleDef[] = [
     custom: true,
     rangeBars: true,
     estimate: true,
+  },
+  // Built from the live trade stream (orderflow/tickSource): it starts empty
+  // and fills while the page watches — Binance has no tick history to load.
+  {
+    id: 'tick',
+    name: 'Tick bars',
+    hint: 'A new bar every N trades, this session',
+    ohlc: true,
+    rangeBars: true,
   },
 ]
 

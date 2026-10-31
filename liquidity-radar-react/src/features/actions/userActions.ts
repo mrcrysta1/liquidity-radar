@@ -5,6 +5,7 @@
 // re-exposed on window by the engine's exposeGlobals().
 import { $ } from '../../utils/dom'
 import { isInstrument } from '../../constants/instruments'
+import { isSynthetic } from '../../services/syntheticSymbol'
 import { primeInstrument } from '../../services/instrumentFeed'
 import { state } from '../../services/store'
 import { resetCandles } from '../../services/marketData'
@@ -163,7 +164,8 @@ export async function setSymbol(sym: string, opts: { keepTab?: boolean } = {}): 
   cbs!.connectStreams(cbs!.streamCb)
   // These instruments have no stream, so leaving the badge on "WS LIVE" or
   // "SYNCING" would claim a connection that does not exist.
-  if (isInstrument(sym)) {
+  // A ratio / spread is re-polled too (services/marketData SYNTH_POLL_MS).
+  if (isInstrument(sym) || isSynthetic(sym)) {
     const ks = $('wsKlineState')!
     ks.textContent = 'POLLED'
     ks.className = 'badge b-cyan'

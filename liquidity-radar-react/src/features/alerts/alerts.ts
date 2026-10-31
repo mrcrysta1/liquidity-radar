@@ -35,7 +35,9 @@ import {
   condLabel,
   evalPrice,
   evalTechnical,
+  evalWatchTech,
   evalWatchlist,
+  freqOf,
   normalizeRules,
   notifyVia,
   rearm,
@@ -43,7 +45,22 @@ import {
   ruleName,
   stepRule,
 } from './rules'
-import type { AlertCond, AlertEvent, AlertKind, AlertRule } from './rules'
+import type { AlertCond, AlertEvent, AlertFreq, AlertKind, AlertRule, TechCond } from './rules'
+import {
+  MAX_CONDS,
+  MAX_MESSAGE,
+  condLookback,
+  condText,
+  condUids,
+  evalConds,
+  fillTemplate,
+  isExpired,
+  judgedBar,
+  normalizeConds,
+  validWebhookUrl,
+} from './conditions'
+import type { Cond } from './conditions'
+import { condContext, forgetCondRule, onCondData, snapshotFor } from './condRuntime'
 
 /** @deprecated old price-alert shape; kept for importers. Rules are AlertRule now. */
 export type AlertItem = AlertRule
@@ -80,6 +97,18 @@ export function onAlertsChange(fn: () => void): () => void {
 // ---------------------------------------------------------------- live data
 
 const prevPrice: Record<string, number> = {}
+/** Trade extremes per symbol since the last evaluation (the charted coin's tape). */
+const tradeRange: Record<string, { hi: number; lo: number }> = {}
+/** Every trade print of the charted coin: remembered for intrabar crosses. */
+export function noteAlertTrade(sym: string, price: number): void {
+  if (!Number.isFinite(price)) return
+  const r = tradeRange[sym]
+  if (!r) tradeRange[sym] = { hi: price, lo: price }
+  else {
+    if (price > r.hi) r.hi = price
+    if (price < r.lo) r.lo = price
+  }
+}
 const extraTickers: Record<string, { last: number; pct: number; ts: number }> = {}
 const badSymbols = new Set<string>()
 const candleCache: Record<string, { ts: number; candles: CandleFlat[] }> = {}
@@ -106,14 +135,31 @@ function isChartedKey(sym: string, tf: string): boolean {
     tf,
   )
 }
+function candlesOf(sym: string, tf: string): CandleFlat[] | null {
+  if (isChartedKey(sym, tf)) return state.candles
+  return candleCache[sym + '|' + tf]?.candles ?? null
+}
 function candlesFor(r: AlertRule): CandleFlat[] | null {
-  if (r.sym && isChartedKey(r.sym, r.tf || '15m')) return state.candles
-  return candleCache[techKey(r)]?.candles ?? null
+  return r.sym ? candlesOf(r.sym, r.tf || '15m') : null
+}
+function tfMs(tf: string): number {
+  const d = tfDef(tf)
+  return (BASE_MS[d.base] || 86400000) * d.factor
 }
 function candleTtl(tf: string): number {
-  const d = tfDef(tf)
-  const ms = (BASE_MS[d.base] || 86400000) * d.factor
-  return Math.min(10 * 60000, Math.max(60000, ms / 3))
+  return Math.min(10 * 60000, Math.max(60000, tfMs(tf) / 3))
+}
+/** Favourites a watchlist technical rule judges — capped, since each needs its own candles. */
+const WATCH_TECH_MAX = 40
+/** Every sym|tf whose candles a rule needs. */
+function candleKeys(r: AlertRule): string[] {
+  if (r.kind === 'technical' || r.kind === 'cond') return [techKey(r)]
+  if (r.kind === 'watchlist' && r.tech)
+    return watchSymbols()
+      .slice(0, WATCH_TECH_MAX)
+      .filter((s) => !isInstrument(s))
+      .map((s) => s + '|' + (r.tf || '15m'))
+  return []
 }
 
 /** 24h tickers for symbols state.tickers lacks: a few per pass, each at most once a minute. */
@@ -163,11 +209,11 @@ async function refreshData(rules: AlertRule[]): Promise<void> {
     const now = Date.now()
     const needT = new Set<string>()
     rules.forEach((r) => {
-      if (r.kind === 'watchlist') watchSymbols().forEach((s) => needT.add(s))
+      if (r.kind === 'watchlist' && !r.tech) watchSymbols().forEach((s) => needT.add(s))
       else if (r.kind === 'price' && r.sym) needT.add(r.sym)
     })
     if (await topUpTickers(needT, now)) got = true
-    const keys = [...new Set(rules.filter((r) => r.kind === 'technical').map(techKey))]
+    const keys = [...new Set(rules.flatMap(candleKeys))]
     const stale = keys
       .filter((k) => {
         const [s, tf] = k.split('|')
@@ -175,12 +221,17 @@ async function refreshData(rules: AlertRule[]): Promise<void> {
         const c = candleCache[k]
         return !c || now - c.ts > candleTtl(tf)
       })
+      // Oldest first, so a long watchlist is cycled through rather than its
+      // first few symbols refreshed forever.
+      .sort((a, b) => (candleCache[a]?.ts ?? 0) - (candleCache[b]?.ts ?? 0))
       .slice(0, 4)
     for (const k of stale) {
       if (isRateLimited()) break
       const [s, tf] = k.split('|')
       try {
-        const candles = await loadCandleWindow(s, tf, 200)
+        // 300 bars: enough warm-up for the usual indicator lengths on a
+        // conditions rule (the charted market uses the chart's own history).
+        const candles = await loadCandleWindow(s, tf, 300)
         if (candles.length) {
           candleCache[k] = { ts: Date.now(), candles }
           got = true
@@ -226,6 +277,30 @@ function notify(title: string, body: string): void {
   }
 }
 
+/**
+ * POST a fired alert's message to its webhook through our relay
+ * (api/alert-webhook.mjs): the browser cannot call arbitrary hosts (CORS), and
+ * the relay is where the URL is checked against private networks. Alerts are
+ * evaluated here in the browser, so a webhook only fires while the app is
+ * open somewhere — there is no server-side alert engine.
+ */
+function sendWebhook(url: string, message: string): void {
+  try {
+    void fetch('/api/alert-webhook', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url, message }),
+      keepalive: true,
+    })
+      .then((r) => {
+        if (!r.ok) console.warn('[alerts] webhook relay answered', r.status)
+      })
+      .catch((e) => console.warn('[alerts] webhook failed', e))
+  } catch {
+    /* no fetch — nothing to send with */
+  }
+}
+
 function evaluate(fetchMore: boolean): void {
   const rules = loadRules()
   const active = rules.filter((r) => r.enabled)
@@ -233,15 +308,25 @@ function evaluate(fetchMore: boolean): void {
   const now = Date.now()
   const fired: AlertEvent[] = []
   let changed = false
+  const hooks: Array<{ url: string; message: string }> = []
   const next = rules.map((r) => {
     if (!r.enabled) return r
+    if (isExpired(r.expires, now)) {
+      changed = true
+      return { ...r, enabled: false }
+    }
     let hit: boolean | null = null
     let matched: string[] | undefined
     let detail = ''
+    /** Open time of the bar judged — for the once-per-bar frequencies. */
+    let barT: number | undefined
+    /** Price the {{close}} placeholder reports. */
+    let close: number | undefined
     if (r.kind === 'price' && r.sym) {
       const t = tickerOf(r.sym)
       if (t) {
-        hit = evalPrice(r, t.last, prevPrice[r.sym], t.pct)
+        hit = evalPrice(r, t.last, prevPrice[r.sym], t.pct, tradeRange[r.sym])
+        close = t.last
         detail = /pct/.test(r.condition)
           ? r.sym + ' 24h ' + t.pct.toFixed(2) + '% · $' + pfmt(t.last)
           : r.sym + ' now $' + pfmt(t.last)
@@ -250,7 +335,37 @@ function evaluate(fetchMore: boolean): void {
       const c = candlesFor(r)
       if (c && c.length >= MIN_TECH_CANDLES) {
         hit = evalTechnical(r, c)
-        detail = r.sym + ' ' + (r.tf || '15m') + ' close $' + pfmt(c[c.length - 1].c)
+        barT = c[judgedBar(c.length, r.onClose)]?.t
+        close = c[c.length - 1].c
+        detail = r.sym + ' ' + (r.tf || '15m') + ' close $' + pfmt(close)
+      }
+    } else if (r.kind === 'cond' && r.sym) {
+      const c = candlesFor(r)
+      const conds = r.conds || []
+      if (c && c.length > condLookback(conds) + 1) {
+        const ctx = condContext(r, c)
+        if (ctx) {
+          const i = judgedBar(c.length, freqOf(r) === 'close')
+          hit = evalConds(conds, ctx, i)
+          barT = c[i]?.t
+          close = c[c.length - 1].c
+          detail = r.sym + ' ' + (r.tf || '15m') + ' close $' + pfmt(close)
+        }
+      }
+    } else if (r.kind === 'watchlist' && r.tech) {
+      const tf = r.tf || '15m'
+      const bySym = watchSymbols()
+        .slice(0, WATCH_TECH_MAX)
+        .map((s) => ({ symbol: s, candles: candlesOf(s, tf) }))
+        .filter((x): x is { symbol: string; candles: CandleFlat[] } => !!x.candles && x.candles.length >= MIN_TECH_CANDLES)
+      if (bySym.length) {
+        const res = evalWatchTech(r, bySym)
+        hit = res.hit
+        matched = res.matched
+        detail = res.detail
+        // Favourites' bars share the interval grid: bucket the clock.
+        const ms = tfMs(tf)
+        barT = Math.floor(now / ms) * ms - (r.onClose ? ms : 0)
       }
     } else if (r.kind === 'watchlist') {
       const tk = watchSymbols()
@@ -267,18 +382,24 @@ function evaluate(fetchMore: boolean): void {
       }
     }
     if (hit == null) return r // no data yet — judge next time
-    const st = stepRule(r, hit, now, matched)
+    const st = stepRule(r, hit, now, matched, barT)
     if (JSON.stringify(st.next) !== JSON.stringify(r)) changed = true
     if (st.fire) {
-      fired.push({
-        id: 'ev-' + now + '-' + r.id,
-        ruleId: r.id,
-        name: ruleName(r),
-        ts: now,
-        message:
-          condLabel(r.condition) + ' ' + r.value + (r.value2 != null ? '/' + r.value2 : '') + ' — ' + detail,
-        sym: r.sym,
-      })
+      const ticker = r.sym || (matched && matched.length ? matched.join(',') : 'WATCHLIST')
+      const message = r.message
+        ? fillTemplate(r.message, {
+            ticker,
+            close: close != null ? pfmt(close) : undefined,
+            interval: r.tf || '',
+            time: new Date(now).toISOString(),
+          })
+        : (r.kind === 'cond'
+            ? (r.conds || []).map(condText).join(' AND ')
+            : condLabel(r.tech || r.condition) + ' ' + r.value + (r.value2 != null ? '/' + r.value2 : '')) +
+          ' — ' +
+          detail
+      fired.push({ id: 'ev-' + now + '-' + r.id, ruleId: r.id, name: ruleName(r), ts: now, message, sym: r.sym })
+      if (r.webhook) hooks.push({ url: r.webhook, message })
     }
     return st.next
   })
@@ -290,15 +411,20 @@ function evaluate(fetchMore: boolean): void {
   seen.forEach((s) => {
     const t = tickerOf(s)
     if (t) prevPrice[s] = t.last
+    delete tradeRange[s]
   })
   if (changed) saveRules(next)
   if (fired.length) {
     storageSet(LOG_KEY, [...fired, ...loadLog()].slice(0, LOG_MAX))
     fired.forEach((e) => notify(e.name, e.message))
   }
+  hooks.forEach((h) => sendWebhook(h.url, h.message))
   if (changed || fired.length) renderAlerts()
   if (fetchMore) void refreshData(next.filter((r) => r.enabled))
 }
+
+// A Pine run for a conditions rule landed: judge with it now, not in 20s.
+onCondData(() => evaluate(false))
 
 /** Called from the ticker loop: judge every enabled rule on current data. */
 export function checkAlerts(): void {
@@ -316,6 +442,16 @@ export interface NewRule {
   value2?: number
   once: boolean
   cooldownMin?: number
+  onClose?: boolean
+  /** Overrides once/onClose when set (see AlertFreq). */
+  freq?: AlertFreq
+  expires?: number
+  message?: string
+  webhook?: string
+  /** Watchlist any_technical. */
+  tech?: TechCond
+  /** cond kind; the indicator instances they read are snapshotted from the chart. */
+  conds?: Cond[]
 }
 
 export function normSym(sym: string): string {
@@ -340,19 +476,46 @@ export function addRule(n: NewRule): string | null {
   const sym = n.kind === 'watchlist' ? undefined : normSym(n.sym || '')
   if (n.kind !== 'watchlist' && !sym) return 'Enter a symbol'
   if (n.kind === 'price' && !/pct/.test(n.condition) && !(n.value > 0)) return 'Enter the alert price'
+  const conds = n.kind === 'cond' ? normalizeConds(n.conds) : null
+  if (n.kind === 'cond' && !conds) return 'Complete every condition (1–' + MAX_CONDS + ')'
+  if (n.condition === 'any_technical' && !n.tech) return 'Pick a technical condition'
+  const webhook = n.webhook && n.webhook.trim() ? validWebhookUrl(n.webhook) : undefined
+  if (webhook === null) return 'Webhook must be a public https:// URL'
+  if (n.expires != null && !(n.expires > Date.now())) return 'Expiry must be in the future'
+  const freq: AlertFreq = n.freq ?? (n.once ? 'once' : 'every')
+  const once = freq === 'once'
+  // Bar-based kinds judge the closed bar under "once per bar close".
+  const barBased = n.kind === 'technical' || n.kind === 'cond' || !!n.tech
   const r: AlertRule = {
     id: 'al-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
     kind: n.kind,
     sym,
-    tf: n.kind === 'technical' ? n.tf || '15m' : undefined,
+    tf: barBased ? n.tf || '15m' : undefined,
     condition: n.condition,
     value: n.value,
     value2: n.value2 != null && Number.isFinite(n.value2) ? n.value2 : undefined,
-    once: n.once,
-    cooldownMin: n.once ? undefined : (n.cooldownMin ?? DEFAULT_COOLDOWN_MIN),
+    once,
+    cooldownMin: freq === 'every' ? (n.cooldownMin ?? DEFAULT_COOLDOWN_MIN) : undefined,
+    onClose: barBased ? freq === 'close' || !!n.onClose : undefined,
+    freq: n.freq,
+    expires: n.expires,
+    message: n.message && n.message.trim() ? n.message.slice(0, MAX_MESSAGE) : undefined,
+    webhook: webhook || undefined,
+    tech: n.condition === 'any_technical' ? n.tech : undefined,
+    conds: conds ?? undefined,
+    inds: conds ? snapshotFor(condUids(conds)) : undefined,
     enabled: true,
     created: Date.now(),
     triggerCount: 0,
+  }
+  if (r.conds && condUids(r.conds).some((u) => !r.inds?.some((i) => i.uid === u)))
+    return 'An indicator in the conditions is no longer on the chart'
+  // A cross is judged against the previous sample: seed it with the current
+  // price, or a rule could fire at once on a crossing from before it existed.
+  if (sym) {
+    const t = tickerOf(sym)
+    if (t) prevPrice[sym] = t.last
+    delete tradeRange[sym]
   }
   saveRules([...rules, r])
   renderAlerts()
@@ -413,6 +576,7 @@ export function removeAlert(idOrIndex: string | number): void {
     typeof idOrIndex === 'number'
       ? rules.filter((_, i) => i !== idOrIndex)
       : rules.filter((r) => r.id !== idOrIndex)
+  rules.filter((r) => !next.includes(r) && r.kind === 'cond').forEach(forgetCondRule)
   saveRules(next)
   renderAlerts()
   showToast('Alert removed')
@@ -431,8 +595,16 @@ export function clearAlertLog(): void {
 
 // ---------------------------------------------------------------- UI
 
+const FREQ_TEXT: Record<AlertFreq, string> = {
+  once: 'once',
+  bar: 'once per bar',
+  close: 'once per bar close',
+  every: 'every time',
+}
+
 function statusOf(r: AlertRule): string {
   if (!r.enabled) {
+    if (isExpired(r.expires, Date.now())) return '<span style="color:var(--muted)"> · expired</span>'
     return r.once && r.triggerCount
       ? '<span style="color:var(--muted)"> · fired</span>'
       : '<span style="color:var(--muted)"> · paused</span>'
@@ -450,18 +622,25 @@ function ruleRow(r: AlertRule): string {
     (r.value2 != null ? ' / ' + r.value2 : '')
   const head =
     r.kind === 'watchlist'
-      ? '<b>Watchlist</b> <span class="al-cur">(' + watchList().length + ' coins)</span>'
+      ? '<b>Watchlist</b> <span class="al-cur">(' + watchList().length + ' coins' +
+        (r.tech ? ', ' + esc(r.tf || '15m') : '') + ')</span>'
       : '<b>' + esc(r.sym || '') + '</b>' +
-        (r.kind === 'technical' ? ' <span class="al-cur">' + esc(r.tf || '15m') + '</span>' : '')
+        (r.tf ? ' <span class="al-cur">' + esc(r.tf) + '</span>' : '')
+  const freq = freqOf(r)
   const meta =
     ' <span class="al-cur">· ' +
-    (r.once ? 'once' : 'repeat, ' + (r.cooldownMin ?? DEFAULT_COOLDOWN_MIN) + 'm cooldown') +
+    (freq === 'every' ? 'every time, ' + (r.cooldownMin ?? DEFAULT_COOLDOWN_MIN) + 'm cooldown' : FREQ_TEXT[freq]) +
+    (r.expires ? ' · until ' + new Date(r.expires).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '') +
+    (r.webhook ? ' · webhook' : '') +
     (r.triggerCount ? ' · fired ' + r.triggerCount + '×' : '') +
     '</span>'
+  const what =
+    r.kind === 'cond'
+      ? '<span class="al-tgt">' + esc((r.conds || []).map(condText).join(' AND ')) + '</span>'
+      : esc(condLabel(r.tech || r.condition).toUpperCase()) + ' <span class="al-tgt">' + tgt + '</span>'
   return (
     '<div class="al-item" data-al-id="' + esc(r.id) + '"' + (r.enabled ? '' : ' style="opacity:.55"') + '>' +
-    '<div style="flex:1;min-width:0">' + head + ' ' + esc(condLabel(r.condition).toUpperCase()) +
-    ' <span class="al-tgt">' + tgt + '</span>' +
+    '<div style="flex:1;min-width:0">' + head + ' ' + what +
     (t && r.kind === 'price' ? ' <span class="al-cur">· now $' + pfmt(t.last) + '</span>' : '') +
     meta + statusOf(r) + '</div>' +
     '<button type="button" class="al-act" data-al-act="toggle" title="' + (r.enabled ? 'Pause' : 'Resume / re-arm') + '">' +

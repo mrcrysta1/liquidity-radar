@@ -8,9 +8,18 @@
 // (used by the unit tests) resolves specifiers literally.
 import { calcRSI, emaArr, macdSeries, smaArr } from '../../utils/indicators.ts'
 import { candlesMatch } from '../../services/symbolScope.ts'
+import { MAX_MESSAGE, condText, isExpired, normalizeConds, validWebhookUrl } from './conditions.ts'
+import type { Cond } from './conditions.ts'
 
-export type AlertKind = 'price' | 'technical' | 'watchlist'
-export const ALERT_LIMITS: Record<AlertKind, number> = { price: 1000, technical: 1000, watchlist: 15 }
+/** 'cond': TradingView-style conditions (indicator outputs, drawings, Pine
+ *  alertconditions; up to five joined with AND) — see ./conditions. */
+export type AlertKind = 'price' | 'technical' | 'watchlist' | 'cond'
+export const ALERT_LIMITS: Record<AlertKind, number> = {
+  price: 1000,
+  technical: 1000,
+  watchlist: 15,
+  cond: 400,
+}
 
 export type PriceCond =
   | 'crosses_above'
@@ -28,8 +37,11 @@ export type TechCond =
   | 'macd_cross_down'
   | 'close_above_sma'
   | 'close_below_sma'
-export type WatchCond = 'any_pct_24h_above' | 'any_pct_24h_below' | 'count_above_pct'
-export type AlertCond = PriceCond | TechCond | WatchCond
+  | 'move_up_pct'
+  | 'move_down_pct'
+/** any_technical: a technical condition (`tech`) on any favourite. */
+export type WatchCond = 'any_pct_24h_above' | 'any_pct_24h_below' | 'count_above_pct' | 'any_technical'
+export type AlertCond = PriceCond | TechCond | WatchCond | 'conditions'
 
 export const PRICE_CONDS: PriceCond[] = [
   'crosses_above',
@@ -48,12 +60,46 @@ export const TECH_CONDS: TechCond[] = [
   'macd_cross_down',
   'close_above_sma',
   'close_below_sma',
+  'move_up_pct',
+  'move_down_pct',
 ]
-export const WATCH_CONDS: WatchCond[] = ['any_pct_24h_above', 'any_pct_24h_below', 'count_above_pct']
+export const WATCH_CONDS: WatchCond[] = [
+  'any_pct_24h_above',
+  'any_pct_24h_below',
+  'count_above_pct',
+  'any_technical',
+]
 export const CONDS_BY_KIND: Record<AlertKind, AlertCond[]> = {
   price: PRICE_CONDS,
   technical: TECH_CONDS,
   watchlist: WATCH_CONDS,
+  cond: ['conditions'],
+}
+
+/**
+ * How often a rule may fire (TradingView's options):
+ *  once  — the first time, then the rule switches off;
+ *  bar   — at most once per bar, as soon as it holds (intrabar);
+ *  close — at most once per bar, judged when the bar closes;
+ *  every — on every new trigger, held to the rule's cooldown.
+ * Rules saved before this field derive it from `once`.
+ */
+export type AlertFreq = 'once' | 'bar' | 'close' | 'every'
+export const FREQS: AlertFreq[] = ['once', 'bar', 'close', 'every']
+export const freqOf = (r: Pick<AlertRule, 'freq' | 'once'>): AlertFreq =>
+  r.freq ?? (r.once ? 'once' : 'every')
+
+/** An indicator instance as a conditions rule keeps it (indicators/store's
+ *  IndicatorInstance, copied so the alert outlives edits to the chart). */
+export interface IndSnap {
+  uid: string
+  type: string
+  params: Record<string, number>
+  source: string
+  visible: boolean
+  script?: string
+  title?: string
+  pineInputs?: Record<string, unknown>
 }
 
 /** Price conditions that sit at a fixed price — drawn as lines on the chart. */
@@ -79,10 +125,27 @@ export interface AlertRule {
   created: number
   lastTriggered?: number
   triggerCount: number
+  /** Technical rules: judge only closed bars, so a cross that un-crosses inside the bar never fires. */
+  onClose?: boolean
   /** Whether the condition held at the last evaluation (edge detection). */
   lastState?: boolean
   /** Watchlist "any" rules: symbols that matched last time. */
   lastMatched?: string[]
+  /** See AlertFreq; absent on rules saved before it existed. */
+  freq?: AlertFreq
+  /** bar / close frequency: open time of the bar it last fired on. */
+  lastBar?: number
+  /** Stop judging (and switch off) from this time, ms. */
+  expires?: number
+  /** Custom notification text with {{ticker}} {{close}} {{interval}} {{time}}. */
+  message?: string
+  /** https URL each fire is POSTed to, through api/alert-webhook. */
+  webhook?: string
+  /** Watchlist any_technical: the technical condition judged per symbol. */
+  tech?: TechCond
+  /** cond kind: the conditions (AND) and the indicator instances they read. */
+  conds?: Cond[]
+  inds?: IndSnap[]
 }
 
 export interface AlertEvent {
@@ -104,7 +167,30 @@ interface LegacyAlert {
 }
 
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
-const ALL_CONDS = new Set<string>([...PRICE_CONDS, ...TECH_CONDS, ...WATCH_CONDS])
+const ALL_CONDS = new Set<string>([...PRICE_CONDS, ...TECH_CONDS, ...WATCH_CONDS, 'conditions'])
+
+/** A saved indicator snapshot, minimally checked (the indicator code
+ *  re-validates params when it computes). Pine scripts keep their cap. */
+function normalizeInds(raw: unknown): IndSnap[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .filter((x): x is Record<string, unknown> => !!x && typeof x === 'object')
+    .filter((x) => typeof x.uid === 'string' && !!x.uid && typeof x.type === 'string' && !!x.type)
+    .slice(0, 20)
+    .map((x) => ({
+      uid: String(x.uid),
+      type: String(x.type),
+      params: x.params && typeof x.params === 'object' ? (x.params as Record<string, number>) : {},
+      source: typeof x.source === 'string' ? x.source : 'close',
+      visible: true,
+      script: typeof x.script === 'string' ? x.script.slice(0, 32000) : undefined,
+      title: typeof x.title === 'string' ? x.title.slice(0, 80) : undefined,
+      pineInputs:
+        x.pineInputs && typeof x.pineInputs === 'object'
+          ? (x.pineInputs as Record<string, unknown>)
+          : undefined,
+    }))
+}
 
 /**
  * Read whatever is saved under the alerts key — old price alerts, new rules,
@@ -125,11 +211,16 @@ export function normalizeRules(raw: unknown): AlertRule[] {
       if (!(CONDS_BY_KIND[kind] as string[]).includes(o.condition)) return
       if (!isNum(o.value)) return
       if (kind !== 'watchlist' && (typeof o.sym !== 'string' || !o.sym)) return
+      const conds = kind === 'cond' ? normalizeConds(o.conds) : null
+      if (kind === 'cond' && !conds) return
+      const tech = o.condition === 'any_technical' ? TECH_CONDS.find((c) => c === o.tech) : undefined
+      if (o.condition === 'any_technical' && !tech) return
+      const usesTf = kind === 'technical' || kind === 'cond' || !!tech
       out.push({
         id: typeof o.id === 'string' && o.id ? o.id : 'al-' + i + '-' + String(o.created ?? 0),
         kind,
         sym: kind === 'watchlist' ? undefined : String(o.sym),
-        tf: kind === 'technical' ? (typeof o.tf === 'string' && o.tf ? o.tf : '15m') : undefined,
+        tf: usesTf ? (typeof o.tf === 'string' && o.tf ? o.tf : '15m') : undefined,
         condition: o.condition as AlertCond,
         value: o.value,
         value2: isNum(o.value2) ? o.value2 : undefined,
@@ -143,6 +234,18 @@ export function normalizeRules(raw: unknown): AlertRule[] {
         lastMatched: Array.isArray(o.lastMatched)
           ? o.lastMatched.filter((s): s is string => typeof s === 'string')
           : undefined,
+        // Dropped before this engine knew about it, so on-close technicals
+        // reloaded as intrabar; kept now.
+        onClose: typeof o.onClose === 'boolean' ? o.onClose : undefined,
+        freq: FREQS.find((f) => f === o.freq),
+        lastBar: isNum(o.lastBar) ? o.lastBar : undefined,
+        expires: isNum(o.expires) ? o.expires : undefined,
+        message:
+          typeof o.message === 'string' && o.message.trim() ? o.message.slice(0, MAX_MESSAGE) : undefined,
+        webhook: typeof o.webhook === 'string' ? (validWebhookUrl(o.webhook) ?? undefined) : undefined,
+        tech,
+        conds: conds ?? undefined,
+        inds: kind === 'cond' ? normalizeInds(o.inds) : undefined,
       })
       return
     }
@@ -171,6 +274,9 @@ export const condLabel = (c: string): string => c.replace(/_/g, ' ').replace('pc
 /** Short human name, e.g. "BTCUSDT crosses above 70000" or "ETHUSDT 1h rsi above 70". */
 export function ruleName(r: AlertRule): string {
   const v = r.value + (r.value2 != null ? '/' + r.value2 : '')
+  if (r.kind === 'cond') return r.sym + ' ' + (r.tf || '15m') + ' ' + (r.conds || []).map(condText).join(' AND ')
+  if (r.kind === 'watchlist' && r.tech)
+    return 'Watchlist ' + (r.tf || '15m') + ': any ' + condLabel(r.tech) + ' ' + v
   if (r.kind === 'watchlist') return 'Watchlist: ' + condLabel(r.condition) + ' ' + v
   return r.sym + (r.kind === 'technical' ? ' ' + (r.tf || '15m') : '') + ' ' + condLabel(r.condition) + ' ' + v
 }
@@ -187,6 +293,10 @@ export function evalPrice(
   price: number,
   prevPrice: number | undefined,
   pct24h: number | undefined,
+  /** Highest and lowest trade since the previous sample, when known: a wick
+   *  through the level between two samples is a cross too (TradingView
+   *  triggers intrabar). */
+  range?: { hi: number; lo: number },
 ): boolean {
   if (!isNum(price)) return false
   const v = rule.value
@@ -196,9 +306,9 @@ export function evalPrice(
     case 'below':
       return price <= v
     case 'crosses_above':
-      return prevPrice != null && prevPrice <= v && price > v
+      return prevPrice != null && prevPrice <= v && (price > v || (range != null && range.hi > v))
     case 'crosses_below':
-      return prevPrice != null && prevPrice >= v && price < v
+      return prevPrice != null && prevPrice >= v && (price < v || (range != null && range.lo < v))
     case 'pct_change_24h_above':
       return isNum(pct24h) && pct24h > v
     case 'pct_change_24h_below':
@@ -239,11 +349,14 @@ export function chartedCandlesFit(c: ChartedCandles, sym: string, tf: string): b
 
 /** Whether a technical condition holds on the latest candle (candles oldest first, `c` = close). */
 export function evalTechnical(
-  rule: Pick<AlertRule, 'condition' | 'value' | 'value2'>,
+  rule: Pick<AlertRule, 'condition' | 'value' | 'value2' | 'onClose'>,
   candles: { c: number }[],
 ): boolean {
   if (!candles || candles.length < MIN_TECH_CANDLES) return false
-  const close = candles.map((k) => +k.c)
+  // On bar close: the last candle is still forming, judge the one before.
+  const bars = rule.onClose ? candles.slice(0, -1) : candles
+  if (bars.length < MIN_TECH_CANDLES) return false
+  const close = bars.map((k) => +k.c)
   const i = close.length - 1
   const j = i - 1
   switch (rule.condition) {
@@ -269,6 +382,15 @@ export function evalTechnical(
       const m = smaArr(close, rule.value || 50)[i]
       if (m == null) return false
       return rule.condition === 'close_above_sma' ? close[i] > m : close[i] < m
+    }
+    case 'move_up_pct':
+    case 'move_down_pct': {
+      // TradingView's "moving up/down %": close vs the close N bars back.
+      const n = Math.max(1, Math.round(rule.value2 || 1))
+      const base = close[i - n]
+      if (!(base > 0)) return false
+      const move = ((close[i] - base) / base) * 100
+      return rule.condition === 'move_up_pct' ? move >= rule.value : move <= -rule.value
     }
     default:
       return false
@@ -311,6 +433,20 @@ export function evalWatchlist(
   }
 }
 
+/**
+ * A watchlist any_technical rule: its technical condition on each favourite's
+ * candles (symbols whose candles have not loaded yet are skipped).
+ */
+export function evalWatchTech(
+  rule: Pick<AlertRule, 'tech' | 'value' | 'value2' | 'onClose'>,
+  bySymbol: Array<{ symbol: string; candles: { c: number }[] }>,
+): WatchResult {
+  if (!rule.tech) return { hit: false, matched: [], detail: '' }
+  const tr = { condition: rule.tech, value: rule.value, value2: rule.value2, onClose: rule.onClose }
+  const m = bySymbol.filter((x) => evalTechnical(tr, x.candles)).map((x) => x.symbol)
+  return { hit: m.length > 0, matched: m, detail: m.join(', ') }
+}
+
 // ---------------------------------------------------------------- firing
 
 export interface StepResult {
@@ -327,11 +463,35 @@ export interface StepResult {
  * still holds once the cooldown ends it fires then. A "once" rule disables
  * itself after firing. For "any symbol" watchlist rules a new symbol joining
  * the matching set counts as a fresh edge (`matched`).
+ *
+ * The "bar" and "close" frequencies fire whenever the condition holds, at most
+ * once per bar (`barT`: open time of the bar judged) — a level that stays
+ * above fires again on the next bar, as on TradingView. Without a bar time
+ * they fall back to the edge rule. A rule past its expiry switches off unfired.
  */
-export function stepRule(rule: AlertRule, hit: boolean, now: number, matched?: string[]): StepResult {
+export function stepRule(
+  rule: AlertRule,
+  hit: boolean,
+  now: number,
+  matched?: string[],
+  barT?: number,
+): StepResult {
   if (!rule.enabled) return { fire: false, next: rule }
+  if (isExpired(rule.expires, now)) return { fire: false, next: { ...rule, enabled: false } }
+  const freq = freqOf(rule)
   const perSymbol = rule.kind === 'watchlist' && rule.condition !== 'count_above_pct' && matched != null
   const prevMatched = rule.lastMatched || []
+  if ((freq === 'bar' || freq === 'close') && barT != null) {
+    const fire = hit && rule.lastBar !== barT
+    const next: AlertRule = { ...rule, lastState: hit }
+    if (perSymbol) next.lastMatched = matched!.slice()
+    if (fire) {
+      next.lastBar = barT
+      next.lastTriggered = now
+      next.triggerCount = rule.triggerCount + 1
+    }
+    return { fire, next }
+  }
   const edge = perSymbol
     ? matched!.some((s) => !prevMatched.includes(s))
     : hit && !rule.lastState

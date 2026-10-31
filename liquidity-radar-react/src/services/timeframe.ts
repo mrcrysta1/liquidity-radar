@@ -251,13 +251,17 @@ export function foldBucket(bucket: CandleFlat[]): CandleFlat | null {
   if (!bucket.length) return null
   const first = bucket[0]
   const out: CandleFlat = { t: first.t, o: first.o, h: first.h, l: first.l, c: first.c, v: first.v }
+  // Taker-buy volume sums too, when every base bar has it.
+  let tb: number | undefined = first.tb
   for (let i = 1; i < bucket.length; i++) {
     const c = bucket[i]
     if (c.h > out.h) out.h = c.h
     if (c.l < out.l) out.l = c.l
     out.c = c.c
     out.v += c.v
+    tb = tb != null && c.tb != null ? tb + c.tb : undefined
   }
+  if (tb != null) out.tb = tb
   return out
 }
 
@@ -293,6 +297,21 @@ export function resample(base: CandleFlat[], def: TimeframeDef): CandleFlat[] {
  * `room` caps how many new candles may be added; `added` counts only those,
  * never the merged bucket, which replaces the one already shown.
  */
+/**
+ * A reload of the series already on screen (a gap refill, a retry, the
+ * primary-feed probe) brings the latest ~500 bars. Keep any older history the
+ * user paged in, and replace only the overlap, so the view does not jump.
+ */
+export function mergeReload(current: CandleFlat[], fresh: CandleFlat[], max = Infinity): CandleFlat[] {
+  if (!fresh.length) return current
+  if (!current.length) return fresh
+  const first = fresh[0].t
+  let i = current.length
+  while (i > 0 && current[i - 1].t >= first) i--
+  const merged = i ? current.slice(0, i).concat(fresh) : fresh
+  return merged.length > max ? merged.slice(merged.length - max) : merged
+}
+
 export function mergeOlderPage(
   older: CandleFlat[],
   current: CandleFlat[],

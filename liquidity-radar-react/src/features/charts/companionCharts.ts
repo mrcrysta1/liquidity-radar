@@ -69,6 +69,9 @@ import type { IndicatorRenderer } from './indicators/render'
 import { panelIndicatorStore } from './indicators/panelStore'
 import { unmountCoinPickers } from '../../components/chart/mountCoinPicker'
 import { registerCrosshairSync } from './crosshairSync'
+import { getLinkGroup, getSyncOptions, registerTimeSync, setMainLinkKey, subscribeLinks } from './linkGroups'
+import type { TimeSyncHandle } from './linkGroups'
+import { mountLinkChip, unmountLinkChips } from '../../components/chart/mountLinkChip'
 
 type Any = any
 
@@ -113,6 +116,8 @@ interface Panel {
   hover: boolean
   /** Leave the crosshair-sync hub. */
   syncOff: (() => void) | null
+  /** Its place in its link group's time-range sync. */
+  timeLink: TimeSyncHandle | null
 }
 
 /** Live ticks redraw a panel's indicators at most this often. */
@@ -255,6 +260,10 @@ export function applyLayout(): void {
     subscribeTimeframe(persistSoon)
     subscribeChartStyle(persistSoon)
     subscribeSymbol(persistSoon)
+    // Linked cells follow the main chart's coin and interval (./linkGroups).
+    subscribeTimeframe(alignLinks)
+    subscribeSymbol(alignLinks)
+    subscribeLinks(alignLinks)
   }
   applyGrid()
   // Panel headers changed: the indicator buttons re-mount into them.
@@ -284,6 +293,7 @@ function applyGrid(): void {
   for (let i = panels.length - 1; i >= 0; i--) if (panels[i].pos >= spec.n) destroyPanel(i)
   for (let pos = 0; pos < spec.n; pos++) if (pos !== active && !panelAt(pos)) addPanel(pos)
   placeCells()
+  alignLinks()
   requestAnimationFrame(resizeAll)
 }
 
@@ -296,6 +306,16 @@ function placeCells(): void {
   wrap.style.order = String(active)
   wrap.style.gridColumn = 'span ' + (geom[active]?.span || 1)
   wrap.classList.toggle('is-active', spec.n > 1)
+  // The main chart takes the link group of the cell it sits in.
+  setMainLinkKey('c' + active)
+  let chip = wrap.querySelector<HTMLElement>(':scope > .rc-link-main')
+  if (!chip) {
+    chip = document.createElement('div')
+    chip.className = 'rc-link-main'
+    wrap.appendChild(chip)
+  }
+  chip.hidden = spec.n < 2
+  mountLinkChip(chip, 'c' + active)
   panels.forEach((p) => {
     if (!p.el) return
     p.el.style.order = String(p.pos)
@@ -399,6 +419,70 @@ export function restoreLayout(
   emit()
 }
 
+/**
+ * What the main chart shares with a cell in its link group: its coin and/or
+ * interval, per the layout's sync options. Companions have no controls of
+ * their own, so the main chart is what moves a group; a group without it
+ * lines up behind its first cell.
+ */
+function linkedSeed(pos: number, seed: CellCfg): CellCfg {
+  const o = getSyncOptions('layout')
+  const g = getLinkGroup('c' + pos)
+  if (!g || pos === active || g !== getLinkGroup('c' + active)) return seed
+  const main = mainCfg()
+  return {
+    ...seed,
+    sym: o.symbol && main.sym ? main.sym : seed.sym,
+    tf: o.interval ? main.tf : seed.tf,
+  }
+}
+
+/** Point every linked cell at its group's coin and interval. */
+function alignLinks(): void {
+  const o = getSyncOptions('layout')
+  if (!o.symbol && !o.interval) return
+  const lead = new Map<string, CellCfg>()
+  const mg = getLinkGroup('c' + active)
+  if (mg) lead.set(mg, mainCfg())
+  let moved = false
+  panels
+    .slice()
+    .sort((a, b) => a.pos - b.pos)
+    .forEach((p) => {
+      const g = getLinkGroup(p.slot)
+      if (!g) return
+      const l = lead.get(g)
+      if (!l) {
+        lead.set(g, { sym: p.sym, tf: p.tf, style: p.style })
+        return
+      }
+      const sym = o.symbol && l.sym ? l.sym : p.sym
+      const tf = o.interval ? l.tf : p.tf
+      if (sym === p.sym && tf === p.tf) return
+      p.sym = sym
+      p.tf = tf
+      relink(p)
+      moved = true
+    })
+  if (moved) persistSoon()
+}
+
+/** A cell's coin or interval changed under it: clear the old bars and load. */
+function relink(p: Panel): void {
+  syncTitle(p)
+  if (!p.chart || !p.candleSeries) return
+  // Old bars must not share the time scale with the new interval's, even
+  // for a moment (see chartRender updateChartData).
+  p.ind?.blank()
+  p.candleSeries.setData([])
+  p.volSeries?.setData([])
+  p.candles = []
+  p.shown = []
+  p.hover = false
+  p.chart.applyOptions({ timeScale: { secondsVisible: isRangeCell(p) } })
+  reload(p)
+}
+
 function defaultFor(pos: number): CellCfg {
   const s = saved[pos]
   if (s) return s
@@ -409,7 +493,7 @@ function defaultFor(pos: number): CellCfg {
 function addPanel(pos: number): void {
   const grid = $('chartLayout')
   if (!grid) return
-  const seed = defaultFor(pos)
+  const seed = linkedSeed(pos, defaultFor(pos))
   const p: Panel = {
     id: idCounter++,
     pos,
@@ -435,6 +519,7 @@ function addPanel(pos: number): void {
     indAt: 0,
     hover: false,
     syncOff: null,
+    timeLink: null,
   }
   // No controls of its own: the toolbar drives whichever chart is active,
   // and clicking this one (or Enter/Space on it) makes it the active chart.
@@ -444,6 +529,7 @@ function addPanel(pos: number): void {
   cell.setAttribute('role', 'button')
   cell.innerHTML =
     '<div class="rc-head">' +
+    '<span class="rc-link"></span>' +
     '<span class="rc-title"></span>' +
     '<span class="rc-meta"></span>' +
     '</div>' +
@@ -456,6 +542,8 @@ function addPanel(pos: number): void {
   grid.insertBefore(cell, next ? next.el : null)
   p.el = cell
   panels.push(p)
+  const chip = cell.querySelector<HTMLElement>('.rc-link')
+  if (chip) mountLinkChip(chip, p.slot)
   // Panning or scaling a chart ends in a click too: only a press that stays
   // put picks the chart.
   let downX = 0
@@ -507,6 +595,8 @@ function destroyPanel(i: number): void {
   if (p.ro) p.ro.disconnect()
   p.syncOff?.()
   p.syncOff = null
+  p.timeLink?.off()
+  p.timeLink = null
   if (p.chart) {
     try {
       p.chart.remove()
@@ -514,7 +604,10 @@ function destroyPanel(i: number): void {
       /* already gone */
     }
   }
-  if (p.el) unmountCoinPickers(p.el)
+  if (p.el) {
+    unmountCoinPickers(p.el)
+    unmountLinkChips(p.el)
+  }
   p.el?.remove()
   panels.splice(i, 1)
 }
@@ -591,6 +684,15 @@ function initChart(p: Panel): void {
     bars: () => legendCandles(p.style, p.shown),
     onSync: (t) => hoverLegend(p, t),
   })
+  // Scrolling and zooming with the charts in its link group (./linkGroups).
+  p.timeLink = registerTimeSync({
+    scope: 'layout',
+    key: () => p.slot,
+    chart,
+    owns: (t) => body.contains(t),
+    times: () => p.shown.map((c) => Math.floor(c.t / 1000)),
+    syncable: () => !isRangeCell(p),
+  })
   // autoSize keeps the bar spacing as the cell grows (full screen, a wider
   // window, a smaller layout), which left the candles bunched in the right
   // part of the cell with blank space before them. When the whole history is
@@ -607,7 +709,10 @@ function initChart(p: Panel): void {
       // Torn down meanwhile (destroyPanel sets the token to -1).
       if (p.token === -1 || p.chart !== chart || !p.shown.length) return
       const r = chart.timeScale().getVisibleLogicalRange()
-      if (r && r.from <= 0) chart.timeScale().fitContent()
+      if (r && r.from <= 0) {
+        chart.timeScale().fitContent()
+        p.timeLink?.adopt()
+      }
     })
   })
   p.ro.observe(body)
@@ -688,6 +793,9 @@ const isRangeCell = (p: Panel): boolean => !!styleDef(p.style).rangeBars
 function barsFor(p: Panel): CandleFlat[] {
   const src = p.candles
   if (!isRangeCell(p) || !src.length) return src
+  // Tick bars come from the focused symbol's trade stream only; a cell has
+  // none, so it shows its time candles rather than an empty chart.
+  if (p.style === 'tick') return src
   const n = src.length
   const manual = manualRangeFor(p.sym, p.style)
   const key = [p.style, p.sym, n, src[0].t, n > 1 ? src[n - 2].t : 0, manual ?? 'a'].join('|')
@@ -747,6 +855,9 @@ function draw(p: Panel, candles: CandleFlat[]): void {
   p.volSeries.setData(p.shown.map(volBar))
   drawIndicators(p)
   p.chart.timeScale().fitContent()
+  // A linked cell opens on its group's time range instead (audit U16: cells
+  // showing different stretches of time).
+  p.timeLink?.adopt()
   syncTvWatermark(p.chart, watermarkOf(p), 32)
   const last = p.shown[p.shown.length - 1]
   if (last) tvLastPrice(p.candleSeries, last.c >= last.o)
@@ -848,7 +959,10 @@ export function resizeAll(): void {
   panels.forEach((p) => {
     const ts = p.chart?.timeScale()
     const r = ts?.getVisibleLogicalRange()
-    if (ts && (!r || r.from <= 0)) ts.fitContent()
+    if (ts && (!r || r.from <= 0)) {
+      ts.fitContent()
+      p.timeLink?.adopt()
+    }
   })
 }
 
@@ -891,6 +1005,20 @@ export function watchStageHeight(): void {
 }
 
 /** Re-theme companions when the palette or light/dark mode changes. */
+/** A new chart time zone: redraw each companion so its day labels move (see reweightTimeScale). */
+export function companionReweight(): void {
+  panels.forEach((p) => {
+    if (!p.chart || !p.candleSeries || !p.candles.length) return
+    const ts = p.chart.timeScale()
+    const keep = ts.getVisibleLogicalRange()
+    p.candleSeries.setData([])
+    p.volSeries?.setData([])
+    p.ind?.blank()
+    draw(p, p.candles)
+    if (keep) ts.setVisibleLogicalRange(keep)
+  })
+}
+
 export function applyCompanionTheme(): void {
   const pal = chartPalette()
   panels.forEach((p) => {

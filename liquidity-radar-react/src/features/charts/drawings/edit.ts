@@ -3,6 +3,7 @@
 // ./geometry and the bar times on screen — no chart, no DOM — so the eraser,
 // the selection and the tests all agree on what a click hits.
 import type { Pt, Shape } from './geometry'
+import { logicalToTime, timeToLogical } from './timeMap.ts'
 
 /** How close (px) a click must land to a line to hit it. */
 export const HIT_PX = 7
@@ -38,19 +39,27 @@ export function hitShape(sh: Shape, x: number, y: number): boolean {
   for (const l of sh.labels) {
     if (!l.box) continue
     const [lo, hi] = labelSpan(l)
-    if (x >= lo && x <= hi && Math.abs(l.y - y) < 12) return true
+    // The box runs from about one font size above the baseline to 4px below.
+    const fs = l.size || 10
+    if (x >= lo && x <= hi && y >= l.y - fs - 2 && y <= l.y + 6) return true
   }
   return false
 }
 
 /**
  * Horizontal extent of a boxed label. The text is measured by eye (no canvas
- * here): about 6.5px a character at the 11px label font, plus the padding.
+ * here): about 0.65 of the font size a character (6.5px at the default 10px,
+ * larger for a text drawing set to a bigger font), plus the padding.
  * A fixed ±60px around x missed the right of long left-aligned labels and
  * caught clicks on empty space to their left.
  */
-export function labelSpan(l: { x: number; text: string; align?: 'left' | 'right' | 'center' }): [number, number] {
-  const w = l.text.length * 6.5 + 12
+export function labelSpan(l: {
+  x: number
+  text: string
+  align?: 'left' | 'right' | 'center'
+  size?: number
+}): [number, number] {
+  const w = l.text.length * ((l.size || 10) * 0.65) + 12
   if (l.align === 'left') return [l.x, l.x + w]
   if (l.align === 'right') return [l.x - w, l.x]
   return [l.x - w / 2, l.x + w / 2]
@@ -108,10 +117,12 @@ export function nearestBar(times: number[], t: number): number {
 
 /**
  * Move a whole drawing by `dBars` bars and a price shift. Each anchor moves by
- * whole bars of the data on screen, and the shift in time is clamped so the shape keeps its form at
- * the ends of the data instead of squashing against them. `movePrice` maps a
- * price to the dragged price (done in pixels by the caller, so a log scale
- * moves evenly); null leaves that anchor's price unchanged.
+ * whole bars, counted in bar-index space so anchors past the last bar (a
+ * position's target, a fib extension) or before the first loaded one move
+ * too; they used to be clamped to the loaded bars, so such a drawing could not
+ * be dragged towards that side at all. `movePrice` maps a price to the dragged
+ * price (done in pixels by the caller, so a log scale moves evenly); null
+ * leaves that anchor's price unchanged.
  */
 export function shiftPoints(
   start: Pt[],
@@ -119,17 +130,18 @@ export function shiftPoints(
   times: number[],
   movePrice: (price: number) => number | null,
 ): Pt[] {
-  if (!times.length) return start.map((p) => ({ ...p }))
-  const idx = start.map((p) => nearestBar(times, p.time))
-  const lo = Math.min(...idx)
-  const hi = Math.max(...idx)
-  const d = Math.max(-lo, Math.min(times.length - 1 - hi, Math.round(dBars)))
-  return start.map((p, i) => {
+  if (times.length < 2) return start.map((p) => ({ ...p }))
+  const d = Math.round(dBars)
+  return start.map((p) => {
     const np = movePrice(p.price)
+    const l = timeToLogical(times, p.time)
+    const base = l == null ? null : Math.round(l)
+    const t0 = base == null ? null : logicalToTime(times, base)
+    const t1 = base == null ? null : logicalToTime(times, base + d)
     return {
       // Shift by whole bars and keep any offset inside the bar (an anchor
       // placed on a lower timeframe), so a purely vertical drag keeps times.
-      time: p.time + (times[idx[i] + d] - times[idx[i]]),
+      time: t0 == null || t1 == null ? p.time : p.time + (t1 - t0),
       price: np != null && Number.isFinite(np) ? np : p.price,
     }
   })

@@ -812,3 +812,436 @@ export function crosses(a: Series, b: Series) {
   }
   return { up, down }
 }
+
+// ------------------------------------------------- swings, levels, patterns
+
+/** A ZigZag turning point: the bar and the extreme (high or low) it made. */
+export interface ZigPivot {
+  i: number
+  price: number
+  high: boolean
+}
+
+/**
+ * ZigZag as TradingView draws it: a leg ends when price reverses `devPct`
+ * percent from the leg's extreme, and a leg shorter than `depth` bars is not
+ * allowed to end (it just keeps extending). `pivots` are the confirmed
+ * turns; `last` is the running extreme of the leg still in progress, which
+ * moves until a reversal confirms it.
+ */
+export function zigzag(
+  c: CandleFlat[],
+  devPct = 5,
+  depth = 10,
+): { pivots: ZigPivot[]; last: ZigPivot | null } {
+  const pivots: ZigPivot[] = []
+  const n = c.length
+  if (!n) return { pivots, last: null }
+  const dev = Math.max(0, devPct) / 100
+  let dir = 0
+  let hi = 0
+  let lo = 0
+  const lastI = () => (pivots.length ? pivots[pivots.length - 1].i : -Infinity)
+  for (let i = 1; i < n; i++) {
+    if (dir === 0) {
+      // Before the first turn both extremes run; whichever is older becomes
+      // the first pivot once the range between them is a full deviation.
+      if (c[i].h > c[hi].h) hi = i
+      if (c[i].l < c[lo].l) lo = i
+      if (hi !== lo && c[hi].h >= c[lo].l * (1 + dev)) {
+        if (hi > lo) {
+          pivots.push({ i: lo, price: c[lo].l, high: false })
+          dir = 1
+        } else {
+          pivots.push({ i: hi, price: c[hi].h, high: true })
+          dir = -1
+        }
+      }
+      continue
+    }
+    if (dir === 1) {
+      if (c[i].h >= c[hi].h) hi = i
+      else if (c[i].l <= c[hi].h * (1 - dev) && hi - lastI() >= depth) {
+        pivots.push({ i: hi, price: c[hi].h, high: true })
+        dir = -1
+        lo = i
+      }
+    } else {
+      if (c[i].l <= c[lo].l) lo = i
+      else if (c[i].h >= c[lo].l * (1 + dev) && lo - lastI() >= depth) {
+        pivots.push({ i: lo, price: c[lo].l, high: false })
+        dir = 1
+        hi = i
+      }
+    }
+  }
+  const last: ZigPivot | null =
+    dir === 1
+      ? { i: hi, price: c[hi].h, high: true }
+      : dir === -1
+        ? { i: lo, price: c[lo].l, high: false }
+        : null
+  return { pivots, last }
+}
+
+/** The ZigZag as a series: values only at the turns, so a line through the
+ *  defined points draws the legs (the live leg to the running extreme too). */
+export function zigzagLine(c: CandleFlat[], devPct = 5, depth = 10): Series {
+  const out = NaNs(c.length)
+  const z = zigzag(c, devPct, depth)
+  z.pivots.forEach((p) => (out[p.i] = p.price))
+  if (z.last && (!z.pivots.length || z.last.i > z.pivots[z.pivots.length - 1].i))
+    out[z.last.i] = z.last.price
+  return out
+}
+
+/** Fibonacci ratios Auto Fib draws, in output order. */
+export const FIB_RATIOS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1]
+
+/**
+ * Auto Fib retracement over the last confirmed ZigZag swing: level 0 sits at
+ * the newest pivot, 1 at the one before it, as TradingView's default. Each
+ * level is a horizontal line from the swing's start to the last bar.
+ */
+export function autoFib(
+  c: CandleFlat[],
+  devPct = 5,
+  depth = 10,
+): { levels: number[]; from: number; series: Series[] } {
+  const { pivots } = zigzag(c, devPct, depth)
+  const series = FIB_RATIOS.map(() => NaNs(c.length))
+  if (pivots.length < 2) return { levels: [], from: -1, series }
+  const a = pivots[pivots.length - 2]
+  const b = pivots[pivots.length - 1]
+  const levels = FIB_RATIOS.map((r) => b.price + (a.price - b.price) * r)
+  levels.forEach((lv, k) => {
+    for (let i = a.i; i < c.length; i++) series[k][i] = lv
+  })
+  return { levels, from: a.i, series }
+}
+
+/**
+ * Chandelier Exit (Le Beau): a long stop `mult` ATRs under the highest high
+ * of `len` bars, a short stop as far over the lowest low. Each stop only
+ * ratchets in the trade's favour while price respects it, and the trend
+ * flips when the close crosses the opposite stop. `long` / `short` carry the
+ * active stop only; `buy` / `sell` mark the flips.
+ */
+export function chandelier(c: CandleFlat[], len = 22, mult = 3) {
+  const n = c.length
+  const long = NaNs(n)
+  const short = NaNs(n)
+  const buy = NaNs(n)
+  const sell = NaNs(n)
+  const a = atr(c, len)
+  const hh = highest(c.map((k) => k.h), len)
+  const ll = lowest(c.map((k) => k.l), len)
+  let ls = NaN
+  let ss = NaN
+  let dir = 1
+  for (let i = 0; i < n; i++) {
+    const av = a[i]
+    if (av == null || hh[i] == null || ll[i] == null) continue
+    let l = (hh[i] as number) - mult * av
+    let s = (ll[i] as number) + mult * av
+    const prevC = i ? c[i - 1].c : c[i].c
+    if (isFinite(ls) && prevC > ls) l = Math.max(l, ls)
+    if (isFinite(ss) && prevC < ss) s = Math.min(s, ss)
+    const prevDir = dir
+    if (isFinite(ss) && c[i].c > ss) dir = 1
+    else if (isFinite(ls) && c[i].c < ls) dir = -1
+    if (dir === 1) long[i] = l
+    else short[i] = s
+    if (isFinite(ls) && dir !== prevDir) {
+      if (dir === 1) buy[i] = l
+      else sell[i] = s
+    }
+    ls = l
+    ss = s
+  }
+  return { long, short, buy, sell }
+}
+
+/**
+ * Ehlers' Fisher Transform as TradingView's built-in: hl2 normalised into
+ * its `len`-bar range, smoothed, clamped short of ±1 and mapped through the
+ * inverse hyperbolic tangent. The trigger is the previous bar's Fisher.
+ */
+export function fisher(c: CandleFlat[], len = 9): { fisher: Series; trigger: Series } {
+  const n = c.length
+  const f = NaNs(n)
+  const trig = NaNs(n)
+  const hl2 = c.map((k) => (k.h + k.l) / 2)
+  const hh = highest(hl2, len)
+  const ll = lowest(hl2, len)
+  let val = 0
+  let fish = 0
+  const clamp = (x: number) => (x > 0.999 ? 0.999 : x < -0.999 ? -0.999 : x)
+  for (let i = 0; i < n; i++) {
+    if (hh[i] == null || ll[i] == null) continue
+    const range = (hh[i] as number) - (ll[i] as number)
+    // A flat range has no position in it: read it as the middle.
+    const pos = range ? (hl2[i] - (ll[i] as number)) / range : 0.5
+    val = clamp(0.66 * (pos - 0.5) + 0.67 * val)
+    const prev = fish
+    fish = 0.5 * Math.log((1 + val) / (1 - val)) + 0.5 * fish
+    f[i] = fish
+    if (i && f[i - 1] != null) trig[i] = prev
+  }
+  return { fisher: f, trigger: trig }
+}
+
+/**
+ * Pring's Know Sure Thing: four rates of change, each smoothed by its own
+ * SMA and weighted 1–4, plus an SMA signal line.
+ */
+export function kst(
+  v: number[],
+  roc1 = 10,
+  roc2 = 15,
+  roc3 = 20,
+  roc4 = 30,
+  sm1 = 10,
+  sm2 = 10,
+  sm3 = 10,
+  sm4 = 15,
+  sig = 9,
+): { line: Series; signal: Series } {
+  const parts = [
+    onDefined(roc(v, roc1), (x) => sma(x, sm1)),
+    onDefined(roc(v, roc2), (x) => sma(x, sm2)),
+    onDefined(roc(v, roc3), (x) => sma(x, sm3)),
+    onDefined(roc(v, roc4), (x) => sma(x, sm4)),
+  ]
+  const line: Series = v.map((_, i) => {
+    let s = 0
+    for (let k = 0; k < 4; k++) {
+      const x = parts[k][i]
+      if (x == null) return null
+      s += x * (k + 1)
+    }
+    return s
+  })
+  return { line, signal: onDefined(line, (x) => sma(x, sig)) }
+}
+
+/**
+ * Levels from one period's high, low and close (and the new period's open,
+ * for Woodie). `kind`: 1 traditional · 2 fibonacci · 3 woodie · 4 camarilla.
+ * R4/S4 exist for Camarilla only.
+ */
+export function pivotLevels(
+  h: number,
+  l: number,
+  c: number,
+  kind = 1,
+  open = c,
+): { p: number; r: number[]; s: number[] } {
+  const rg = h - l
+  if (kind === 4) {
+    const p = (h + l + c) / 3
+    const k = [12, 6, 4, 2].map((d) => (1.1 * rg) / d)
+    return { p, r: k.map((x) => c + x), s: k.map((x) => c - x) }
+  }
+  if (kind === 2) {
+    const p = (h + l + c) / 3
+    const f = [0.382, 0.618, 1]
+    return { p, r: f.map((x) => p + x * rg), s: f.map((x) => p - x * rg) }
+  }
+  const p = kind === 3 ? (h + l + 2 * open) / 4 : (h + l + c) / 3
+  return {
+    p,
+    r: [2 * p - l, p + rg, h + 2 * (p - l)],
+    s: [2 * p - h, p - rg, l - 2 * (h - p)],
+  }
+}
+
+type PivotKey = 'p' | 'r1' | 'r2' | 'r3' | 'r4' | 's1' | 's2' | 's3' | 's4'
+
+/**
+ * Period pivot points: each day / week / month (`anchor` as VWAP's) draws
+ * the levels of the period before it. The first bar of a period is left
+ * empty, so each period's levels draw as a segment of their own instead of
+ * a vertical jump from the last period's.
+ */
+export function pivotPoints(c: CandleFlat[], kind = 1, anchor = 1): Record<PivotKey, Series> {
+  const n = c.length
+  const keys: PivotKey[] = ['p', 'r1', 'r2', 'r3', 'r4', 's1', 's2', 's3', 's4']
+  const out = {} as Record<PivotKey, Series>
+  keys.forEach((k) => (out[k] = NaNs(n)))
+  let period = NaN
+  let h = -Infinity
+  let l = Infinity
+  let cl = NaN
+  let lv: ReturnType<typeof pivotLevels> | null = null
+  for (let i = 0; i < n; i++) {
+    const k = vwapPeriod(c[i].t, anchor)
+    const fresh = k !== period
+    if (fresh) {
+      // The previous period closed: its range sets this period's levels.
+      lv = isFinite(cl) ? pivotLevels(h, l, cl, kind, c[i].o) : null
+      period = k
+      h = -Infinity
+      l = Infinity
+    }
+    h = Math.max(h, c[i].h)
+    l = Math.min(l, c[i].l)
+    cl = c[i].c
+    if (!lv || fresh) continue
+    out.p[i] = lv.p
+    lv.r.forEach((x, j) => (out[('r' + (j + 1)) as PivotKey][i] = x))
+    lv.s.forEach((x, j) => (out[('s' + (j + 1)) as PivotKey][i] = x))
+  }
+  return out
+}
+
+/** A detected chart pattern: its outline (one or two polylines over pivot
+ *  points) and the bar it completed on. */
+export interface ChartPattern {
+  kind: 'dtop' | 'dbot' | 'hs' | 'ihs' | 'asc' | 'desc' | 'sym'
+  lines: Array<Array<{ i: number; price: number }>>
+  /** Bar where the pattern completed (its last pivot). */
+  at: number
+  bullish: boolean
+}
+
+/** Marker text per pattern, indexed by PATTERN_KINDS position. */
+export const PATTERN_KINDS: Array<ChartPattern['kind']> = [
+  'dtop',
+  'dbot',
+  'hs',
+  'ihs',
+  'asc',
+  'desc',
+  'sym',
+]
+export const PATTERN_LABELS = [
+  'Double Top',
+  'Double Bottom',
+  'H&S',
+  'Inv H&S',
+  'Asc Triangle',
+  'Desc Triangle',
+  'Sym Triangle',
+]
+
+/**
+ * Classic patterns read off a run of alternating ZigZag pivots. `tolPct` is
+ * how far apart two prices may be and still count as level (the tops of a
+ * double top, a head & shoulders' shoulders, a triangle's flat side).
+ *
+ * The bigger patterns claim their pivots first (head & shoulders and
+ * triangles, then double tops/bottoms) and a pivot belongs to at most one
+ * pattern: the shoulder-neck-head of an H&S would otherwise also read as a
+ * double bottom. Returned in chart order.
+ */
+export function chartPatterns(pivots: ZigPivot[], tolPct = 1.5): ChartPattern[] {
+  const tol = Math.max(0, tolPct) / 100
+  const same = (a: number, b: number) =>
+    Math.abs(a - b) <= tol * Math.max(Math.abs(a), Math.abs(b))
+  const pt = (p: ZigPivot) => ({ i: p.i, price: p.price })
+
+  // Head & shoulders: H L H L H (or inverted), the head beyond both
+  // shoulders, the shoulders level.
+  const headShoulders = ([s1, n1, hd, n2, s2]: ZigPivot[]): ChartPattern | null => {
+    const up = s1.high
+    const beyond = (a: number, b: number) => (up ? a > b * (1 + tol) : a < b * (1 - tol))
+    if (!beyond(hd.price, s1.price) || !beyond(hd.price, s2.price) || !same(s1.price, s2.price))
+      return null
+    return {
+      kind: up ? 'hs' : 'ihs',
+      lines: [[s1, n1, hd, n2, s2].map(pt), [pt(n1), pt(n2)]],
+      at: s2.i,
+      bullish: !up,
+    }
+  }
+  // Triangles: five alternating pivots (three touches on one side, two on
+  // the other, as most screeners ask) whose lines converge. Four would read
+  // every double top that started from a lower low as an ascending triangle.
+  const triangle = (five: ZigPivot[]): ChartPattern | null => {
+    const hs = five.filter((p) => p.high)
+    const ls = five.filter((p) => !p.high)
+    const flat = (xs: ZigPivot[]) => xs.every((p) => same(p.price, xs[0].price))
+    const falling = (xs: ZigPivot[]) =>
+      xs.every((p, k) => !k || p.price < xs[k - 1].price * (1 - tol))
+    const rising = (xs: ZigPivot[]) =>
+      xs.every((p, k) => !k || p.price > xs[k - 1].price * (1 + tol))
+    const kind =
+      flat(hs) && rising(ls)
+        ? 'asc'
+        : flat(ls) && falling(hs)
+          ? 'desc'
+          : falling(hs) && rising(ls)
+            ? 'sym'
+            : null
+    if (!kind) return null
+    const last = five[five.length - 1]
+    return {
+      kind,
+      // Each side drawn as a straight line through its first and last touch.
+      lines: [
+        [pt(hs[0]), pt(hs[hs.length - 1])],
+        [pt(ls[0]), pt(ls[ls.length - 1])],
+      ],
+      at: last.i,
+      // A symmetric triangle leans the way its last leg points.
+      bullish: kind === 'asc' || (kind === 'sym' && !last.high),
+    }
+  }
+  // Double top / bottom: H L H (or L H L), the extremes level and the
+  // middle clearly apart from them.
+  const double = ([a, m, b]: ZigPivot[]): ChartPattern | null => {
+    const deep = a.high
+      ? m.price < Math.min(a.price, b.price) * (1 - 2 * tol)
+      : m.price > Math.max(a.price, b.price) * (1 + 2 * tol)
+    if (!same(a.price, b.price) || !deep) return null
+    return {
+      kind: a.high ? 'dtop' : 'dbot',
+      lines: [[a, m, b].map(pt), [pt(m), { i: b.i, price: m.price }]],
+      at: b.i,
+      bullish: !a.high,
+    }
+  }
+
+  const taken: boolean[] = pivots.map(() => false)
+  const found: Array<{ start: number; pat: ChartPattern }> = []
+  const passes: Array<[number, (p: ZigPivot[]) => ChartPattern | null]> = [
+    [5, headShoulders],
+    [5, triangle],
+    [3, double],
+  ]
+  passes.forEach(([size, match]) => {
+    for (let s = 0; s + size <= pivots.length; s++) {
+      if (taken.slice(s, s + size).some(Boolean)) continue
+      const pat = match(pivots.slice(s, s + size))
+      if (!pat) continue
+      for (let k = s; k < s + size; k++) taken[k] = true
+      found.push({ start: s, pat })
+    }
+  })
+  return found.sort((a, b) => a.start - b.start).map((f) => f.pat)
+}
+
+/**
+ * Pattern outlines as line series with gaps: pattern k draws into slot k % 2
+ * so neighbouring patterns, which share a pivot, do not join into one line.
+ * Each polyline is interpolated bar by bar between its points; bars outside
+ * a pattern stay null, which the renderer turns into a break in the line.
+ * Returns [slot 0 line A, slot 0 line B, slot 1 line A, slot 1 line B].
+ */
+export function patternSeries(n: number, patterns: ChartPattern[]): Series[] {
+  const out = [NaNs(n), NaNs(n), NaNs(n), NaNs(n)]
+  patterns.forEach((pat, k) => {
+    pat.lines.slice(0, 2).forEach((line, j) => {
+      const s = out[(k % 2) * 2 + j]
+      for (let q = 1; q < line.length; q++) {
+        const a = line[q - 1]
+        const b = line[q]
+        for (let i = a.i; i <= b.i && i < n; i++)
+          s[i] =
+            b.i === a.i ? b.price : a.price + ((b.price - a.price) * (i - a.i)) / (b.i - a.i)
+      }
+    })
+  })
+  return out
+}

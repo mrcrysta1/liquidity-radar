@@ -4,7 +4,15 @@
 // from the indicator store on purpose — these aren't user-configurable
 // indicators, just layers to show or hide.
 import { storageGet, storageSet } from '../../services/storage'
-import { VP_ROWS_DEFAULT, VP_VA_DEFAULT, clampRows, clampValueArea } from './volumeProfile'
+import {
+  VP_MODE_DEFAULT,
+  VP_ROWS_DEFAULT,
+  VP_VA_DEFAULT,
+  clampRows,
+  clampValueArea,
+  isVpMode,
+  type VpMode,
+} from './volumeProfile'
 
 const DELTA_KEY = 'lr-showDelta'
 const WHALE_KEY = 'lr-showWhaleBubbles'
@@ -19,11 +27,15 @@ let showDelta = storageGet<boolean>(DELTA_KEY, true)
 let showWhales = storageGet<boolean>(WHALE_KEY, true)
 let showVP = storageGet<boolean>(VP_KEY, true)
 
-/** Volume profile look: rows (price buckets), value-area %, buy/sell colouring. */
+/**
+ * Volume profile look: rows (price buckets), value-area %, buy/sell colouring,
+ * and which bars it profiles (visible range, today's session, all loaded).
+ */
 export interface VolumeProfileSettings {
   rows: number
   valueArea: number
   split: boolean
+  mode: VpMode
 }
 function readVPSettings(): VolumeProfileSettings {
   const raw = storageGet<Partial<VolumeProfileSettings> | null>(VP_SETTINGS_KEY, null) || {}
@@ -31,6 +43,8 @@ function readVPSettings(): VolumeProfileSettings {
     rows: clampRows(Number(raw.rows ?? VP_ROWS_DEFAULT)),
     valueArea: clampValueArea(Number(raw.valueArea ?? VP_VA_DEFAULT)),
     split: raw.split === true,
+    // Settings saved before modes existed profiled the loaded window: keep that.
+    mode: isVpMode(raw.mode) ? raw.mode : VP_MODE_DEFAULT,
   }
 }
 let vpSettings = readVPSettings()
@@ -87,11 +101,13 @@ export function setVolumeProfileSettings(patch: Partial<VolumeProfileSettings>):
     rows: clampRows(patch.rows ?? vpSettings.rows),
     valueArea: clampValueArea(patch.valueArea ?? vpSettings.valueArea),
     split: patch.split ?? vpSettings.split,
+    mode: isVpMode(patch.mode) ? patch.mode : vpSettings.mode,
   }
   if (
     next.rows === vpSettings.rows &&
     next.valueArea === vpSettings.valueArea &&
-    next.split === vpSettings.split
+    next.split === vpSettings.split &&
+    next.mode === vpSettings.mode
   )
     return
   vpSettings = next
@@ -132,5 +148,18 @@ export function getShowRLPolicy(): boolean {
 export function setShowRLPolicy(v: boolean): void {
   showRLPolicy = v
   storageSet(RL_KEY, v)
+  emit()
+}
+
+// Order-book depth heatmap under the candles (orderflow/depthHeatmap). Off by
+// default: it is a dense layer that changes how the chart reads.
+const DEPTH_KEY = 'lr-showDepthHeatmap'
+let showDepthHeatmap = storageGet<boolean>(DEPTH_KEY, false)
+export function getShowDepthHeatmap(): boolean {
+  return showDepthHeatmap
+}
+export function setShowDepthHeatmap(v: boolean): void {
+  showDepthHeatmap = v
+  storageSet(DEPTH_KEY, v)
   emit()
 }

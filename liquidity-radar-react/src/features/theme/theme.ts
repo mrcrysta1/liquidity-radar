@@ -5,9 +5,9 @@
 // light color sets and the right set is applied based on the current theme,
 // re-applied on theme toggle. Charts read the live CSS variables via
 // getComputedStyle so they follow too.
-import { applyChartTheme, isLightTheme } from '../charts/chartRender'
-import { applyCompanionTheme } from '../charts/companionCharts'
-import { mcApplyTheme } from '../charts/multiCharts'
+import { applyChartTheme, isLightTheme, reweightTimeScale } from '../charts/chartRender'
+import { applyCompanionTheme, companionReweight } from '../charts/companionCharts'
+import { mcApplyTheme, mcReweight } from '../charts/multiCharts'
 import { subscribeChartTz } from '../charts/timezone'
 import { applySigAnaTheme } from '../signals'
 import { storageGetRaw, storageSetRaw } from '../../services/storage'
@@ -686,6 +686,10 @@ export function initTheme(): void {
     applyChartTheme()
     applyCompanionTheme()
     mcApplyTheme()
+    // Tick weights (where day labels go) are per zone: recompute them.
+    reweightTimeScale()
+    companionReweight()
+    mcReweight()
   })
   $('paletteBtn')!.addEventListener('click', function () {
     renderPalettePicker()

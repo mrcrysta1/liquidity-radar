@@ -9,7 +9,7 @@ import { state } from '../../services/store'
 import { bucketEnd, tfDef } from '../../services/timeframe'
 import { getTimeframe } from './timeframes'
 import { isReplayOn } from './replay'
-import { chartPalette } from './chartPalette'
+import { chartPalette, mainPaneHeight } from './chartPalette'
 import { chartSettings } from './chartSettings'
 import { getChartStyle } from './chartStyle'
 import { heikinAshiBar } from './series/heikinAshi'
@@ -78,7 +78,14 @@ export function updateCloseTimer(): void {
     /* scale not mounted */
   }
   const wrap = $('chartWrap')
-  const maxY = wrap ? wrap.clientHeight - 20 : 400
+  // The price pane only: below it sit the indicator panes (v5), and a
+  // countdown parked over an RSI pane reads as that pane's value.
+  const paneH = mainPaneHeight(deps.chart, wrap ? wrap.clientHeight : 400)
+  if (y < 0 || y > paneH) {
+    el.style.display = 'none'
+    return
+  }
+  const maxY = paneH - 20
   const def = tfDef(getTimeframe())
   const left = bucketEnd(last.t, def) - Date.now()
 

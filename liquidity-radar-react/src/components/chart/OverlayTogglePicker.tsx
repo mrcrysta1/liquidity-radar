@@ -8,6 +8,7 @@ import { useFitMenu } from './useFitMenu'
 import {
   getShowConfluence,
   getShowDelta,
+  getShowDepthHeatmap,
   getShowMLPrediction,
   getShowOBGauge,
   getShowRLPolicy,
@@ -17,6 +18,7 @@ import {
   onOverlayTogglesChange,
   setShowConfluence,
   setShowDelta,
+  setShowDepthHeatmap,
   setShowMLPrediction,
   setShowOBGauge,
   setShowRLPolicy,
@@ -24,7 +26,13 @@ import {
   setShowWhaleBubbles,
   setVolumeProfileSettings,
 } from '../../features/charts/overlayToggles'
-import { VP_ROWS_MAX, VP_ROWS_MIN, VP_VA_MAX, VP_VA_MIN } from '../../features/charts/volumeProfile'
+import {
+  VP_ROWS_MAX,
+  VP_ROWS_MIN,
+  VP_VA_MAX,
+  VP_VA_MIN,
+  isVpMode,
+} from '../../features/charts/volumeProfile'
 
 type Pane = {
   id: string
@@ -63,6 +71,15 @@ const PANES: Pane[] = [
     group: 'On the chart',
     get: getShowVolumeProfile,
     set: setShowVolumeProfile,
+  },
+  {
+    id: 'depth',
+    glyph: 'HM',
+    name: 'Depth heatmap',
+    hint: 'Resting order-book liquidity over time',
+    group: 'On the chart',
+    get: getShowDepthHeatmap,
+    set: setShowDepthHeatmap,
   },
   {
     id: 'mtf',
@@ -137,6 +154,19 @@ function VolumeProfileSettings() {
   const s = getVolumeProfileSettings()
   return (
     <div className="ind-settings vp-settings">
+      <label>
+        <span>Range</span>
+        <select
+          value={s.mode}
+          onChange={(e) => {
+            if (isVpMode(e.target.value)) setVolumeProfileSettings({ mode: e.target.value })
+          }}
+        >
+          <option value="visible">Visible range</option>
+          <option value="session">Session (UTC day)</option>
+          <option value="all">All loaded</option>
+        </select>
+      </label>
       <NumField
         label="Rows"
         value={s.rows}

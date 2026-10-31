@@ -6203,3 +6203,309 @@ html[data-palette="glass"] .acct-card{background:linear-gradient(145deg,rgba(255
 .cset-dialog footer button{padding:6px 14px;border-radius:6px;border:1px solid var(--border2);background:transparent;color:var(--txt);cursor:pointer;font-weight:600}
 .cset-dialog footer .cset-done{background:var(--primary);border-color:var(--primary);color:#fff}
 .cset-dialog button:focus-visible,.cset-dialog input:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+
+/* Round 2: the indicator count badge widened the toolbar past one row at
+   1440px. Where the bar is narrow, the count stands in for the word
+   ("fx 2"); the tooltip still says what the button is. */
+#radarChartCard .sec-head{container-type:inline-size}
+@container (max-width:900px){
+  #radarChartCard .tvb .ind-open:has(.rail-count) .tvb-label{display:none}
+}
+
+/* Round 2: on a desktop the chart grows with the window's height (it was a
+   fixed 400px); plain pixel values, which syncStageHeight reads. */
+@media(min-width:1024px) and (min-height:820px){:root{--ch:480px}}
+@media(min-width:1024px) and (min-height:960px){:root{--ch:560px}}
+@media(min-width:1024px) and (min-height:1100px){:root{--ch:640px}}
+
+/* Round 2, phones: the drawing strip hides behind the pencil in the toolbar,
+   and a multi-chart layout stacks its cells one per row (2x2 left ~140px
+   per cell). */
+#radarChartCard .tvb .tvb-draw-toggle{display:none}
+@media(max-width:640px){
+  #radarChartCard .tvb .tvb-draw-toggle{display:inline-flex}
+  #radarChartCard .tvb .tvb-draw-toggle[aria-pressed="true"]{color:var(--tv-blue)}
+  #radarChartCard .chart-stage:not(.draw-open)>.tv-drawbar{display:none}
+  #radarChartCard .chart-stage:not(.draw-open){grid-template-columns:minmax(0,1fr)}
+  #radarChartCard .chart-stage:not(.draw-open)>.chart-layout{grid-column:1 / -1}
+  #chartLayout.multi{grid-template-columns:minmax(0,1fr) !important;grid-template-rows:none !important;grid-auto-rows:280px;height:auto !important}
+  #chartLayout.multi>*{grid-column:auto !important}
+}
+
+/* Round 2: each indicator pane's legend sits in that pane (placed by JS at
+   the pane's top edge), not in the price pane's legend. */
+#chartWrap .pane-legends{position:absolute;inset:0;pointer-events:none;z-index:5}
+#chartWrap .pane-legend{position:absolute;left:8px;max-width:calc(100% - 90px);background:transparent;border:0;padding:0 4px}
+
+/* Round 2: the time-zone list scrolls inside its menu (it was cut off at both
+   ends), and the settings / shortcut dialogs sit in the middle of the
+   screen rather than pinned to the page's top-left. */
+.sn-menu.sn-tz-list{max-height:min(60vh,440px);overflow-y:auto}
+dialog.cset-dialog[open],dialog.kbd-dialog[open]{position:fixed;inset:0;margin:auto;max-height:min(85dvh,680px)}
+
+/* Round 2: the drawing properties bar sits under the legend (it covered the
+   OHLC values); phones get 36px touch targets in the bottom bar and zoom
+   bar; the chart card clears the sticky header when scrolled into view. */
+#radarChartCard .dp-bar{top:52px}
+#radarChartCard{scroll-margin-top:110px}
+@media(hover:none) and (max-width:900px){
+  #radarChartCard .sn-btn,#radarChartCard .sn-zoom button{min-height:36px;min-width:36px}
+}
+
+/* r3-sync: link groups — the coloured group chip on each chart header and the
+   sync toggles (features/charts/linkGroups, components/chart/LinkChip). */
+.lk-chip{display:inline-flex;align-items:center;gap:2px;flex-shrink:0}
+.lk-chip.open{padding:1px 3px;border-radius:9px;background:var(--sunk-2);border:1px solid var(--border2)}
+.lk-btn{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;padding:0;border:0;border-radius:50%;background:none;cursor:pointer}
+.lk-btn:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
+.lk-btn.sel .lk-dot{box-shadow:0 0 0 2px var(--card),0 0 0 3px var(--txt)}
+.lk-dot{display:inline-flex;align-items:center;justify-content:center;width:13px;height:13px;border-radius:50%;
+  font:700 8px/1 var(--mono);font-style:normal;color:#fff}
+.lk-dot.none{background:none;border:1.5px dashed var(--muted)}
+.lk-btn:hover .lk-dot{filter:brightness(1.15)}
+/* A cell head is title-left / interval-right: the chip leads, the title takes the slack. */
+.rc-link{display:inline-flex;flex-shrink:0}
+.rc-link+.rc-title{margin-right:auto}
+/* The main chart's chip, top right of its plot (clear of the legend and price scale). */
+.rc-link-main{position:absolute;top:6px;right:72px;z-index:6}
+.rc-link-main[hidden]{display:none}
+.lk-sync{border-top:0;padding-top:2px}
+.lk-opts{display:inline-flex;align-items:center;gap:3px;padding:3px 6px;border-radius:10px;border:1px solid var(--edge,var(--border2));background:var(--sunk-2);font-size:11px}
+.lk-opts-k{color:var(--muted);margin-right:2px}
+.lk-opt{padding:2px 7px;border-radius:7px;border:1px solid transparent;background:none;color:var(--dim);font-size:11px;cursor:pointer}
+.lk-opt.on{color:var(--txt);border-color:var(--border2);background:var(--card)}
+.lk-opt:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
+
+/* r3-compare: "+ Compare" toolbar button, compare rows in the chart legend
+   (features/charts/compare.ts, components/chart/CompareButton.tsx). */
+#radarChartCard .tvb .cmp-picker .cp-trigger::before,.cmp-picker .cp-caret{display:none}
+.cmp-picker .cp-trigger,.cmp-btn{position:relative}
+.cmp-btn-face{display:inline-flex;align-items:center;gap:4px;font-size:13px;color:var(--txt);white-space:nowrap}
+.cmp-btn-face>span[aria-hidden]{font-size:15px;line-height:1;color:var(--tv-ico,var(--muted))}
+.cmp-btn{display:inline-flex;align-items:center;gap:4px;height:30px;padding:0 8px;font-size:13px}
+.cmp-btn:disabled{opacity:.55;cursor:not-allowed}
+.cmp-picker .rail-count,.cmp-btn .rail-count{position:static;margin-left:2px}
+.legend .leg-cmp-list{display:flex;flex-direction:column;gap:1px;margin-top:2px}
+.legend .leg-cmp{display:inline-flex;align-items:center;gap:6px;font-size:12px;pointer-events:auto;border-radius:3px;padding:0 2px}
+.legend .leg-cmp-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;font-style:normal}
+.legend .leg-cmp-sym{color:var(--txt)}
+.legend .leg-cmp b{font-variant-numeric:tabular-nums;color:var(--txt)}
+.legend .leg-cmp small{color:var(--muted);font-size:11px}
+.legend .leg-cmp-main{pointer-events:none}
+.legend .leg-cmp-main .leg-cmp-dot{background:none!important;border:1px dashed var(--muted)}
+.legend .leg-cmp-x{
+  display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;padding:0;
+  background:none;border:0;border-radius:3px;color:var(--muted);font-size:14px;line-height:1;cursor:pointer;
+  opacity:0;transition:opacity .12s;
+}
+.legend .leg-cmp:hover .leg-cmp-x,.legend .leg-cmp-x:focus-visible{opacity:1}
+.legend .leg-cmp-x:hover{color:var(--txt);background:var(--tv-hover,rgba(128,128,128,.15))}
+@media(hover:none){.legend .leg-cmp-x{opacity:1}}
+
+/* r3-drawings: favourite stars in the drawing menu, the selection toolbar's
+   font-size select and position popover, and the Objects side panel. */
+.draw-opt-row{position:relative;display:flex;align-items:center}
+.draw-opt-row .draw-opt{padding-right:32px}
+.draw-fav{
+  position:absolute;right:6px;top:50%;transform:translateY(-50%);display:grid;place-items:center;
+  width:22px;height:22px;padding:0;border:0;border-radius:5px;background:transparent;color:var(--dim);
+  cursor:pointer;opacity:0;transition:opacity .12s;
+}
+.draw-opt-row:hover .draw-fav,.draw-fav:focus-visible,.draw-fav.on{opacity:1}
+.draw-fav.on{color:var(--amber)}
+.draw-fav:hover{color:var(--amber);background:rgb(var(--pRGB)/.1)}
+@media(hover:none){.draw-fav{opacity:1}}
+#radarChartCard .dp-select{
+  height:26px;padding:0 4px;border:1px solid var(--tv-line);border-radius:4px;flex-shrink:0;
+  background:var(--card);color:var(--tv-txt);font-size:12px;cursor:pointer;
+}
+#radarChartCard .dp-btn:disabled{opacity:.4;cursor:default}
+#radarChartCard .dp-pop{
+  position:absolute;top:96px;right:76px;z-index:9;width:220px;display:grid;gap:8px;padding:10px;
+  background:var(--card);border:1px solid var(--tv-line);border-radius:6px;box-shadow:var(--tv-menu-shadow);
+  font-size:12px;color:var(--tv-txt);
+}
+#radarChartCard .dp-pop label{display:grid;grid-template-columns:1fr 96px;align-items:center;gap:8px}
+#radarChartCard .dp-pop input{
+  min-width:0;height:26px;padding:0 7px;border:1px solid var(--tv-line);border-radius:4px;
+  background:var(--bg);color:var(--tv-txt);font-family:var(--mono);font-size:12px;
+}
+#radarChartCard .dp-pop input:focus{outline:none;border-color:var(--tv-blue)}
+#radarChartCard .dp-pop-note{margin:0;font-size:11px;color:var(--dim);line-height:1.4}
+#radarChartCard .dp-pop-actions{display:flex;justify-content:flex-end;gap:6px}
+#radarChartCard .dp-pop-actions button{
+  height:26px;padding:0 10px;border:1px solid var(--tv-line);border-radius:4px;background:transparent;
+  color:var(--tv-txt);cursor:pointer;font-size:12px;
+}
+#radarChartCard .dp-pop-actions button.primary{background:var(--tv-blue);border-color:var(--tv-blue);color:#fff}
+.obj-tree{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:1px}
+.obj-row{display:flex;align-items:center;gap:2px;border-radius:5px}
+.obj-row:hover{background:var(--hair-1)}
+.obj-row.sel{background:rgb(var(--pRGB)/.14)}
+.obj-row.off .obj-name{opacity:.5}
+.obj-name{
+  flex:1;min-width:0;display:flex;align-items:center;gap:7px;padding:5px 6px;border:0;background:transparent;
+  color:var(--txt);font-size:12px;text-align:left;cursor:pointer;
+}
+.obj-name i{width:9px;height:9px;border-radius:2px;flex-shrink:0}
+.obj-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.obj-act{
+  display:grid;place-items:center;width:24px;height:24px;padding:0;border:0;border-radius:4px;flex-shrink:0;
+  background:transparent;color:var(--dim);cursor:pointer;
+}
+.obj-act:hover{color:var(--txt);background:var(--hair-1)}
+.obj-act.on{color:var(--amber)}
+.obj-del:hover{color:var(--red)}
+.obj-name:focus-visible,.obj-act:focus-visible{outline:2px solid var(--primary);outline-offset:-2px}
+
+/* r3-replay: start-bar picker (cut line + dimmed future), select date / random,
+   bars-per-step and the paper-trading panel under the transport. */
+#chartWrap.replay-selecting{cursor:col-resize}
+#chartWrap .replay-cut,#chartWrap .replay-future{position:absolute;display:none;pointer-events:none;z-index:6}
+#chartWrap .replay-cut{width:0;border-left:2px solid var(--tv-blue,var(--purple));transform:translateX(-1px)}
+#chartWrap .replay-future{background:rgb(var(--pRGB)/.08);backdrop-filter:grayscale(.85) brightness(.75)}
+[data-theme="light"] #chartWrap .replay-future{backdrop-filter:grayscale(.85) brightness(1.08);background:rgb(255 255 255/.35)}
+.replay-bar.selecting{justify-content:flex-start}
+.replay-hint{font-size:var(--text-xs);color:var(--muted)}
+.replay-start{display:flex;align-items:center;gap:4px}
+.replay-pick{
+  display:inline-flex;align-items:center;gap:5px;background:transparent;border:1px solid var(--border2);
+  color:var(--muted);border-radius:7px;padding:3px 8px;font-size:11px;cursor:pointer;
+}
+.replay-pick:hover,.replay-pick.on{color:var(--txt);border-color:var(--purple)}
+.replay-pick.on{background:rgb(var(--pRGB)/.15)}
+.replay-date,.replay-qty{
+  background:var(--bg);border:1px solid var(--border2);color:var(--txt);border-radius:7px;
+  padding:3px 6px;font-size:11px;font-family:var(--mono);outline:none;color-scheme:dark;
+}
+[data-theme="light"] .replay-date,[data-theme="light"] .replay-qty{background:var(--card);border-color:var(--border);color-scheme:light}
+.replay-trade{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;width:100%;
+  padding-top:7px;border-top:1px solid var(--border2);font-size:11px;
+}
+.replay-orders{display:flex;align-items:center;gap:4px}
+.replay-qty{width:78px}
+.replay-orders button{
+  border:1px solid transparent;border-radius:7px;padding:4px 11px;font-size:11px;font-weight:600;
+  cursor:pointer;color:#fff;letter-spacing:.02em;
+}
+.replay-orders .replay-buy{background:var(--green)}
+.replay-orders .replay-sell{background:var(--red)}
+.replay-orders .replay-flat{background:transparent;border-color:var(--border2);color:var(--txt)}
+.replay-orders button:hover:not(:disabled){filter:brightness(1.12)}
+.replay-orders button:disabled{opacity:.4;cursor:default}
+.replay-pnl,.replay-sum{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;color:var(--dim)}
+.replay-pnl b,.replay-sum b{font-family:var(--mono);font-weight:600;color:var(--txt);font-variant-numeric:tabular-nums}
+.replay-trade .up{color:var(--green)}
+.replay-trade .dn{color:var(--red)}
+.replay-trades{margin-left:auto;color:var(--muted)}
+.replay-trades summary{cursor:pointer;font-family:var(--mono)}
+.replay-trades[open]{width:100%;margin-left:0}
+.replay-sum{margin:6px 0}
+.replay-reset{
+  margin-left:auto;background:transparent;border:1px solid var(--border2);color:var(--dim);
+  border-radius:7px;padding:2px 9px;font-size:11px;cursor:pointer;
+}
+.replay-reset:hover{color:var(--red);border-color:var(--red)}
+.replay-list{width:100%;border-collapse:collapse;font-family:var(--mono);font-variant-numeric:tabular-nums}
+.replay-list th,.replay-list td{padding:3px 6px;text-align:right;border-bottom:1px solid var(--border2)}
+.replay-list th:first-child,.replay-list td:first-child{text-align:left}
+.replay-list th{color:var(--dim);font-weight:500}
+.replay-trades[open] .replay-list{display:block;max-height:180px;overflow:auto}
+@media (max-width:640px){
+  .replay-start{width:100%;flex-wrap:wrap}
+  .replay-trades{margin-left:0}
+}
+
+/* r3-alerts: conditions builder (AND rows), frequency + expiry/message/webhook options */
+.al-conds{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}
+.al-cond-head{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px}
+.al-cond{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:6px;border:1px solid var(--border);border-radius:8px;background:var(--sunk-1)}
+.al-cond .pf-input{padding:4px 6px;font-size:12px;width:auto}
+.al-cond-sel{flex:1 1 130px;min-width:0}
+.al-cond-op{flex:0 1 140px}
+.al-cond-num{flex:0 1 80px;min-width:60px}
+.al-cond-add{align-self:flex-start}
+.al-opts .al-freq{width:auto;padding:3px 6px;font-size:12px}
+.al-more{margin:0 0 10px;font-size:12px;color:var(--dim)}
+.al-more summary{cursor:pointer;font-weight:700}
+.al-more-row{display:flex;align-items:center;gap:8px;margin-top:6px}
+.al-more-row>span{flex:0 0 64px}
+.al-more-row .pf-input{flex:1;min-width:0;padding:4px 7px;font-size:12px}
+.al-note{margin-top:6px;font-size:11px}
+
+/* r3-indicators: settings tabs (Inputs / Style / Visibility), templates, favourites */
+.ind-set-tabs{display:flex;gap:2px;padding:0 6px 4px 20px}
+.ind-set-tabs button{
+  background:transparent;border:none;border-bottom:2px solid transparent;color:var(--dim);
+  padding:3px 7px;font-size:var(--text-2xs);font-weight:700;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;
+}
+.ind-set-tabs button:hover{color:var(--txt)}
+.ind-set-tabs button.on{color:var(--txt);border-bottom-color:var(--primary)}
+.ind-style{display:flex;flex-direction:column;gap:4px}
+.ind-style-row{display:grid;grid-template-columns:auto minmax(0,1fr) 28px 54px 70px;align-items:center;gap:5px}
+.ind-settings .ind-style-row input[type="checkbox"],.ind-settings .ind-vis input{width:auto}
+.ind-settings .ind-style-row input[type="color"]{width:28px;height:22px;padding:1px 2px;cursor:pointer}
+.ind-settings .ind-style-row select{padding:2px 3px}
+.ind-settings span.ind-style-name{
+  text-transform:none;letter-spacing:0;font-size:11px;color:var(--txt);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.ind-settings span.ind-style-kind{grid-column:span 2;font-family:var(--mono)}
+.ind-style-opts{display:grid;grid-template-columns:1fr 1.4fr auto;gap:6px;align-items:end;margin-top:4px}
+.ind-vis{display:flex;flex-direction:column;gap:5px}
+.ind-settings .ind-vis span{text-transform:none;letter-spacing:0;font-size:11px;color:var(--txt)}
+.ind-tpl{border-top:1px solid var(--border);margin-top:8px;padding:8px 2px 0;display:flex;flex-direction:column;gap:5px}
+.ind-tpl-row{display:flex;align-items:center;gap:5px}
+.ind-tpl-row select,.ind-tpl-row input{
+  flex:1;min-width:0;background:var(--bg);border:1px solid var(--border2);color:var(--txt);border-radius:6px;
+  padding:3px 6px;font-size:11px;font-family:var(--mono);outline:none;
+}
+.ind-tpl-row select:focus,.ind-tpl-row input:focus{border-color:var(--primary)}
+.ind-tpl-row .ind-icon:disabled{opacity:.35;cursor:not-allowed}
+.ind-tpl-msg{font-size:var(--text-2xs);color:var(--dim);padding-left:2px}
+.ind-add-row{display:flex;align-items:center}
+.ind-add-row .ind-add{flex:1;min-width:0}
+.ind-fav{opacity:0}
+.ind-add-row:hover .ind-fav,.ind-fav:focus-visible,.ind-fav.on{opacity:1}
+.ind-fav.on{color:#F0A04B}
+@media (hover:none){.ind-fav{opacity:1}}
+[data-theme="light"] .ind-tpl-row select,[data-theme="light"] .ind-tpl-row input{background:var(--card);border-color:var(--border)}
+
+/* r3-strategy: Strategy Tester (components/chart/StrategyTester.tsx) — a panel
+   docked to the bottom of the window, above the chart, below modal menus. */
+.st-panel{
+  position:fixed;left:max(12px,calc(var(--nav-w, 0px) + 12px));right:12px;bottom:12px;z-index:90;
+  max-height:min(46vh,420px);display:flex;flex-direction:column;
+  background:var(--card);border:1px solid var(--border2);border-radius:12px;box-shadow:var(--shade-3);
+  font-size:12px;
+}
+.st-head{display:flex;align-items:center;gap:10px;padding:8px 10px 8px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.st-head>b{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.st-title{color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:30ch}
+.st-tabs{display:flex;gap:4px;margin-left:auto}
+.st-tabs button{background:transparent;border:1px solid transparent;color:var(--dim);border-radius:6px;padding:3px 10px;font-size:var(--text-xs);cursor:pointer}
+.st-tabs button.on{border-color:var(--primary);color:var(--primary)}
+.st-close{background:transparent;border:0;color:var(--dim);cursor:pointer;padding:4px;border-radius:6px;display:flex}
+.st-close:hover{color:var(--red)}
+.st-body{overflow:auto;padding:10px 14px 12px;display:flex;flex-direction:column;gap:10px;overscroll-behavior:contain}
+.st-summary{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px}
+.st-cell{display:flex;flex-direction:column;gap:1px;min-width:0}
+.st-k{font-size:var(--text-xs);color:var(--dim)}
+.st-v{font-family:var(--mono);font-size:13px}
+.st-sub{font-family:var(--mono);font-size:var(--text-xs);color:var(--dim)}
+.st-panel .up{color:var(--green)}
+.st-panel .down{color:var(--red)}
+.st-equity{width:100%;height:120px;display:block}
+.st-note{font-size:var(--text-xs);color:var(--dim)}
+.st-empty{color:var(--dim);padding:12px 0}
+.st-empty.err{color:var(--red);font-family:var(--mono)}
+.st-trades{overflow:auto;max-height:100%}
+.st-trades table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:var(--text-xs)}
+.st-trades th{position:sticky;top:0;background:var(--card);text-align:left;color:var(--dim);font-weight:600;padding:4px 6px;border-bottom:1px solid var(--border)}
+.st-trades td{padding:4px 6px;border-bottom:1px solid var(--border);vertical-align:top}
+.st-trades .num{text-align:right}
+.st-trades em{font-style:normal;color:var(--dim)}
+.st-id{color:var(--primary)}
+@media (max-width:900px){.st-panel{left:8px;right:8px;bottom:8px;max-height:60vh}}
+@media (max-width:640px){.st-title{display:none}}

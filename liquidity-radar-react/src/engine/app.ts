@@ -30,7 +30,7 @@ import { mdPill, mdToggleDebug } from '../services/market'
 import { storageGet, storageSet } from '../services/storage'
 import { onTimeframeChange, syncChartTitle } from '../features/charts/timeframes'
 import { applyLayout, watchStageHeight } from '../features/charts/companionCharts'
-import { connectStreams, disconnectStreams } from '../services/streams'
+import { connectStreams, disconnectStreams, onTradePrint } from '../services/streams'
 import { fetchMarketCaps } from '../services/coingecko'
 import { fetchFuturesSnapshot } from '../services/futures'
 import { poll } from '../services/pollScheduler'
@@ -80,6 +80,10 @@ import { refreshInstrumentQuotes, refreshPerpQuotes } from '../services/instrume
 import { getShowMLPrediction, onOverlayTogglesChange } from '../features/charts/overlayToggles'
 import { checkRLPriceTick } from '../features/ml/rlStore'
 import { addAlert, checkAlerts, enableAlerts, removeAlert, renderAlerts, syncAlertLines } from '../features/alerts'
+import { noteAlertTrade } from '../features/alerts/alerts'
+// Price alerts see every print of the charted coin, so a wick through a
+// level between two checks still counts as a cross.
+onTradePrint(noteAlertTrade);
 import { initTheme, selectPalette } from '../features/theme'
 import { initKeyboard } from '../features/keyboard'
 

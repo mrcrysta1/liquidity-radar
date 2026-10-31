@@ -18,7 +18,7 @@ import { mainPaneHeight } from './chartPalette'
 import { displayCandles } from './series/rangeView'
 import { getWhaleView, onWhaleFlowChange, syncWhaleSymbol } from '../whales/whaleFlow'
 import type { WhaleOrder } from '../whales/whaleFlow'
-import { bubbleRadius, gapLabelSpot } from '../whales/whaleMath'
+import { bubbleRadius } from '../whales/whaleMath'
 import { fmtChartDate } from './timezone'
 
 
@@ -97,7 +97,9 @@ function paint(): void {
   const paneW: number = ts.width()
   // The price pane only: indicator panes (v5) sit below it on the same canvas.
   const paneH: number = mainPaneHeight(chart, ch - ts.height())
-  const spacing: number = ts.options().barSpacing || 6
+  // v5 does not write the zoom back to options().barSpacing: measure it.
+  const vr = ts.getVisibleLogicalRange()
+  const spacing: number = vr && vr.to > vr.from ? paneW / (vr.to - vr.from) : ts.options().barSpacing || 6
   const dur =
     candles.length > 1 ? candles[candles.length - 1].t - candles[candles.length - 2].t : 60_000
   const endT = candles[candles.length - 1].t + dur
@@ -198,16 +200,9 @@ function paintCoverage(
       ctx.stroke()
       ctx.setLineDash([])
     }
-    const spot = gapLabelSpot({ left: l, width: w, edge: x1 < paneW, paneH, loading })
-    if (spot) {
-      ctx.fillStyle = 'rgba(143,163,191,.75)'
-      ctx.textAlign = spot.align
-      ctx.fillText(
-        spot.align === 'right' ? '◂ no whale data scanned' : 'no whale data scanned',
-        spot.x,
-        spot.y,
-      )
-    }
+    // The shading alone marks the gap: a "no whale data scanned" caption on
+    // the candles read as debug output and was captured in every snapshot.
+    // The whale legend chip carries the coverage status in words.
   }
   ctx.restore()
 }
@@ -215,7 +210,9 @@ function paintCoverage(
 function onHover(param: Any): void {
   if (!tip) return
   const pt = param?.point
-  if (!pt || !drawn.length || !getShowWhaleBubbles()) {
+  // v5 gives the point relative to the hovered pane: only the price pane's
+  // coordinates line up with the bubbles.
+  if (!pt || (param.paneIndex ?? 0) !== 0 || !drawn.length || !getShowWhaleBubbles()) {
     tip.style.display = 'none'
     return
   }
