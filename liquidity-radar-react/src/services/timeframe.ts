@@ -293,6 +293,21 @@ export function resample(base: CandleFlat[], def: TimeframeDef): CandleFlat[] {
  * `room` caps how many new candles may be added; `added` counts only those,
  * never the merged bucket, which replaces the one already shown.
  */
+/**
+ * A reload of the series already on screen (a gap refill, a retry, the
+ * primary-feed probe) brings the latest ~500 bars. Keep any older history the
+ * user paged in, and replace only the overlap, so the view does not jump.
+ */
+export function mergeReload(current: CandleFlat[], fresh: CandleFlat[], max = Infinity): CandleFlat[] {
+  if (!fresh.length) return current
+  if (!current.length) return fresh
+  const first = fresh[0].t
+  let i = current.length
+  while (i > 0 && current[i - 1].t >= first) i--
+  const merged = i ? current.slice(0, i).concat(fresh) : fresh
+  return merged.length > max ? merged.slice(merged.length - max) : merged
+}
+
 export function mergeOlderPage(
   older: CandleFlat[],
   current: CandleFlat[],

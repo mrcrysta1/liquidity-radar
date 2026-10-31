@@ -281,7 +281,14 @@ export function connectStreams(cb: StreamsCallbacks): void {
     // Delta/whale tracking runs on every print (not coalesced to rAF like the
     // tape paint below) — dropping ticks here would silently under-count CVD.
     const arr = state.candles
-    const bucketStart = arr.length ? arr[arr.length - 1].t : +d.T
+    // Bucket by the trade's own time: trades of a new bar arrive before the
+    // kline frame that opens it (~2s), and were credited to the bar that had
+    // just closed, skewing the delta pane and CVD divergence.
+    let bucketStart = arr.length ? arr[arr.length - 1].t : +d.T
+    if (arr.length) {
+      const end = bucketEnd(bucketStart, def)
+      if (+d.T >= end) bucketStart = end
+    }
     ingestTrade(state.symbol, bucketStart, +d.q, !!d.m)
     ingestWhaleAgg(state.symbol, +d.a, p, +d.q, +d.T, !!d.m)
     tradePending = { p: p, q: +d.q, T: +d.T }

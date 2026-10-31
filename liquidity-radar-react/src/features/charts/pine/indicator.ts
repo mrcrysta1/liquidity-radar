@@ -74,6 +74,44 @@ function outputKind(style: string): OutputDef['kind'] {
 }
 
 /** Turn a run into an IndicatorDef whose compute hands back its series. */
+/**
+ * Series computed over `run` candles, re-indexed onto `cs`. Same candles: as
+ * is. A bar both share with a different close means another coin's run: no
+ * values at all, rather than its line on these bars.
+ */
+export function alignByTime(
+  series: Record<string, Series>,
+  run: CandleFlat[],
+  cs: CandleFlat[],
+): Record<string, Series> {
+  const n = run.length
+  if (!n || !cs.length) return series
+  if (cs.length === n && cs[0].t === run[0].t && cs[0].c === run[0].c && cs[n - 1].t === run[n - 1].t)
+    return series
+  const at = new Map<number, number>()
+  for (let i = 0; i < n; i++) at.set(run[i].t, i)
+  let checked = false
+  for (let k = 0; k < cs.length - 1 && !checked; k++) {
+    const j = at.get(cs[k].t)
+    if (j == null || j === n - 1) continue
+    if (run[j].c !== cs[k].c) {
+      const empty: Record<string, Series> = {}
+      for (const key in series) empty[key] = new Array(cs.length).fill(null)
+      return empty
+    }
+    checked = true
+  }
+  const out: Record<string, Series> = {}
+  for (const key in series) {
+    const src = series[key]
+    out[key] = cs.map((c) => {
+      const j = at.get(c.t)
+      return j == null ? null : (src[j] ?? null)
+    })
+  }
+  return out
+}
+
 function build(inst: PineInstance, r: PineResult, candles: CandleFlat[], ms?: number): Built {
   const outputs: OutputDef[] = []
   const series: Record<string, Series> = {}
@@ -105,6 +143,7 @@ function build(inst: PineInstance, r: PineResult, candles: CandleFlat[], ms?: nu
       if (vals[s.bar] == null) vals[s.bar] = v
       markers.push({
         i: s.bar,
+        t: c.t,
         position: s.position === 'above' ? 'aboveBar' : 'belowBar',
         shape: s.shape,
         color: s.color,
@@ -124,7 +163,10 @@ function build(inst: PineInstance, r: PineResult, candles: CandleFlat[], ms?: nu
     placement: r.overlay ? 'overlay' : 'pane',
     sourced: false,
     hlines: r.hlines.map((h) => ({ ...h, title: cleanTitle(h.title || '').slice(0, 24) })),
-    compute: () => series,
+    // Results come from a worker, so the chart may already hold different
+    // candles (history paged in, the 5000-bar cap, another coin): line them
+    // up by time rather than by index.
+    compute: (_src, cs) => alignByTime(series, candles, cs),
   }
   return {
     def,

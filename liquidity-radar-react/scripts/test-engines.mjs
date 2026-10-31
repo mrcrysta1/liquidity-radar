@@ -3542,6 +3542,25 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('zoned ticks: year beats month beats day', [Z.weightBetween(Date.UTC(2027, 0, 1), Date.UTC(2026, 11, 31)), Z.weightBetween(Date.UTC(2026, 10, 1), Date.UTC(2026, 9, 31))], [70, 60])
 }
 
+// ---- round 2: reloads keep paged history; Pine results line up by time -----------
+{
+  const T = await import(src('services/timeframe.ts'))
+  const k = (t, c = t) => ({ t, o: c, h: c, l: c, c, v: 1 })
+  const current = [k(1), k(2), k(3), k(4), k(5)]
+  const fresh = [k(4, 40), k(5, 50), k(6, 60)]
+  eq('reload: older history kept, overlap replaced', T.mergeReload(current, fresh).map((c) => c.c), [1, 2, 3, 40, 50, 60])
+  eq('reload: capped at max, oldest dropped', T.mergeReload(current, fresh, 4).map((c) => c.t), [3, 4, 5, 6])
+  eq('reload: nothing on screen yet', T.mergeReload([], fresh).length, 3)
+  const P = await import(src('features/charts/pine/indicator.ts'))
+  const run = [k(10, 1), k(20, 2), k(30, 3)]
+  const series = { a: [100, 200, 300] }
+  eq('pine align: same candles as is', P.alignByTime(series, run, run).a, [100, 200, 300])
+  const paged = [k(0, 9), k(10, 1), k(20, 2), k(30, 3)]
+  eq('pine align: history paged in front', P.alignByTime(series, run, paged).a, [null, 100, 200, 300])
+  const other = [k(10, 7), k(20, 8), k(30, 9)]
+  eq('pine align: another coin draws nothing', P.alignByTime(series, run, other).a, [null, null, null])
+}
+
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')
 if (fails.length) {
   fails.forEach((f) => console.log('  FAIL  ' + f))

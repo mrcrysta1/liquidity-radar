@@ -564,8 +564,15 @@ export function mcChangeInterval(id: number, iv: string): void {
   })
   if (!p) return
   p.interval = iv
+  // Drop the old interval's bars before the new ones load, as a symbol change
+  // does: live bars of the new interval were appended onto them, and a failed
+  // load left the mix on screen. A fresh chart also clears the old time points.
+  p.candles = []
   mcCloseWS(p)
-  mcLoadData(p)
+  if (p.el) {
+    mcDisposeChart(p)
+    mcInitChart(p)
+  } else mcLoadData(p)
   changed()
 }
 

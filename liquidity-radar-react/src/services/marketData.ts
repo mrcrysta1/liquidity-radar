@@ -23,7 +23,7 @@ import {
   mdTf,
 } from './market'
 import type { CandleFlat } from './market'
-import { DEFAULT_TF, createFolder, mainFolder, mergeOlderPage, resample, tfDef } from './timeframe'
+import { DEFAULT_TF, createFolder, mainFolder, mergeOlderPage, mergeReload, resample, tfDef } from './timeframe'
 import type { Folder } from './timeframe'
 import {
   fetchKlinesChain,
@@ -310,12 +310,14 @@ export async function fetchKlines(sym: string): Promise<void> {
     })
     if (seq !== klineSeq) return
     if (!candles.length) throw new Error('empty')
-    state.candles = candles
+    // Same symbol and interval as on screen: merge, keeping paged-in history.
+    const reload = state.candlesKey === candlesTag(sym, tf) && state.candles.length > 0
+    state.candles = reload ? mergeReload(state.candles, candles, MAX_KEEP) : candles
     state.candlesKey = candlesTag(sym, tf)
     mainFolder.key = key
     mainFolder.folder = folder
-    mdStoreCandles(state.symbol, tf, candles)
-    resetHistory()
+    mdStoreCandles(state.symbol, tf, state.candles)
+    if (!reload) resetHistory()
     if (source) setKlineFeed(key, source)
     if (source && (source.freshness === 'STALE' || source.freshness === 'OFFLINE')) {
       // Every provider failed; this is the last good copy. Show it as such

@@ -72,9 +72,23 @@ export function isTvPalette(): boolean {
   return !id || id === 'navy'
 }
 
+/**
+ * Read on every live tick (price-line colour, legend, volume bars), once per
+ * panel: getComputedStyle six times each time forced style recalculation.
+ * Cached per theme + palette, which are what the CSS variables follow.
+ */
+let paletteKey = ''
+let paletteCache: ChartPalette | null = null
 export function chartPalette(): ChartPalette {
   const light = lightMode()
   if (isTvPalette()) return light ? TV_LIGHT : TV_DARK
+  const key = (light ? 'l' : 'd') + '|' + (document.documentElement.dataset.palette || '')
+  if (paletteCache && key === paletteKey) return paletteCache
+  paletteKey = key
+  paletteCache = readPalette(light)
+  return paletteCache
+}
+function readPalette(light: boolean): ChartPalette {
   return {
     bg: cssVar('card', light ? '#FFFFFF' : '#0D1628'),
     txt: cssVar('muted', light ? '#6B7280' : '#8FA3BF'),

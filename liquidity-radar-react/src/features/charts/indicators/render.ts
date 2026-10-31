@@ -42,6 +42,10 @@ interface Held {
   precision?: number
   /** The markers plugin of a signal series. */
   markers?: Any
+  /** What the series last got by setData (count, first time), for pushData. */
+  n?: number
+  first?: Any
+  updates?: number
 }
 
 /**
@@ -316,6 +320,28 @@ export function createIndicatorRenderer(
     return v >= 0 ? 'rgba(0,230,118,.55)' : 'rgba(255,23,68,.55)'
   }
 
+  /**
+   * Hand a series its points. A live tick only moves the last bar, so when
+   * the point count and first time are unchanged the last point goes through
+   * update(); re-sending thousands of points with setData four times a second
+   * (once per panel) also rebuilt the time scale each time. A full setData
+   * still runs every tenth refresh, for outputs that revise earlier bars
+   * (pivots, repainting scripts).
+   */
+  function pushData(h: Held, data: Any[]): void {
+    const n = data.length
+    const first = n ? data[0].time : null
+    if (n && h.n === n && h.first === first && (h.updates ?? 0) < 10) {
+      h.series.update(data[n - 1])
+      h.updates = (h.updates ?? 0) + 1
+      return
+    }
+    h.series.setData(data)
+    h.n = n
+    h.first = first
+    h.updates = 0
+  }
+
   /** Full redraw for the given candles. Cheap enough to run on every data load. */
   function renderIndicators(candles: CandleFlat[]): void {
     if (!chart) return
@@ -354,7 +380,7 @@ export function createIndicatorRenderer(
             if (va == null || vb == null || !isFinite(va) || !isFinite(vb)) continue
             data.push({ time: Math.floor(candles[i].t / 1000), a: va, b: vb })
           }
-          h.series.setData(data)
+          pushData(h, data)
           return
         }
         const values = outs[out.key] || []
@@ -382,9 +408,11 @@ export function createIndicatorRenderer(
         if (out.markers)
           out.markers.forEach((m) => {
             const c = candles[m.i]
-            if (!c) return
+            if (!c && m.t == null) return
+            // A Pine result may be one run behind the candles: place by time.
+            if (m.t != null && (m.t < candles[0].t || m.t > candles[candles.length - 1].t)) return
             markers.push({
-              time: Math.floor(c.t / 1000),
+              time: Math.floor((m.t ?? c.t) / 1000),
               position: m.position,
               shape: m.shape,
               color: m.color,
@@ -392,7 +420,7 @@ export function createIndicatorRenderer(
               size: 1,
             })
           })
-        h.series.setData(data)
+        pushData(h, data)
         syncPaneFormat(h, data)
         // lightweight-charts v5: markers are a plugin on the series.
         if (out.kind === 'signal') {
@@ -465,7 +493,10 @@ export function createIndicatorRenderer(
 
   /** Empty every series but keep it, so a new dataset can land on a clean time scale. */
   function blankIndicators(): void {
-    held.forEach((h) => h.series.setData([]))
+    held.forEach((h) => {
+      h.series.setData([])
+      h.n = 0
+    })
   }
 
   function clearIndicators(): void {

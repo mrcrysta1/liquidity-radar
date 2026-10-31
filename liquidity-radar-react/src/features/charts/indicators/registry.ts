@@ -98,6 +98,8 @@ export interface OutputDef {
   /** signal: individual markers (Pine plotshape) instead of one per value. */
   markers?: Array<{
     i: number
+    /** Bar open time (ms), when set: placed by time rather than index. */
+    t?: number
     shape: 'arrowUp' | 'arrowDown' | 'circle' | 'square'
     position: 'aboveBar' | 'belowBar'
     color: string
