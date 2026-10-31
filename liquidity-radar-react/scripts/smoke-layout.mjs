@@ -965,13 +965,17 @@ server.listen(PORT, async () => {
         return l
       }
       const synced = (l) => l.every((t, i) => /O.*H.*L.*C/.test(t) && t !== live[i])
-      const a = await hoverAt(0.72, synced)
+      // The main chart opens on its latest ~120 bars (about 30h of 15m), so
+      // mid-chart is ~15h back: inside every cell's history, and a different
+      // bar from the live one even on SOL's 4h. Near the right edge it would
+      // still sit inside the live 4h bar.
+      const a = await hoverAt(0.4, synced)
       check(
         'hovering the main chart switches every companion legend to a past bar',
         synced(a),
         { live, hovered: a },
       )
-      const b = await hoverAt(0.6, (l) => l.some((t, i) => t !== a[i]))
+      const b = await hoverAt(0.25, (l) => l.some((t, i) => t !== a[i]))
       check(
         'a different hovered time shows a different bar',
         b.some((t, i) => t !== a[i]),
