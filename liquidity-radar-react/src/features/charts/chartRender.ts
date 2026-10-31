@@ -57,8 +57,9 @@ import {
 import {
   drawToolDef,
   getDrawTool,
-  isMagnet,
+  getMagnetMode,
   onClearAllDrawings,
+  onDrawingCommand,
   onDrawToolChange,
   onDeleteSelectedDrawing,
   onEditSelectedDrawing,
@@ -67,14 +68,19 @@ import {
   setDrawTool,
   setDrawingCount,
   setDrawingHistory,
+  setDrawingList,
+  stayInDrawingMode,
+  toolTemplate,
   setSelectedDrawing,
   setPendingPoints,
 } from './drawTools'
+import type { DrawingCommand } from './drawTools'
 import { createDrawingHistory } from './drawings/history'
 import { shape } from './drawings/geometry'
 import type { Drawing, MapCtx, Shape } from './drawings/geometry'
 import { handleAt, hitShape, shiftPoints } from './drawings/edit'
 import { logicalToTime, timeToLogical } from './drawings/timeMap'
+import { cloneDrawing, constrainAngle, fixPositionSides, reorder } from './drawings/ops'
 import { fetchOlderKlines, historyExhausted } from '../../services/marketData'
 import { attachDeltaPane, blankDeltaPane, renderDeltaPane, updateDeltaLast } from './deltaPane'
 import { subscribeSymbol } from '../actions/userActions'
@@ -1252,6 +1258,9 @@ function initChartToolbar(): void {
   // back through every saved change (add, delete, move, clear all).
   onUndoDrawing(function () {
     currentDrawings()
+    // An arrow-key nudge still settling is committed first, so undo takes
+    // back the whole burst rather than whatever came before it.
+    flushNudge()
     if (chartState.drawBuf.length) {
       chartState.drawBuf = []
       publishDrawingCount()
@@ -1262,6 +1271,7 @@ function initChartToolbar(): void {
   })
   onRedoDrawing(function () {
     currentDrawings()
+    flushNudge()
     restoreDrawings(drawHistory.redo())
   })
   // The floating toolbar over a selected drawing: restyle it or delete it.
@@ -1269,9 +1279,12 @@ function initChartToolbar(): void {
     const d = currentDrawings()[chartState._sel]
     if (!d) return
     Object.assign(d, patch)
+    // A hidden drawing cannot be clicked, so it cannot stay selected either.
+    if (d.hidden) chartState._sel = -1
     saveDrawings()
     redrawDrawings()
   })
+  onDrawingCommand(runDrawingCommand)
   onDeleteSelectedDrawing(function () {
     const list = currentDrawings()
     if (chartState._sel < 0 || !list[chartState._sel]) return
@@ -1301,6 +1314,8 @@ function validDrawing(d: Any): boolean {
 function currentDrawings(): Any[] {
   const sym = String(state.symbol || '')
   if (sym !== drawingsSym) {
+    // Save the previous coin's pending nudge under that coin, before the swap.
+    flushNudge()
     drawingsSym = sym
     const all = storageGet<Record<string, Any[]>>(DRAWINGS_KEY, {})
     const list = all && Array.isArray(all[sym]) ? all[sym] : []
@@ -1369,6 +1384,155 @@ function syncDrawHint(): void {
   if (!hint) return
   const def = drawToolDef(getDrawTool())
   hint.textContent = def ? def.name + ' — ' + def.hint : ''
+}
+
+/** The selection toolbar's and the object tree's requests (see DrawingCommand). */
+function runDrawingCommand(cmd: DrawingCommand): void {
+  const list = currentDrawings()
+  flushNudge()
+  const sel = chartState._sel
+  switch (cmd.kind) {
+    case 'select': {
+      const d = list[cmd.i]
+      if (!d) return
+      // Selecting from the object tree shows a hidden drawing again: a
+      // selection nobody can see would be useless.
+      if (d.hidden) {
+        delete d.hidden
+        saveDrawings()
+      }
+      if (getDrawTool()) setDrawTool(null)
+      chartState._sel = cmd.i
+      break
+    }
+    case 'toggle': {
+      const i = cmd.i ?? sel
+      const d = list[i]
+      if (!d) return
+      if (d[cmd.flag]) delete d[cmd.flag]
+      else d[cmd.flag] = true
+      if (cmd.flag === 'hidden' && d.hidden && i === sel) chartState._sel = -1
+      saveDrawings()
+      break
+    }
+    case 'delete': {
+      if (!list[cmd.i]) return
+      list.splice(cmd.i, 1)
+      if (sel === cmd.i) chartState._sel = -1
+      else if (sel > cmd.i) chartState._sel = sel - 1
+      saveDrawings()
+      publishDrawingCount()
+      break
+    }
+    case 'clone': {
+      const d = list[sel]
+      if (!d) return
+      if (list.length >= DRAWINGS_MAX_PER_COIN) {
+        showToast('This coin already has ' + DRAWINGS_MAX_PER_COIN + ' drawings — delete some to add more')
+        return
+      }
+      // Cloned in place and selected, as on TradingView: drag it off the original.
+      list.push(cloneDrawing(d))
+      chartState._sel = list.length - 1
+      saveDrawings()
+      publishDrawingCount()
+      showToast('Drawing cloned — drag to move it')
+      break
+    }
+    case 'order': {
+      if (!list[sel]) return
+      chartState._sel = reorder(list, sel, cmd.to)
+      saveDrawings()
+      break
+    }
+    case 'editText':
+      editDrawingText(sel)
+      return
+  }
+  redrawDrawings()
+}
+
+/** Re-open the caption field over a placed text / callout / note drawing. */
+function editDrawingText(i: number): void {
+  const d = currentDrawings()[i]
+  const def = d && drawToolDef(d.type)
+  if (!d || !def?.text || d.locked) return
+  const [cw, ch] = drawCanvasSize()
+  const sh = shapeOf(d, cw, ch)
+  const l = sh?.labels.find((lb) => lb.box)
+  if (!l) return
+  const sym = drawingsSym
+  askCaption(
+    l.x,
+    l.y,
+    function (caption) {
+      // Same coin and the same drawing still there (not undone meanwhile).
+      if (caption == null || sym !== drawingsSym || currentDrawings()[i] !== d) return
+      if (caption === d.text) return
+      d.text = caption
+      saveDrawings()
+      redrawDrawings()
+    },
+    d.text || '',
+  )
+}
+
+/**
+ * Arrow keys nudge the selected drawing: left / right a bar, up / down a
+ * pixel (Shift: 10). The moves are written straight away but recorded as one
+ * undo step once the keys go quiet, so a burst of nudges undoes in one go.
+ */
+const NUDGE_SETTLE_MS = 600
+let nudgeTimer: ReturnType<typeof setTimeout> | null = null
+function flushNudge(): void {
+  if (!nudgeTimer) return
+  clearTimeout(nudgeTimer)
+  nudgeTimer = null
+  saveDrawings()
+}
+function nudgeSelected(key: string, big: boolean): boolean {
+  const d = chartState.drawings[chartState._sel]
+  if (!d || d.locked || !chart || !candleSeries) return false
+  const step = big ? 10 : 1
+  const dBars = key === 'ArrowRight' ? step : key === 'ArrowLeft' ? -step : 0
+  const dy = key === 'ArrowDown' ? step : key === 'ArrowUp' ? -step : 0
+  d.points = shiftPoints(d.points, dBars, shownBarTimes(), (pr) => {
+    if (!dy) return pr
+    const py = candleSeries.priceToCoordinate(pr)
+    return py == null ? null : candleSeries.coordinateToPrice(py + dy)
+  })
+  writeDrawings()
+  if (nudgeTimer) clearTimeout(nudgeTimer)
+  nudgeTimer = setTimeout(function () {
+    nudgeTimer = null
+    saveDrawings()
+  }, NUDGE_SETTLE_MS)
+  redrawDrawings()
+  return true
+}
+
+/**
+ * Leave the tool after a drawing lands unless "stay in drawing mode" is on,
+ * and select the new drawing so it can be styled straight away.
+ */
+function afterDrawingPlaced(): void {
+  if (stayInDrawingMode() || !getDrawTool()) return
+  setDrawTool(null)
+  chartState._sel = chartState.drawings.length - 1
+  redrawDrawings()
+}
+
+/** A new drawing of `type`, styled from its saved template if there is one. */
+function newDrawing(type: string, color: string, points: Any[]): Any {
+  const d: Any = { type, color, points }
+  const t = toolTemplate(type)
+  if (t) {
+    if (t.color) d.color = t.color
+    if (t.width) d.width = t.width
+    if (t.dash) d.dash = t.dash
+    if (t.fontSize) d.fontSize = t.fontSize
+  }
+  return d
 }
 
 // ---- Full screen ----
@@ -1500,7 +1664,8 @@ function setupDrawLayer(): void {
     const x = e.clientX - r.left
     const y = e.clientY - r.top
     if (tool === 'erase') {
-      const i = drawingAt(x, y)
+      // Locked drawings are skipped, so the eraser reaches whatever is under them.
+      const i = drawingAt(x, y, true)
       if (i === -1) return
       currentDrawings().splice(i, 1)
       saveDrawings()
@@ -1510,7 +1675,7 @@ function setupDrawLayer(): void {
       redrawDrawings()
       return
     }
-    placeDrawPointFromXY(x, y)
+    placeDrawPointFromXY(x, y, e.shiftKey)
   })
   // Open-ended shapes (polyline, patterns you want to cut short) finish here.
   overlay.addEventListener('dblclick', function (e) {
@@ -1549,9 +1714,12 @@ function setupDrawLayer(): void {
     chartState._freehand = null
     chartState._freeXY = null
     if (pts.length > 1) {
-      currentDrawings().push({ type: 'brush', color: def.color || '#4FC3F7', points: pts })
+      currentDrawings().push(newDrawing('brush', def.color || '#4FC3F7', pts))
       saveDrawings()
       publishDrawingCount()
+      redrawDrawings()
+      afterDrawingPlaced()
+      return
     }
     redrawDrawings()
   })
@@ -1569,7 +1737,7 @@ function setupDrawLayer(): void {
     const y = e.clientY - r.top
     if (tool === 'erase') {
       // Highlight whatever a click would remove, so nothing vanishes by surprise.
-      const i = drawingAt(x, y)
+      const i = drawingAt(x, y, true)
       if (i !== chartState._eraseHit) {
         chartState._eraseHit = i
         overlay.style.cursor = i === -1 ? 'crosshair' : 'pointer'
@@ -1577,9 +1745,9 @@ function setupDrawLayer(): void {
       }
       return
     }
-    const snapped = snapToCandle(x, y)
-    if (!snapped) return
     if (chartState._freehand) {
+      const snapped = snapToCandle(x, y)
+      if (!snapped) return
       // Sample on raw pixel distance: two positions inside one bar map to the
       // same time, so a time-based gate would swallow most of the stroke.
       const prev = chartState._freeXY
@@ -1591,6 +1759,9 @@ function setupDrawLayer(): void {
       return
     }
     if (chartState.drawBuf.length) {
+      const [cx, cy] = constrainFromLast(x, y, e.shiftKey)
+      const snapped = snapToCandle(cx, cy, e.shiftKey)
+      if (!snapped) return
       chartState._preview = snapped
       redrawDrawings(true)
     }
@@ -1630,7 +1801,7 @@ function shownBarTimes(): number[] {
   return barTimes
 }
 
-function snapToCandle(x: Any, y: Any): Any {
+function snapToCandle(x: Any, y: Any, noMagnet = false): Any {
   // Below the price pane (an indicator pane, v5) a price would be
   // extrapolated and the drawing clipped out of sight: no point there.
   if (y > mainPaneHeight(chart, Number.MAX_SAFE_INTEGER)) return null
@@ -1649,7 +1820,9 @@ function snapToCandle(x: Any, y: Any): Any {
     price = null
   }
   if (time == null || price == null) return null
-  if (!isMagnet() || !candleSeries) return { time: time, price: price }
+  // Shift (angle constraint) wins over the magnet, as on TradingView.
+  const mode = noMagnet ? 'off' : getMagnetMode()
+  if (mode === 'off' || !candleSeries) return { time: time, price: price }
   const candles = displayCandles()
   const c = candles.find((k) => Math.floor(k.t / 1000) === time)
   if (!c) return { time: time, price: price }
@@ -1664,13 +1837,29 @@ function snapToCandle(x: Any, y: Any): Any {
       best = v
     }
   }
-  return { time: time, price: bestDist <= MAGNET_PX ? best : price }
+  // Strong magnet: always the nearest of the four; weak only when close to it.
+  return { time: time, price: mode === 'strong' || bestDist <= MAGNET_PX ? best : price }
 }
 
-function placeDrawPointFromXY(x: Any, y: Any): void {
+/**
+ * Shift held while placing: the pixel the next point goes to, constrained to
+ * 0/45/90 degrees from the last point placed.
+ */
+function constrainFromLast(x: number, y: number, shift: boolean): [number, number] {
+  const last = chartState.drawBuf[chartState.drawBuf.length - 1]
+  if (!shift || !last) return [x, y]
+  const [cw, ch] = drawCanvasSize()
+  const m = mapCtx(cw, ch)
+  const lx = m.x(last.time)
+  const ly = m.y(last.price)
+  return lx == null || ly == null ? [x, y] : constrainAngle(lx, ly, x, y)
+}
+
+function placeDrawPointFromXY(x: Any, y: Any, shift = false): void {
   const def = drawToolDef(getDrawTool())
   if (!def) return
-  const pt = snapToCandle(x, y)
+  ;[x, y] = constrainFromLast(x, y, shift)
+  const pt = snapToCandle(x, y, shift)
   if (!pt) return
   chartState.drawBuf.push(pt)
   setPendingPoints(chartState.drawBuf.length)
@@ -1704,7 +1893,8 @@ function commitPending(x: number, y: number): void {
     showToast('This coin already has ' + DRAWINGS_MAX_PER_COIN + ' drawings — delete some to add more')
     return
   }
-  const drawing: Any = { type: def.id, color: def.color || '#4FC3F7', points: pts.slice() }
+  // A position's stop and target are put on the right side of the entry.
+  const drawing: Any = newDrawing(def.id, def.color || '#4FC3F7', fixPositionSides(def.id, pts.slice()))
   chartState.drawBuf = []
   chartState._preview = null
   if (def.text) {
@@ -1717,6 +1907,10 @@ function commitPending(x: number, y: number): void {
         drawing.text = caption
         currentDrawings().push(drawing)
         saveDrawings()
+        publishDrawingCount()
+        redrawDrawings()
+        afterDrawingPlaced()
+        return
       }
       publishDrawingCount()
       redrawDrawings()
@@ -1729,6 +1923,7 @@ function commitPending(x: number, y: number): void {
   saveDrawings()
   publishDrawingCount()
   redrawDrawings()
+  afterDrawingPlaced()
 }
 
 /**
@@ -1741,7 +1936,12 @@ function closeLabelInput(): void {
   labelInput = null
   el?.remove()
 }
-function askCaption(x: number, y: number, done: (caption: string | null) => void): void {
+function askCaption(
+  x: number,
+  y: number,
+  done: (caption: string | null) => void,
+  initial = '',
+): void {
   closeLabelInput()
   const wrap = $('chartWrap')
   if (!wrap) return done(null)
@@ -1750,6 +1950,7 @@ function askCaption(x: number, y: number, done: (caption: string | null) => void
   el.className = 'draw-label-input'
   el.placeholder = 'Label'
   el.maxLength = 80
+  el.value = initial
   el.setAttribute('aria-label', 'Drawing label')
   el.style.left = Math.max(4, Math.min(x, wrap.clientWidth - 170)) + 'px'
   el.style.top = Math.max(4, Math.min(y - 14, wrap.clientHeight - 32)) + 'px'
@@ -1774,6 +1975,7 @@ function askCaption(x: number, y: number, done: (caption: string | null) => void
   el.addEventListener('click', (e) => e.stopPropagation())
   wrap.appendChild(el)
   el.focus()
+  if (initial) el.select()
 }
 
 function resizeDrawCanvas(): void {
@@ -1838,6 +2040,14 @@ function mapCtx(cw: number, ch: number): MapCtx {
       const [a, b] = barSpan(Math.min(t1, t2) * 1000, Math.max(t1, t2) * 1000)
       return b - a
     },
+    candles(t1: number, t2: number) {
+      const [a, b] = barSpan(Math.min(t1, t2) * 1000, Math.max(t1, t2) * 1000)
+      return displayCandles().slice(a, b)
+    },
+    last: (() => {
+      const bars = displayCandles()
+      return bars.length ? bars[bars.length - 1].c : null
+    })(),
     timeLabel(t: number) {
       return fmtChartDate(t * 1000, {
         month: 'short',
@@ -1880,14 +2090,18 @@ function drawCanvasSize(): [number, number] {
   return cv ? [cv.width / dpr, cv.height / dpr] : [0, 0]
 }
 
-/** Index of the drawing under a pixel position, or -1. */
-function drawingAt(x: Any, y: Any): number {
+/**
+ * Index of the drawing under a pixel position, or -1. Hidden drawings are
+ * never hit; `skipLocked` (the eraser) passes over locked ones too.
+ */
+function drawingAt(x: Any, y: Any, skipLocked = false): number {
   if (!chartState.drawCanvas) return -1
   const [cw, ch] = drawCanvasSize()
   const [px0, px1] = plotSpan(cw)
   if (x < px0 || x > px1) return -1
   const drawings = currentDrawings()
   for (let i = drawings.length - 1; i >= 0; i--) {
+    if (drawings[i].hidden || (skipLocked && drawings[i].locked)) continue
     const sh = shapeOf(drawings[i], cw, ch)
     if (sh && hitShape(sh, x, y)) return i
   }
@@ -1907,16 +2121,29 @@ function setupDrawSelect(wrap: HTMLElement): void {
   const onMove = (e: PointerEvent) => {
     const drag = chartState._drag
     if (!drag || e.pointerId !== drag.pointerId) return
-    const [x, y] = local(e)
+    let [x, y] = local(e)
     if (!drag.moved && Math.hypot(x - drag.x0, y - drag.y0) < 3) return
-    drag.moved = true
     const d = currentDrawings()[drag.i]
-    if (!d) return
+    // Locked: it can be selected (to unlock it) but not moved.
+    if (!d || d.locked) return
+    drag.moved = true
     if (drag.handle >= 0) {
-      const pt = snapToCandle(x, y)
+      // Shift: the handle keeps 0/45/90 degrees to its neighbouring anchor.
+      if (e.shiftKey && drag.start.length > 1) {
+        const other = drag.start[drag.handle > 0 ? drag.handle - 1 : 1]
+        const [cw, ch] = drawCanvasSize()
+        const m = mapCtx(cw, ch)
+        const ox = m.x(other.time)
+        const oy = m.y(other.price)
+        if (ox != null && oy != null) [x, y] = constrainAngle(ox, oy, x, y)
+      }
+      const pt = snapToCandle(x, y, e.shiftKey)
       if (!pt) return
-      d.points = drag.start.map((p: Any, k: number) => (k === drag.handle ? pt : { ...p }))
+      const pts = drag.start.map((p: Any, k: number) => (k === drag.handle ? pt : { ...p }))
+      d.points = fixPositionSides(d.type, pts, true)
     } else {
+      // Shift: move straight across, straight up or down, or at 45 degrees.
+      if (e.shiftKey) [x, y] = constrainAngle(drag.x0, drag.y0, x, y)
       const ts = chart.timeScale()
       const l0 = ts.coordinateToLogical(drag.x0)
       const l1 = ts.coordinateToLogical(x)
@@ -1966,6 +2193,7 @@ function setupDrawSelect(wrap: HTMLElement): void {
       // Ours: keep the chart from panning or scrolling under the drag.
       e.preventDefault()
       e.stopPropagation()
+      flushNudge()
       chartState._sel = i
       chartState._drag = {
         pointerId: e.pointerId,
@@ -2021,19 +2249,56 @@ function setupDrawSelect(wrap: HTMLElement): void {
     },
     true,
   )
-  // Delete / Backspace removes the selection, Esc drops it.
+  // Double-click a text, callout or note with the cursor to edit its caption.
+  wrap.addEventListener(
+    'dblclick',
+    function (e) {
+      if (getDrawTool() || !chart) return
+      const [x, y] = local(e)
+      const i = drawingAt(x, y)
+      const d = i >= 0 ? currentDrawings()[i] : null
+      if (!d || !drawToolDef(d.type)?.text) return
+      // Ours, not the chart's (a double-click there resets the price scale).
+      e.preventDefault()
+      e.stopPropagation()
+      chartState._sel = i
+      redrawDrawings()
+      editDrawingText(i)
+    },
+    true,
+  )
+  // Delete / Backspace removes the selection, Esc drops it, arrows nudge it,
+  // Ctrl+D clones it.
   window.addEventListener(
     'keydown',
     function (e) {
-      if (!(chartState._sel >= 0) || e.ctrlKey || e.metaKey || e.altKey) return
+      if (!(chartState._sel >= 0) || e.altKey) return
       const t = e.target as HTMLElement | null
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable))
         return
       // Only while the chart is on screen; a hidden tab keeps its selection.
       if (!wrap.isConnected || !wrap.offsetParent) return
+      if (e.ctrlKey || e.metaKey) {
+        // Ctrl+D would bookmark the page; here it clones the drawing.
+        if (e.key.toLowerCase() === 'd' && !e.shiftKey) {
+          e.preventDefault()
+          e.stopPropagation()
+          runDrawingCommand({ kind: 'clone' })
+        }
+        return
+      }
+      if (e.key.startsWith('Arrow')) {
+        // Arrows otherwise scroll the chart (and the page): only while nudging.
+        if (nudgeSelected(e.key, e.shiftKey)) {
+          e.preventDefault()
+          e.stopPropagation()
+        }
+        return
+      }
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault()
         e.stopPropagation()
+        flushNudge()
         if (currentDrawings()[chartState._sel]) {
           currentDrawings().splice(chartState._sel, 1)
           saveDrawings()
@@ -2134,16 +2399,17 @@ function paintShape(
   })
   sh.labels.forEach((l) => {
     ctx.save()
-    ctx.font = '10px JetBrains Mono, monospace'
+    const fs = l.size || 10
+    ctx.font = fs + 'px JetBrains Mono, monospace'
     ctx.textAlign = l.align || 'left'
     const w = ctx.measureText(l.text).width
     if (l.box) {
       const bx = l.align === 'center' ? l.x - w / 2 : l.align === 'right' ? l.x - w : l.x
       ctx.fillStyle = isLightTheme() ? 'rgba(255,255,255,.88)' : 'rgba(6,11,24,.78)'
-      ctx.fillRect(bx - 4, l.y - 10, w + 8, 14)
+      ctx.fillRect(bx - 4, l.y - fs, w + 8, fs + 4)
       ctx.strokeStyle = doomed ? stroke : l.color || base
       ctx.lineWidth = 1
-      ctx.strokeRect(bx - 4, l.y - 10, w + 8, 14)
+      ctx.strokeRect(bx - 4, l.y - fs, w + 8, fs + 4)
     }
     ctx.fillStyle = doomed ? stroke : l.color || base
     ctx.fillText(l.text, l.x, l.y)
@@ -2155,7 +2421,31 @@ function paintShape(
 function publishSelection(): void {
   const d = chartState._sel >= 0 ? chartState.drawings[chartState._sel] : null
   setSelectedDrawing(
-    d ? { color: d.color || '#4FC3F7', width: d.width || 1.7, dash: d.dash || 'solid' } : null,
+    d
+      ? {
+          type: d.type,
+          color: d.color || '#4FC3F7',
+          width: d.width || 1.7,
+          dash: d.dash || 'solid',
+          locked: !!d.locked,
+          hidden: !!d.hidden,
+          fontSize: d.fontSize || 10,
+          text: typeof d.text === 'string' ? d.text : null,
+          account: typeof d.account === 'number' ? d.account : null,
+          risk: typeof d.risk === 'number' ? d.risk : null,
+        }
+      : null,
+  )
+  // The object tree (side panel); the store skips the update when nothing changed.
+  setDrawingList(
+    chartState.drawings.map((x: Any, i: number) => ({
+      type: x.type,
+      name: (drawToolDef(x.type)?.name || x.type) + (x.text ? ': ' + x.text : ''),
+      color: x.color || '#4FC3F7',
+      locked: !!x.locked,
+      hidden: !!x.hidden,
+      selected: i === chartState._sel,
+    })),
   )
 }
 
@@ -2183,6 +2473,7 @@ function redrawDrawings(includePreview?: Any): void {
   ctx.clip()
 
   currentDrawings().forEach(function (d: Any, i: number) {
+    if (d.hidden) return
     const sh = shapeOf(d, cw, ch)
     if (sh)
       paintShape(ctx, sh, d.color, i === chartState._eraseHit, i === chartState._sel, {

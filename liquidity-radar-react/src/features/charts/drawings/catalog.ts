@@ -128,6 +128,22 @@ export const DRAW_TOOLS: DrawToolDef[] = [
     points: 3,
     color: PURPLE,
   },
+  {
+    id: 'schiff',
+    name: 'Schiff pitchfork',
+    group: 'Channels',
+    hint: 'Origin halfway up the first swing',
+    points: 3,
+    color: PURPLE,
+  },
+  {
+    id: 'modschiff',
+    name: 'Modified Schiff pitchfork',
+    group: 'Channels',
+    hint: 'Origin mid first swing',
+    points: 3,
+    color: PURPLE,
+  },
 
   // ---- Fibonacci ----
   {
@@ -250,6 +266,14 @@ export const DRAW_TOOLS: DrawToolDef[] = [
     color: PURPLE,
   },
   {
+    id: 'trianglepat',
+    name: 'Triangle pattern',
+    group: 'Patterns',
+    hint: 'Four pivots, converging sides',
+    points: 4,
+    color: PURPLE,
+  },
+  {
     id: 'elliott5',
     name: 'Elliott impulse (1–5)',
     group: 'Patterns',
@@ -308,6 +332,23 @@ export const DRAW_TOOLS: DrawToolDef[] = [
     color: CYAN,
   },
 
+  {
+    id: 'avwap',
+    name: 'Anchored VWAP',
+    group: 'Projection',
+    hint: 'Click the anchor bar',
+    points: 1,
+    color: ORANGE,
+  },
+  {
+    id: 'fixedvp',
+    name: 'Fixed range volume profile',
+    group: 'Projection',
+    hint: 'First and last bar',
+    points: 2,
+    color: CYAN,
+  },
+
   // ---- Annotation ----
   {
     id: 'text',
@@ -340,6 +381,23 @@ export const DRAW_TOOLS: DrawToolDef[] = [
     name: 'Arrow down',
     group: 'Annotation',
     hint: 'Mark a bar',
+    points: 1,
+    color: RED,
+  },
+  {
+    id: 'note',
+    name: 'Note',
+    group: 'Annotation',
+    hint: 'Pinned note',
+    points: 1,
+    color: AMBER,
+    text: true,
+  },
+  {
+    id: 'flag',
+    name: 'Flag mark',
+    group: 'Annotation',
+    hint: 'Flag a bar',
     points: 1,
     color: RED,
   },
