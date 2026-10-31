@@ -425,9 +425,11 @@ export function initChart(): void {
   followPriceScale(el)
   // While the cursor is over a bar the legend shows that bar; live ticks must
   // not overwrite it, and leaving the chart hands it back to the live candle.
-  chart.subscribeCrosshairMove((param: Any) =>
-    hoverLegend(param.time && param.point ? param.time : null),
-  )
+  chart.subscribeCrosshairMove((param: Any) => {
+    hoverLegend(param.time && param.point ? param.time : null)
+    // Dragging the price axis rescales without moving the time range.
+    updateCloseTimer()
+  })
   // Crosshair sync with the layout's other cells (./crosshairSync); a synced
   // crosshair drives the legend too.
   registerCrosshairSync({
@@ -436,8 +438,11 @@ export function initChart(): void {
     bars: () => legendCandles(getChartStyle(), displayCandles()),
     onSync: hoverLegend,
   })
+  // The bar countdown hangs under the last-price label; moving the view moves
+  // that label, so the countdown follows at once instead of on its 1s tick.
   chart.timeScale().subscribeVisibleTimeRangeChange(function () {
     redrawDrawings()
+    updateCloseTimer()
   })
   // The chart resizes itself; these only need to follow it. One exception:
   // the chart is built at startup while the Home screen is showing, so its
@@ -446,7 +451,8 @@ export function initChart(): void {
   let fitW = el.clientWidth
   const wrapEl = $('chartWrap')
   new ResizeObserver(() => {
-    if (fitW < 60 && el.clientWidth >= 60 && state.candles.length) chart.timeScale().fitContent()
+    if (fitW < 60 && el.clientWidth >= 60 && state.candles.length)
+      openingView(chart.timeScale(), displayCandles().length)
     fitW = el.clientWidth
     // Size classes for the legend and whale box: in a 4-16 cell layout the
     // full OHLC legend wrapped to three lines over the candles (index.css).
@@ -498,6 +504,7 @@ export function initChart(): void {
     if (isRangeMode()) updateChartData(true)
   })
   watchForOlderHistory()
+  anchorWheelZoomToLiveEdge()
   // Delta bars stream in far faster than the chart should repaint — coalesce
   // to the next frame, same reasoning as the live-tick indicator refresh
   // below (IND_REFRESH_MS): the eye cannot read faster than that anyway.
@@ -723,6 +730,20 @@ function wireLegendActions(): void {
  * replay) keeps whatever the user has scrolled to; refitting on every redraw
  * would yank the view back to the right edge mid-drag.
  */
+/**
+ * A fresh dataset opens on the latest ~120 bars at a readable width, with the
+ * live edge's usual offset — as TradingView does — instead of fitting all
+ * 500+ bars into a few pixels each. Short series are still fitted whole.
+ */
+const OPENING_BARS = 120
+function openingView(ts: Any, n: number): void {
+  if (n <= OPENING_BARS * 1.25) {
+    ts.fitContent()
+    return
+  }
+  ts.setVisibleLogicalRange({ from: n - OPENING_BARS, to: n - 1 + LIVE_EDGE_OFFSET })
+}
+
 export function updateChartData(fit = false): void {
   if (!chart) return
   const candles = displayCandles()
@@ -738,7 +759,7 @@ export function updateChartData(fit = false): void {
   renderDeltaPane(timeOnlyCandles(), indicatorPaneCount())
   renderWhaleBubbles()
   if (fit) {
-    ts.fitContent()
+    openingView(ts, candles.length)
     afterChartFit()
   } else if (keep) {
     // Older candles land in front of index 0, so the same bars now sit that
@@ -821,6 +842,36 @@ function pushRangeLive(): void {
     if (keep) ts.setVisibleLogicalRange(keep)
   }
   rangeShown = next
+}
+
+// ---- Wheel zoom keeps the live edge, as on TradingView ----
+// lightweight-charts zooms around the cursor, so zooming out while looking at
+// the newest bars opened a wide empty stretch of future on the right. When
+// the latest bar was in view, the zoom is re-anchored to it (same width, the
+// usual right offset); scrolled back into history, the cursor zoom stays.
+const LIVE_EDGE_OFFSET = 10
+function anchorWheelZoomToLiveEdge(): void {
+  const el = $('chart')
+  if (!el) return
+  let wasLive = false
+  el.addEventListener(
+    'wheel',
+    (e) => {
+      if (e.ctrlKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return
+      const r = chart.timeScale().getVisibleLogicalRange()
+      const last = displayCandles().length - 1
+      wasLive = !!r && last >= 0 && r.to >= last
+      if (!wasLive) return
+      requestAnimationFrame(() => {
+        const n = chart.timeScale().getVisibleLogicalRange()
+        if (!n) return
+        const width = n.to - n.from
+        const to = last + LIVE_EDGE_OFFSET
+        if (Math.abs(n.to - to) > 0.5) chart.timeScale().setVisibleLogicalRange({ from: to - width, to })
+      })
+    },
+    { passive: true, capture: true },
+  )
 }
 
 // ---- Lazy history on pan ----

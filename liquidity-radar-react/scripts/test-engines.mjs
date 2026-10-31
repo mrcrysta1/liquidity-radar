@@ -196,6 +196,14 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   const jan = Date.UTC(2026, 0, 1)
   eq('bucketEnd: January rolls to February', bucketEnd(jan, tfDef('1M')), Date.UTC(2026, 1, 1))
   ok('bucketIndex: monotonic', bucketIndex(t0 + 1e6, d) > bucketIndex(t0, d))
+  // 7m does not divide a day: buckets restart at 00:00 UTC, the last one short.
+  const d7 = customTfDef('7m')
+  const day0 = Date.UTC(2026, 9, 23)
+  ok('bucket 7m: a new day starts a new bucket', bucketIndex(day0, d7) !== bucketIndex(day0 - 60000, d7))
+  eq('bucket 7m: same bucket inside 7 minutes', bucketIndex(day0 + 6 * 60000, d7), bucketIndex(day0, d7))
+  eq('bucket 7m: the last bucket ends at midnight', bucketEnd(day0 - 5 * 60000, d7), day0)
+  eq('bucket 7m: a full bucket is 7 minutes', bucketEnd(day0, d7), day0 + 7 * 60000)
+  eq('bucket 15m: dividing intervals are unchanged', bucketEnd(day0, tfDef('15m')), day0 + 900000)
 }
 
 // ------------------------------------------- older-history paging (resampled)

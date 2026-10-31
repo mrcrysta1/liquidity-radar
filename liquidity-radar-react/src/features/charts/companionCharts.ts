@@ -826,9 +826,18 @@ function connect(p: Panel, token: number): void {
   }
 }
 
-/** Companions size themselves via autoSize; kept so callers have one entry point. */
+/**
+ * Companions size themselves via autoSize; kept so callers have one entry
+ * point. Only a panel that has nothing in view yet is fitted (the same rule
+ * as its ResizeObserver): fitting all of them reset every companion's zoom
+ * on each tab switch.
+ */
 export function resizeAll(): void {
-  panels.forEach((p) => p.chart?.timeScale().fitContent())
+  panels.forEach((p) => {
+    const ts = p.chart?.timeScale()
+    const r = ts?.getVisibleLogicalRange()
+    if (ts && (!r || r.from <= 0)) ts.fitContent()
+  })
 }
 
 /**

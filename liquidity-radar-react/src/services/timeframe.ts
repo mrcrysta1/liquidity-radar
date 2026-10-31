@@ -220,7 +220,25 @@ export function tfMs(def: TimeframeDef): number {
  * Stable bucket number for a candle open time. Derived from absolute time, not
  * from position in the array, so buckets do not shift as candles arrive.
  */
+const DAY_MS = 86400000
+
+/**
+ * Intraday buckets that do not divide a day (7m, 25m, 5h…) restart at 00:00
+ * UTC each day, as TradingView's crypto sessions do; the day's last bucket is
+ * the remainder. Counted from the epoch they drifted against TradingView's
+ * bars (1440 is not a multiple of 7).
+ */
+function dayAnchored(def: TimeframeDef): number {
+  const span = (BASE_MS[def.base] || 0) * def.factor
+  return def.factor > 1 && span > 0 && span < DAY_MS && DAY_MS % span !== 0 ? span : 0
+}
+
 export function bucketIndex(tMs: number, def: TimeframeDef): number {
+  const span = dayAnchored(def)
+  if (span) {
+    const day = Math.floor(tMs / DAY_MS)
+    return day * Math.ceil(DAY_MS / span) + Math.floor((tMs - day * DAY_MS) / span)
+  }
   if (def.base === '1M') {
     const d = new Date(tMs)
     return Math.floor((d.getUTCFullYear() * 12 + d.getUTCMonth()) / def.factor)
@@ -316,6 +334,12 @@ export function bucketEnd(openMs: number, def: TimeframeDef): number {
     const start = d.getUTCFullYear() * 12 + d.getUTCMonth()
     const end = Math.floor(start / def.factor) * def.factor + def.factor
     return Date.UTC(Math.floor(end / 12), end % 12, 1)
+  }
+  const span = dayAnchored(def)
+  if (span) {
+    const day = Math.floor(openMs / DAY_MS) * DAY_MS
+    const k = Math.floor((openMs - day) / span)
+    return Math.min(day + (k + 1) * span, day + DAY_MS)
   }
   return openMs + BASE_MS[def.base] * def.factor
 }

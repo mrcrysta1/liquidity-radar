@@ -16,11 +16,37 @@ interface ReplayState {
   on: boolean
   /** How many candles of the live array are visible. */
   idx: number
+  /** Open time of the last visible bar: the position, as a time. */
+  at: number
   playing: boolean
   speed: number
 }
 
-const rs: ReplayState = { on: false, idx: 0, playing: false, speed: 1 }
+const rs: ReplayState = { on: false, idx: 0, at: 0, playing: false, speed: 1 }
+
+/** Set the position by count, remembering it as the last visible bar's time. */
+function setIdx(i: number): void {
+  rs.idx = i
+  rs.at = state.candles[i - 1]?.t ?? 0
+}
+/**
+ * The live array keeps changing under replay: new bars are appended and the
+ * oldest dropped at 5000, which shifted an index-only cursor one bar per new
+ * bar, and older history paged in moved it the other way. The position is
+ * kept as a time and the count re-derived from it.
+ */
+function syncIdx(): void {
+  const a = state.candles
+  if (!rs.on || !rs.at || a[rs.idx - 1]?.t === rs.at) return
+  let lo = 0
+  let hi = a.length
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (a[mid].t <= rs.at) lo = mid + 1
+    else hi = mid
+  }
+  rs.idx = Math.max(1, lo)
+}
 let timer: ReturnType<typeof setInterval> | null = null
 
 type Listener = () => void
@@ -57,6 +83,7 @@ export function replayInfo(): {
   speed: number
   at: CandleFlat | null
 } {
+  syncIdx()
   const total = state.candles.length
   const idx = Math.min(rs.idx, total)
   return {
@@ -72,6 +99,7 @@ export function replayInfo(): {
 /** The candles the chart should draw right now. */
 export function visibleCandles(): CandleFlat[] {
   if (!rs.on) return state.candles
+  syncIdx()
   return state.candles.slice(0, Math.max(1, Math.min(rs.idx, state.candles.length)))
 }
 
@@ -84,13 +112,14 @@ function startTimer(): void {
   stopTimer()
   timer = setInterval(() => {
     if (!rs.on || !rs.playing) return stopTimer()
+    syncIdx()
     if (rs.idx >= state.candles.length) {
       rs.playing = false
       stopTimer()
       emit()
       return
     }
-    rs.idx++
+    setIdx(rs.idx + 1)
     emit()
   }, 600 / rs.speed)
 }
@@ -101,7 +130,7 @@ export function toggleReplay(): void {
   stopTimer()
   if (rs.on) {
     const n = state.candles.length
-    rs.idx = Math.max(1, Math.min(n, Math.floor(n * START_FRACTION)))
+    setIdx(Math.max(1, Math.min(n, Math.floor(n * START_FRACTION))))
   }
   emit(true, true)
 }
@@ -116,7 +145,8 @@ export function exitReplay(): void {
 
 export function playPause(): void {
   if (!rs.on) return
-  if (rs.idx >= state.candles.length) rs.idx = Math.max(1, Math.floor(state.candles.length * 0.5))
+  syncIdx()
+  if (rs.idx >= state.candles.length) setIdx(Math.max(1, Math.floor(state.candles.length * 0.5)))
   rs.playing = !rs.playing
   if (rs.playing) startTimer()
   else stopTimer()
@@ -127,13 +157,14 @@ export function step(delta: number): void {
   if (!rs.on) return
   rs.playing = false
   stopTimer()
-  rs.idx = Math.max(1, Math.min(state.candles.length, rs.idx + delta))
+  syncIdx()
+  setIdx(Math.max(1, Math.min(state.candles.length, rs.idx + delta)))
   emit()
 }
 
 export function seek(idx: number): void {
   if (!rs.on) return
-  rs.idx = Math.max(1, Math.min(state.candles.length, Math.round(idx)))
+  setIdx(Math.max(1, Math.min(state.candles.length, Math.round(idx))))
   emit()
 }
 
@@ -145,6 +176,6 @@ export function setSpeed(s: number): void {
 
 export function restart(): void {
   if (!rs.on) return
-  rs.idx = 1
+  setIdx(1)
   emit()
 }

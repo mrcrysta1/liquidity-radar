@@ -65,7 +65,8 @@ import {
   mcChangeInterval,
   mcChangeSymbol,
 } from '../features/charts/multiCharts'
-import { switchTab, setSymbol, wireUserActions, getActiveTab, subscribeActiveTab } from '../features/actions/userActions'
+import { switchTab, setSymbol, wireUserActions, getActiveTab, subscribeActiveTab, subscribeSymbol } from '../features/actions/userActions'
+import { exitReplay } from '../features/charts/replay'
 import { analyzeSigCoin, onSigSearch, startAutoScan, switchSigMode, setSigFilter } from '../features/signals'
 import { renderMemeUniverse } from '../features/bubbles'
 import { pushMsg } from '../features/chat/log' // not ../features/chat: keeps the assistant out of the boot bundle
@@ -167,7 +168,10 @@ $('symSelect').addEventListener('change',e=>setSymbol(e.target.value));
 
 // The <TimeframePicker/> component owns the toolbar UI and state.tf; the
 // engine only supplies the reload when the interval changes.
+// Replay is a position in one market's bars; a new market or interval ends it.
+subscribeSymbol(exitReplay);
 onTimeframeChange(()=>{
+  exitReplay();
   resetCandles(); // the previous interval's bars must not stand in for this one's
   fetchKlines(state.symbol);
   connectStreams(streamCb); // restart live kline stream at the new, consistent interval
