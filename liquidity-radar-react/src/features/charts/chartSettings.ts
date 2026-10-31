@@ -1,52 +1,56 @@
 // Chart display settings (the gear in the chart's right rail), saved per
-// browser: grid lines, magnet crosshair, last-price line, bar countdown and the
-// symbol watermark — the TradingView "Chart settings" basics the chart lacked.
+// browser — TradingView's "Chart settings" sections: Symbol (candle colours,
+// last-price line), Status line (what the legend shows), Scales (labels,
+// countdown) and Canvas (background, grid, crosshair, watermark). The shape,
+// validation and the options they become live in ./chartSettingsMath.
 import { storageGet, storageSet } from '../../services/storage'
+import { DEFAULT_SETTINGS, legendHideClasses, normalizeSettings } from './chartSettingsMath'
+import type { ChartSettings } from './chartSettingsMath'
 
-export interface ChartSettings {
-  grid: boolean
-  magnet: boolean
-  priceLine: boolean
-  countdown: boolean
-  watermark: boolean
-}
+export type { ChartSettings } from './chartSettingsMath'
+export { DEFAULT_SETTINGS } from './chartSettingsMath'
 
 const KEY = 'lr-chartSettings'
-export const DEFAULT_SETTINGS: ChartSettings = {
-  grid: true,
-  magnet: false,
-  priceLine: true,
-  countdown: true,
-  watermark: true,
-}
-
-function read(): ChartSettings {
-  const v = storageGet<Partial<ChartSettings>>(KEY, {})
-  const out = { ...DEFAULT_SETTINGS }
-  if (v && typeof v === 'object')
-    for (const k of Object.keys(out) as Array<keyof ChartSettings>)
-      if (typeof v[k] === 'boolean') out[k] = v[k] as boolean
-  return out
-}
 
 let current: ChartSettings | null = null
 const listeners = new Set<() => void>()
 
+/** The legend switches are plain CSS (index.css r4-ux), for every chart at once. */
+function syncLegendClasses(st: ChartSettings): void {
+  if (typeof document === 'undefined') return
+  const root = document.documentElement
+  for (const [cls, on] of Object.entries(legendHideClasses(st))) root.classList.toggle(cls, on)
+}
+
 export function chartSettings(): ChartSettings {
-  if (!current) current = read()
+  if (!current) {
+    current = normalizeSettings(storageGet<unknown>(KEY, {}))
+    syncLegendClasses(current)
+  }
   return current
+}
+/**
+ * Listeners re-theme every chart, and a colour picker fires on each step of
+ * a drag: notify once a frame, with whatever the settings are by then.
+ */
+let notifyFrame = 0
+function commit(next: ChartSettings): void {
+  current = next
+  storageSet(KEY, current)
+  syncLegendClasses(current)
+  if (notifyFrame) return
+  notifyFrame = requestAnimationFrame(() => {
+    notifyFrame = 0
+    listeners.forEach((fn) => fn())
+  })
 }
 export function setChartSetting<K extends keyof ChartSettings>(key: K, value: ChartSettings[K]): void {
   const s = chartSettings()
   if (s[key] === value) return
-  current = { ...s, [key]: value }
-  storageSet(KEY, current)
-  listeners.forEach((fn) => fn())
+  commit({ ...s, [key]: value })
 }
 export function resetChartSettings(): void {
-  current = { ...DEFAULT_SETTINGS }
-  storageSet(KEY, current)
-  listeners.forEach((fn) => fn())
+  commit({ ...DEFAULT_SETTINGS })
 }
 export function subscribeChartSettings(fn: () => void): () => void {
   listeners.add(fn)

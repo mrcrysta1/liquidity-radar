@@ -182,3 +182,17 @@ export function computeVolumeProfile(
 export function bucketPriceRange(vp: VolumeProfile, i: number): [number, number] {
   return [vp.lo + i * vp.binSize, vp.lo + (i + 1) * vp.binSize]
 }
+
+/**
+ * Right edge of the plot area in overlay-canvas pixels: where the chart
+ * element starts on the canvas, plus the left price scale, plus the plot's
+ * own width (timeScale().width()). Built from the plot rather than "chart
+ * right minus price-scale width", which drew the bars under the price labels
+ * whenever the scale's width read 0 or the chart element ran wider than the
+ * canvas. Capped to the canvas; 0 when nothing is laid out yet.
+ */
+export function plotRightEdge(chartLeft: number, leftScaleW: number, plotW: number, canvasW: number): number {
+  if (!(plotW > 0) || !(canvasW > 0)) return 0
+  const x = (chartLeft > 0 ? chartLeft : 0) + (leftScaleW > 0 ? leftScaleW : 0) + plotW
+  return Math.max(0, Math.min(canvasW, x))
+}

@@ -12,7 +12,7 @@ import {
   scanFurther,
   setWhaleMult,
 } from '../../features/whales/whaleFlow'
-import { bubbleRadius, whaleLegendCompact } from '../../features/whales/whaleMath'
+import { bubbleRadius, collectorState, whaleLegendCompact } from '../../features/whales/whaleMath'
 import { getShowWhaleBubbles, onOverlayTogglesChange } from '../../features/charts/overlayToggles'
 import { scaleNavSnapshot, subscribeScaleNav } from '../../features/charts/scaleNav'
 import { chartDayKey, fmtChartDate } from '../../features/charts/timezone'
@@ -87,8 +87,10 @@ export function WhaleLegend() {
   let gaps = 0
   for (let i = 1; i < cov.length; i++) if (cov[i].t0 - cov[i - 1].t1 > 60_000) gaps++
   const shown = v.orders.filter((o) => o.usd >= v.min).length
-  // The collector writes a heartbeat every ~10s; two minutes of silence means it stopped.
-  const stale = v.server && Math.max(now, v.serverUpdated) - v.serverUpdated > 120_000
+  // The collector writes a heartbeat every ~10s; two minutes of silence means
+  // it stopped. Days of silence is "history unavailable", with no stale date.
+  const srv = collectorState(!!v.server, v.serverUpdated, now)
+  const stale = srv === 'offline'
 
   if (!open)
     return (
@@ -169,14 +171,16 @@ export function WhaleLegend() {
         {v.loading ? <i className="wl-spin" aria-hidden="true" /> : null}
         {v.server && (
           <i
-            className={'wl-srv' + (stale ? ' off' : '')}
+            className={'wl-srv' + (srv !== 'live' ? ' off' : '')}
             title={
               stale
                 ? 'History collector last seen ' + since(v.serverUpdated)
-                : 'History from the 24/7 collector'
+                : srv === 'unavailable'
+                  ? 'Older whale history is unavailable; showing trades scanned here'
+                  : 'History from the 24/7 collector'
             }
           >
-            {stale ? 'collector offline' : 'server'}
+            {stale ? 'collector offline' : srv === 'unavailable' ? 'history unavailable' : 'server'}
           </i>
         )}
         <span>

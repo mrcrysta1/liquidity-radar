@@ -4256,6 +4256,43 @@ alertcondition(close > 12, "Up", "close above 12")`, k)
   eq('depth: empty grid has no cap', DH.intensityCap([0, 0]), 0)
 }
 
+{
+  // r4-ux: chart settings sections (U9), collector state (U17), VP plot edge (U21).
+  const CS = await import(src('features/charts/chartSettingsMath.ts'))
+  const legacy = CS.normalizeSettings({ grid: false, magnet: true })
+  eq('r4ux settings: legacy grid seeds both directions', [legacy.gridVert, legacy.gridHorz, legacy.magnet], [false, false, true])
+  const bad = CS.normalizeSettings({ crosshair: 'wavy', bodyUp: 'red', bgColor: '', priceLine: 'yes', bodyDown: '#00ff00' })
+  eq('r4ux settings: invalid values fall back', [bad.crosshair, bad.bodyUp, bad.bgColor, bad.priceLine, bad.bodyDown], ['dashed', '', CS.DEFAULT_SETTINGS.bgColor, true, '#00ff00'])
+  eq('r4ux settings: junk storage gives defaults', CS.normalizeSettings('x'), CS.DEFAULT_SETTINGS)
+  eq('r4ux settings: crosshair line styles', ['dashed', 'dotted', 'solid'].map(CS.crosshairLineStyle), [3, 1, 0])
+  const grad = CS.settingsChartOptions({ ...CS.DEFAULT_SETTINGS, background: 'gradient', bgColor: '#111111', bgColor2: '#222222', gridVert: false, magnet: true, priceLabels: 'exact' }, '#ffffff')
+  eq('r4ux settings: gradient background', grad.layout.background, { type: 'gradient', topColor: '#111111', bottomColor: '#222222' })
+  eq('r4ux settings: grid, magnet, label mode', [grad.grid.vertLines.visible, grad.grid.horzLines.visible, grad.crosshair.mode, grad.rightPriceScale.alignLabels], [false, true, 1, false])
+  eq('r4ux settings: theme background writes the palette back', CS.settingsChartOptions(CS.DEFAULT_SETTINGS, '#abcdef').layout.background, { type: 'solid', color: '#abcdef' })
+  eq('r4ux settings: canvas edge colour', [CS.canvasEdgeColor(CS.DEFAULT_SETTINGS, '#fff'), CS.canvasEdgeColor({ ...CS.DEFAULT_SETTINGS, background: 'gradient', bgColor2: '#010203' }, '#fff')], ['#fff', '#010203'])
+  const custom = { ...CS.DEFAULT_SETTINGS, bodyUp: '#00aa00', wickDown: '#aa0000', symbolLabel: false }
+  eq('r4ux settings: candle colours on candles', CS.settingsSeriesOptions(custom, 'candle'), { priceLineVisible: true, lastValueVisible: false, upColor: '#00aa00', wickDownColor: '#aa0000' })
+  eq('r4ux settings: hollow keeps per-bar bodies', CS.settingsSeriesOptions(custom, 'hollow'), { priceLineVisible: true, lastValueVisible: false, wickDownColor: '#aa0000' })
+  eq('r4ux settings: line styles take no candle colours', CS.settingsSeriesOptions(custom, 'line'), { priceLineVisible: true, lastValueVisible: false })
+  eq('r4ux settings: a border colour turns borders on', CS.settingsSeriesOptions({ ...CS.DEFAULT_SETTINGS, borderUp: '#123456' }, 'candle').borderVisible, true)
+  eq('r4ux settings: legend classes', CS.legendHideClasses({ ...CS.DEFAULT_SETTINGS, legendVolume: false }), { 'cs-hide-ohlc': false, 'cs-hide-chg': false, 'cs-hide-vol': true, 'cs-hide-indv': false })
+
+  const WM = await import(src('features/whales/whaleMath.ts'))
+  const now = 1_800_000_000_000
+  eq('r4ux collector: states by age', [
+    WM.collectorState(false, now, now),
+    WM.collectorState(true, now - 5_000, now),
+    WM.collectorState(true, now - 10 * 60_000, now),
+    WM.collectorState(true, now - 49 * 3600_000, now),
+    WM.collectorState(true, NaN, now),
+  ], ['none', 'live', 'offline', 'unavailable', 'unavailable'])
+
+  const VP = await import(src('features/charts/volumeProfile.ts'))
+  eq('r4ux vp: plot edge is chart offset + left scale + plot width', VP.plotRightEdge(10, 0, 700, 800), 710)
+  eq('r4ux vp: plot edge capped to the canvas', VP.plotRightEdge(0, 50, 900, 800), 800)
+  eq('r4ux vp: nothing laid out draws nothing', [VP.plotRightEdge(0, 0, 0, 800), VP.plotRightEdge(-4, 0, 300, 800)], [0, 300])
+}
+
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')
 if (fails.length) {
   fails.forEach((f) => console.log('  FAIL  ' + f))

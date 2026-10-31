@@ -11,6 +11,7 @@ import type { CandleFlat } from '../../services/market'
 import {
   buildVolumeProfile,
   bucketPriceRange,
+  plotRightEdge,
   profileCandles,
   type VolumeProfile,
   type VpMode,
@@ -59,18 +60,17 @@ export function attachVolumeProfile(c: Any, series: Any, wrap: HTMLElement): voi
 /**
  * X of the right price scale's left edge in canvas pixels. The canvas covers
  * the whole wrap, but the bars belong to the plot area: drawn to the wrap's
- * edge they sat underneath the price labels.
+ * edge they sat underneath the price labels (see plotRightEdge).
  */
 function plotRight(cw: number): number {
   try {
-    const scaleW = Number(chart.priceScale('right').width()) || 0
     const el: HTMLElement | undefined = chart.chartElement?.()
-    const chartRight = el
-      ? el.getBoundingClientRect().right - canvas!.getBoundingClientRect().left
-      : cw
-    return Math.max(0, Math.min(cw, chartRight) - scaleW)
+    const left = el ? el.getBoundingClientRect().left - canvas!.getBoundingClientRect().left : 0
+    const leftW = Number(chart.priceScale('left').width()) || 0
+    return plotRightEdge(left, leftW, Number(chart.timeScale().width()) || 0, cw)
   } catch (e) {
-    return cw
+    // Not laid out: draw nothing rather than under the price axis.
+    return 0
   }
 }
 
