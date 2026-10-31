@@ -13,30 +13,6 @@ import {
 } from '../../features/charts/savedLayouts'
 import { MAX_LAYOUT_NAME } from '../../features/charts/savedLayoutsMath'
 
-// Kept with the component so index.css (shared with other work) stays as is.
-const CSS = `
-.sl{border-top:1px solid var(--border);padding:6px 8px 8px}
-.sl-head{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:2px 2px 6px;
-  font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
-.sl-btn{background:transparent;border:1px solid transparent;border-radius:6px;color:var(--dim);cursor:pointer;
-  font:inherit;font-size:var(--text-xs);padding:4px 7px;min-height:26px;line-height:1.2}
-.sl-btn:hover{background:rgb(var(--pRGB)/.1);color:var(--txt)}
-.sl-btn:focus-visible,.sl-input:focus-visible{outline:2px solid var(--primary);outline-offset:-2px}
-.sl-btn.pri{background:var(--primary);border-color:var(--primary);color:#fff}
-.sl-btn.danger{color:var(--red)}
-.sl-btn.danger.pri{background:var(--red);border-color:var(--red);color:#fff}
-.sl-save{color:var(--primary);font-weight:600;text-transform:none;letter-spacing:0}
-.sl-form{display:flex;gap:4px;align-items:center;padding:2px 0 6px}
-.sl-input{flex:1;min-width:0;background:var(--bg,transparent);color:var(--txt);border:1px solid var(--border2);
-  border-radius:6px;padding:4px 7px;font:inherit;font-size:12px;min-height:26px}
-.sl-err{color:var(--red);font-size:var(--text-xs);padding:0 2px 6px}
-.sl-list{list-style:none;margin:0;padding:0;max-height:200px;overflow-y:auto}
-.sl-row{display:flex;align-items:center;gap:2px}
-.sl-name{flex:1;min-width:0;text-align:left;color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.sl-meta{color:var(--dim);font-family:var(--mono);font-size:10px;margin-left:6px}
-.sl-confirm{flex:1;min-width:0;font-size:var(--text-xs);color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-left:4px}
-.sl-empty{color:var(--dim);font-size:var(--text-xs);padding:2px 2px 4px}
-`
 
 type Mode =
   | { kind: 'idle' }
@@ -153,7 +129,6 @@ export function SavedLayouts({ onLoaded, cancelRef }: SavedLayoutsProps) {
 
   return (
     <div className="sl" role="group" aria-label="Saved layouts">
-      <style>{CSS}</style>
       <div className="sl-head">
         <span>Saved layouts</span>
         <button
