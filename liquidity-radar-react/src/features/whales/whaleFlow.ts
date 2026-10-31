@@ -22,6 +22,7 @@ import { state } from '../../services/store'
 import { storageGetRaw, storageSetRaw } from '../../services/storage'
 import { jget } from '../../api/client'
 import { isInstrument } from '../../constants/instruments'
+import { isSynthetic } from '../../services/syntheticSymbol'
 import { autoThreshold, groupAggTrades } from './whaleMath'
 import type { Agg, WhaleOrder } from './whaleMath'
 
@@ -526,14 +527,15 @@ export function syncWhaleSymbol(s: string, earliest: number): void {
   held = -1
   load(s)
   emit()
-  if (isInstrument(s)) return
+  // Ratio / spread symbols have no trade tape to scan.
+  if (isInstrument(s) || isSynthetic(s)) return
   earliestT = earliest
   void backfill(gen, s, earliest, AUTO_PAGES)
 }
 
 /** Scan another batch of history, continuing past what is already covered. */
 export function scanFurther(): void {
-  if (!sym || loading || isInstrument(sym)) return
+  if (!sym || loading || isInstrument(sym) || isSynthetic(sym)) return
   void backfill(gen, sym, earliestT, MORE_PAGES)
 }
 

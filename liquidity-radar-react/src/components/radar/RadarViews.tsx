@@ -17,6 +17,7 @@ import { baseOf, coinMeta, venueOf } from '../../utils/coins'
 import { cfmt, pfmt } from '../../utils/format'
 import { calcATR, calcBB, calcMACD, calcRSI, emaArr } from '../../utils/indicators'
 import { useTick } from '../useTick'
+import { synthTicker } from '../../services/synthQuote'
 import { useFavorites, watchList } from '../../features/favorites/favorites'
 import { AreaChart } from '../home/charts'
 import { HomeIcon } from '../home/icons'
@@ -88,8 +89,9 @@ export function RadarHero() {
   useBump(onConfluenceChange)
   const sym = state.symbol
   const meta = coinMeta(sym)
-  const t = state.tickers[sym] as
-    { last?: number; pct?: number; high?: number; low?: number; qvol?: number } | undefined
+  // A ratio / spread has no ticker: its quote comes from its own candles.
+  const t = (state.tickers[sym] ?? synthTicker(sym) ?? undefined) as
+    { last?: number; pct?: number | null; high?: number; low?: number; qvol?: number } | undefined
   const last = t?.last
   const abs = last && t?.pct != null ? last - last / (1 + t.pct / 100) : null
   const trend = confluenceSummary()

@@ -22,6 +22,7 @@ const LiqHeatmap = lazy(() => loadLiqHeatmap().then((m) => ({ default: m.LiqHeat
 const CrossExchangeTable = lazy(() => loadCrossExchange().then((m) => ({ default: m.CrossExchangeTable })))
 import { DrawEditTools, DrawQuickTools, DrawToolPicker } from './chart/DrawToolPicker'
 import { ScreenshotButton } from './chart/ScreenshotButton'
+import { ChartDataMenu } from './chart/ChartDataMenu'
 import { OverlayTogglePicker } from './chart/OverlayTogglePicker'
 import { OBImbalanceGauge } from './chart/OBImbalanceGauge'
 import { DivergenceBanner } from './chart/DivergenceBanner'
@@ -223,6 +224,7 @@ export function Shell() {
                 <LayoutPicker />
                 <ReplayButton />
                 <ScreenshotButton />
+                <ChartDataMenu />
               </ToolbarOverflow>
               {/* The engine swaps this button's tooltip and label on toggle;
                   the icon is drawn in CSS so it survives that. */}
