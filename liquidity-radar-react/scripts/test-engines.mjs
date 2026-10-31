@@ -4404,6 +4404,103 @@ alertcondition(close > 12, "Up", "close above 12")`, k)
   eq('replay2: fill marker text', mk[1].text, 'Buy 1 @ 100')
   eq('replay2: fill snaps to the bar it happened in', PT.fillMarkers([{ side: 'buy', qty: 1, price: 1, t: 150000 }], bars, 1e9, { up: 'g', dn: 'r' })[0].time, 120)
   eq('replay2: fill before the first bar is not drawn', PT.fillMarkers([{ side: 'buy', qty: 1, price: 1, t: -5 }], bars, 1e9, { up: 'g', dn: 'r' }), [])
+
+// ---- r4-indicators2: multi-timeframe inputs, volume profile, auto trendlines, catalogue ----
+{
+  const MT = await import(src('features/charts/indicators/mtf.ts'))
+  const M = await import(src('features/charts/indicators/math.ts'))
+  const R = await import(src('features/charts/indicators/registry.ts'))
+  const S = await import(src('features/charts/indicators/store.ts'))
+  const G = await import(src('features/charts/indicators/graph.ts'))
+  const VP = await import(src('features/charts/indicators/vprofile.ts'))
+  const H = 3600000
+  const bar = (t, c, v = 1) => ({ t, o: c, h: c, l: c, c, v })
+
+  // Alignment: 1h chart, 4h bars. A 4h bar shows from the chart bar whose
+  // close ends it; before any closed 4h bar there is nothing.
+  const chartT = Array.from({ length: 10 }, (_, i) => i * H)
+  const htfT = [0, 4 * H, 8 * H]
+  eq('mtf: closed 4h bar from the chart bar that closes it; live bar shows the forming one',
+    MT.alignIndex(chartT, H, htfT, 4 * H, false), [-1, -1, -1, 0, 0, 0, 0, 1, 1, 2])
+  eq('mtf: wait for close keeps the live bar on the last closed bar',
+    MT.alignIndex(chartT, H, htfT, 4 * H, true), [-1, -1, -1, 0, 0, 0, 0, 1, 1, 1])
+  eq('mtf: values mapped by index', MT.mapAligned([10, 20, 30], [-1, 0, 0, 1, 2]), [null, 10, 10, 20, 30])
+  eq('mtf: once = only on the first bar of each period', MT.mapAligned([10, 20], [0, 0, 1, 1], true), [10, null, 20, null])
+  ok('mtf: applies only to a longer timeframe', MT.mtfApplies('1h', 15 * 60000) && !MT.mtfApplies('1h', H) && !MT.mtfApplies(undefined, H))
+  eq('mtf: weeks open on Monday', MT.mtfBucketStart(Date.UTC(2024, 0, 3, 12), '1w'), Date.UTC(2024, 0, 1))
+  const ch = Array.from({ length: 10 }, (_, i) => bar(i * H, 100 + i, 2))
+  const rs = MT.resampleTo(ch, '4h')
+  eq('mtf: resample folds OHLCV', rs.map((k) => [k.t, k.o, k.h, k.l, k.c, k.v]),
+    [[0, 100, 103, 100, 103, 8], [4 * H, 104, 107, 104, 107, 8], [8 * H, 108, 109, 108, 109, 4]])
+  // Fetched bars running past the chart (replay) are cut at the chart's
+  // bucket, and the forming bucket is rebuilt from what the chart has seen.
+  const ahead = [bar(0, 1), bar(4 * H, 2), { t: 8 * H, o: 1, h: 999, l: 1, c: 999, v: 99 }, bar(12 * H, 3)]
+  const wf = MT.withForming(ahead, ch, '4h')
+  eq('mtf: no lookahead from fetched bars', wf.map((k) => [k.t, k.h, k.c, k.v]), [[0, 1, 1, 1], [4 * H, 2, 2, 1], [8 * H, 109, 109, 4]])
+  ok('mtf: bars needed covers span + warm-up, capped', MT.mtfBarsNeeded(ch, '1h') === 9 + 300 && MT.mtfBarsNeeded(ch, '1h', 300, 50) === 50)
+
+  // computeAll with a frame: SMA(2) of 4h closes onto the 1h bars.
+  const smaInst = { uid: 'a', type: 'sma', params: { length: 2 }, source: 'close', visible: true }
+  const frame = { candles: rs, idx: MT.alignIndex(ch.map((k) => k.t), H, rs.map((k) => k.t), 4 * H, false) }
+  const [cmp] = G.computeAll([smaInst], ch, (i) => R.indicatorDef(i.type), R.sourceSeries, () => frame)
+  eq('mtf: indicator computed on the higher timeframe and aligned', cmp.outputs.v,
+    [null, null, null, null, null, null, null, 105, 105, 108])
+
+  // Store: the timeframe persists; junk and drawing indicators drop it.
+  const san = S.sanitizeIndicators([
+    { uid: 'x1', type: 'rsi', params: {}, source: 'close', visible: true, tf: '4h', tfWait: true },
+    { uid: 'x2', type: 'rsi', params: {}, source: 'close', visible: true, tf: '7h' },
+    { uid: 'x3', type: 'zigzag', params: {}, source: 'close', visible: true, tf: '1h' },
+  ])
+  eq('mtf: stored timeframe kept / bad dropped / not on drawings', san.map((i) => [i.tf ?? null, i.tfWait ?? null]), [['4h', true], [null, null], [null, null]])
+  eq('mtf: serialized', S.serializeIndicators(san)[0].tf, '4h')
+
+  // Trendlines: lows rising 100 → 110 → 120 every 20 bars, highs in between.
+  const zz = (pts) => {
+    const v = []
+    for (let k = 1; k < pts.length; k++)
+      for (let j = 0; j < 10; j++) v.push(pts[k - 1] + ((pts[k] - pts[k - 1]) * j) / 10)
+    v.push(pts[pts.length - 1])
+    return v.map((x, i) => ({ t: i * 60000, o: x, h: x, l: x, c: x, v: 1 }))
+  }
+  const up = zz([100, 130, 110, 140, 120, 150, 135])
+  const lows = [{ i: 0, price: 100, high: false }, { i: 20, price: 110, high: false }, { i: 40, price: 120, high: false }]
+  const sup = M.fitTrendline(up, lows, false, 0.5)
+  ok('trend: support through three rising lows', sup && sup.a === 0 && Math.abs(sup.slope - 0.5) < 1e-9 && sup.touches === 3, sup)
+  eq('trend: line extended to the last bar', M.trendSeries(up.length, sup)[up.length - 1], 100 + 0.5 * (up.length - 1))
+  // A close under the line breaks it: no line through those lows survives.
+  const broken = up.map((k, i) => (i === 45 ? { ...k, c: 100, l: 100 } : k))
+  eq('trend: a line broken by a close is rejected', M.fitTrendline(broken, lows, false, 0.5), null)
+  eq('trend: needs two pivots', M.fitTrendline(up, lows.slice(0, 1), false), null)
+  const highs = [{ i: 10, price: 130, high: true }, { i: 30, price: 140, high: true }, { i: 50, price: 150, high: true }]
+  const res = M.fitTrendline(up, highs, true, 0.5)
+  ok('trend: resistance through rising highs', res && res.a === 10 && res.touches === 3, res)
+  const at = M.autoTrendlines(up, 5, 3, 0.5)
+  ok('trend: auto trendlines find both sides', at.supFit && at.resFit && at.sup[at.sup.length - 1] < at.res[at.res.length - 1], at)
+
+  // Catalogue additions.
+  const cs = Array.from({ length: 60 }, (_, i) => ({ t: i, o: 100 + i, h: 102 + i, l: 99 + i, c: 101 + i, v: 10 }))
+  const er = M.elderRay(cs, 13)
+  ok('elder: bull = high − EMA, bear = low − EMA', er.bull[12] != null && Math.abs(er.bull[59] - er.bear[59] - 3) < 1e-9 && er.bull[11] === null)
+  const mi = M.massIndex(cs, 9, 25)
+  ok('mass index: constant range → sum length', Math.abs(mi[59] - 25) < 1e-9 && mi[20] === null, mi[59])
+  const lin = cs.map((k) => k.c)
+  eq('dpo: a straight line detrends to a constant', M.dpo(lin, 20).slice(-2), [20.5, 20.5])
+  ok('coppock: rising prices → positive', M.coppock(lin, 10, 14, 11)[59] > 0 && M.coppock(lin, 10, 14, 11)[20] === null)
+  const lrc = M.linregChannel(lin, 30, 2)
+  ok('lr channel: fits a line exactly, zero width, only the window', Math.abs(lrc.mid[59] - 160) < 1e-9 && Math.abs(lrc.upper[59] - 160) < 1e-6 && lrc.mid[29] === null && Math.abs(lrc.mid[30] - 131) < 1e-9, lrc.mid[59])
+  ;['vprofile', 'autotrend', 'lrc', 'elder', 'massindex', 'coppock', 'dpo', 'supertrend', 'ichimoku', 'keltner', 'donchian', 'vortex', 'aroon', 'uo', 'cmf', 'trix', 'hv'].forEach((id) =>
+    ok('catalogue: ' + id, !!R.indicatorDef(id)))
+  const vpDef = R.indicatorDef('vprofile')
+  eq('vprofile: label names the range mode', R.instanceLabel(vpDef, { ...R.defaultParams(vpDef), mode: 1 }), 'Volume Profile Session/200/48/70/30')
+  eq('vprofile: no value outputs', R.valueOutputs(vpDef).length, 0)
+  ok('vprofile / trendlines take no timeframe', !R.takesMtf(vpDef) && !R.takesMtf(R.indicatorDef('autotrend')) && R.takesMtf(R.indicatorDef('rsi')))
+
+  // Volume profile ranges by mode (4 bars a day).
+  const times = Array.from({ length: 10 }, (_, i) => i * 6 * H)
+  eq('vprofile: fixed lookback = newest bars', VP.profileRanges(times, 2, null, 3), [[7, 9]])
+  eq('vprofile: visible range', VP.profileRanges(times, 0, { from: 2.4, to: 7.2 }, 0), [[2, 8]])
+  eq('vprofile: sessions from the day start of the first visible bar', VP.profileRanges(times, 1, { from: 5, to: 9 }, 0), [[4, 7], [8, 9]])
 }
 
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')

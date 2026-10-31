@@ -890,7 +890,14 @@ function legendRowsHtml(rows: ReturnType<typeof indicatorLegend>): string {
               '<b style="color:' +
               p.color +
               '">' +
-              (p.big ? nfmt(p.value) : chartPrice(p.value)) +
+              (p.precision != null
+                ? p.value.toLocaleString('en-US', {
+                    minimumFractionDigits: p.precision,
+                    maximumFractionDigits: p.precision,
+                  })
+                : p.big
+                  ? nfmt(p.value)
+                  : chartPrice(p.value)) +
               '</b>',
           )
           .join('') +

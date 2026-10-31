@@ -22,12 +22,31 @@
 import { createSeriesMarkers, HistogramSeries, LineSeries } from 'lightweight-charts'
 import type { CandleFlat } from '../../../services/market'
 import type { IndicatorInstance } from './store'
-import { barStepMs, getIndicators, instanceDef, shownOnTf, tfGroupFor } from './store'
-import { indicatorDef, instanceLabel, sourceSeries, valueOutputs } from './registry'
+import {
+  barStepMs,
+  getIndicators,
+  instanceDef,
+  pokeIndicatorStores,
+  shownOnTf,
+  tfGroupFor,
+} from './store'
+import { indicatorDef, instanceLabel, sourceSeries, takesMtf, valueOutputs } from './registry'
 import type { IndicatorDef, OutputDef } from './registry'
 import { computeAll } from './graph'
-import type { Computed } from './graph'
+import type { Computed, Frame } from './graph'
 import { cloudView } from './cloud'
+import { vprofileView } from './vprofile'
+import {
+  alignIndex,
+  mtfApplies,
+  mtfBarsNeeded,
+  mtfLabel,
+  mtfStepMs,
+  resampleTo,
+  withForming,
+} from './mtf'
+import { mtfCandles, mtfVersion, subscribeMtf } from './mtfFeed'
+import { state } from '../../../services/store'
 import { volumeColor } from '../chartPalette'
 import { chartSettings } from '../chartSettings'
 import { PINE_TYPE, pineLive, pineStatus, subscribePine } from '../pine/indicator'
@@ -49,6 +68,8 @@ interface Held {
   fixedPrec?: number
   /** What applyLook last applied. */
   lookSig?: string
+  /** Volume profile: the params last handed to the series. */
+  optSig?: string
   /** The markers plugin of a signal series. */
   markers?: Any
   /** What the series last got by setData (count, first time), for pushData. */
@@ -103,6 +124,9 @@ export interface IndicatorRendererOptions {
   /** Lay out the chart's own price scales around `bottom` (the fraction the
    *  indicator panes take). Default: candles on 'right' get the rest. */
   priceLayout?(chart: Any, bottom: number): void
+  /** The chart's symbol, for fetching higher-timeframe bars. Without one a
+   *  multi-timeframe input folds the chart's own bars instead. */
+  symbol?(): string
 }
 
 export interface IndicatorRenderer {
@@ -174,6 +198,7 @@ export function createIndicatorRenderer(
     candles: CandleFlat[]
     n: number
     last: CandleFlat
+    mtf: number
     out: Array<Computed<IndicatorInstance>>
   } | null = null
   subscribePine(() => (memo = null))
@@ -181,16 +206,61 @@ export function createIndicatorRenderer(
     const items = getItems()
     const n = candles.length
     const m = memo
-    if (m && m.items === items && m.candles === candles && m.n === n && m.last === candles[n - 1])
+    const mtf = mtfVersion()
+    if (
+      m &&
+      m.items === items &&
+      m.candles === candles &&
+      m.n === n &&
+      m.last === candles[n - 1] &&
+      m.mtf === mtf
+    )
       return m.out
     const out = computeAll(
       items,
       candles,
       (inst, c) => (inst.type === PINE_TYPE ? pineLive(inst, c) : indicatorDef(inst.type)),
       sourceSeries,
+      framer(candles),
     )
-    memo = { items, candles, n, last: candles[n - 1], out }
+    memo = { items, candles, n, last: candles[n - 1], mtf, out }
     return out
+  }
+
+  /**
+   * Multi-timeframe inputs: the higher-timeframe bars an instance computes
+   * on (fetched, else folded from the chart's), with the forming bar rebuilt
+   * from the chart's live bars, and the map back onto chart bars. One frame
+   * per timeframe and wait setting per redraw.
+   */
+  function framer(candles: CandleFlat[]) {
+    const step = barStepMs(candles)
+    const times = candles.map((c) => c.t)
+    const frames = new Map<string, Frame>()
+    return (inst: IndicatorInstance, def: IndicatorDef): Frame | null => {
+      const tf = inst.tf
+      if (!tf || inst.type === PINE_TYPE || !takesMtf(def) || !mtfApplies(tf, step)) return null
+      const key = tf + (inst.tfWait ? '|w' : '')
+      let f = frames.get(key)
+      if (!f) {
+        const sym = opts.symbol ? opts.symbol() : ''
+        const fetched = sym ? mtfCandles(sym, tf, mtfBarsNeeded(candles, tf)) : null
+        const base = fetched && fetched.length ? fetched : resampleTo(candles, tf)
+        const htf = withForming(base, candles, tf)
+        f = {
+          candles: htf,
+          idx: alignIndex(
+            times,
+            step,
+            htf.map((c) => c.t),
+            mtfStepMs(tf),
+            !!inst.tfWait,
+          ),
+        }
+        frames.set(key, f)
+      }
+      return f
+    }
   }
 
   const GUIDE_COLOR = 'rgba(148,163,184,.5)'
@@ -336,6 +406,14 @@ export function createIndicatorRenderer(
         upColor: lk.color,
         downColor: lk.custom ? lk.color : out.colorDown || out.color,
       }, pane)
+    if (out.kind === 'vprofile')
+      return chart.addCustomSeries(vprofileView(), {
+        ...common,
+        lastValueVisible: false,
+        title: '',
+        upColor: lk.color,
+        downColor: lk.custom ? lk.color : out.colorDown || out.color,
+      }, pane)
     if (out.kind === 'signal')
       // Carries markers only: the points exist so markers have a time and a
       // value to sit against; the line itself is never drawn.
@@ -380,6 +458,12 @@ export function createIndicatorRenderer(
     h.lookSig = sig
     const kind = out.kind || 'line'
     if (kind === 'cloud')
+      h.series.applyOptions({
+        visible: lk.visible,
+        upColor: lk.color,
+        downColor: lk.custom ? lk.color : out.colorDown || out.color,
+      })
+    else if (kind === 'vprofile')
       h.series.applyOptions({
         visible: lk.visible,
         upColor: lk.color,
@@ -469,8 +553,22 @@ export function createIndicatorRenderer(
           held.set(key, h)
         } else applyLook(h, out, inst)
         const lk = outputLook(inst, out)
-        if (!lineHost && kind !== 'signal' && kind !== 'cloud') lineHost = h
+        if (!lineHost && kind !== 'signal' && kind !== 'cloud' && kind !== 'vprofile') lineHost = h
         const data: Any[] = []
+        if (out.kind === 'vprofile') {
+          // The bars themselves: the series bins them as it draws (./vprofile).
+          for (const c of candles)
+            data.push({ time: Math.floor(c.t / 1000), o: c.o, h: c.h, l: c.l, c: c.c, v: c.v })
+          pushData(h, data)
+          const p = inst.params
+          const vpOpts = { mode: p.mode, lookback: p.lookback, rows: p.rows, va: p.va, width: p.width }
+          const sig = JSON.stringify(vpOpts)
+          if (h.optSig !== sig) {
+            h.optSig = sig
+            h.series.applyOptions(vpOpts)
+          }
+          return
+        }
         if (out.kind === 'cloud') {
           const a = outs[out.between?.[0] || ''] || []
           const b = outs[out.between?.[1] || ''] || []
@@ -582,7 +680,8 @@ export function createIndicatorRenderer(
     // `at`: the bar under the crosshair; the live bar otherwise.
     const i = at != null && at >= 0 && at < candles.length ? at : candles.length - 1
     const out: LegendEntry[] = []
-    const tf = tfGroupFor(barStepMs(candles))
+    const step = barStepMs(candles)
+    const tf = tfGroupFor(step)
     computeActive(candles).forEach(({ inst, def, outputs: outs }) => {
       if (!shownOnTf(inst, tf)) return
       const big = BIG_SCALE.indexOf(def.id) !== -1
@@ -593,9 +692,20 @@ export function createIndicatorRenderer(
           value: outs[o.key]?.[i] as number,
           color: outputLook(inst, o).color,
           big,
+          // The Style tab's precision reads the same in the legend.
+          ...(inst.precision != null ? { precision: inst.precision } : {}),
         }))
         .filter((p) => p.value != null && isFinite(p.value))
-      if (parts.length) out.push({ uid: inst.uid, label: instanceLabel(def, inst.params), parts })
+      // A higher-timeframe input names its timeframe ("RSI 14 · 1h").
+      const label =
+        instanceLabel(def, inst.params) +
+        (inst.tf && inst.type !== PINE_TYPE && takesMtf(def) && mtfApplies(inst.tf, step)
+          ? ' · ' + mtfLabel(inst.tf)
+          : '')
+      if (parts.length) out.push({ uid: inst.uid, label, parts })
+      // Drawn without per-bar values (volume profile): listed for its controls.
+      else if (!valueOutputs(def).length && inst.type !== PINE_TYPE)
+        out.push({ uid: inst.uid, label, parts: [] })
       // A Pine script that failed shows as a badge rather than disappearing.
       else if (inst.type === PINE_TYPE && pineStatus(inst).error)
         out.push({ uid: inst.uid, label: def.name + ' ⚠ error', parts: [] })
@@ -676,12 +786,16 @@ export interface LegendEntry {
   /** Switched off: listed without values. */
   hidden?: boolean
   /** `big` marks a count-scale value (volume, OBV) that reads better as 1.2M. */
-  parts: Array<{ label: string; value: number; color: string; big: boolean }>
+  /** `precision`: decimals chosen on the instance's Style tab, if any. */
+  parts: Array<{ label: string; value: number; color: string; big: boolean; precision?: number }>
 }
 
 // ---------------------------------------------------------------- main chart
 
-const main = createIndicatorRenderer(getIndicators)
+const main = createIndicatorRenderer(getIndicators, { symbol: () => state.symbol })
+// Higher-timeframe bars landing redraw every chart (each renderer's memo is
+// keyed on the feed's version, so it recomputes).
+subscribeMtf(pokeIndicatorStores)
 export const attachIndicatorChart = (c: Any): void => main.attach(c)
 /** Full redraw for the given candles. Cheap enough to run on every data load. */
 export const renderIndicators = (candles: CandleFlat[]): void => main.render(candles)

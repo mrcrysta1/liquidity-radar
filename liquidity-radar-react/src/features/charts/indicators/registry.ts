@@ -13,6 +13,12 @@ import {
   PATTERN_LABELS,
   aroon,
   atr,
+  autoTrendlines,
+  coppock,
+  dpo,
+  elderRay,
+  linregChannel,
+  massIndex,
   autoFib,
   chandelier,
   chartPatterns,
@@ -64,6 +70,9 @@ import {
 } from './math.ts'
 
 export type SourceKey = 'close' | 'open' | 'high' | 'low' | 'hl2' | 'hlc3' | 'ohlc4' | 'volume'
+/** Volume Profile's range choices, by `mode` param value. */
+export const VP_RANGE_MODES = ['Visible range', 'Session', 'Fixed lookback']
+
 export const SOURCES: Array<{ key: SourceKey; label: string }> = [
   { key: 'close', label: 'Close' },
   { key: 'open', label: 'Open' },
@@ -82,6 +91,8 @@ export interface ParamDef {
   min: number
   max: number
   step: number
+  /** A choice rather than a number: the value is an index into these. */
+  options?: string[]
 }
 export interface OutputDef {
   key: string
@@ -92,7 +103,7 @@ export interface OutputDef {
    * · cloud (fill between the outputs named in `between`, drawn by a custom
    * series) · signal (a marker at each bar the series has a value).
    */
-  kind?: 'line' | 'histogram' | 'dots' | 'step' | 'cloud' | 'signal'
+  kind?: 'line' | 'histogram' | 'dots' | 'step' | 'cloud' | 'signal' | 'vprofile'
   /** Dashed, for band edges. */
   dashed?: boolean
   /** histogram: tint by sign (default) or by bar-to-bar slope. */
@@ -128,7 +139,7 @@ export interface OutputDef {
 }
 /** Outputs that hold a plain value per bar — legend rows and valid sources. */
 export const valueOutputs = (def: IndicatorDef): OutputDef[] =>
-  def.outputs.filter((o) => o.kind !== 'cloud' && o.kind !== 'signal')
+  def.outputs.filter((o) => o.kind !== 'cloud' && o.kind !== 'signal' && o.kind !== 'vprofile')
 export interface IndicatorDef {
   id: string
   name: string
@@ -147,6 +158,9 @@ export interface IndicatorDef {
   }>
   /** true when the indicator reads a configurable price source. */
   sourced: boolean
+  /** No higher-timeframe input: drawings tied to the chart's own bars
+   *  (ZigZag turns, patterns, trendlines, the volume profile). */
+  noMtf?: boolean
   compute(src: number[], candles: CandleFlat[], p: Record<string, number>): Record<string, Series>
 }
 
@@ -831,6 +845,7 @@ export const INDICATORS: IndicatorDef[] = [
     outputs: [{ key: 'v', label: 'ZigZag', color: '#F0A04B' }],
     placement: 'overlay',
     sourced: false,
+    noMtf: true,
     compute: (_s, c, p) => ({ v: zigzagLine(c, p.dev, p.depth) }),
   },
   {
@@ -848,6 +863,7 @@ export const INDICATORS: IndicatorDef[] = [
     })),
     placement: 'overlay',
     sourced: false,
+    noMtf: true,
     compute: (_s, c, p) => {
       const out: Record<string, Series> = {}
       autoFib(c, p.dev, p.depth).series.forEach((s, k) => (out['f' + k] = s))
@@ -963,6 +979,7 @@ export const INDICATORS: IndicatorDef[] = [
     ],
     placement: 'overlay',
     sourced: false,
+    noMtf: true,
     compute: (_s, c, p) => {
       const pats = chartPatterns(zigzag(c, p.dev, p.depth).pivots, p.tol)
       const [a0, b0, a1, b1] = patternSeries(c.length, pats)
@@ -976,6 +993,120 @@ export const INDICATORS: IndicatorDef[] = [
       })
       return { a0, b0, a1, b1, bull, bear, code }
     },
+  },
+  // ---- r4-indicators2
+  {
+    id: 'vprofile',
+    name: 'Volume Profile',
+    group: 'Volume',
+    params: [
+      { key: 'mode', label: 'Range', default: 0, min: 0, max: 2, step: 1, options: VP_RANGE_MODES },
+      L('lookback', 'Fixed lookback (bars)', 200, 10, 5000),
+      L('rows', 'Rows', 48, 8, 200),
+      L('va', 'Value area %', 70, 10, 99),
+      L('width', 'Width %', 30, 5, 100),
+    ],
+    // Drawn by a custom series over the chart's bars (see ./vprofile): no
+    // per-bar values, so nothing for the legend or as a source.
+    outputs: [
+      {
+        key: 'vp',
+        label: 'Profile',
+        color: 'rgba(41,98,255,.42)',
+        colorDown: 'rgba(251,192,45,.42)',
+        kind: 'vprofile',
+      },
+    ],
+    placement: 'overlay',
+    sourced: false,
+    noMtf: true,
+    compute: () => ({}),
+  },
+  {
+    id: 'autotrend',
+    name: 'Auto Trendlines',
+    group: 'Trend',
+    params: [
+      M('dev', 'ZigZag deviation %', 3, 0.1, 50),
+      L('depth', 'ZigZag depth', 5, 1, 200),
+      F('tol', 'Touch tolerance %', 0.5, 0, 5, 0.1),
+    ],
+    outputs: [
+      { key: 'res', label: 'Resistance', color: '#F23645', width: 2 },
+      { key: 'sup', label: 'Support', color: '#089981', width: 2 },
+    ],
+    placement: 'overlay',
+    sourced: false,
+    noMtf: true,
+    compute: (_s, c, p) => {
+      const t = autoTrendlines(c, p.dev, p.depth, p.tol)
+      return { res: t.res, sup: t.sup }
+    },
+  },
+  {
+    id: 'lrc',
+    name: 'Linear Regression Channel',
+    group: 'Bands & channels',
+    params: [L('length', 'Length', 100, 2, 5000), M('dev', 'Deviations', 2, 0.1, 10)],
+    outputs: [
+      { key: 'u', label: 'Upper', color: '#F23645', width: 1 },
+      { key: 'm', label: 'LinReg', color: '#2962FF', width: 1, dashed: true },
+      { key: 'l', label: 'Lower', color: '#089981', width: 1 },
+    ],
+    placement: 'overlay',
+    sourced: true,
+    noMtf: true,
+    compute: (s, _c, p) => {
+      const r = linregChannel(s, p.length, p.dev)
+      return { u: r.upper, m: r.mid, l: r.lower }
+    },
+  },
+  {
+    id: 'elder',
+    name: 'Elder-Ray',
+    group: 'Oscillators',
+    params: [L('length', 'Length', 13)],
+    outputs: [
+      { key: 'bull', label: 'Bull power', color: '#26A69A', kind: 'histogram' },
+      { key: 'bear', label: 'Bear power', color: '#EF5350', kind: 'histogram' },
+    ],
+    placement: 'pane',
+    guides: [0],
+    sourced: false,
+    compute: (_s, c, p) => elderRay(c, p.length),
+  },
+  {
+    id: 'massindex',
+    name: 'Mass Index',
+    group: 'Volatility',
+    params: [L('ema', 'EMA length', 9), L('sum', 'Sum length', 25)],
+    outputs: [{ key: 'v', label: 'Mass', color: '#AB47BC' }],
+    placement: 'pane',
+    guides: [27, 26.5],
+    sourced: false,
+    compute: (_s, c, p) => ({ v: massIndex(c, p.ema, p.sum) }),
+  },
+  {
+    id: 'coppock',
+    name: 'Coppock Curve',
+    group: 'Oscillators',
+    params: [L('wma', 'WMA length', 10), L('long', 'Long RoC', 14), L('short', 'Short RoC', 11)],
+    outputs: [{ key: 'v', label: 'Coppock', color: '#2962FF' }],
+    placement: 'pane',
+    guides: [0],
+    sourced: true,
+    compute: (s, _c, p) => ({ v: coppock(s, p.wma, p.long, p.short) }),
+  },
+  {
+    id: 'dpo',
+    name: 'Detrended Price Osc',
+    group: 'Oscillators',
+    params: [L('length', 'Length', 21, 2)],
+    outputs: [{ key: 'v', label: 'DPO', color: '#43A047' }],
+    placement: 'pane',
+    guides: [0],
+    sourced: true,
+    compute: (s, _c, p) => ({ v: dpo(s, p.length) }),
   },
 ]
 
@@ -1017,6 +1148,9 @@ export function sourceSeries(key: SourceKey, c: CandleFlat[]): number[] {
   }
 }
 
+/** Does an instance's def take a higher-timeframe input? */
+export const takesMtf = (def: IndicatorDef): boolean => !def.noMtf
+
 export function defaultParams(def: IndicatorDef): Record<string, number> {
   const p: Record<string, number> = {}
   def.params.forEach((x) => {
@@ -1028,5 +1162,14 @@ export function defaultParams(def: IndicatorDef): Record<string, number> {
 /** "EMA 20", "MACD 12/26/9" — the label shown on the chip and in the legend. */
 export function instanceLabel(def: IndicatorDef, params: Record<string, number>): string {
   if (!def.params.length) return def.name
-  return def.name + ' ' + def.params.map((x) => params[x.key] ?? x.default).join('/')
+  return (
+    def.name +
+    ' ' +
+    def.params
+      .map((x) => {
+        const v = params[x.key] ?? x.default
+        return x.options ? (x.options[v] ?? v) : v
+      })
+      .join('/')
+  )
 }

@@ -6613,7 +6613,7 @@ html.cs-hide-indv .legend .leg-ind b{display:none}
 #radarChartCard .dp-swatch.r4dr-none.on{border-color:var(--tv-txt)}
 #radarChartCard .r4dr-icons .dp-btn{font-size:14px;line-height:1;min-width:26px}
 @media (max-width:640px){#radarChartCard .r4dr-icons{max-width:180px;flex-wrap:wrap}}
-=======
+
 /* r4-replay2: update interval, order ticket (limit/stop, trade from chart), working orders */
 .replay-upd{max-width:110px}
 .replay-loading{font-size:11px;color:var(--muted);font-family:var(--mono)}
@@ -6639,4 +6639,7 @@ html.cs-hide-indv .legend .leg-ind b{display:none}
 }
 .replay-order button:hover{color:var(--red)}
 @media (max-width:640px){.replay-orders{flex-wrap:wrap}}
->>>>>>> feature/r4-replay2
+=======
+/* r4-indicators2: multi-timeframe "wait for bar close" toggle in indicator inputs */
+.ind-settings .ind-mtf-wait input{width:auto;align-self:flex-start;margin:4px 0 0;accent-color:var(--primary)}
+>>>>>>> feature/r4-indicators2
