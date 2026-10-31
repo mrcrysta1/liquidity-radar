@@ -4348,7 +4348,7 @@ td .sk,b .sk{display:inline-block;vertical-align:middle}
 /* ============================================================
    CHARTS TAB — reference layout
    ============================================================ */
-.ch-top{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:14px;align-items:start;margin-bottom:14px}
+.ch-top{display:grid;grid-template-columns:minmax(0,1fr);gap:14px;align-items:start;margin-bottom:14px}
 .ch-top>.chart-host{min-width:0}
 .ch-top #radarChartCard{margin-bottom:0}
 @media(max-width:1100px){.ch-top{grid-template-columns:1fr}}
@@ -6178,3 +6178,28 @@ html[data-palette="glass"] .acct-card{background:linear-gradient(145deg,rgba(255
 .sl-meta{color:var(--dim);font-family:var(--mono);font-size:10px;margin-left:6px}
 .sl-confirm{flex:1;min-width:0;font-size:var(--text-xs);color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-left:4px}
 .sl-empty{color:var(--dim);font-size:var(--text-xs);padding:2px 2px 4px}
+
+/* Chart Intelligence inside the chart's right rail (ChartSidePanel 'intel'). */
+.ci.ci-rail{padding:0;border:0;background:none;box-shadow:none;border-radius:0;gap:10px}
+.ci.ci-rail .ci-tabs{margin:0}
+
+/* Chart settings dialog (components/chart/ChartSettingsButton). */
+.cset-dialog{
+  width:min(420px,calc(100vw - 32px));padding:0;background:var(--card);color:var(--txt);
+  border:1px solid var(--border2);border-radius:12px;box-shadow:var(--shade-3);
+}
+.cset-dialog::backdrop{background:rgb(0 0 0/.45)}
+.cset-dialog header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border)}
+.cset-dialog header button{background:none;border:0;color:var(--muted);font-size:20px;line-height:1;cursor:pointer;padding:2px 6px;border-radius:6px}
+.cset-dialog header button:hover{color:var(--txt);background:var(--sunk-2)}
+.cset-dialog ul{list-style:none;margin:0;padding:6px 8px}
+.cset-dialog label{display:flex;gap:12px;align-items:flex-start;padding:9px 8px;border-radius:8px;cursor:pointer}
+.cset-dialog label:hover{background:var(--sunk-2)}
+.cset-dialog input{margin-top:3px;width:16px;height:16px;accent-color:var(--primary);flex-shrink:0}
+.cset-dialog label span{display:flex;flex-direction:column;gap:2px}
+.cset-dialog label b{font-size:13px;font-weight:600}
+.cset-dialog label small{font-size:var(--text-xs);color:var(--muted)}
+.cset-dialog footer{display:flex;justify-content:space-between;gap:8px;padding:10px 16px 14px;border-top:1px solid var(--border)}
+.cset-dialog footer button{padding:6px 14px;border-radius:6px;border:1px solid var(--border2);background:transparent;color:var(--txt);cursor:pointer;font-weight:600}
+.cset-dialog footer .cset-done{background:var(--primary);border-color:var(--primary);color:#fff}
+.cset-dialog button:focus-visible,.cset-dialog input:focus-visible{outline:2px solid var(--primary);outline-offset:2px}

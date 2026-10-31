@@ -1,5 +1,6 @@
 import * as LightweightCharts from 'lightweight-charts'
 import { createZonedChart } from './zonedTimeScale'
+import { chartSettings, subscribeChartSettings } from './chartSettings'
 import { venueOf } from '../../utils/coins'
 import { COINS, TICKER_COINS } from '../../constants/market'
 import { fmt, pfmt, nfmt, cfmt, chgHtml, priceDecimals, priceFormatFor } from '../../utils/format'
@@ -137,6 +138,7 @@ export function chartTheme(): Any {
 export function applyChartTheme(): void {
   if (!chart) return
   chart.applyOptions({ ...tvChartOptions(undefined, mainIsDaily), ...tvWatermark(watermarkText()) })
+  applyChartSettings()
   if (candleSeries) {
     themePriceSeries(candleSeries, getChartStyle())
     resetTvLastPrice(candleSeries)
@@ -155,7 +157,21 @@ const mainIsDaily = (): boolean => !isRangeMode() && isDailyTf(getTimeframe())
 
 /** "BTCUSDT, 15m" — the watermark TradingView prints behind the bars. */
 function watermarkText(): string {
+  if (!chartSettings().watermark) return ''
   return legendSymbol(state.symbol) + ', ' + tfLabel(getTimeframe())
+}
+
+/** Apply the chart settings (./chartSettings) over the theme's options. */
+function applyChartSettings(): void {
+  if (!chart) return
+  const st = chartSettings()
+  chart.applyOptions({
+    grid: { vertLines: { visible: st.grid }, horzLines: { visible: st.grid } },
+    crosshair: { mode: st.magnet ? 1 : 0 },
+  })
+  candleSeries?.applyOptions({ priceLineVisible: st.priceLine })
+  syncWatermark()
+  updateCloseTimer()
 }
 let watermarkShown = ''
 function syncWatermark(): void {
@@ -376,6 +392,7 @@ function applyChartStyle(): void {
 
   const base = state.candles.length ? state.candles[0].c : 0
   candleSeries = createPriceSeries(chart, getChartStyle(), base)
+  candleSeries.applyOptions({ priceLineVisible: chartSettings().priceLine })
   chartState.styleSeries = candleSeries
   priceSeriesSubs.forEach((f) => f(candleSeries))
 }
@@ -521,6 +538,8 @@ export function initChart(): void {
     updateCloseTimer()
   }).observe(el)
   setupDrawLayer()
+  applyChartSettings()
+  subscribeChartSettings(applyChartSettings)
   wireLegendActions()
   initChartToolbar()
   initFullScreen()

@@ -37,6 +37,7 @@ import { AlertsModal } from './alerts/AlertsModal'
 import { openModal } from '../utils/dom'
 import { ChartSidePanel } from './chart/ChartSidePanel'
 import { AlertRailButton, DrawHistoryButtons } from './chart/ChartActions'
+import { ChartSettingsButton } from './chart/ChartSettingsButton'
 import { DrawingPropsBar } from './chart/DrawingPropsBar'
 import { Footer } from './footer/Footer'
 import { DashHead } from './DashHead'
@@ -47,7 +48,7 @@ import { CoinWishlist } from './market/CoinWishlist'
 import { Guard } from './ErrorBoundary'
 import { HomeDashboard, HomeHero } from './HomeDashboard'
 import { RadarHero, RadarLower, RadarMetrics, RadarSide } from './radar/RadarViews'
-import { ChartIntel, QuickTools, WorkspaceHead } from './charts/ChartsViews'
+import { QuickTools, WorkspaceHead } from './charts/ChartsViews'
 import { MultiChartGrid } from './chart/MultiChartGrid'
 import { SignalsBoard, SignalsHead } from './signals/SignalsViews'
 import { AccountMenu } from './auth/AccountMenu'
@@ -235,7 +236,7 @@ export function Shell() {
               </div>
             </div>
             <Guard name="Chart side panel">
-              <ChartSidePanel tools={<AlertRailButton />} />
+              <ChartSidePanel tools={<><AlertRailButton /><ChartSettingsButton /></>} />
             </Guard>
           </div>
           <Guard name="Chart bottom bar"><ChartBottomBar /></Guard>
@@ -307,9 +308,10 @@ export function Shell() {
       </section>
       
       <section className="tab-section" id="tab-multichart">
+        {/* Chart Intelligence moved into the chart's right rail, so the chart
+            gets the full width here. */}
         <div className="ch-top">
           <div className="chart-host" id="chartHostCharts"></div>
-          <Guard name="Chart intelligence"><ChartIntel /></Guard>
         </div>
         <div className="card ws-card">
           <Guard name="Workspace header"><WorkspaceHead /></Guard>

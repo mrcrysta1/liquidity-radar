@@ -283,17 +283,17 @@ function Insights() {
 
 const TABS = ['Overview', 'Signals', 'AI Insights'] as const
 
+/**
+ * Trend, levels, signals and AI notes for the charted coin. It lives in the
+ * chart's right rail (ChartSidePanel), which supplies the heading; it used to
+ * be a 330px card beside the chart on the Charts tab, competing with the rail.
+ */
 export function ChartIntel() {
   useTick(2000, CHART_TABS)
   useBump(subscribeIndicators)
   const [tab, setTab] = useState<(typeof TABS)[number]>('Overview')
   return (
-    <aside className="card ci" aria-label="Chart intelligence">
-      <header className="ci-head">
-        <HomeIcon id="radar" size={22} />
-        <h3>Chart Intelligence</h3>
-        <span className="ci-sym">{baseOf(state.symbol)}/USDT</span>
-      </header>
+    <div className="ci ci-rail" aria-label={'Chart intelligence, ' + baseOf(state.symbol) + '/USDT'}>
       {/* Roving tabindex: Tab enters the strip once, the arrows (and Home /
           End) move between tabs, as the ARIA tabs pattern expects. */}
       <div
@@ -337,7 +337,7 @@ export function ChartIntel() {
       <div id="ci-panel" role="tabpanel" aria-labelledby={tabId(tab)}>
         {tab === 'Overview' ? <Overview /> : tab === 'Signals' ? <Signals /> : <Insights />}
       </div>
-    </aside>
+    </div>
   )
 }
 
