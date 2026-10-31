@@ -203,8 +203,9 @@ export class Futures {
       if (!(e instanceof BinanceError)) throw e
       if (e.code === -4046) return // already isolated
       // -4047 / -4048: margin type cannot change while orders / a position are
-      // open. Keep the current margin type rather than retrying startup forever.
-      if (e.code === -4047 || e.code === -4048) {
+      // open (the testnet answers -4067 for the same case). Keep the current
+      // margin type rather than retrying startup forever.
+      if (e.code === -4047 || e.code === -4048 || e.code === -4067) {
         console.warn(`[futures] ${symbol}: margin type left unchanged (${e.message})`)
         return
       }

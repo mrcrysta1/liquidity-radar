@@ -115,6 +115,13 @@ for (const s of SYMBOLS) {
       const wait = Math.min(300, 10 * 2 ** (attempt - 1))
       await store.event('warn', s, `setup failed (attempt ${attempt}): ${(e as Error).message} — retrying in ${wait}s`)
       if (ONCE && attempt >= 2) process.exit(1)
+      // Out of run time while still retrying: exit cleanly so the next run is
+      // started, instead of being killed by the job timeout and breaking the chain.
+      if (Date.now() + wait * 1000 >= DEADLINE) {
+        console.log(new Date().toISOString(), 'run time over during setup, handing over to the next run')
+        await db.end().catch(() => {})
+        process.exit(0)
+      }
       await new Promise((r) => setTimeout(r, wait * 1000))
     }
   }
