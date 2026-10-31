@@ -20,8 +20,9 @@ import { syncStageHeight } from '../../features/charts/companionCharts'
 import { CHART_TABS, useTick } from '../useTick'
 import { WatchlistPanel } from './WatchlistPanel'
 import { ChartIntel } from '../charts/ChartsViews'
+import { DrawingObjectsPanel } from './DrawingObjectsPanel'
 
-type TabId = 'book' | 'liquidity' | 'futures' | 'structure' | 'watchlist' | 'intel'
+type TabId = 'book' | 'liquidity' | 'futures' | 'structure' | 'watchlist' | 'intel' | 'objects'
 
 const S = {
   fill: 'none',
@@ -72,6 +73,13 @@ function TabIcon({ id }: { id: TabId }) {
         <path d="M12 3.5a6 6 0 0 0-3.5 10.9V17h7v-2.6A6 6 0 0 0 12 3.5ZM9.5 20.5h5" stroke="var(--cyan)" {...S} />
       </svg>
     )
+  if (id === 'objects')
+    return (
+      <svg {...p}>
+        <path d="M4 5.5h16M7 12h13M10 18.5h10" stroke="var(--cyan)" {...S} />
+        <path d="M4 5.5v13h6M4 12h3" stroke="var(--cyan)" strokeWidth="1.4" fill="none" />
+      </svg>
+    )
   if (id === 'futures')
     return (
       <svg {...p}>
@@ -95,6 +103,7 @@ const TABS: Array<{ id: TabId; label: string }> = [
   { id: 'structure', label: 'Structure' },
   { id: 'watchlist', label: 'Watchlist' },
   { id: 'intel', label: 'Chart intelligence' },
+  { id: 'objects', label: 'Objects' },
 ]
 
 const OPEN_KEY = 'lr-chartSide'
@@ -206,6 +215,7 @@ export function ChartSidePanel({ tools }: { tools?: ReactNode }) {
             {tab === 'structure' && <StructurePanel />}
             {tab === 'watchlist' && <WatchlistPanel />}
             {tab === 'intel' && <ChartIntel />}
+            {tab === 'objects' && <DrawingObjectsPanel />}
           </div>
         </div>
       )}

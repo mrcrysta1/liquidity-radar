@@ -1,5 +1,6 @@
 // Drawing tools dropdown — the full catalogue grouped like TradingView's
-// drawing toolbar, with a search box, the magnet toggle, undo and clear-all.
+// drawing toolbar, with a search box, favourite stars, the weak / strong
+// magnet, "stay in drawing mode", undo and clear-all.
 import { useEffect, useRef, useState } from 'react'
 import { useFitMenu } from './useFitMenu'
 import {
@@ -8,15 +9,21 @@ import {
   clearAllDrawings,
   drawToolDef,
   drawingCount,
+  favouriteTools,
   getDrawTool,
-  isMagnet,
+  getMagnetMode,
+  isFavouriteTool,
   pendingPoints,
   setDrawTool,
-  setMagnet,
+  setMagnetMode,
+  setStayInDrawingMode,
+  stayInDrawingMode,
   subscribeDrawTools,
   toggleDrawTool,
+  toggleFavouriteTool,
   undoDrawing,
 } from '../../features/charts/drawTools'
+import type { MagnetMode } from '../../features/charts/drawTools'
 
 const S = {
   fill: 'none',
@@ -128,6 +135,15 @@ function ToolIcon({ id, size = 17 }: { id: string; size?: number }) {
           <path d="M3 19 21 7" stroke={c} {...S} />
           <path d="M7 4 21 12M8 21 21 15" stroke={c} strokeWidth="1.3" fill="none" />
           {dot(3, 19)}
+        </svg>
+      )
+    case 'schiff':
+    case 'modschiff':
+      return (
+        <svg {...p}>
+          <path d="M3 19 7 13M7 13 21 8" stroke={c} {...S} />
+          <path d="M8 5 21 9M8 21 21 15" stroke={c} strokeWidth="1.3" fill="none" />
+          {dot(7, 13)}
         </svg>
       )
     case 'fibretr':
@@ -272,6 +288,13 @@ function ToolIcon({ id, size = 17 }: { id: string; size?: number }) {
           <path d="M2 19l3-6 3 4 4-10 4 10 3-4 3 6" stroke={c} {...S} />
         </svg>
       )
+    case 'trianglepat':
+      return (
+        <svg {...p}>
+          <path d="M3 5l5 13 4-9 4 6 5-3" stroke={c} {...S} />
+          <path d="M3 5l18 7M8 18l13-6" stroke={c} strokeWidth="1.2" strokeDasharray="3 3" fill="none" />
+        </svg>
+      )
     case 'elliott5':
     case 'elliottabc':
       return (
@@ -352,6 +375,42 @@ function ToolIcon({ id, size = 17 }: { id: string; size?: number }) {
           <path d="M4 12h16M4 8v8M20 8v8" stroke={c} {...S} />
         </svg>
       )
+    case 'avwap':
+      return (
+        <svg {...p}>
+          <path d="M5 4v16" stroke={c} strokeWidth="1.3" strokeDasharray="2 2" fill="none" />
+          <path d="M5 16c4-1 5-6 9-6s4 3 7 2" stroke={c} {...S} />
+          {dot(5, 16)}
+        </svg>
+      )
+    case 'fixedvp':
+      return (
+        <svg {...p}>
+          <path d="M4 3v18M20 3v18" stroke={c} strokeWidth="1.2" strokeDasharray="2 2" fill="none" />
+          <path d="M4 7h7M4 11h13M4 15h9M4 19h5" stroke={c} strokeWidth="2.2" strokeLinecap="round" fill="none" />
+        </svg>
+      )
+    case 'note':
+      return (
+        <svg {...p}>
+          <rect x="4" y="3.5" width="16" height="10" rx="2" stroke={c} {...S} />
+          <path d="M12 13.5V21" stroke={c} {...S} />
+        </svg>
+      )
+    case 'flag':
+      return (
+        <svg {...p}>
+          <path d="M6 21V4" stroke={c} {...S} />
+          <path d="M6 4h12l-3 4 3 4H6" stroke={c} {...S} fill={c} fillOpacity=".35" />
+        </svg>
+      )
+    case 'stay':
+      return (
+        <svg {...p}>
+          <path d="M4 20l1-4L16.5 4.5a2 2 0 0 1 3 3L8 19l-4 1Z" stroke="currentColor" {...S} />
+          <path d="M14 20h6" stroke="currentColor" {...S} />
+        </svg>
+      )
     case 'text':
       return (
         <svg {...p}>
@@ -398,10 +457,12 @@ function ToolIcon({ id, size = 17 }: { id: string; size?: number }) {
         </svg>
       )
     case 'magnet':
+    case 'magnet-strong':
       return (
         <svg {...p}>
           <path d="M6 4v8a6 6 0 0 0 12 0V4" stroke="currentColor" {...S} />
           <path d="M6 9h4M14 9h4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+          {id === 'magnet-strong' && <path d="M12 9.5v5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />}
         </svg>
       )
     default:
@@ -411,6 +472,17 @@ function ToolIcon({ id, size = 17 }: { id: string; size?: number }) {
         </svg>
       )
   }
+}
+
+const MAGNETS: Array<{ id: Exclude<MagnetMode, 'off'>; name: string; hint: string }> = [
+  { id: 'weak', name: 'Weak magnet', hint: 'Snap to open/high/low/close when near' },
+  { id: 'strong', name: 'Strong magnet', hint: 'Always snap to the nearest open/high/low/close' },
+]
+const MAGNET_NEXT: Record<MagnetMode, MagnetMode> = { off: 'weak', weak: 'strong', strong: 'off' }
+const MAGNET_TIP: Record<MagnetMode, string> = {
+  off: 'Magnet off — click for weak',
+  weak: 'Weak magnet — click for strong',
+  strong: 'Strong magnet — click to turn off',
 }
 
 export function DrawToolPicker() {
@@ -445,7 +517,8 @@ export function DrawToolPicker() {
 
   const active = getDrawTool()
   const def = drawToolDef(active)
-  const magnet = isMagnet()
+  const magnet = getMagnetMode()
+  const stay = stayInDrawingMode()
   const count = drawingCount()
   const pending = pendingPoints()
   const q = query.trim().toLowerCase()
@@ -505,24 +578,47 @@ export function DrawToolPicker() {
               return (
                 <div key={g}>
                   <div className="draw-menu-lbl">{g}</div>
-                  {list.map((t) => (
-                    <button
-                      key={t.id}
-                      type="button"
-                      role="menuitemradio"
-                      aria-checked={active === t.id}
-                      className={'draw-opt' + (active === t.id ? ' sel' : '')}
-                      onClick={() => toggleDrawTool(t.id)}
-                    >
-                      <span className="draw-opt-ico">
-                        <ToolIcon id={t.id} />
-                      </span>
-                      <span className="draw-opt-text">
-                        <b>{t.name}</b>
-                        <small>{t.hint}</small>
-                      </span>
-                    </button>
-                  ))}
+                  {list.map((t) => {
+                    const fav = isFavouriteTool(t.id)
+                    return (
+                      <div key={t.id} className="draw-opt-row">
+                        <button
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={active === t.id}
+                          className={'draw-opt' + (active === t.id ? ' sel' : '')}
+                          onClick={() => toggleDrawTool(t.id)}
+                        >
+                          <span className="draw-opt-ico">
+                            <ToolIcon id={t.id} />
+                          </span>
+                          <span className="draw-opt-text">
+                            <b>{t.name}</b>
+                            <small>{t.hint}</small>
+                          </span>
+                        </button>
+                        {/* A sibling, not inside the option: a button in a button is invalid. */}
+                        <button
+                          type="button"
+                          className={'draw-fav' + (fav ? ' on' : '')}
+                          aria-pressed={fav}
+                          aria-label={(fav ? 'Remove ' : 'Add ') + t.name + (fav ? ' from' : ' to') + ' favourites'}
+                          title={fav ? 'Remove from favourites' : 'Add to favourites (left toolbar)'}
+                          onClick={() => toggleFavouriteTool(t.id)}
+                        >
+                          <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
+                            <path
+                              d="M12 3.5l2.6 5.3 5.8.8-4.2 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.2-4.1 5.8-.8Z"
+                              fill={fav ? 'currentColor' : 'none'}
+                              stroke="currentColor"
+                              strokeWidth="1.6"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+                        </button>
+                      </div>
+                    )
+                  })}
                 </div>
               )
             })}
@@ -544,21 +640,42 @@ export function DrawToolPicker() {
                 <small>Click a drawing to remove it</small>
               </span>
             </button>
+            {MAGNETS.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                role="menuitemcheckbox"
+                aria-checked={magnet === m.id}
+                className={'draw-opt' + (magnet === m.id ? ' sel' : '')}
+                onClick={() => setMagnetMode(magnet === m.id ? 'off' : m.id)}
+              >
+                <span className="draw-opt-ico">
+                  <ToolIcon id={m.id === 'strong' ? 'magnet-strong' : 'magnet'} />
+                </span>
+                <span className="draw-opt-text">
+                  <b>{m.name}</b>
+                  <small>{m.hint}</small>
+                </span>
+                <span className={'draw-switch' + (magnet === m.id ? ' on' : '')} aria-hidden="true">
+                  <i />
+                </span>
+              </button>
+            ))}
             <button
               type="button"
               role="menuitemcheckbox"
-              aria-checked={magnet}
-              className={'draw-opt' + (magnet ? ' sel' : '')}
-              onClick={() => setMagnet(!magnet)}
+              aria-checked={stay}
+              className={'draw-opt' + (stay ? ' sel' : '')}
+              onClick={() => setStayInDrawingMode(!stay)}
             >
               <span className="draw-opt-ico">
-                <ToolIcon id="magnet" />
+                <ToolIcon id="stay" />
               </span>
               <span className="draw-opt-text">
-                <b>Magnet</b>
-                <small>Snap points to open/high/low/close</small>
+                <b>Stay in drawing mode</b>
+                <small>Keep the tool after each drawing</small>
               </span>
-              <span className={'draw-switch' + (magnet ? ' on' : '')} aria-hidden="true">
+              <span className={'draw-switch' + (stay ? ' on' : '')} aria-hidden="true">
                 <i />
               </span>
             </button>
@@ -609,6 +726,8 @@ const QUICK_TOOLS = ['trend', 'hline', 'fibretr', 'rect', 'text']
 export function DrawQuickTools() {
   useDrawTools()
   const active = getDrawTool()
+  // Starred tools follow the fixed ones (no duplicates).
+  const ids = QUICK_TOOLS.concat(favouriteTools().filter((id) => !QUICK_TOOLS.includes(id)))
   return (
     <>
       <button
@@ -629,7 +748,7 @@ export function DrawQuickTools() {
         </svg>
         <span className="tvb-tip">Cursor</span>
       </button>
-      {QUICK_TOOLS.map((id) => {
+      {ids.map((id) => {
         const def = drawToolDef(id)
         if (!def) return null
         const on = active === id
@@ -651,22 +770,34 @@ export function DrawQuickTools() {
   )
 }
 
-/** Left drawing toolbar, edit group: magnet snapping and the eraser. */
+/** Left drawing toolbar, edit group: magnet snapping, stay in drawing mode and the eraser. */
 export function DrawEditTools() {
   useDrawTools()
-  const magnet = isMagnet()
+  const magnet = getMagnetMode()
+  const stay = stayInDrawingMode()
   const erasing = getDrawTool() === 'erase'
   return (
     <>
+      {/* One button cycles off, weak, strong, as the dropdown's two rows set them. */}
       <button
         type="button"
-        className={'chart-tool-btn tvb-icon draw-quick' + (magnet ? ' on' : '')}
-        aria-pressed={magnet}
-        aria-label="Magnet mode"
-        onClick={() => setMagnet(!magnet)}
+        className={'chart-tool-btn tvb-icon draw-quick' + (magnet !== 'off' ? ' on' : '')}
+        aria-pressed={magnet !== 'off'}
+        aria-label={'Magnet mode: ' + magnet}
+        onClick={() => setMagnetMode(MAGNET_NEXT[magnet])}
       >
-        <ToolIcon id="magnet" size={18} />
-        <span className="tvb-tip">Magnet: snap to open/high/low/close</span>
+        <ToolIcon id={magnet === 'strong' ? 'magnet-strong' : 'magnet'} size={18} />
+        <span className="tvb-tip">{MAGNET_TIP[magnet]}</span>
+      </button>
+      <button
+        type="button"
+        className={'chart-tool-btn tvb-icon draw-quick' + (stay ? ' on' : '')}
+        aria-pressed={stay}
+        aria-label="Stay in drawing mode"
+        onClick={() => setStayInDrawingMode(!stay)}
+      >
+        <ToolIcon id="stay" size={18} />
+        <span className="tvb-tip">Stay in drawing mode</span>
       </button>
       <button
         type="button"

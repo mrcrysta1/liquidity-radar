@@ -6251,3 +6251,59 @@ dialog.cset-dialog[open],dialog.kbd-dialog[open]{position:fixed;inset:0;margin:a
 @media(hover:none) and (max-width:900px){
   #radarChartCard .sn-btn,#radarChartCard .sn-zoom button{min-height:36px;min-width:36px}
 }
+
+/* r3-drawings: favourite stars in the drawing menu, the selection toolbar's
+   font-size select and position popover, and the Objects side panel. */
+.draw-opt-row{position:relative;display:flex;align-items:center}
+.draw-opt-row .draw-opt{padding-right:32px}
+.draw-fav{
+  position:absolute;right:6px;top:50%;transform:translateY(-50%);display:grid;place-items:center;
+  width:22px;height:22px;padding:0;border:0;border-radius:5px;background:transparent;color:var(--dim);
+  cursor:pointer;opacity:0;transition:opacity .12s;
+}
+.draw-opt-row:hover .draw-fav,.draw-fav:focus-visible,.draw-fav.on{opacity:1}
+.draw-fav.on{color:var(--amber)}
+.draw-fav:hover{color:var(--amber);background:rgb(var(--pRGB)/.1)}
+@media(hover:none){.draw-fav{opacity:1}}
+#radarChartCard .dp-select{
+  height:26px;padding:0 4px;border:1px solid var(--tv-line);border-radius:4px;flex-shrink:0;
+  background:var(--card);color:var(--tv-txt);font-size:12px;cursor:pointer;
+}
+#radarChartCard .dp-btn:disabled{opacity:.4;cursor:default}
+#radarChartCard .dp-pop{
+  position:absolute;top:96px;right:76px;z-index:9;width:220px;display:grid;gap:8px;padding:10px;
+  background:var(--card);border:1px solid var(--tv-line);border-radius:6px;box-shadow:var(--tv-menu-shadow);
+  font-size:12px;color:var(--tv-txt);
+}
+#radarChartCard .dp-pop label{display:grid;grid-template-columns:1fr 96px;align-items:center;gap:8px}
+#radarChartCard .dp-pop input{
+  min-width:0;height:26px;padding:0 7px;border:1px solid var(--tv-line);border-radius:4px;
+  background:var(--bg);color:var(--tv-txt);font-family:var(--mono);font-size:12px;
+}
+#radarChartCard .dp-pop input:focus{outline:none;border-color:var(--tv-blue)}
+#radarChartCard .dp-pop-note{margin:0;font-size:11px;color:var(--dim);line-height:1.4}
+#radarChartCard .dp-pop-actions{display:flex;justify-content:flex-end;gap:6px}
+#radarChartCard .dp-pop-actions button{
+  height:26px;padding:0 10px;border:1px solid var(--tv-line);border-radius:4px;background:transparent;
+  color:var(--tv-txt);cursor:pointer;font-size:12px;
+}
+#radarChartCard .dp-pop-actions button.primary{background:var(--tv-blue);border-color:var(--tv-blue);color:#fff}
+.obj-tree{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:1px}
+.obj-row{display:flex;align-items:center;gap:2px;border-radius:5px}
+.obj-row:hover{background:var(--hair-1)}
+.obj-row.sel{background:rgb(var(--pRGB)/.14)}
+.obj-row.off .obj-name{opacity:.5}
+.obj-name{
+  flex:1;min-width:0;display:flex;align-items:center;gap:7px;padding:5px 6px;border:0;background:transparent;
+  color:var(--txt);font-size:12px;text-align:left;cursor:pointer;
+}
+.obj-name i{width:9px;height:9px;border-radius:2px;flex-shrink:0}
+.obj-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.obj-act{
+  display:grid;place-items:center;width:24px;height:24px;padding:0;border:0;border-radius:4px;flex-shrink:0;
+  background:transparent;color:var(--dim);cursor:pointer;
+}
+.obj-act:hover{color:var(--txt);background:var(--hair-1)}
+.obj-act.on{color:var(--amber)}
+.obj-del:hover{color:var(--red)}
+.obj-name:focus-visible,.obj-act:focus-visible{outline:2px solid var(--primary);outline-offset:-2px}
