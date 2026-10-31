@@ -30,6 +30,7 @@ import type { Computed } from './graph'
 import { cloudView } from './cloud'
 import { volumeColor } from '../chartPalette'
 import { PINE_TYPE, pineLive, pineStatus, subscribePine } from '../pine/indicator'
+import { createPineDrawings } from '../pine/overlay'
 import { priceFormatFor } from '../../../utils/format'
 
 type Any = any
@@ -102,6 +103,8 @@ export interface IndicatorRendererOptions {
   /** Lay out the chart's own price scales around `bottom` (the fraction the
    *  indicator panes take). Default: candles on 'right' get the rest. */
   priceLayout?(chart: Any, bottom: number): void
+  /** The main chart: Pine barcolor() recolours its candles. */
+  pineBarColors?: boolean
 }
 
 export interface IndicatorRenderer {
@@ -130,6 +133,8 @@ export function createIndicatorRenderer(
   const held = new Map<string, Held>()
   /** Price-scale margins recomputed whenever the set of panes changes. */
   let paneOrder: string[] = []
+  /** Pine bgcolor / label / line / box / table (../pine/overlay). */
+  const pineDraw = createPineDrawings({ barColors: opts.pineBarColors })
 
   /** How many indicator panes currently occupy the bottom of the chart — used
    * by the Delta pane to stack under them instead of overlapping. */
@@ -138,6 +143,7 @@ export function createIndicatorRenderer(
   }
 
   function attachIndicatorChart(c: Any): void {
+    pineDraw.sweep(new Set())
     chart = c
     held.clear()
     paneOrder = []
@@ -421,12 +427,14 @@ export function createIndicatorRenderer(
     // Visibility tab: instances switched off for this interval group draw
     // nothing (and their series go), though others may still read them.
     const tf = tfGroupFor(barStepMs(candles))
+    const pineShown = new Set<string>()
     computeActive(candles).forEach(({ inst, def, outputs: outs, host }) => {
       if (!shownOnTf(inst, tf)) return
       const scaleId = scaleOf(host)
       if (scaleId !== 'right' && def.outputs.length && panes.indexOf(scaleId) === -1)
         panes.push(scaleId)
       let lineHost: Held | null = null
+      const pineHost: { h: Held | null } = { h: null }
       def.outputs.forEach((out) => {
         const key = keyOf(inst, out.key)
         wanted.add(key)
@@ -449,6 +457,9 @@ export function createIndicatorRenderer(
         } else applyLook(h, out, inst)
         const lk = outputLook(inst, out)
         if (!lineHost && kind !== 'signal' && kind !== 'cloud') lineHost = h
+        // Pine drawings hang off a plotted series where there is one.
+        const plotted = (k: string) => k !== 'signal' && k !== 'cloud'
+        if (!pineHost.h || (plotted(kind) && !plotted(pineHost.h.kind))) pineHost.h = h
         const data: Any[] = []
         if (out.kind === 'cloud') {
           const a = outs[out.between?.[0] || ''] || []
@@ -457,7 +468,9 @@ export function createIndicatorRenderer(
             const va = a[i]
             const vb = b[i]
             if (va == null || vb == null || !isFinite(va) || !isFinite(vb)) continue
-            data.push({ time: Math.floor(candles[i].t / 1000), a: va, b: vb })
+            // Pine fill() coloured per bar.
+            const own = lk.custom ? undefined : out.colors?.[i]
+            data.push({ time: Math.floor(candles[i].t / 1000), a: va, b: vb, ...(own ? { color: own } : {}) })
           }
           pushData(h, data)
           return
@@ -522,7 +535,12 @@ export function createIndicatorRenderer(
       // hline()s ride on the first drawn series; when that series is swapped
       // the new one starts without lines, so its signature starts empty.
       if (lineHost) syncPriceLines(lineHost, def, inst)
+      if (inst.type === PINE_TYPE && pineHost.h) {
+        pineShown.add(inst.uid)
+        pineDraw.sync(inst.uid, pineHost.h.series, candles, chart)
+      }
     })
+    pineDraw.sweep(pineShown)
 
     held.forEach((h, key) => {
       if (wanted.has(key)) return
@@ -608,6 +626,7 @@ export function createIndicatorRenderer(
   }
 
   function clearIndicators(): void {
+    pineDraw.sweep(new Set())
     held.forEach((h) => {
       try {
         chart?.removeSeries(h.series)
@@ -644,7 +663,7 @@ export interface LegendEntry {
 
 // ---------------------------------------------------------------- main chart
 
-const main = createIndicatorRenderer(getIndicators)
+const main = createIndicatorRenderer(getIndicators, { pineBarColors: true })
 export const attachIndicatorChart = (c: Any): void => main.attach(c)
 /** Full redraw for the given candles. Cheap enough to run on every data load. */
 export const renderIndicators = (candles: CandleFlat[]): void => main.render(candles)
