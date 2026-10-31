@@ -5,6 +5,11 @@
 // It works against one chart's store: the main chart's by default, or a
 // multi-chart panel's (variant 'panel': a small header button whose menu
 // floats over the page, since panel cells clip their contents).
+//
+// An instance's settings have TradingView's three tabs: Inputs (params,
+// source), Style (per-output colour / width / line style / visibility,
+// precision, levels) and Visibility (interval groups). Templates save and
+// re-apply a whole set; the star on a catalogue row makes it a favourite.
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
@@ -15,8 +20,24 @@ import {
   indicatorDef,
   instanceLabel,
 } from '../../features/charts/indicators/registry'
-import { instanceDef, mainIndicatorStore } from '../../features/charts/indicators/store'
-import type { IndicatorInstance, IndicatorStore } from '../../features/charts/indicators/store'
+import type { IndicatorDef } from '../../features/charts/indicators/registry'
+import { TF_GROUPS, instanceDef, mainIndicatorStore } from '../../features/charts/indicators/store'
+import type {
+  IndicatorInstance,
+  IndicatorStore,
+  LineStyleName,
+} from '../../features/charts/indicators/store'
+import { outputLook } from '../../features/charts/indicators/render'
+import {
+  applyTemplate,
+  cleanTemplateName,
+  deleteTemplate,
+  favourites,
+  listTemplates,
+  saveTemplate,
+  subscribeTemplates,
+  toggleFavourite,
+} from '../../features/charts/indicators/templates'
 import { PINE_TYPE, pineStatus, subscribePine } from '../../features/charts/pine/indicator'
 import type { PineInput } from '../../features/charts/pine/runtime'
 import { editPineInstance } from '../../features/charts/pine/draft'
@@ -139,6 +160,286 @@ function PineInputField({
   )
 }
 
+/** `#rrggbb` for a colour input; rgba()/#rgb read, anything else grey. */
+function toHex(c: string): string {
+  const h = /^#([0-9a-f]{3}|[0-9a-f]{6})\b/i.exec(c)
+  if (h)
+    return h[1].length === 3
+      ? '#' + h[1].split('').map((x) => x + x).join('')
+      : '#' + h[1].toLowerCase()
+  const r = /rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/i.exec(c)
+  if (!r) return '#888888'
+  return (
+    '#' +
+    [r[1], r[2], r[3]]
+      .map((x) => Math.round(Math.min(255, Number(x))).toString(16).padStart(2, '0'))
+      .join('')
+  )
+}
+
+/**
+ * A picked colour, keeping the translucency the old one had: a band fill or a
+ * faded basis line stays faded when only its hue is changed.
+ */
+function keepAlpha(hex: string, prev: string): string {
+  const a = /rgba\([^)]*,\s*([\d.]+)\s*\)/i.exec(prev)
+  if (!a || Number(a[1]) >= 1) return hex
+  const n = parseInt(hex.slice(1), 16)
+  return 'rgba(' + [(n >> 16) & 255, (n >> 8) & 255, n & 255].join(',') + ',' + a[1] + ')'
+}
+
+/** Guide levels as a comma list; applied when the field loses focus. */
+function LevelsField({ value, onCommit }: { value: number[]; onCommit: (v: number[]) => void }) {
+  const text = value.join(', ')
+  const [draft, setDraft] = useState<string | null>(null)
+  return (
+    <input
+      type="text"
+      value={draft ?? text}
+      placeholder="none"
+      aria-label="Levels"
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        if (draft == null) return
+        const next = draft
+          .split(/[,;\s]+/)
+          .filter(Boolean)
+          .map(Number)
+          .filter((x) => isFinite(x))
+        if (next.join(', ') !== text) onCommit(next)
+        setDraft(null)
+      }}
+    />
+  )
+}
+
+const STYLE_NAMES: LineStyleName[] = ['solid', 'dashed', 'dotted']
+
+/** The Style tab: how each output draws, the axis precision, guide levels. */
+function StyleSettings({
+  store,
+  inst,
+  def,
+}: {
+  store: IndicatorStore
+  inst: IndicatorInstance
+  def: IndicatorDef
+}) {
+  // Levels belong to a pane (on the price pane they would be prices).
+  const hasLevels = def.placement === 'pane' || !!def.guides || !!def.hlines || !!inst.levels
+  const levels = inst.levels ?? def.guides ?? (def.hlines || []).map((x) => x.price)
+  return (
+    <div className="ind-style pine-span">
+      {def.outputs.map((o) => {
+        const lk = outputLook(inst, o)
+        const kind = o.kind || 'line'
+        const lined = kind === 'line' || kind === 'step'
+        const st = inst.styles?.[o.key]
+        return (
+          <div className="ind-style-row" key={o.key}>
+            <input
+              type="checkbox"
+              checked={lk.visible}
+              aria-label={'Show ' + o.label}
+              onChange={(e) =>
+                store.setStyle(inst.uid, o.key, { visible: e.target.checked ? undefined : false })
+              }
+            />
+            <span className="ind-style-name" title={o.label}>
+              {o.label}
+            </span>
+            <input
+              type="color"
+              value={toHex(lk.color)}
+              aria-label={o.label + ' colour'}
+              onChange={(e) =>
+                store.setStyle(inst.uid, o.key, { color: keepAlpha(e.target.value, lk.color) })
+              }
+            />
+            {lined ? (
+              <>
+                <select
+                  value={lk.width}
+                  aria-label={o.label + ' width'}
+                  onChange={(e) => store.setStyle(inst.uid, o.key, { width: Number(e.target.value) })}
+                >
+                  {[1, 2, 3, 4].map((w) => (
+                    <option key={w} value={w}>
+                      {w}px
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={st?.style ?? (o.dashed ? 'dashed' : 'solid')}
+                  aria-label={o.label + ' line style'}
+                  onChange={(e) =>
+                    store.setStyle(inst.uid, o.key, { style: e.target.value as LineStyleName })
+                  }
+                >
+                  {STYLE_NAMES.map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </>
+            ) : (
+              <span className="ind-style-kind">{kind}</span>
+            )}
+          </div>
+        )
+      })}
+      <div className="ind-style-opts">
+        <label>
+          <span>Precision</span>
+          <select
+            value={inst.precision ?? ''}
+            onChange={(e) =>
+              store.setPrecision(inst.uid, e.target.value === '' ? null : Number(e.target.value))
+            }
+          >
+            <option value="">Default</option>
+            {[0, 1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </label>
+        {hasLevels && (
+          <label>
+            <span>Levels</span>
+            <LevelsField value={levels} onCommit={(v) => store.setLevels(inst.uid, v)} />
+          </label>
+        )}
+        <button type="button" className="pine-btn sm" onClick={() => store.resetLook(inst.uid)}>
+          Defaults
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/** The Visibility tab: which interval groups the indicator shows on. */
+function VisibilitySettings({ store, inst }: { store: IndicatorStore; inst: IndicatorInstance }) {
+  return (
+    <div className="ind-vis pine-span">
+      {TF_GROUPS.map((g) => (
+        <label key={g.key} className="pine-check">
+          <input
+            type="checkbox"
+            checked={inst.tfVisibility?.[g.key] !== false}
+            onChange={(e) => store.setTfVisible(inst.uid, g.key, e.target.checked)}
+          />
+          <span>{g.label}</span>
+        </label>
+      ))}
+    </div>
+  )
+}
+
+/** Save the chart's set under a name, or apply / delete a saved one. */
+function TemplateBar({ store, count }: { store: IndicatorStore; count: number }) {
+  const [sel, setSel] = useState('')
+  const [name, setName] = useState('')
+  const [msg, setMsg] = useState('')
+  const list = listTemplates()
+  const chosen = list.some((t) => t.name === sel) ? sel : ''
+  const save = () => {
+    const n = cleanTemplateName(name)
+    if (!n) return
+    if (saveTemplate(n, store.getIndicators())) {
+      setSel(n)
+      setName('')
+      setMsg('Saved')
+    } else setMsg('Template list is full')
+  }
+  return (
+    <div className="ind-tpl">
+      <div className="ind-tpl-row">
+        <select
+          value={chosen}
+          aria-label="Indicator templates"
+          onChange={(e) => {
+            setSel(e.target.value)
+            setMsg('')
+          }}
+        >
+          <option value="">Templates ({list.length})</option>
+          {list.map((t) => (
+            <option key={t.name} value={t.name}>
+              {t.name} · {t.items.length}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          className="pine-btn sm"
+          disabled={!chosen}
+          title="Replace this chart's indicators with the template"
+          onClick={() => {
+            if (applyTemplate(store, chosen)) setMsg('Applied')
+          }}
+        >
+          Apply
+        </button>
+        <button
+          type="button"
+          className="ind-icon danger"
+          disabled={!chosen}
+          title="Delete template"
+          aria-label="Delete template"
+          onClick={() => {
+            deleteTemplate(chosen)
+            setSel('')
+            setMsg('')
+          }}
+        >
+          <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true">
+            <path d="M6 6 18 18M18 6 6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          </svg>
+        </button>
+      </div>
+      <div className="ind-tpl-row">
+        <input
+          type="text"
+          value={name}
+          maxLength={60}
+          placeholder="Save current set as…"
+          aria-label="Template name"
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') save()
+          }}
+        />
+        <button
+          type="button"
+          className="pine-btn sm"
+          disabled={!count || !cleanTemplateName(name)}
+          onClick={save}
+        >
+          Save
+        </button>
+      </div>
+      {msg && <div className="ind-tpl-msg">{msg}</div>}
+    </div>
+  )
+}
+
+function Star({ on }: { on: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
+      <path
+        d="m12 3.2 2.7 5.6 6.1.8-4.5 4.2 1.1 6.1L12 17l-5.4 2.9 1.1-6.1-4.5-4.2 6.1-.8Z"
+        fill={on ? 'currentColor' : 'none'}
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
 function Eye({ on }: { on: boolean }) {
   return (
     <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
@@ -188,12 +489,14 @@ export function IndicatorPicker({
   const [tab, setTab] = useState<'catalog' | 'pine'>('catalog')
   const [query, setQuery] = useState('')
   const [editing, setEditing] = useState<string | null>(null)
+  const [settingsTab, setSettingsTab] = useState<'inputs' | 'style' | 'vis'>('inputs')
   const [pos, setPos] = useState<CSSProperties | null>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => store.subscribe(() => force((n) => n + 1)), [store])
   useEffect(() => subscribePine(() => force((n) => n + 1)), [])
+  useEffect(() => subscribeTemplates(() => force((n) => n + 1)), [])
 
   // A panel's menu floats (position: fixed) under its button, kept on screen.
   useLayoutEffect(() => {
@@ -246,6 +549,7 @@ export function IndicatorPicker({
   const full = indicatorCount() >= maxIndicators()
   const q = query.trim().toLowerCase()
   const matches = (n: string) => !q || n.toLowerCase().includes(q)
+  const favs = favourites()
 
   // The engine's global key handler owns Escape and the letter shortcuts.
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -309,7 +613,8 @@ export function IndicatorPicker({
               if (!def) return null
               const isEditing = editing === inst.uid
               const pine = inst.type === PINE_TYPE ? pineStatus(inst) : null
-              const canEdit = def.params.length > 0 || def.sourced || !!pine
+              // Every indicator has a Style and a Visibility tab.
+              const canEdit = true
               return (
                 <div className={'ind-item' + (inst.visible ? '' : ' off')} key={inst.uid}>
                   <div className="ind-item-row">
@@ -338,7 +643,10 @@ export function IndicatorPicker({
                         className={'ind-icon' + (isEditing ? ' active' : '')}
                         aria-expanded={isEditing}
                         title="Settings"
-                        onClick={() => setEditing(isEditing ? null : inst.uid)}
+                        onClick={() => {
+                          setEditing(isEditing ? null : inst.uid)
+                          setSettingsTab('inputs')
+                        }}
                       >
                         <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
                           <circle
@@ -374,7 +682,39 @@ export function IndicatorPicker({
                       </svg>
                     </button>
                   </div>
-                  {isEditing && pine && (
+                  {isEditing && (
+                    <div className="ind-set-tabs" role="tablist">
+                      {(
+                        [
+                          ['inputs', 'Inputs'],
+                          ['style', 'Style'],
+                          ['vis', 'Visibility'],
+                        ] as const
+                      ).map(([k, label]) => (
+                        <button
+                          key={k}
+                          type="button"
+                          role="tab"
+                          aria-selected={settingsTab === k}
+                          className={settingsTab === k ? 'on' : ''}
+                          onClick={() => setSettingsTab(k)}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {isEditing && settingsTab === 'style' && (
+                    <div className="ind-settings">
+                      <StyleSettings store={store} inst={inst} def={def} />
+                    </div>
+                  )}
+                  {isEditing && settingsTab === 'vis' && (
+                    <div className="ind-settings">
+                      <VisibilitySettings store={store} inst={inst} />
+                    </div>
+                  )}
+                  {isEditing && settingsTab === 'inputs' && pine && (
                     <div className="ind-settings">
                       {pine.error && <div className="pine-msg err pine-span">{pine.error}</div>}
                       {pine.inputs.map((input) => (
@@ -411,8 +751,11 @@ export function IndicatorPicker({
                       </div>
                     </div>
                   )}
-                  {isEditing && !pine && (
+                  {isEditing && settingsTab === 'inputs' && !pine && (
                     <div className="ind-settings">
+                      {!def.params.length && !def.sourced && (
+                        <div className="ind-empty pine-span">No inputs.</div>
+                      )}
                       {def.params.map((p) => (
                         <label key={p.key}>
                           <span>{p.label}</span>
@@ -449,6 +792,7 @@ export function IndicatorPicker({
               )
             })}
             {full && <div className="ind-empty">Limit of {maxIndicators()} reached.</div>}
+            <TemplateBar store={store} count={items.length} />
           </div>
 
           <div className="ind-catalog">
@@ -461,28 +805,47 @@ export function IndicatorPicker({
               aria-label="Search indicators"
             />
             <div className="ind-list">
-              {INDICATOR_GROUPS.map((group) => {
-                const list = INDICATORS.filter((d) => d.group === group && matches(d.name))
+              {/* Favourites first, then the catalogue by group (a favourite
+                  stays in its group too). */}
+              {(['Favourites', ...INDICATOR_GROUPS] as const).map((group) => {
+                const list = INDICATORS.filter(
+                  (d) =>
+                    (group === 'Favourites' ? favs.indexOf(d.id) !== -1 : d.group === group) &&
+                    matches(d.name),
+                )
                 if (!list.length) return null
                 return (
                   <div key={group}>
                     <div className="ind-group-lbl">{group}</div>
-                    {list.map((d) => (
-                      <button
-                        type="button"
-                        className="ind-add"
-                        key={d.id}
-                        disabled={full}
-                        title={full ? 'Limit reached' : 'Add ' + d.name}
-                        onClick={() => addIndicator(d.id)}
-                      >
-                        <span className="ind-dot" style={{ background: d.outputs[0]?.color }} />
-                        <span className="ind-add-name">{d.name}</span>
-                        <span className="ind-add-kind">
-                          {d.placement === 'pane' ? 'pane' : 'overlay'}
-                        </span>
-                      </button>
-                    ))}
+                    {list.map((d) => {
+                      const fav = favs.indexOf(d.id) !== -1
+                      return (
+                        <div className="ind-add-row" key={d.id}>
+                          <button
+                            type="button"
+                            className="ind-add"
+                            disabled={full}
+                            title={full ? 'Limit reached' : 'Add ' + d.name}
+                            onClick={() => addIndicator(d.id)}
+                          >
+                            <span className="ind-dot" style={{ background: d.outputs[0]?.color }} />
+                            <span className="ind-add-name">{d.name}</span>
+                            <span className="ind-add-kind">
+                              {d.placement === 'pane' ? 'pane' : 'overlay'}
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            className={'ind-icon ind-fav' + (fav ? ' on' : '')}
+                            aria-pressed={fav}
+                            title={fav ? 'Remove from favourites' : 'Add to favourites'}
+                            onClick={() => toggleFavourite(d.id)}
+                          >
+                            <Star on={fav} />
+                          </button>
+                        </div>
+                      )
+                    })}
                   </div>
                 )
               })}

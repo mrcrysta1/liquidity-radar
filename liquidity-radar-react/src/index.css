@@ -6251,3 +6251,41 @@ dialog.cset-dialog[open],dialog.kbd-dialog[open]{position:fixed;inset:0;margin:a
 @media(hover:none) and (max-width:900px){
   #radarChartCard .sn-btn,#radarChartCard .sn-zoom button{min-height:36px;min-width:36px}
 }
+
+/* r3-indicators: settings tabs (Inputs / Style / Visibility), templates, favourites */
+.ind-set-tabs{display:flex;gap:2px;padding:0 6px 4px 20px}
+.ind-set-tabs button{
+  background:transparent;border:none;border-bottom:2px solid transparent;color:var(--dim);
+  padding:3px 7px;font-size:var(--text-2xs);font-weight:700;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;
+}
+.ind-set-tabs button:hover{color:var(--txt)}
+.ind-set-tabs button.on{color:var(--txt);border-bottom-color:var(--primary)}
+.ind-style{display:flex;flex-direction:column;gap:4px}
+.ind-style-row{display:grid;grid-template-columns:auto minmax(0,1fr) 28px 54px 70px;align-items:center;gap:5px}
+.ind-settings .ind-style-row input[type="checkbox"],.ind-settings .ind-vis input{width:auto}
+.ind-settings .ind-style-row input[type="color"]{width:28px;height:22px;padding:1px 2px;cursor:pointer}
+.ind-settings .ind-style-row select{padding:2px 3px}
+.ind-settings span.ind-style-name{
+  text-transform:none;letter-spacing:0;font-size:11px;color:var(--txt);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.ind-settings span.ind-style-kind{grid-column:span 2;font-family:var(--mono)}
+.ind-style-opts{display:grid;grid-template-columns:1fr 1.4fr auto;gap:6px;align-items:end;margin-top:4px}
+.ind-vis{display:flex;flex-direction:column;gap:5px}
+.ind-settings .ind-vis span{text-transform:none;letter-spacing:0;font-size:11px;color:var(--txt)}
+.ind-tpl{border-top:1px solid var(--border);margin-top:8px;padding:8px 2px 0;display:flex;flex-direction:column;gap:5px}
+.ind-tpl-row{display:flex;align-items:center;gap:5px}
+.ind-tpl-row select,.ind-tpl-row input{
+  flex:1;min-width:0;background:var(--bg);border:1px solid var(--border2);color:var(--txt);border-radius:6px;
+  padding:3px 6px;font-size:11px;font-family:var(--mono);outline:none;
+}
+.ind-tpl-row select:focus,.ind-tpl-row input:focus{border-color:var(--primary)}
+.ind-tpl-row .ind-icon:disabled{opacity:.35;cursor:not-allowed}
+.ind-tpl-msg{font-size:var(--text-2xs);color:var(--dim);padding-left:2px}
+.ind-add-row{display:flex;align-items:center}
+.ind-add-row .ind-add{flex:1;min-width:0}
+.ind-fav{opacity:0}
+.ind-add-row:hover .ind-fav,.ind-fav:focus-visible,.ind-fav.on{opacity:1}
+.ind-fav.on{color:#F0A04B}
+@media (hover:none){.ind-fav{opacity:1}}
+[data-theme="light"] .ind-tpl-row select,[data-theme="light"] .ind-tpl-row input{background:var(--card);border-color:var(--border)}
