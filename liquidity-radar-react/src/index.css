@@ -6510,8 +6510,6 @@ dialog.cset-dialog[open],dialog.kbd-dialog[open]{position:fixed;inset:0;margin:a
 @media (max-width:900px){.st-panel{left:8px;right:8px;bottom:8px;max-height:60vh}}
 @media (max-width:640px){.st-title{display:none}}
 
-<<<<<<< HEAD
-<<<<<<< HEAD
 /* r4-brand: our radar mark where the TradingView logo was (features/charts/brandMark.ts) */
 .chart-brand{position:absolute;left:10px;bottom:36px;width:26px;height:26px;z-index:3;opacity:.7;pointer-events:none;user-select:none;filter:drop-shadow(0 1px 2px rgba(0,0,0,.35))}
 .rc-body .chart-brand,.mc-body .chart-brand{width:20px;height:20px;left:8px;bottom:32px;opacity:.6}
@@ -6640,11 +6638,8 @@ html.cs-hide-indv .legend .leg-ind b{display:none}
 }
 .replay-order button:hover{color:var(--red)}
 @media (max-width:640px){.replay-orders{flex-wrap:wrap}}
-=======
 /* r4-indicators2: multi-timeframe "wait for bar close" toggle in indicator inputs */
 .ind-settings .ind-mtf-wait input{width:auto;align-self:flex-start;margin:4px 0 0;accent-color:var(--primary)}
->>>>>>> feature/r4-indicators2
-=======
 /* r4-data: chart data export / pop-out menu, watchlist columns, popout window */
 .r4d-menu-wrap{position:relative;display:flex}
 #radarChartCard .r4d-menu-wrap .tvb-tip{left:auto;right:0;transform:translateY(-3px)}
@@ -6683,4 +6678,3 @@ html.lr-popout #fsBtn{display:none}
 .r4wl-sort:hover,.r4wl-sort.on{color:var(--txt)}
 .r4wl-sort.on.asc::after{content:' ▲';font-size:8px}
 .r4wl-sort.on.desc::after{content:' ▼';font-size:8px}
->>>>>>> feature/r4-data

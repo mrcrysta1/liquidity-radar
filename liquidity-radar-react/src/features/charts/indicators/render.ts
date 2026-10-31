@@ -727,7 +727,6 @@ export function createIndicatorRenderer(
     return out
   }
 
-<<<<<<< HEAD
   /**
    * A pane indicator's value label on its scale, unless the chart settings'
    * "Indicator labels" is off. Axis-labelled levels (Auto Fib) always keep
@@ -737,11 +736,6 @@ export function createIndicatorRenderer(
     return (inPane && chartSettings().indicatorLabels) || !!out.axisLabel
   }
 
-  /**
-   * Re-tint every series — called when the palette or light/dark mode
-   * changes, and on a chart-settings change (which re-themes the chart).
-   */
-=======
   function columns(candles: CandleFlat[]): IndicatorColumn[] {
     if (!candles.length) return []
     const tf = tfGroupFor(barStepMs(candles))
@@ -756,8 +750,10 @@ export function createIndicatorRenderer(
     return out
   }
 
-  /** Re-tint every series — called when the palette or light/dark mode changes. */
->>>>>>> feature/r4-data
+  /**
+   * Re-tint every series — called when the palette or light/dark mode
+   * changes, and on a chart-settings change (which re-themes the chart).
+   */
   function refreshIndicatorColors(): void {
     active().forEach(({ inst, def }) => {
       def.outputs.forEach((out) => {

@@ -4291,6 +4291,7 @@ alertcondition(close > 12, "Up", "close above 12")`, k)
   eq('r4ux vp: plot edge is chart offset + left scale + plot width', VP.plotRightEdge(10, 0, 700, 800), 710)
   eq('r4ux vp: plot edge capped to the canvas', VP.plotRightEdge(0, 50, 900, 800), 800)
   eq('r4ux vp: nothing laid out draws nothing', [VP.plotRightEdge(0, 0, 0, 800), VP.plotRightEdge(-4, 0, 300, 800)], [0, 300])
+}
 
 // ---- r4-drawings2: visible-on-intervals + the second batch of drawing tools ----------
 {
@@ -4367,6 +4368,7 @@ alertcondition(close > 12, "Up", "close above 12")`, k)
   ], { bg: '#00000040', border: 'none' })
   eq('r4dr price note: carries the box style', [pn.s.labels[0].text, pn.s.labels[0].bg, pn.s.labels[0].border], ['100', '#00000040', 'none'])
   ok('r4dr extra: every new tool id handled', X.EXTRA_TOOL_IDS.every((id) => run(id, [0, 1, 2, 3, 4, 5].map((i) => ({ time: i * 10, price: 100 + i }))).done))
+}
 
 // ---- r4-replay2: update-interval forming bar, working orders, fill markers ----
 {
@@ -4404,6 +4406,7 @@ alertcondition(close > 12, "Up", "close above 12")`, k)
   eq('replay2: fill marker text', mk[1].text, 'Buy 1 @ 100')
   eq('replay2: fill snaps to the bar it happened in', PT.fillMarkers([{ side: 'buy', qty: 1, price: 1, t: 150000 }], bars, 1e9, { up: 'g', dn: 'r' })[0].time, 120)
   eq('replay2: fill before the first bar is not drawn', PT.fillMarkers([{ side: 'buy', qty: 1, price: 1, t: -5 }], bars, 1e9, { up: 'g', dn: 'r' }), [])
+}
 
 // ---- r4-indicators2: multi-timeframe inputs, volume profile, auto trendlines, catalogue ----
 {
@@ -4503,6 +4506,7 @@ alertcondition(close > 12, "Up", "close above 12")`, k)
   eq('vprofile: sessions from the day start of the first visible bar', VP.profileRanges(times, 1, { from: 5, to: 9 }, 0), [[4, 7], [8, 9]])
 }
 
+{
   // r4-data: chart CSV export, watchlist columns, popout URL / sync, ratio quote
   const DX = await import(src('features/charts/dataExport.ts'))
   eq('csv: plain cell', DX.csvCell('RSI 14'), 'RSI 14')
