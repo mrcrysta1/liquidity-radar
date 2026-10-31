@@ -113,17 +113,44 @@ export function renderDeltaPane(candles: CandleFlat[], otherPaneCount = 0): void
   ensureSeries()
   const bars = getDeltaBars()
   const byT = new Map(bars.map((b) => [b.t, b]))
-  const data = candles.map((c) => {
-    const d = byT.get(c.t)
-    const v = d ? d.delta : 0
-    return {
-      time: Math.floor(c.t / 1000),
-      value: v,
-      color: v >= 0 ? 'rgba(0,230,118,.75)' : 'rgba(255,23,68,.75)',
-    }
-  })
+  const data = candles.map((c) => deltaPoint(c.t, byT.get(c.t)?.delta ?? 0))
   series.setData(data)
+  drawn = { first: candles[0].t, last: candles[candles.length - 1].t }
   layout(true, otherPaneCount)
+}
+
+const deltaPoint = (t: number, v: number) => ({
+  time: Math.floor(t / 1000),
+  value: v,
+  color: v >= 0 ? 'rgba(0,230,118,.75)' : 'rgba(255,23,68,.75)',
+})
+
+/** The first and last bar times the pane last drew in full. */
+let drawn = { first: 0, last: 0 }
+
+/**
+ * A trade only moves the delta of the bar still forming: update that one bar
+ * instead of re-sending up to 5000 with setData on every animation frame.
+ * Anything else (a new dataset, history paged in) takes the full redraw.
+ */
+export function updateDeltaLast(candles: CandleFlat[], otherPaneCount = 0): void {
+  const n = candles.length
+  if (!series || !n || !getShowDelta() || candles[0].t !== drawn.first || candles[n - 1].t < drawn.last) {
+    renderDeltaPane(candles, otherPaneCount)
+    return
+  }
+  const t = candles[n - 1].t
+  const bars = getDeltaBars()
+  let v = 0
+  for (let i = bars.length - 1; i >= 0; i--) {
+    if (bars[i].t === t) {
+      v = bars[i].delta
+      break
+    }
+    if (bars[i].t < t) break
+  }
+  series.update(deltaPoint(t, v))
+  drawn.last = t
 }
 
 export function clearDeltaPane(): void {

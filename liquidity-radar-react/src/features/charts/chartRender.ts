@@ -62,7 +62,7 @@ import { shape } from './drawings/geometry'
 import type { Drawing, MapCtx, Shape } from './drawings/geometry'
 import { handleAt, hitShape, shiftPoints } from './drawings/edit'
 import { fetchOlderKlines, historyExhausted } from '../../services/marketData'
-import { attachDeltaPane, renderDeltaPane } from './deltaPane'
+import { attachDeltaPane, renderDeltaPane, updateDeltaLast } from './deltaPane'
 import { attachWhaleBubbles, renderWhaleBubbles, watchLiveWhales } from './whaleBubbles'
 import { attachVolumeProfile, renderVolumeProfile } from './volumeProfileOverlay'
 import { onDeltaChange } from '../delta/delta'
@@ -507,7 +507,7 @@ export function initChart(): void {
     deltaPending = true
     requestAnimationFrame(() => {
       deltaPending = false
-      renderDeltaPane(timeOnlyCandles(), indicatorPaneCount())
+      updateDeltaLast(timeOnlyCandles(), indicatorPaneCount())
     })
   })
   onOverlayTogglesChange(() => {
@@ -557,11 +557,19 @@ function hoverLegend(time: Any): void {
   if (!shown || !cp) {
     if (hoverTime != null) {
       hoverTime = null
+      hoverIndex = null
+      refreshIndicatorLegend()
       renderLiveLegend()
     }
     return
   }
   hoverTime = time as number
+  // The indicator values follow the crosshair too, as on TradingView (read
+  // from the cached computation, so hovering costs no recompute).
+  if (hoverIndex !== i) {
+    hoverIndex = i
+    refreshIndicatorLegend()
+  }
   renderLegend(cp.o, cp.h, cp.l, cp.c, cp.v, true, shown[i - 1]?.c)
 }
 function renderLiveLegend(): void {
@@ -652,8 +660,10 @@ let legendNode: ChildNode | null = null
  * moving average can meaningfully change anyway.
  */
 let indLegendHtml = ''
+/** Index of the bar under the crosshair, or null on the live bar. */
+let hoverIndex: number | null = null
 export function refreshIndicatorLegend(): void {
-  indLegendHtml = buildIndicatorLegend()
+  indLegendHtml = buildIndicatorLegend(hoverIndex ?? undefined)
 }
 function indicatorLegendHtml(): string {
   return indLegendHtml
@@ -664,8 +674,8 @@ const EYE_OFF =
   '<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4 4 20 20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>'
 const REMOVE =
   '<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M6 6 18 18M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
-function buildIndicatorLegend(): string {
-  const rows = indicatorLegend(displayCandles())
+function buildIndicatorLegend(at?: number): string {
+  const rows = indicatorLegend(displayCandles(), at)
   if (!rows.length) return ''
   return rows
     .map(
@@ -890,16 +900,28 @@ export function updateChartLast(c: Any): void {
   if (hoverTime == null || hoverTime === Math.floor(c.t / 1000))
     renderLegend(c.o, c.h, c.l, c.c, c.v, hoverTime != null, prevBar?.c)
   syncLastPrice(c)
-  const now = Date.now()
-  if (!indPending && now - indLast >= IND_REFRESH_MS) {
-    indPending = true
+  scheduleIndicatorRefresh()
+  redrawDrawings()
+}
+
+/**
+ * Recompute indicators at most every IND_REFRESH_MS. A tick inside that window
+ * schedules the refresh for when it ends rather than being dropped, so on a
+ * quiet coin the indicators and legend catch up with the last trade instead of
+ * waiting for the next one.
+ */
+function scheduleIndicatorRefresh(): void {
+  if (indPending) return
+  indPending = true
+  const wait = Math.max(0, IND_REFRESH_MS - (Date.now() - indLast))
+  setTimeout(() => {
     requestAnimationFrame(() => {
       indPending = false
       indLast = Date.now()
       if (!isReplayOn()) {
         const shown = displayCandles()
         renderIndicators(shown)
-        renderDeltaPane(timeOnlyCandles(), indicatorPaneCount())
+        updateDeltaLast(timeOnlyCandles(), indicatorPaneCount())
         refreshIndicatorLegend()
         const lcs = legendCandles(getChartStyle(), shown)
         const lc = lcs[lcs.length - 1]
@@ -908,8 +930,7 @@ export function updateChartLast(c: Any): void {
       }
       updateCloseTimer()
     })
-  }
-  redrawDrawings()
+  }, wait)
 }
 // ---- Toolbar wiring ----
 
