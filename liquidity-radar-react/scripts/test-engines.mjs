@@ -3629,6 +3629,7 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   // Round trip across a weekend gap stays on the same bars.
   const gap = [t0, t0 + H, t0 + 50 * H, t0 + 51 * H]
   eq('link: gap round trip', L.timeToLogical(gap, L.logicalToTime(gap, 1.5)), 1.5)
+}
 
 // ---- r3-compare: ratio / spread symbols, compare lines, volume-profile modes ----
 {
@@ -3675,6 +3676,7 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('vp mode: visible without a range falls back', V.profileCandles('visible', cs).length, V.profileWindow(cs).length)
   eq('vp mode: all is the loaded window', V.profileCandles('all', cs).length, V.profileWindow(cs).length)
   eq('vp mode: guard', [V.isVpMode('session'), V.isVpMode('x')], [true, false])
+}
 
 // ---- r3-drawings: angle constraint, stacking, position tool, anchored VWAP --------
 {
@@ -3715,6 +3717,7 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   ]
   eq('avwap: cumulative typical price x volume', O.anchoredVwap(bars), [10, 10, 50 / 3])
   eq('avwap: no volume yet falls back to the typical price', O.anchoredVwap([{ h: 3, l: 1, c: 2, v: 0 }]), [2])
+}
 
 // ---- r3-replay: paper trading + replay position maths ----------------------------
 {
@@ -3755,6 +3758,7 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   const rs = [0, 0.5, 0.999999].map((r) => RM.randomCount(100, () => r))
   eq('replay: random bar stays off the ends', rs, [10, 50, 90])
   eq('replay: random on one bar', RM.randomCount(1, () => 0.7), 1)
+}
 
 // ---- round 3: alerts — conditions (AND), drawings, Pine, frequency, webhook ----
 {
@@ -3843,6 +3847,7 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('relay: public addresses', ['8.8.8.8', '1.1.1.1', '2606:4700::1111'].some(W.isPrivateAddress), false)
   eq('relay: target checks', ['https://a.example.com/h', 'https://a.example.com:8443/h', 'https://1.2.3.4/h', 'https://x.internal/h'].map((u) => !!W.webhookTarget(u)), [true, false, false, false])
   eq('relay: JSON messages go out as JSON', [W.messageType('{"a":1}'), W.messageType('BTC up')], ['application/json', 'text/plain; charset=utf-8'])
+}
 
 // ---- r3-indicators: zigzag, auto fib, patterns, new indicators, style, templates ----
 {
@@ -4010,6 +4015,7 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('favourites: toggled', T.favourites(), ['kst'])
   if (prevLS) Object.defineProperty(globalThis, 'localStorage', prevLS)
   else delete globalThis.localStorage
+}
 
 {
   // r3-strategy: broker emulator, arrays, fill/alertcondition, error hints.
@@ -4174,6 +4180,7 @@ alertcondition(close > 12, "Up", "close above 12")`, k)
   ok('pine error: did you mean a function', dy2 && /did you mean 'ta.ema'/.test(dy2.message), dy2 && dy2.message)
   const dy3 = catchErr(() => runPine('plot(sma(close, 3))', k))
   ok('pine error: missing namespace suggested', dy3 && /did you mean 'ta.sma'/.test(dy3.message), dy3 && dy3.message)
+}
 
 {
   // r3-orderflow: real footprint book, imbalances, tick bars, depth history.
