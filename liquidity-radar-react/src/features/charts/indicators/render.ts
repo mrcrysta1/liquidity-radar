@@ -29,6 +29,7 @@ import { computeAll } from './graph'
 import type { Computed } from './graph'
 import { cloudView } from './cloud'
 import { volumeColor } from '../chartPalette'
+import { chartSettings } from '../chartSettings'
 import { PINE_TYPE, pineLive, pineStatus, subscribePine } from '../pine/indicator'
 import { priceFormatFor } from '../../../utils/format'
 
@@ -321,7 +322,7 @@ export function createIndicatorRenderer(
     const common = {
       priceScaleId: 'right',
       // Auto Fib's levels name themselves on the price axis, as TradingView's.
-      lastValueVisible: inPane || !!out.axisLabel,
+      lastValueVisible: paneLabel(inPane, out),
       priceLineVisible: false,
       crosshairMarkerVisible: false,
       title: inPane || out.axisLabel ? out.label : '',
@@ -609,12 +610,28 @@ export function createIndicatorRenderer(
     return out
   }
 
-  /** Re-tint every series — called when the palette or light/dark mode changes. */
+  /**
+   * A pane indicator's value label on its scale, unless the chart settings'
+   * "Indicator labels" is off. Axis-labelled levels (Auto Fib) always keep
+   * theirs: the label is the only thing naming the level.
+   */
+  function paneLabel(inPane: boolean, out: OutputDef): boolean {
+    return (inPane && chartSettings().indicatorLabels) || !!out.axisLabel
+  }
+
+  /**
+   * Re-tint every series — called when the palette or light/dark mode
+   * changes, and on a chart-settings change (which re-themes the chart).
+   */
   function refreshIndicatorColors(): void {
     active().forEach(({ inst, def }) => {
       def.outputs.forEach((out) => {
         const h = held.get(keyOf(inst, out.key))
-        if (h) applyLook(h, out, inst, true)
+        if (!h) return
+        applyLook(h, out, inst, true)
+        // Clouds and signal carriers never show a label.
+        if (out.kind !== 'cloud' && out.kind !== 'signal')
+          h.series.applyOptions({ lastValueVisible: paneLabel(h.scaleId !== 'right', out) })
       })
     })
   }

@@ -51,6 +51,8 @@ import {
 } from './chartPalette'
 import { LAYOUTS, MAX_CHARTS, cells, layoutSpec, rowCount } from './layouts'
 import { isDailyTf } from './timezone'
+import { chartSettings, subscribeChartSettings } from './chartSettings'
+import { settingsSeriesOptions } from './chartSettingsMath'
 import { loadCandles } from '../../services/marketData'
 import { mdSym, mdTf } from '../../services/market'
 import { klineHub } from '../../services/failover'
@@ -636,7 +638,7 @@ function initChart(p: Panel): void {
       secondsVisible: isRangeCell(p),
       rightOffset: 5,
     },
-    crosshair: { ...tv.crosshair, mode: 0 },
+    // Crosshair style and magnet follow the chart settings (tvChartOptions).
     // Capped at the instrument's own precision, as on the main chart, so the
     // decimals do not flip as a coin crosses 1.00.
     localization: {
@@ -652,6 +654,7 @@ function initChart(p: Panel): void {
   // The same series the main chart builds for this style, so a cell keeps its
   // look whether or not it is the active one.
   p.candleSeries = createPriceSeries(chart, p.style)
+  p.candleSeries.applyOptions(settingsSeriesOptions(chartSettings(), p.style))
   p.volSeries = chart.addSeries(LightweightCharts.HistogramSeries, {
     priceFormat: { type: 'volume' },
     priceScaleId: 'vol',
@@ -876,8 +879,9 @@ function legendHtml(p: Panel, c: CandleFlat, prev?: CandleFlat): string {
   const d = c.c - ref
   const pct = ref ? (d / ref) * 100 : 0
   const sign = (x: number) => (x >= 0 ? '+' : '\u2212')
+  // Classes for the chart settings' status-line switches (index.css r4-ux).
   const val = (k: string, x: number) =>
-    '<span class="leg-k">' + k + '</span><b style="color:' + col + '">' + pfmt(x) + '</b>'
+    '<span class="leg-k leg-o">' + k + '</span><b class="leg-o" style="color:' + col + '">' + pfmt(x) + '</b>'
   return (
     '<span class="leg-sym">' +
     legendSymbol(p.sym) +
@@ -890,7 +894,7 @@ function legendHtml(p: Panel, c: CandleFlat, prev?: CandleFlat): string {
     val('H', c.h) +
     val('L', c.l) +
     val('C', c.c) +
-    '<b style="color:' +
+    '<b class="leg-chg" style="color:' +
     col +
     '">' +
     sign(d) +
@@ -1018,6 +1022,9 @@ export function companionReweight(): void {
     if (keep) ts.setVisibleLogicalRange(keep)
   })
 }
+
+// Chart settings (the gear) re-theme the cells as they do the main chart.
+subscribeChartSettings(() => applyCompanionTheme())
 
 export function applyCompanionTheme(): void {
   const pal = chartPalette()

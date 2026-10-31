@@ -12,6 +12,8 @@
 // read the same colours without an import cycle through chartRender.
 import { createTextWatermark } from 'lightweight-charts'
 import { chartTzOptions } from './timezone'
+import { chartSettings } from './chartSettings'
+import { settingsChartOptions } from './chartSettingsMath'
 
 type Any = any
 
@@ -127,23 +129,46 @@ export function tvChartOptions(
   daily?: () => boolean,
 ): Record<string, unknown> {
   const tz = chartTzOptions(daily)
+  // The user's chart settings (background, grid, crosshair, label mode) ride
+  // on top, so every chart built or re-themed from here honours them.
+  const st = settingsChartOptions(chartSettings(), p.bg) as Any
   return {
     localization: tz.localization,
     layout: {
-      background: { type: 'solid', color: p.bg },
+      background: st.layout.background,
       textColor: p.txt,
       fontSize: TV_FONT_SIZE,
       fontFamily: TV_FONT,
       // v5's pane divider defaults to #E0E3EB: a bright line on the dark theme.
       panes: { separatorColor: p.border, separatorHoverColor: 'rgba(178,181,189,0.2)' },
     },
-    grid: { vertLines: { color: p.grid }, horzLines: { color: p.grid } },
-    rightPriceScale: { borderVisible: true, borderColor: p.border },
+    grid: {
+      vertLines: { color: p.grid, ...st.grid.vertLines },
+      horzLines: { color: p.grid, ...st.grid.horzLines },
+    },
+    rightPriceScale: {
+      borderVisible: true,
+      borderColor: p.border,
+      ...st.rightPriceScale,
+      // Axis label collisions (audit U12): lightweight-charts 5.2 draws the
+      // tick labels and then the last-price / crosshair labels on top, and has
+      // no option to drop a tick hidden under a label. The closest levers:
+      // fewer ticks (a higher density spaces them further apart, so a label
+      // covers at most one), no clipped half-labels at the top and bottom
+      // edges, and a minimum width so the scale does not jump as labels with
+      // more digits appear (which re-laid every tick). alignLabels — on by
+      // default, see the Scales setting — keeps the labels off each other.
+      tickMarkDensity: 3.4,
+      entireTextOnly: true,
+      minimumWidth: 64,
+    },
     timeScale: { ...tz.timeScale, borderVisible: true, borderColor: p.border },
     crosshair: {
-      // LargeDashed lines with grey labels, as TradingView draws them.
-      vertLine: { color: p.cross, width: 1, style: 3, labelBackgroundColor: p.crossLabel },
-      horzLine: { color: p.cross, width: 1, style: 3, labelBackgroundColor: p.crossLabel },
+      // LargeDashed lines with grey labels, as TradingView draws them (the
+      // Canvas setting can make them dotted or solid).
+      mode: st.crosshair.mode,
+      vertLine: { color: p.cross, width: 1, style: st.crosshair.vertLine.style, labelBackgroundColor: p.crossLabel },
+      horzLine: { color: p.cross, width: 1, style: st.crosshair.horzLine.style, labelBackgroundColor: p.crossLabel },
     },
   }
 }
@@ -156,7 +181,9 @@ export function tvChartOptions(
 export function tvLastPrice(series: { applyOptions(o: unknown): void } | null, up: boolean): void {
   if (!series) return
   const p = chartPalette()
-  const color = up ? p.up : p.dn
+  // A custom candle body colour (chart settings) colours the marker too.
+  const st = chartSettings()
+  const color = up ? st.bodyUp || p.up : st.bodyDown || p.dn
   const s = series as unknown as { __tvLast?: string }
   if (s.__tvLast === color) return
   s.__tvLast = color

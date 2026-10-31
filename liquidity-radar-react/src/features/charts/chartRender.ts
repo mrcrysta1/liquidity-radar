@@ -2,6 +2,7 @@ import * as LightweightCharts from 'lightweight-charts'
 import { createZonedChart } from './zonedTimeScale'
 import { keepMainPane } from './chartPalette'
 import { chartSettings, subscribeChartSettings } from './chartSettings'
+import { canvasEdgeColor, settingsSeriesOptions } from './chartSettingsMath'
 import { onPineResult, setPineChart } from './pine/indicator'
 import { venueOf } from '../../utils/coins'
 import { COINS, TICKER_COINS } from '../../constants/market'
@@ -184,12 +185,13 @@ function watermarkText(): string {
 /** Apply the chart settings (./chartSettings) over the theme's options. */
 function applyChartSettings(): void {
   if (!chart) return
-  const st = chartSettings()
-  chart.applyOptions({
-    grid: { vertLines: { visible: st.grid }, horzLines: { visible: st.grid } },
-    crosshair: { mode: st.magnet ? 1 : 0 },
-  })
-  candleSeries?.applyOptions({ priceLineVisible: st.priceLine })
+  // Grid, background and crosshair come with tvChartOptions; the magnet is
+  // re-applied because initChart starts the crosshair in free mode.
+  chart.applyOptions({ crosshair: { mode: chartSettings().magnet ? 1 : 0 } })
+  candleSeries?.applyOptions(settingsSeriesOptions(chartSettings(), getChartStyle()))
+  // The chart boxes paint this behind the canvas, so a sliver the canvas
+  // does not cover (under the time axis) matches it instead of showing grey.
+  document.documentElement.style.setProperty('--chart-bg', canvasEdgeColor(chartSettings(), chartPalette().bg))
   syncWatermark()
   updateCloseTimer()
 }
@@ -257,6 +259,8 @@ export function themePriceSeries(series: Any, id: ChartStyleId): void {
   } else {
     themeLineFamilySeries(series, id, lineFamilyColors())
   }
+  // The user's candle colours and scale labels (./chartSettings) win.
+  series.applyOptions(settingsSeriesOptions(chartSettings(), id))
 }
 /** The palette the line-family styles (series/lineFamily) are drawn in. */
 function lineFamilyColors(): LineFamilyColors {
@@ -416,7 +420,7 @@ function applyChartStyle(): void {
       /* already detached */
     }
   }
-  candleSeries.applyOptions({ priceLineVisible: chartSettings().priceLine })
+  candleSeries.applyOptions(settingsSeriesOptions(chartSettings(), getChartStyle()))
   chartState.styleSeries = candleSeries
   priceSeriesSubs.forEach((f) => f(candleSeries))
 }
@@ -583,7 +587,9 @@ export function initChart(): void {
   }).observe(el)
   setupDrawLayer()
   applyChartSettings()
-  subscribeChartSettings(applyChartSettings)
+  // A full re-theme: background, grid and candle colours are theme options
+  // with the settings merged over them (chartPalette tvChartOptions).
+  subscribeChartSettings(applyChartTheme)
   // Pine scripts run in a worker: draw each result as it arrives.
   onPineResult(() => (isReplayOn() ? updateChartData(false) : scheduleIndicatorRefresh()))
   wireLegendActions()
@@ -738,8 +744,10 @@ function renderLegend(
   const ref = prevClose != null && isFinite(prevClose) && prevClose > 0 ? prevClose : o
   const d = c - ref
   const pct = ref ? (d / ref) * 100 : 0
+  // leg-o / leg-chg / leg-vol: the chart settings' status-line switches
+  // hide them by class (index.css r4-ux); the nth-child rules still count them.
   const val = (k: string, x: Any) =>
-    '<span class="leg-k">' + k + '</span><b style="color:' + col + '">' + pfmt(x) + '</b>'
+    '<span class="leg-k leg-o">' + k + '</span><b class="leg-o" style="color:' + col + '">' + pfmt(x) + '</b>'
   const html =
     '<div class="leg-main' +
     (isCross ? ' leg-cross' : '') +
@@ -754,7 +762,7 @@ function renderLegend(
     val('H', h) +
     val('L', l) +
     val('C', c) +
-    '<b style="color:' +
+    '<b class="leg-chg" style="color:' +
     col +
     '">' +
     fmtChg(d, ref) +
@@ -762,7 +770,7 @@ function renderLegend(
     (pct >= 0 ? '+' : '\u2212') +
     Math.abs(pct).toFixed(2) +
     '%)</b>' +
-    (v != null ? '<span class="leg-k">Vol</span><b>' + nfmt(v) + '</b>' : '') +
+    (v != null ? '<span class="leg-k leg-vol">Vol</span><b class="leg-vol">' + nfmt(v) + '</b>' : '') +
     '</span></div>' +
     indicatorLegendHtml() +
     compareLegendHtml()
