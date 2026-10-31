@@ -3487,6 +3487,32 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('hit: empty space left of it', E.hitShape(lbl, 60, 20), false)
 }
 
+// ---- indicator maths: supertrend flip, keltner ATR, gaps, anchored VWAP -----------
+{
+  const M = await import(src('features/charts/indicators/math.ts'))
+  const bar = (t, o, h, l, c, v = 1) => ({ t, o, h, l, c, v })
+  // Flat at 100, then a bar that closes far below the lower band.
+  const flat = Array.from({ length: 15 }, (_, i) => bar(i * 60000, 100, 101, 99, 100))
+  const drop = flat.concat([bar(15 * 60000, 100, 100, 80, 80)])
+  const st = M.supertrend(drop, 3, 1)
+  eq('supertrend: flips on the bar that breaks the band', st.dir[15], -1)
+  // ATR length is its own input: a different ATR length changes the bands.
+  const kA = M.keltner(drop, 5, 2, 3)
+  const kB = M.keltner(drop, 5, 2, 10)
+  ok('keltner: ATR length is separate from the EMA length', kA.upper[15] !== kB.upper[15])
+  // An interior gap carries the last value forward instead of blanking the rest.
+  const gapped = M.onDefined([null, 1, 2, null, 4, 5], (v) => v.map((x) => x * 2))
+  eq('onDefined: a gap does not poison later values', gapped.slice(3), [4, 8, 10])
+  // Weekly anchor: Monday 2026-10-26 restarts; within the week it accumulates.
+  const mon = Date.UTC(2026, 9, 26)
+  const wk = [bar(mon - 86400000, 0, 10, 10, 10), bar(mon, 0, 20, 20, 20), bar(mon + 86400000, 0, 40, 40, 40)]
+  eq('vwap: weekly anchor restarts on Monday', M.vwapBands(wk, 2).v, [10, 20, 30])
+  eq('vwap: daily anchor restarts each day', M.vwapBands(wk, 1).v, [10, 20, 40])
+  const vb = M.vwapBands(wk, 2, 1)
+  eq('vwap: 1σ bands around the weekly VWAP', [vb.u[2], vb.l[2]], [40, 20])
+  eq('vwap: no bands at 0σ', M.vwapBands(wk, 2, 0).u[2], null)
+}
+
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')
 if (fails.length) {
   fails.forEach((f) => console.log('  FAIL  ' + f))

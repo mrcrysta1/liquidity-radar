@@ -101,7 +101,10 @@ export function computeAll<I extends GraphInstance>(
     if (!dep || !series) return null
     // An overlay draws where its source lives; a pane indicator gets its own.
     if (def.placement === 'overlay') host = dep.host
-    const src = series.map((v) => (v == null ? NaN : v))
+    // Interior gaps carry the last value forward (see onDefined); leading
+    // warm-up stays NaN and is trimmed below.
+    let last = NaN
+    const src = series.map((v) => (v == null || !Number.isFinite(v) ? last : (last = v)))
     // Trim the source's warm-up so the dependent seeds on real values, then
     // pad back so indices keep lining up with candles.
     let f = src.findIndex((v) => Number.isFinite(v))

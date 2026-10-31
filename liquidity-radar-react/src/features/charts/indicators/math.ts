@@ -137,23 +137,55 @@ export function atr(c: CandleFlat[], p = 14): Series {
 
 /** Session VWAP — resets each UTC day. */
 export function vwap(c: CandleFlat[]): Series {
-  const out = NaNs(c.length)
+  return vwapBands(c).v
+}
+
+/** Where an anchored VWAP restarts: 1 each UTC day, 2 each week (Monday), 3 each month. */
+function vwapPeriod(t: number, anchor: number): number {
+  if (anchor === 3) {
+    const d = new Date(t)
+    return d.getUTCFullYear() * 12 + d.getUTCMonth()
+  }
+  const day = Math.floor(t / 86400000)
+  // 1970-01-01 was a Thursday: shift so weeks start on Monday.
+  return anchor === 2 ? Math.floor((day + 3) / 7) : day
+}
+
+/**
+ * Anchored VWAP with optional bands, as TradingView's VWAP: the session, week
+ * or month restarts it, and the bands sit `mult` volume-weighted standard
+ * deviations either side (mult 0: no bands).
+ */
+export function vwapBands(c: CandleFlat[], anchor = 1, mult = 0): { v: Series; u: Series; l: Series } {
+  const v = NaNs(c.length)
+  const u = NaNs(c.length)
+  const l = NaNs(c.length)
   let pv = 0
+  let pv2 = 0
   let vol = 0
-  let day = -1
+  let period = NaN
   for (let i = 0; i < c.length; i++) {
-    const d = Math.floor(c[i].t / 86400000)
-    if (d !== day) {
-      day = d
+    const k = vwapPeriod(c[i].t, anchor)
+    if (k !== period) {
+      period = k
       pv = 0
+      pv2 = 0
       vol = 0
     }
     const tp = (c[i].h + c[i].l + c[i].c) / 3
     pv += tp * c[i].v
+    pv2 += tp * tp * c[i].v
     vol += c[i].v
-    out[i] = vol ? pv / vol : null
+    if (!vol) continue
+    const mean = pv / vol
+    v[i] = mean
+    if (mult > 0) {
+      const sd = Math.sqrt(Math.max(0, pv2 / vol - mean * mean))
+      u[i] = mean + mult * sd
+      l[i] = mean - mult * sd
+    }
   }
-  return out
+  return { v, u, l }
 }
 
 export function stochastic(c: CandleFlat[], kP = 14, dP = 3) {
@@ -197,9 +229,11 @@ export function supertrend(c: CandleFlat[], p = 10, mult = 3) {
       if (bl < lower && c[i - 1].c > lower) bl = lower
       if (bu > upper && c[i - 1].c < upper) bu = upper
     }
+    // Flip against this bar's final bands, as Pine's ta.supertrend does;
+    // comparing with the previous bar's flipped one bar late.
     if (i === 0 || line[i - 1] == null) trend = 1
-    else if (trend === 1 && c[i].c < lower) trend = -1
-    else if (trend === -1 && c[i].c > upper) trend = 1
+    else if (trend === 1 && c[i].c < bl) trend = -1
+    else if (trend === -1 && c[i].c > bu) trend = 1
     upper = bu
     lower = bl
     line[i] = trend === 1 ? lower : upper
@@ -208,12 +242,13 @@ export function supertrend(c: CandleFlat[], p = 10, mult = 3) {
   return { line, dir }
 }
 
-export function keltner(c: CandleFlat[], p = 20, mult = 2) {
+/** Keltner channels: EMA(p) ± mult × ATR(atrP); TradingView's default ATR is 10. */
+export function keltner(c: CandleFlat[], p = 20, mult = 2, atrP = 10) {
   const mid = ema(
     c.map((k) => k.c),
     p,
   )
-  const a = atr(c, p)
+  const a = atr(c, atrP)
   return {
     mid,
     upper: mid.map((m, i) => (m != null && a[i] != null ? m + mult * (a[i] as number) : null)),
@@ -280,7 +315,11 @@ export function mfi(c: CandleFlat[], p = 14): Series {
 export function onDefined(s: Series, fn: (v: number[]) => Series): Series {
   const start = s.findIndex((x) => x != null && isFinite(x))
   if (start === -1) return NaNs(s.length)
-  const tail = s.slice(start).map((x) => (x == null ? NaN : x))
+  // A gap inside the data carries the last value forward: as NaN it poisoned
+  // every later value of a running sum, EMA or RMA and blanked the indicator
+  // for good.
+  let last = NaN
+  const tail = s.slice(start).map((x) => (x == null || !isFinite(x) ? last : (last = x)))
   return [...NaNs(start), ...fn(tail).map((x) => (x == null || !isFinite(x) ? null : x))]
 }
 

@@ -26,6 +26,7 @@ import {
   hma,
   ichimoku,
   keltner,
+  vwapBands,
   linreg,
   macd,
   mfi,
@@ -44,7 +45,6 @@ import {
   tsi,
   ultimate,
   vortex,
-  vwap,
   vwma,
   williamsR,
   wma,
@@ -196,13 +196,20 @@ export const INDICATORS: IndicatorDef[] = [
   },
   {
     id: 'vwap',
-    name: 'VWAP (session)',
+    name: 'VWAP (anchored)',
     group: 'Moving averages',
-    params: [],
-    outputs: [{ key: 'v', label: 'VWAP', color: '#FF5252' }],
+    params: [
+      L('anchor', 'Reset: 1 day · 2 week · 3 month', 1, 1, 3),
+      M('bands', 'Bands (σ, 0 = off)', 0, 0, 4),
+    ],
+    outputs: [
+      { key: 'v', label: 'VWAP', color: '#FF5252' },
+      { key: 'u', label: 'Upper', color: 'rgba(255,82,82,.55)', dashed: true },
+      { key: 'l', label: 'Lower', color: 'rgba(255,82,82,.55)', dashed: true },
+    ],
     placement: 'overlay',
     sourced: false,
-    compute: (_s, c) => ({ v: vwap(c) }),
+    compute: (_s, c, p) => vwapBands(c, p.anchor ?? 1, p.bands ?? 0),
   },
   {
     id: 'bb',
@@ -225,7 +232,7 @@ export const INDICATORS: IndicatorDef[] = [
     id: 'keltner',
     name: 'Keltner Channels',
     group: 'Bands & channels',
-    params: [L('length', 'Length', 20), M('mult', 'Multiplier', 2, 0.5, 5)],
+    params: [L('length', 'Length', 20), M('mult', 'Multiplier', 2, 0.5, 5), L('atr', 'ATR length', 10)],
     outputs: [
       { key: 'u', label: 'Upper', color: '#5BA8F5', dashed: true },
       { key: 'm', label: 'Mid', color: 'rgba(91,168,245,.5)' },
@@ -234,7 +241,7 @@ export const INDICATORS: IndicatorDef[] = [
     placement: 'overlay',
     sourced: false,
     compute: (_s, c, p) => {
-      const k = keltner(c, p.length, p.mult)
+      const k = keltner(c, p.length, p.mult, p.atr ?? 10)
       return { u: k.upper, m: k.mid, l: k.lower }
     },
   },
