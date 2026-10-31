@@ -2678,6 +2678,34 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   ok('proven: live wins can earn it', edgeProven({ n: 15, winRate: 0.45, avgR: 0.1 }, Array(30).fill(2.2), st).proven)
 }
 
+// ---- server bot: "is it on track?" ---------------------------------------------------
+{
+  const { onTrack, phi, calibration, CAL_NEED } = await import(src('features/selflearn/onTrack.ts'))
+  near('ontrack: phi(0) = 0.5', phi(0), 0.5)
+  near('ontrack: phi(1.96) ≈ 0.975', phi(1.96), 0.975, 1e-3)
+  near('ontrack: phi is symmetric', phi(-1.2) + phi(1.2), 1, 1e-9)
+  const day = 86_400_000
+  const mk = (p, r, exit) => ({ p, r, t: 0, exit })
+  eq('ontrack: nothing yet is "early"', onTrack([], [], 0, day).verdict, 'early')
+  // Honest 55% calls, 1:1.5 bracket: 55 wins of +1.5R, 45 losses of −1R per 100.
+  const honest = (k) => Array.from({ length: k }, (_, i) => mk(0.55, i % 20 < 11 ? 1.5 : -1, i % 20 < 11 ? 'tp' : 'sl'))
+  const good = onTrack(honest(200), honest(200), 0, 20 * day)
+  eq('ontrack: honest probabilities and a real edge are on track', good.verdict, 'on-track')
+  near('ontrack: calibration gap of honest 55% calls is 0', good.cal.gap, 0, 1e-9)
+  ok('ontrack: edge interval clears zero', good.edge.lo > 0, good.edge.lo)
+  eq('ontrack: calibration reached needs no more days', good.days.cal, 0)
+  // The 5m explore record: predicted ~53%, won ~20%, stops at −1.65R.
+  const bad = Array.from({ length: 100 }, (_, i) => (i % 5 === 0 ? mk(0.53, 1.8, 'tp') : mk(0.53, -1.65, 'sl')))
+  const b = onTrack(bad, [], 0, 25 * day)
+  eq('ontrack: the old 5m record is off track', b.verdict, 'off-track')
+  ok('ontrack: it names the oversized stops', b.reasons.some((r) => r.includes('stop-outs')), b.reasons)
+  ok('ontrack: it names the dishonest probabilities', b.reasons.some((r) => r.includes('off by 33')), b.reasons)
+  // Pace: 40 outcomes in 2 days → (385 − 40) / 20 per day = 18 days.
+  eq('ontrack: days left at the pace so far', onTrack([], honest(40), 0, 2 * day).days.cal, Math.ceil((CAL_NEED - 40) / 20))
+  eq('ontrack: no pace before a day has passed', onTrack([], honest(40), 0, day / 2).days.cal, null)
+  eq('ontrack: buckets split on 0.5', calibration([mk(0.48, 1), mk(0.52, -1)]).map((x) => x.n), [1, 1])
+}
+
 // ---- direction models: is holdout accuracy an edge? ---------------------------------
 {
   const { majorityBaseline, provenEdge } = await import(src('features/ml/edge.ts'))

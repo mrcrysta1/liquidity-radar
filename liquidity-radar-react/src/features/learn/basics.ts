@@ -163,6 +163,14 @@ export const TECH: LearnSection = {
 /** Newest first. Add a line here whenever a feature ships. */
 export const WHATS_NEW: Array<{ date: string; items: string[] }> = [
   {
+    date: '2026-10-31',
+    items: [
+      'The testnet bot now trades 4-hour candles in gated mode: a market trades only while its model passes the walk-forward test. At the switch none passed yet (BTC was closest), so it paper-trades and learns from shadow trades until one does. The 5-minute explore setup lost $745 over 107 trades, half of it fees.',
+      'Fixed the bot freezing at startup on a Binance testnet error (-4067), which had stopped it trading since Oct 30.',
+      'New "Is it on track?" panel on the Self Learning tab: are its win chances honest, is there a real edge, do stops cost about 1R, and how many more trades each answer needs.',
+    ],
+  },
+  {
     date: '2026-10-04',
     items: [
       'Self Learning now trains and trades two markets only: BTC (BTCUSDT.P) and Gold (XAUUSDT.P, which follows spot XAUUSD), on Binance futures prices.',
