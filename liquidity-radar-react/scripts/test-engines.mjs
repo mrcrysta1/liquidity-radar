@@ -3583,6 +3583,174 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('pine gradient: clamped at the ends', RT.gradientColor(150, 0, 100, '#000000', '#ffffff'), 'rgba(255,255,255,1.00)')
 }
 
+// ---- r3-indicators: zigzag, auto fib, patterns, new indicators, style, templates ----
+{
+  const M = await import(src('features/charts/indicators/math.ts'))
+  const R = await import(src('features/charts/indicators/registry.ts'))
+  const S = await import(src('features/charts/indicators/store.ts'))
+  // A price path through the given turning points, 10 bars per leg.
+  const path = (pts, step = 60000) => {
+    const v = []
+    for (let k = 1; k < pts.length; k++)
+      for (let j = 0; j < 10; j++) v.push(pts[k - 1] + ((pts[k] - pts[k - 1]) * j) / 10)
+    v.push(pts[pts.length - 1])
+    return v.map((x, i) => ({ t: i * step, o: x, h: x, l: x, c: x, v: 1 }))
+  }
+  const turns = (z) => z.pivots.map((p) => [p.i, p.price, p.high])
+
+  // ZigZag: legs end on a 5% reversal; the last leg is still running.
+  const dt = path([100, 120, 105, 120, 100])
+  const z = M.zigzag(dt, 5, 3)
+  eq('zigzag: confirmed turns', turns(z), [[0, 100, false], [10, 120, true], [20, 105, false], [30, 120, true]])
+  eq('zigzag: running extreme of the live leg', [z.last.i, z.last.price, z.last.high], [40, 100, false])
+  eq('zigzag: a 20% deviation ignores the 12.5% dip', turns(M.zigzag(dt, 20, 3)), [[0, 100, false]])
+  // Depth: a leg shorter than `depth` bars cannot end.
+  eq('zigzag: depth 15 lets a 10-bar leg run on into the next', turns(M.zigzag(dt, 5, 15)), [[0, 100, false], [30, 120, true]])
+  const zl = M.zigzagLine(dt, 5, 3)
+  eq('zigzag line: values only at the turns', zl.map((v, i) => (v == null ? null : i)).filter((x) => x != null), [0, 10, 20, 30, 40])
+
+  // Auto Fib: last confirmed swing 105 (bar 20) → 120 (bar 30); 0 at 120.
+  const fib = M.autoFib(dt, 5, 3)
+  eq('auto fib: drawn from the swing start', fib.from, 20)
+  near('auto fib: 0 at the newest pivot', fib.levels[0], 120)
+  near('auto fib: 0.618 retracement', fib.levels[4], 120 - 15 * 0.618)
+  near('auto fib: 1 at the older pivot', fib.levels[6], 105)
+  eq('auto fib: nothing before the swing', [fib.series[4][19], fib.series[4][40]], [null, 120 - 15 * 0.618])
+  eq('auto fib: no swing, no levels', M.autoFib(path([100, 101]), 5, 3).levels, [])
+
+  // Chart patterns from pivots.
+  const kinds = (pts, dev = 5, tol = 1.5) =>
+    M.chartPatterns(M.zigzag(path(pts), dev, 3).pivots, tol).map((p) => p.kind)
+  eq('patterns: double top', kinds([90, 120, 100, 120.5, 95, 97]), ['dtop'])
+  eq('patterns: double bottom', kinds([130, 100, 120, 100.5, 125, 123]), ['dbot'])
+  eq('patterns: head & shoulders claims its pivots before a double bottom', kinds([100, 120, 110, 130, 110, 121, 95]), ['hs'])
+  eq('patterns: inverse head & shoulders', kinds([130, 110, 120, 100, 120, 109, 135]), ['ihs'])
+  eq('patterns: ascending triangle', kinds([90, 120, 100, 120, 110, 121, 100], 3), ['asc'])
+  eq('patterns: descending triangle', kinds([130, 100, 120, 100, 110, 99.5, 112], 3), ['desc'])
+  eq('patterns: symmetric triangle', kinds([90, 130, 100, 120, 108, 113], 3), ['sym'])
+  eq('patterns: unequal tops are no double top', kinds([90, 120, 100, 130, 95, 97]), [])
+  const hs = M.chartPatterns(M.zigzag(path([100, 120, 110, 130, 110, 121, 95]), 5, 3).pivots, 1.5)[0]
+  eq('patterns: H&S completes on the right shoulder, bearish', [hs.at, hs.bullish], [50, false])
+  const ps = M.patternSeries(70, [hs])
+  near('pattern series: outline interpolated between pivots', ps[0][15], 115)
+  eq('pattern series: gaps outside the pattern', [ps[0][9], ps[0][51], ps[2][15]], [null, null, null])
+  near('pattern series: neckline', ps[1][30], 110)
+
+  // Chandelier Exit: flat, then a collapse flips it short with a sell.
+  const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
+  const ceBars = Array.from({ length: 30 }, (_, i) => bar(i, 101, 99, 100)).concat([bar(30, 100, 80, 80)])
+  const ce = M.chandelier(ceBars, 5, 1)
+  near('chandelier: long stop = highest high - ATR', ce.long[20], 101 - 2)
+  eq('chandelier: no short stop while long', ce.short[20], null)
+  ok('chandelier: a close under the long stop flips short with a sell', ce.sell[30] != null && ce.long[30] == null && ce.short[30] != null)
+
+  // Fisher Transform: flat range reads the middle (0); trigger is a bar late.
+  const fl = M.fisher(Array.from({ length: 12 }, (_, i) => bar(i, 101, 99, 100)), 5)
+  near('fisher: flat range is 0', fl.fisher[11], 0)
+  eq('fisher: warms up after length bars', [fl.fisher[3], fl.fisher[4] != null], [null, true])
+  const rise = M.fisher(path([100, 200]), 9)
+  ok('fisher: a steady rise reads positive, trigger lags', rise.fisher[10] > 0 && rise.trigger[10] === rise.fisher[9])
+
+  // KST on a steady 1%-per-bar compounding rise: every ROC is constant.
+  const geo = Array.from({ length: 80 }, (_, i) => 100 * Math.pow(1.01, i))
+  const k = M.kst(geo, 1, 2, 3, 4, 2, 2, 2, 2, 3)
+  const r = (n) => (Math.pow(1.01, n) - 1) * 100
+  near('kst: weighted sum of smoothed ROCs', k.line[79], r(1) + 2 * r(2) + 3 * r(3) + 4 * r(4), 1e-9)
+  near('kst: signal is its SMA', k.signal[79], k.line[79], 1e-9)
+
+  // Pivot point levels by hand: H 110, L 90, C 100 (open 104 for Woodie).
+  const tr = M.pivotLevels(110, 90, 100, 1)
+  eq('pivots: traditional P/R1/S1/R2/S2/R3/S3', [tr.p, tr.r[0], tr.s[0], tr.r[1], tr.s[1], tr.r[2], tr.s[2]], [100, 110, 90, 120, 80, 130, 70])
+  const fb = M.pivotLevels(110, 90, 100, 2)
+  near('pivots: fibonacci R1', fb.r[0], 107.64)
+  const wd = M.pivotLevels(110, 90, 100, 3, 104)
+  eq('pivots: woodie pivot uses the new open', [wd.p, wd.r[0], wd.s[0]], [102, 114, 94])
+  const cm = M.pivotLevels(110, 90, 100, 4)
+  near('pivots: camarilla R1', cm.r[0], 100 + 22 / 12)
+  near('pivots: camarilla S4', cm.s[3], 100 - 11)
+  // Daily periods: day 2 draws day 1's levels, starting from its second bar.
+  const day = 86400000
+  const pp = M.pivotPoints([bar(0, 110, 90, 100), { ...bar(0, 105, 95, 100), t: day }, { ...bar(0, 106, 96, 101), t: day + 3600000 }], 1, 1)
+  eq('pivot points: first bar of a period is a break', [pp.p[0], pp.p[1], pp.p[2]], [null, null, 100])
+  eq('pivot points: R4 is Camarilla only', pp.r4[2], null)
+
+  // The registry carries the new indicators and they compute.
+  const ids = ['zigzag', 'autofib', 'chandelier', 'fisher', 'kst', 'pivotpts', 'patterns']
+  ok('registry: new indicators listed', ids.every((id) => R.indicatorDef(id)))
+  const pat = R.indicatorDef('patterns').compute([], path([100, 120, 110, 130, 110, 121, 95]), { dev: 5, depth: 3, tol: 1.5 })
+  eq('registry: pattern marker code names the pattern', R.indicatorDef('patterns').outputs[5].labelFrom.texts[pat.code[50]], 'H&S')
+  ok('registry: bearish marker on the completing bar', pat.bear[50] != null && pat.bull.every((v) => v == null))
+
+  // Interval groups for the Visibility tab.
+  eq('tf group: seconds / minutes / hours / days', [S.tfGroupFor(5000), S.tfGroupFor(300000), S.tfGroupFor(4 * 3600000), S.tfGroupFor(7 * day)], ['s', 'm', 'h', 'd'])
+  eq('bar step: smallest recent gap (a weekend gap ignored)', S.barStepMs([{ t: 0 }, { t: 3600000 }, { t: 3 * 86400000 }, { t: 3 * 86400000 + 3600000 }]), 3600000)
+
+  // Style settings: cleaned on load, persisted only when set.
+  const look = S.sanitizeLook({
+    styles: { v: { color: '#ff0000', width: 9, style: 'dotted', visible: false }, x: { color: 'url(evil)' } },
+    precision: 4,
+    levels: [20, 'x', 80],
+    tfVisibility: { s: false, m: true, zz: false },
+  })
+  eq('style: bad width and colour dropped', look.styles, { v: { color: '#ff0000', style: 'dotted', visible: false } })
+  eq('style: precision, levels, tf groups', [look.precision, look.levels, look.tfVisibility], [4, [20, 80], { s: false }])
+  eq('style: nothing set, nothing added', S.sanitizeLook({}), {})
+  let saved = null
+  const st = S.createIndicatorStore({ id: 't', max: 10, load: () => null, save: (d) => (saved = d), prefix: 't' })
+  st.addIndicator('rsi')
+  const u = st.getIndicators()[0].uid
+  eq('style: an untouched instance persists in its old shape', Object.keys(saved[0]).sort(), ['params', 'source', 'type', 'uid', 'visible'])
+  st.setStyle(u, 'v', { color: '#00ff00', width: 3 })
+  st.setStyle(u, 'v', { style: 'dashed' })
+  st.setPrecision(u, 3)
+  st.setLevels(u, [25, 75])
+  st.setTfVisible(u, 'd', false)
+  eq('style: setters merge and persist', [saved[0].styles, saved[0].precision, saved[0].levels, saved[0].tfVisibility], [{ v: { color: '#00ff00', width: 3, style: 'dashed' } }, 3, [25, 75], { d: false }])
+  eq('style: round-trips through sanitize', S.sanitizeIndicators(saved)[0].styles, saved[0].styles)
+  ok('style: hidden on the days group only', !S.shownOnTf(st.getIndicators()[0], 'd') && S.shownOnTf(st.getIndicators()[0], 'h'))
+  st.resetLook(u)
+  eq('style: defaults drop every override', Object.keys(saved[0]).sort(), ['params', 'source', 'type', 'uid', 'visible'])
+
+  // Templates: uids re-keyed, references follow.
+  let n = 0
+  const re = S.remapUids([{ uid: 'a1', type: 'obv', source: 'close' }, { uid: 'a2', type: 'rsi', source: 'a1.v' }, { uid: 'a3', type: 'sma', source: 'zz.v' }], () => 'n' + n++)
+  eq('templates: fresh uids, sources remapped, dangling to close', re.map((x) => [x.uid, x.source]), [['n0', 'close'], ['n1', 'n0.v'], ['n2', 'close']])
+
+  const mem = new Map()
+  const prevLS = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    writable: true,
+    value: {
+      getItem: (k) => (mem.has(k) ? mem.get(k) : null),
+      setItem: (k, v) => mem.set(k, String(v)),
+      removeItem: (k) => mem.delete(k),
+    },
+  })
+  const T = await import(src('features/charts/indicators/templates.ts'))
+  const other = S.createIndicatorStore({ id: 'o', max: 10, load: () => null, save: () => {}, prefix: 'o' })
+  st.addIndicator('obv')
+  const obvUid = st.getIndicators()[1].uid
+  st.setSource(u, obvUid + '.v')
+  st.setStyle(u, 'v', { color: '#123456' })
+  ok('templates: saved', T.saveTemplate('  My   set ', st.getIndicators()))
+  eq('templates: listed under a clean name', T.listTemplates().map((t) => t.name), ['My set'])
+  ok('templates: same name replaces', T.saveTemplate('my set', st.getIndicators()) && T.listTemplates().length === 1)
+  ok('templates: empty name refused', !T.saveTemplate('   ', st.getIndicators()))
+  ok('templates: applied', T.applyTemplate(other, 'my set'))
+  const got = other.getIndicators()
+  eq('templates: types and styles carried over', got.map((i) => [i.type, i.styles?.v?.color ?? null]), [['rsi', '#123456'], ['obv', null]])
+  ok('templates: applied under new uids with the reference kept', got[0].uid !== u && got[0].source === got[1].uid + '.v')
+  T.deleteTemplate('my set')
+  eq('templates: deleted', T.listTemplates(), [])
+  T.toggleFavourite('rsi')
+  T.toggleFavourite('kst')
+  T.toggleFavourite('rsi')
+  eq('favourites: toggled', T.favourites(), ['kst'])
+  if (prevLS) Object.defineProperty(globalThis, 'localStorage', prevLS)
+  else delete globalThis.localStorage
+}
+
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')
 if (fails.length) {
   fails.forEach((f) => console.log('  FAIL  ' + f))
