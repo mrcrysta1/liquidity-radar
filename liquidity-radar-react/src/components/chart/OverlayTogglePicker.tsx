@@ -8,6 +8,7 @@ import { useFitMenu } from './useFitMenu'
 import {
   getShowConfluence,
   getShowDelta,
+  getShowDepthHeatmap,
   getShowMLPrediction,
   getShowOBGauge,
   getShowRLPolicy,
@@ -17,6 +18,7 @@ import {
   onOverlayTogglesChange,
   setShowConfluence,
   setShowDelta,
+  setShowDepthHeatmap,
   setShowMLPrediction,
   setShowOBGauge,
   setShowRLPolicy,
@@ -63,6 +65,15 @@ const PANES: Pane[] = [
     group: 'On the chart',
     get: getShowVolumeProfile,
     set: setShowVolumeProfile,
+  },
+  {
+    id: 'depth',
+    glyph: 'HM',
+    name: 'Depth heatmap',
+    hint: 'Resting order-book liquidity over time',
+    group: 'On the chart',
+    get: getShowDepthHeatmap,
+    set: setShowDepthHeatmap,
   },
   {
     id: 'mtf',

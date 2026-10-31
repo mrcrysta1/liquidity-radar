@@ -134,3 +134,16 @@ export function setShowRLPolicy(v: boolean): void {
   storageSet(RL_KEY, v)
   emit()
 }
+
+// Order-book depth heatmap under the candles (orderflow/depthHeatmap). Off by
+// default: it is a dense layer that changes how the chart reads.
+const DEPTH_KEY = 'lr-showDepthHeatmap'
+let showDepthHeatmap = storageGet<boolean>(DEPTH_KEY, false)
+export function getShowDepthHeatmap(): boolean {
+  return showDepthHeatmap
+}
+export function setShowDepthHeatmap(v: boolean): void {
+  showDepthHeatmap = v
+  storageSet(DEPTH_KEY, v)
+  emit()
+}
