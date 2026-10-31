@@ -443,6 +443,96 @@ function ToolIcon({ id, size = 17 }: { id: string; size?: number }) {
           <path d="M12 4v15M12 19l-6-7M12 19l6-7" stroke={c} {...S} />
         </svg>
       )
+    case 'gannsquare':
+      return (
+        <svg {...p}>
+          <rect x="3.5" y="3.5" width="17" height="17" stroke={c} strokeWidth="1.5" fill="none" />
+          <path d="M3.5 3.5l17 17M3.5 20.5l17-17" stroke={c} strokeWidth="1.1" strokeDasharray="3 3" fill="none" />
+          <path d="M12 3.5a8.5 8.5 0 0 1-8.5 8.5" stroke={c} strokeWidth="1.1" fill="none" />
+        </svg>
+      )
+    case 'threedrives':
+      return (
+        <svg {...p}>
+          <path d="M2 20l4-8 3 4 4-9 3 4 5-8" stroke={c} {...S} />
+          <path d="M6 12l7-5 8-4" stroke={c} strokeWidth="1.1" strokeDasharray="2 2" fill="none" />
+        </svg>
+      )
+    case 'cypher':
+      return (
+        <svg {...p}>
+          <path d="M3 19 8 6l3 7 5-10 5 14" stroke={c} {...S} />
+          <path d="M3 19 11 13M8 6l8-3" stroke={c} strokeWidth="1.1" strokeDasharray="2 2" fill="none" />
+        </svg>
+      )
+    case 'elliotttri':
+      return (
+        <svg {...p}>
+          <path d="M2 20 6 5l3 12 3-9 3 6 3-4 3 3" stroke={c} {...S} />
+          <path d="M6 5l15 8M9 17l12-4" stroke={c} strokeWidth="1.1" strokeDasharray="2 2" fill="none" />
+        </svg>
+      )
+    case 'forecast':
+      return (
+        <svg {...p}>
+          <path d="M4 17 18 7" stroke={c} {...S} />
+          <path d="M4 17h14V7" stroke={c} strokeWidth="1.1" strokeDasharray="2 2" fill="none" />
+          <circle cx="18" cy="7" r="2.6" stroke={c} strokeWidth="1.6" fill="none" />
+        </svg>
+      )
+    case 'barspattern':
+      return (
+        <svg {...p}>
+          <path d="M5 6v10M3 9h2M5 13h2M10 9v10M8 11h2M10 16h2" stroke={c} {...S} />
+          <path d="M15 4v10M13 7h2M15 11h2M20 7v10M18 9h2M20 14h2" stroke={c} strokeWidth="1.3" opacity=".55" fill="none" />
+        </svg>
+      )
+    case 'ghostfeed':
+      return (
+        <svg {...p}>
+          <rect x="3" y="12" width="3" height="6" stroke={c} strokeWidth="1.3" fill="none" />
+          <rect x="9" y="9" width="3" height="5" stroke={c} strokeWidth="1.3" fill="none" opacity=".75" />
+          <rect x="15" y="6" width="3" height="5" stroke={c} strokeWidth="1.3" fill="none" opacity=".5" />
+          <path d="M4.5 10v2M10.5 7v2M16.5 4v2M19 4l2 2" stroke={c} strokeWidth="1.3" fill="none" />
+        </svg>
+      )
+    case 'arc':
+      return (
+        <svg {...p}>
+          <path d="M3 18a10 10 0 0 1 18 0" stroke={c} {...S} />
+          {dot(3, 18)}
+          {dot(21, 18)}
+        </svg>
+      )
+    case 'rotrect':
+      return (
+        <svg {...p}>
+          <path d="M3 14 13 3l8 7-10 11Z" stroke={c} {...S} />
+        </svg>
+      )
+    case 'curve':
+      return (
+        <svg {...p}>
+          <path d="M3 19Q8 2 21 15" stroke={c} {...S} />
+          {dot(3, 19)}
+          {dot(21, 15)}
+        </svg>
+      )
+    case 'pricenote':
+      return (
+        <svg {...p}>
+          <circle cx="4.5" cy="18" r="2" stroke={c} strokeWidth="1.5" fill="none" />
+          <path d="M6 16.5 11 12" stroke={c} strokeWidth="1.3" strokeDasharray="2 2" fill="none" />
+          <rect x="10" y="5" width="11" height="7" rx="1.5" stroke={c} {...S} />
+        </svg>
+      )
+    case 'icon':
+      return (
+        <svg {...p}>
+          <circle cx="12" cy="12" r="8.5" stroke={c} {...S} />
+          <path d="M8.5 14.5a4 4 0 0 0 7 0M9 9.5h.01M15 9.5h.01" stroke={c} {...S} />
+        </svg>
+      )
     case 'erase':
       return (
         <svg {...p}>
