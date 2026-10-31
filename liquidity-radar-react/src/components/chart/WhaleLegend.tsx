@@ -57,8 +57,9 @@ export function WhaleLegend() {
     }
   }, [])
 
-  // On a narrow chart the full legend covers the zoom/reset buttons: it
-  // collapses to a one-line chip above them that expands on tap.
+  // The full legend covered about 40% of the plot's lower left (candles, the
+  // VAH/POC/VAL labels): it starts as a one-line chip everywhere and expands on
+  // tap. On a narrow chart the chip is also lifted above the zoom buttons.
   const [chartW, setChartW] = useState(0)
   const [open, setOpen] = useState(false)
   useEffect(() => {
@@ -83,13 +84,13 @@ export function WhaleLegend() {
   // The collector writes a heartbeat every ~10s; two minutes of silence means it stopped.
   const stale = v.server && Math.max(now, v.serverUpdated) - v.serverUpdated > 120_000
 
-  if (compact && !open)
+  if (!open)
     return (
       <div
         className="whale-legend"
         role="group"
         aria-label="Whale orders legend"
-        style={{ ...LIFTED, padding: '2px 4px', maxWidth: 'calc(100% - 90px)' }}
+        style={{ ...(compact ? LIFTED : null), padding: '2px 4px', maxWidth: 'calc(100% - 90px)' }}
       >
         <button
           type="button"
@@ -101,6 +102,14 @@ export function WhaleLegend() {
           {v.loading ? <i className="wl-spin" aria-hidden="true" /> : null}
           <span>Whales ≥ {cfmt(v.min)}</span>
           <span style={{ color: 'var(--dim)' }}>· {shown} orders</span>
+          {/* The collector being down is a small dot here, not a banner. */}
+          {stale ? (
+            <i
+              aria-label="collector offline"
+              title={'History collector last seen ' + since(v.serverUpdated)}
+              style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--amber)', display: 'inline-block' }}
+            />
+          ) : null}
         </button>
       </div>
     )
@@ -113,18 +122,16 @@ export function WhaleLegend() {
       style={compact ? LIFTED : undefined}
     >
       <div className="wl-row">
-        {compact && (
-          <button
-            type="button"
-            style={{ ...CHIP_BTN, padding: '0 4px', marginLeft: 'auto', order: 9 }}
-            aria-expanded={true}
-            aria-label="Collapse the whale orders legend"
-            title="Collapse"
-            onClick={() => setOpen(false)}
-          >
-            ×
-          </button>
-        )}
+        <button
+          type="button"
+          style={{ ...CHIP_BTN, padding: '0 4px', marginLeft: 'auto', order: 9 }}
+          aria-expanded={true}
+          aria-label="Collapse the whale orders legend"
+          title="Collapse"
+          onClick={() => setOpen(false)}
+        >
+          ×
+        </button>
         <b className="wl-title">Whale orders</b>
         <span className="wl-key buy">Buy</span>
         <span className="wl-key sell">Sell</span>

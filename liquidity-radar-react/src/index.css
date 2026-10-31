@@ -1219,6 +1219,14 @@ html.radar-fs .cs-panel{height:100%;max-height:none}
   }
   #radarChartCard .legend .leg-ind i{font-size:var(--text-xs)}
   [data-theme="light"] #radarChartCard .legend{background:rgb(255 255 255/.7)}
+  /* A 390px phone gave the candles ~210px; the legend took three lines over
+     them. Keep the symbol, close and change, as TradingView's phone legend
+     does (each O/H/L value is a label + number pair, so six children). */
+  #radarChartCard .legend .leg-ohlc>:nth-child(-n+6),
+  #radarChartCard .legend .leg-ohlc>.leg-k:nth-last-child(2),
+  #radarChartCard .legend .leg-ohlc>.leg-k:nth-last-child(2)+b{display:none}
+  /* The assistant button sat over the chart's lower right on the Radar tab. */
+  body:has(#tab-radar.active) .ai-fab{width:40px;height:40px;border-radius:13px;opacity:.85}
 
   /* Full screen on a phone: every pixel the toolbar gives back goes to the
      candles. */
@@ -4347,6 +4355,8 @@ td .sk,b .sk{display:inline-block;vertical-align:middle}
 .ws-count{font-weight:700}
 .ws-live{display:inline-flex;align-items:center;gap:7px;padding:6px 12px;border-radius:10px;border:1px solid rgb(var(--gRGB)/.5);background:rgb(var(--gRGB)/.1);color:var(--green);font-weight:800;font-size:12.5px}
 .ws-live i{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)}
+.ws-live.off{border-color:rgb(var(--aRGB)/.5);background:rgb(var(--aRGB)/.1);color:var(--amber)}
+.ws-live.off i{background:var(--amber);box-shadow:none}
 
 .multi-chart-grid{display:grid;gap:12px;grid-template-columns:repeat(var(--mc-cols,4),minmax(0,1fr))}
 .multi-chart-grid[data-cols="2"]{--mc-cols:2}
