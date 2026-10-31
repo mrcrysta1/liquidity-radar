@@ -6509,3 +6509,30 @@ dialog.cset-dialog[open],dialog.kbd-dialog[open]{position:fixed;inset:0;margin:a
 .st-id{color:var(--primary)}
 @media (max-width:900px){.st-panel{left:8px;right:8px;bottom:8px;max-height:60vh}}
 @media (max-width:640px){.st-title{display:none}}
+
+/* r4-ux: toolbar overflow, chart settings sections, legend switches,
+   Chart intelligence drawer, light-mode canvas edge. */
+/* U2 — the toolbar's "…" (components/chart/ToolbarOverflow). Unfolded, the
+   group is invisible to layout and its buttons sit in the row as before. */
+#radarChartCard .tvb{position:relative}
+.tvb-more,.tvb-more-items{display:contents}
+.tvb-more-btn{display:none !important}
+.tvb.tvb-folded .tvb-more{display:flex;position:relative;flex-shrink:0}
+.tvb.tvb-folded .tvb-more-btn{display:inline-flex !important}
+.tvb.tvb-folded .tvb-more-items{display:none}
+.tvb.tvb-folded .tvb-more.open .tvb-more-items{
+  display:flex;align-items:center;gap:2px;position:absolute;top:calc(100% + 4px);right:0;z-index:60;padding:4px;
+  background:var(--card);border:1px solid var(--tv-line,var(--border2));border-radius:6px;
+  box-shadow:var(--tv-menu-shadow,var(--shade-2));
+}
+/* Its menus open leftwards from the popover's right edge. */
+.tvb-more .layout-menu{left:auto;right:0}
+/* Snapshot (and "…") are the rightmost buttons again: keep their tips on screen. */
+#radarChartCard .tvb .tvb-more .shot-btn>.tvb-tip,#radarChartCard .tvb .tvb-more-btn>.tvb-tip{left:auto;right:0;transform:translateY(-3px)}
+#radarChartCard .tvb .tvb-more .shot-btn:hover>.tvb-tip,#radarChartCard .tvb .tvb-more .shot-btn:focus-visible>.tvb-tip,
+#radarChartCard .tvb .tvb-more-btn:hover>.tvb-tip,#radarChartCard .tvb .tvb-more-btn:focus-visible>.tvb-tip{transform:none}
+/* The symbol block gives way before anything wraps. */
+#radarChartCard .tvb .cp-trigger{max-width:100%;overflow:hidden}
+#radarChartCard .tvb .cp-id{min-width:0;overflow:hidden}
+#radarChartCard .tvb .cp-id b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@container (max-width:1040px){#radarChartCard .tvb .cp-quote .cp-chg{display:none}}
