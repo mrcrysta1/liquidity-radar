@@ -21,6 +21,7 @@ import {
 } from './indicators/render'
 import { onIndicatorsChange, removeIndicator, toggleIndicator } from './indicators/store'
 import { isReplayOn, onReplayChange, visibleCandles } from './replay'
+import { mountReplayOverlay } from './replayOverlay'
 import {
   getChartStyle,
   onChartStyleChange,
@@ -502,6 +503,8 @@ export function initChart(): void {
   // replaces the series does not strand it.
   // Range bars do not close on the clock, so there is nothing to count down.
   mountCloseTimer(chart, () => (isRangeMode() ? null : candleSeries))
+  // Bar replay's start-bar picker and paper-position line (./replayOverlay).
+  mountReplayOverlay(chart, () => candleSeries, onPriceSeriesChange)
   // Price-scale modes, zoom/scroll buttons and the date-range bar (scaleNav).
   attachScaleNav({ chart, el, getSeries: () => candleSeries, onSeriesChange: onPriceSeriesChange })
   followPriceScale(el)
