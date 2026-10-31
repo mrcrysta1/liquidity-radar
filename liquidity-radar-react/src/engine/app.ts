@@ -169,6 +169,7 @@ $('symSelect').addEventListener('change',e=>setSymbol(e.target.value));
 // engine only supplies the reload when the interval changes.
 onTimeframeChange(()=>{
   resetCandles(); // the previous interval's bars must not stand in for this one's
+  updateChartData(true); // …nor stay on the chart while the new ones load
   fetchKlines(state.symbol);
   connectStreams(streamCb); // restart live kline stream at the new, consistent interval
 });
