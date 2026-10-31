@@ -6090,3 +6090,44 @@ html[data-palette="glass"] .acct-card{background:linear-gradient(145deg,rgba(255
   .an-tfs button,.an-secs button,.nn-tfs button,.liqhm-views button{min-height:40px}
   .sidenav-collapse{width:40px;height:40px}
 }
+
+/* Keyboard shortcut sheet ("?"), features/keyboard. */
+.kbd-dialog{
+  width:min(560px,calc(100vw - 32px));max-height:min(80dvh,640px);padding:0;overflow:auto;
+  background:var(--card);color:var(--txt);border:1px solid var(--border2);border-radius:12px;
+  box-shadow:var(--shade-3);
+}
+.kbd-dialog::backdrop{background:rgb(0 0 0/.45)}
+.kbd-dialog header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border)}
+.kbd-dialog header button{background:none;border:0;color:var(--muted);font-size:20px;line-height:1;cursor:pointer;padding:2px 6px;border-radius:6px}
+.kbd-dialog header button:hover{color:var(--txt);background:var(--sunk-2)}
+.kbd-dialog section{padding:10px 16px 14px}
+.kbd-dialog h4{margin:0 0 8px;font-size:var(--text-xs);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.kbd-dialog dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:0;align-items:center}
+.kbd-dialog dt{margin:0}
+.kbd-dialog dd{margin:0;font-size:13px}
+.kbd-dialog kbd{
+  display:inline-block;min-width:22px;padding:2px 6px;border:1px solid var(--border2);border-bottom-width:2px;border-radius:5px;
+  background:var(--sunk-2);font-family:var(--mono);font-size:11.5px;text-align:center;white-space:nowrap;
+}
+@media(min-width:560px){.kbd-dialog{display:none}.kbd-dialog[open]{display:grid;grid-template-columns:1fr 1fr}.kbd-dialog[open] header{grid-column:1 / -1}}
+#radarChartCard .tvb-tip kbd{font-family:var(--tv-font);font-size:11px;opacity:.65;margin-left:4px}
+/* Floating toolbar over a selected drawing (components/chart/DrawingPropsBar). */
+#radarChartCard .dp-bar{
+  /* Top right, by the price axis: the OHLC legend's numbers are top left. */
+  position:absolute;top:8px;right:76px;z-index:8;
+  display:flex;align-items:center;gap:2px;padding:4px;max-width:calc(100% - 92px);overflow-x:auto;scrollbar-width:none;
+  background:var(--card);border:1px solid var(--tv-line);border-radius:6px;box-shadow:var(--tv-menu-shadow);
+}
+#radarChartCard .dp-colors,#radarChartCard .dp-group{display:flex;align-items:center;gap:2px}
+#radarChartCard .dp-swatch{width:18px;height:18px;margin:0 1px;border-radius:4px;border:2px solid transparent;cursor:pointer;padding:0;flex-shrink:0}
+#radarChartCard .dp-swatch.on{border-color:var(--tv-txt)}
+#radarChartCard .dp-btn{
+  display:grid;place-items:center;width:28px;height:28px;padding:0;border:0;border-radius:4px;flex-shrink:0;
+  background:transparent;color:var(--tv-ico);cursor:pointer;
+}
+#radarChartCard .dp-btn:hover{background:var(--tv-hover);color:var(--tv-txt)}
+#radarChartCard .dp-btn.on{background:var(--tv-blue-soft);color:var(--tv-blue)}
+#radarChartCard .dp-del:hover{color:var(--red)}
+#radarChartCard .dp-swatch:focus-visible,#radarChartCard .dp-btn:focus-visible{outline:2px solid var(--tv-blue);outline-offset:1px}
+#radarChartCard .dp-sep{width:1px;height:20px;margin:0 3px;background:var(--tv-line);flex-shrink:0}

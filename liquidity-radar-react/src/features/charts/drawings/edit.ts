@@ -28,12 +28,54 @@ export function pointToSegment(
 /** Whether a pixel position touches a drawing's lines or boxed labels. */
 export function hitShape(sh: Shape, x: number, y: number): boolean {
   for (const g of sh.segs) {
+    // Soft segments are decoration behind the shape (fib rails, TP/SL rails).
+    if (g.soft) continue
     if (pointToSegment(x, y, g.x1, g.y1, g.x2, g.y2) <= HIT_PX) return true
   }
+  for (const a of sh.arcs) if (nearEllipse(a, x, y)) return true
+  // Inside a filled area (rectangle, zone, ellipse fill) counts, as on TradingView.
+  for (const f of sh.fills) if (insidePolygon(f.pts, x, y)) return true
   for (const l of sh.labels) {
-    if (l.box && Math.abs(l.x - x) < 60 && Math.abs(l.y - y) < 12) return true
+    if (!l.box) continue
+    const [lo, hi] = labelSpan(l)
+    if (x >= lo && x <= hi && Math.abs(l.y - y) < 12) return true
   }
   return false
+}
+
+/**
+ * Horizontal extent of a boxed label. The text is measured by eye (no canvas
+ * here): about 6.5px a character at the 11px label font, plus the padding.
+ * A fixed ±60px around x missed the right of long left-aligned labels and
+ * caught clicks on empty space to their left.
+ */
+export function labelSpan(l: { x: number; text: string; align?: 'left' | 'right' | 'center' }): [number, number] {
+  const w = l.text.length * 6.5 + 12
+  if (l.align === 'left') return [l.x, l.x + w]
+  if (l.align === 'right') return [l.x - w, l.x]
+  return [l.x - w / 2, l.x + w / 2]
+}
+
+/** On an ellipse's outline, within the hit radius. */
+function nearEllipse(a: Shape['arcs'][number], x: number, y: number): boolean {
+  const rx = Math.abs(a.rx)
+  const ry = Math.abs(a.ry)
+  if (!rx || !ry) return false
+  const r = Math.hypot((x - a.cx) / rx, (y - a.cy) / ry)
+  return Math.abs(r - 1) * Math.min(rx, ry) <= HIT_PX
+}
+
+/** Point in a polygon given as flat x, y pairs (even-odd rule). */
+export function insidePolygon(pts: number[], x: number, y: number): boolean {
+  let inside = false
+  for (let i = 0, j = pts.length - 2; i < pts.length; j = i, i += 2) {
+    const xi = pts[i]
+    const yi = pts[i + 1]
+    const xj = pts[j]
+    const yj = pts[j + 1]
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside
+  }
+  return inside
 }
 
 /** Index of the anchor handle under a pixel position, or -1. */

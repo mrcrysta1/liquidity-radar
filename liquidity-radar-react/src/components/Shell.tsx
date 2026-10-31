@@ -36,6 +36,8 @@ import { renderAlerts } from '../features/alerts/alerts'
 import { AlertsModal } from './alerts/AlertsModal'
 import { openModal } from '../utils/dom'
 import { ChartSidePanel } from './chart/ChartSidePanel'
+import { AlertRailButton, DrawHistoryButtons } from './chart/ChartActions'
+import { DrawingPropsBar } from './chart/DrawingPropsBar'
 import { Footer } from './footer/Footer'
 import { DashHead } from './DashHead'
 import { Sidebar } from './Sidebar'
@@ -218,6 +220,7 @@ export function Shell() {
               <DrawToolPicker />
               <span className="tvd-sep" aria-hidden="true" />
               <DrawEditTools />
+              <DrawHistoryButtons />
               <span className="tvd-sep" aria-hidden="true" />
               <OverlayTogglePicker />
             </div>
@@ -227,11 +230,12 @@ export function Shell() {
                 <div id="chart"></div>
                 <span className="chart-draw-hint" id="drawHint"></span>
                 <Guard name="Whale legend"><WhaleLegend /></Guard>
+                <Guard name="Drawing properties"><DrawingPropsBar /></Guard>
                 <Guard name="Chart navigation"><ChartNavOverlay /></Guard>
               </div>
             </div>
             <Guard name="Chart side panel">
-              <ChartSidePanel />
+              <ChartSidePanel tools={<AlertRailButton />} />
             </Guard>
           </div>
           <Guard name="Chart bottom bar"><ChartBottomBar /></Guard>

@@ -3435,6 +3435,50 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('priceFormat: capped at 12', priceFormatFor(1e-15).precision, 12)
 }
 
+// ---- drawings: undo / redo history ------------------------------------------------
+{
+  const { createDrawingHistory } = await import(src('features/charts/drawings/history.ts'))
+  const h = createDrawingHistory(3)
+  h.reset('[]')
+  eq('history: nothing to undo at first', h.undo(), null)
+  eq('history: unchanged save is no step', h.commit('[]'), false)
+  h.commit('[a]')
+  h.commit('[a,b]')
+  eq('history: undo returns the previous state', h.undo(), '[a]')
+  eq('history: redo returns the undone state', h.redo(), '[a,b]')
+  h.undo()
+  h.commit('[a,c]')
+  eq('history: a new change drops the redo branch', h.canRedo(), false)
+  h.commit('[1]')
+  h.commit('[2]')
+  h.commit('[3]')
+  h.undo()
+  h.undo()
+  h.undo()
+  eq('history: capped at the limit', h.undo(), null)
+  h.reset('[x]')
+  eq('history: a coin switch forgets the steps', [h.canUndo(), h.canRedo()], [false, false])
+}
+
+// ---- drawings: what a click hits --------------------------------------------------
+{
+  const E = await import(src('features/charts/drawings/edit.ts'))
+  const base = { segs: [], fills: [], arcs: [], labels: [], handles: [] }
+  eq('hit: soft decoration is not grabbed', E.hitShape({ ...base, segs: [{ x1: 0, y1: 0, x2: 100, y2: 0, soft: true }] }, 50, 0), false)
+  eq('hit: a main line is', E.hitShape({ ...base, segs: [{ x1: 0, y1: 0, x2: 100, y2: 0 }] }, 50, 3), true)
+  const box = { ...base, fills: [{ pts: [10, 10, 90, 10, 90, 60, 10, 60], color: '' }] }
+  eq('hit: inside a filled rectangle', E.hitShape(box, 50, 30), true)
+  eq('hit: outside it', E.hitShape(box, 95, 30), false)
+  const ring = { ...base, arcs: [{ cx: 50, cy: 50, rx: 30, ry: 20 }] }
+  eq('hit: on an ellipse outline', E.hitShape(ring, 80, 50), true)
+  eq('hit: far from it', E.hitShape(ring, 50, 50), false)
+  eq('label: left-aligned spans to the right', E.labelSpan({ x: 100, text: 'abcd', align: 'left' }), [100, 138])
+  eq('label: right-aligned spans to the left', E.labelSpan({ x: 100, text: 'abcd', align: 'right' }), [62, 100])
+  const lbl = { ...base, labels: [{ x: 100, y: 20, text: 'a long caption here', box: true, align: 'left' }] }
+  eq('hit: right end of a long left-aligned label', E.hitShape(lbl, 200, 20), true)
+  eq('hit: empty space left of it', E.hitShape(lbl, 60, 20), false)
+}
+
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')
 if (fails.length) {
   fails.forEach((f) => console.log('  FAIL  ' + f))
