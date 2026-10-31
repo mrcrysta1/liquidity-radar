@@ -25,6 +25,8 @@ import { CHART_TABS, useTick } from '../useTick'
 import { symOf, toggleFavorite, useFavorites } from '../../features/favorites/favorites'
 import { commitMarket, marketRow, remoteMarket, searchMarkets } from '../../features/markets/catalog'
 import type { MarketRow } from '../../features/markets/catalog'
+import { parseSynthetic } from '../../services/syntheticSymbol'
+import { isInstrument } from '../../constants/instruments'
 
 function Chg({ pct }: { pct: number | undefined }) {
   if (pct == null || !isFinite(pct)) return <span className="cp-chg">—</span>
@@ -75,6 +77,12 @@ export interface CoinMenuProps {
   markets?: readonly string[]
   /** Binance crypto pairs only. */
   cryptoOnly?: boolean
+  /**
+   * Offer a typed ratio / spread (BTCUSDT/ETHUSDT, BTCUSDT-ETHUSDT, BTCUSDT*2)
+   * as a market. Only for callers that load bars through services/marketData
+   * (the main chart, compare lines); the layout's other cells stream directly.
+   */
+  allowSynthetic?: boolean
   placeholder?: string
   /** Id for the search box (the header's is #coinSearch, for the "/" key). */
   inputId?: string
@@ -89,6 +97,7 @@ export function CoinMenu({
   onClose,
   markets,
   cryptoOnly = false,
+  allowSynthetic = false,
   placeholder = 'Search coin, gold, forex, stock…',
   inputId,
   className = '',
@@ -160,7 +169,10 @@ export function CoinMenu({
   const up = q.toUpperCase().replace(/\/?USDT$/, '')
   const custom =
     !fixed && /^[A-Z0-9]{2,12}$/.test(up) && !rows.some((r) => r.ticker === up) ? up + 'USDT' : null
-  const total = rows.length + (custom ? 1 : 0)
+  const synth = allowSynthetic && !fixed ? parseSynthetic(q, isInstrument) : null
+  // The expression goes first: anything the search matched is a fragment of it.
+  const shown = synth ? [marketRow(synth.expr), ...rows] : rows
+  const total = shown.length + (custom ? 1 : 0)
 
   const pick = (r: MarketRow) => onPick(commitMarket(r), r)
 
@@ -174,7 +186,7 @@ export function CoinMenu({
       listRef.current?.querySelectorAll('.cp-row')[n]?.scrollIntoView({ block: 'nearest' })
     } else if (e.key === 'Enter') {
       e.preventDefault()
-      const r = rows[hi]
+      const r = shown[hi]
       if (r) pick(r)
       else if (custom) pick(marketRow(custom))
     } else if (e.key === 'Escape') {
@@ -220,10 +232,10 @@ export function CoinMenu({
         )}
       </div>
       <div className="cp-list" role="listbox" aria-label="Markets" ref={listRef}>
-        {rows.map((r, i) => {
+        {shown.map((r, i) => {
           const sel = r.sym === value
           const fav = !fixed && !!r.fav && favs.includes(r.fav)
-          const prevFav = i > 0 && !!rows[i - 1].fav && favs.includes(rows[i - 1].fav!)
+          const prevFav = i > 0 && !!shown[i - 1].fav && favs.includes(shown[i - 1].fav!)
           return (
             <div key={r.kind + ':' + r.sym} className="cp-rowwrap">
               {!q && !fixed && i === 0 && fav && <div className="cp-group">★ Favorites</div>}
@@ -264,8 +276,8 @@ export function CoinMenu({
             type="button"
             role="option"
             aria-selected={false}
-            className={'cp-row cp-custom' + (hi === rows.length ? ' hi' : '')}
-            onMouseEnter={() => setHi(rows.length)}
+            className={'cp-row cp-custom' + (hi === shown.length ? ' hi' : '')}
+            onMouseEnter={() => setHi(shown.length)}
             onClick={() => pick(marketRow(custom))}
           >
             <span className="cp-ico">＋</span>
@@ -296,6 +308,7 @@ export function CoinPicker({
   label = 'Symbol',
   className = '',
   keepTab = false,
+  allowSynthetic,
 }: {
   /** The selected symbol; defaults to the charted one. */
   value?: string
@@ -311,6 +324,8 @@ export function CoinPicker({
   markets?: readonly string[]
   /** Binance crypto pairs only. */
   cryptoOnly?: boolean
+  /** Offer typed ratio / spread expressions; defaults to on for the main chart. */
+  allowSynthetic?: boolean
   /** Small trigger: icon and ticker only. */
   compact?: boolean
   /** Float the menu over the page — for containers that clip (chart panels, modals). */
@@ -391,6 +406,7 @@ export function CoinPicker({
       onClose={() => setOpen(false)}
       markets={markets}
       cryptoOnly={cryptoOnly}
+      allowSynthetic={allowSynthetic ?? (!onPick && !markets)}
       className={float ? 'cp-float' : ''}
       style={float ? pos || { visibility: 'hidden' } : undefined}
       menuRef={menuRef}

@@ -11,6 +11,7 @@
 // Pure helpers only — no DOM, no network, no state import — so they can be
 // unit-tested in Node.
 import { binancePerpOf, isInstrument } from '../constants/instruments.ts'
+import { isSynthetic } from './syntheticSymbol.ts'
 
 /**
  * Bases Binance USDⓈ-M lists only as a 1000-unit contract (1000PEPEUSDT etc.).
@@ -48,7 +49,8 @@ export function futuresSymbolOf(spot: string): FuturesSymbol | null {
   if (!spot) return null
   const perp = binancePerpOf(spot)
   if (perp) return { sym: perp, mult: 1 }
-  if (isInstrument(spot)) return null
+  // Instruments and ratio / spread expressions have no perpetual of their own.
+  if (isInstrument(spot) || isSynthetic(spot)) return null
   const s = spot.toUpperCase()
   const m = /^(.+)USDT$/.exec(s)
   if (m && FUTURES_1000X.has(m[1])) return { sym: '1000' + m[1] + 'USDT', mult: 1000 }

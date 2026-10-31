@@ -3,6 +3,7 @@
 // injected callback set so this module stays free of UI concerns.
 import { state } from './store'
 import { binancePerpOf, isInstrument } from '../constants/instruments'
+import { isSynthetic } from './syntheticSymbol'
 import { PERP_WS } from './perpData'
 import { spotBasis } from './spotGold'
 import {
@@ -169,8 +170,10 @@ export function connectStreams(cb: StreamsCallbacks): void {
   // price is polled by services/instrumentFeed.
   // Gold is the exception: its Binance perpetual (XAUUSDT) streams exactly like
   // a spot pair, so it gets the full live set from the futures socket host.
+  // A ratio / spread (BTCUSDT/ETHUSDT) has no socket either: its bars are
+  // re-polled by services/marketData instead (see SYNTH_POLL_MS).
   const perp = binancePerpOf(state.symbol)
-  if (isInstrument(state.symbol) && !perp) {
+  if ((isInstrument(state.symbol) && !perp) || isSynthetic(state.symbol)) {
     syncCount()
     cb.onStatus()
     return

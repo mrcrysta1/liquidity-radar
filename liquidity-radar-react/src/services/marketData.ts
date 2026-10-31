@@ -9,6 +9,7 @@ import { candlesTag, futuresSymbolOf, perUnitOi, perUnitPremium, symbolScoped } 
 import { perpKlines } from './perpData'
 import { refreshSpotBasis, spotBasis } from './spotGold'
 import { yahooCandles } from './yahoo'
+import { isSynthetic, parseSynthetic, synthesize } from './syntheticSymbol'
 import { jget } from '../api/client'
 import { cooldownLeft } from '../api/rateLimit'
 import { state } from './store'
@@ -106,6 +107,17 @@ async function fetchBase(
   // non-crypto instrument without any of them knowing where the bars came
   // from. Yahoo has no endTime paging, so a history request past the first
   // page simply ends; the chart stops at the loaded range instead of looping.
+  // A ratio / spread (BTCUSDT/ETHUSDT) is its legs, fetched alike and joined
+  // on time (services/syntheticSymbol) — so paging, resampling and the
+  // compare lines all work on one without knowing.
+  const synth = parseSynthetic(sym, isInstrument)
+  if (synth) {
+    const [a, b] = await Promise.all([
+      fetchBase(synth.a, base, need, before, req),
+      synth.b ? fetchBase(synth.b, base, need, before, req) : Promise.resolve(null),
+    ])
+    return { rows: synthesize(synth, a.rows, b ? b.rows : null), source: null }
+  }
   if (isInstrument(sym)) {
     // Gold: Binance's gold perpetual (pages back like any Binance pair),
     // shifted onto the spot price (services/spotGold); Yahoo only if Binance
@@ -287,6 +299,25 @@ function schedulePrimaryProbe(key: string): void {
   }, PRIMARY_PROBE_MS)
 }
 
+/**
+ * A ratio / spread has no live socket (services/streams skips it), so its bars
+ * are reloaded this often instead. The reload merges into the same dataset, so
+ * the viewport stays put; two legs of REST history is the price of each one.
+ */
+const SYNTH_POLL_MS = 20_000
+
+function scheduleSynthPoll(key: string): void {
+  if (klineRetry) clearTimeout(klineRetry)
+  klineRetry = setTimeout(() => {
+    klineRetry = null
+    const tf = mdTf(state.tf || DEFAULT_TF)
+    if (mdSym(state.symbol) + '|' + tf !== key) return
+    // A hidden tab has nobody watching; check again later instead.
+    if (typeof document !== 'undefined' && document.hidden) scheduleSynthPoll(key)
+    else fetchKlines(state.symbol)
+  }, SYNTH_POLL_MS)
+}
+
 // Bumped by every load: a response that a newer load (another coin or
 // timeframe picked meanwhile) has superseded is dropped, never drawn.
 let klineSeq = 0
@@ -331,6 +362,7 @@ export async function fetchKlines(sym: string): Promise<void> {
     klineAttempt = 0
     hooks!.onKlines()
     if (source && !source.primary) schedulePrimaryProbe(key)
+    else if (isSynthetic(sym)) scheduleSynthPoll(key)
   } catch (e) {
     if (seq !== klineSeq) return
     console.warn('klines', e)
@@ -365,7 +397,8 @@ export async function fetchOB(): Promise<void> {
   // asking would just be a guaranteed 400 every poll — and whatever the
   // previous crypto symbol left in state has to go, or gold ends up skewed
   // by Bitcoin's funding rate.
-  if (isInstrument(state.symbol)) {
+  // A ratio / spread has no book or tape of its own either.
+  if (isInstrument(state.symbol) || isSynthetic(state.symbol)) {
     state.ob = { bids: [], asks: [] }
     return
   }
@@ -474,7 +507,7 @@ export async function fetchWhales(): Promise<void> {
   // asking would just be a guaranteed 400 every poll — and whatever the
   // previous crypto symbol left in state has to go, or gold ends up skewed
   // by Bitcoin's funding rate.
-  if (isInstrument(state.symbol)) {
+  if (isInstrument(state.symbol) || isSynthetic(state.symbol)) {
     state.whales = []
     return
   }
