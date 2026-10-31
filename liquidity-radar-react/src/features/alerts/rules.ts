@@ -79,6 +79,8 @@ export interface AlertRule {
   created: number
   lastTriggered?: number
   triggerCount: number
+  /** Technical rules: judge only closed bars, so a cross that un-crosses inside the bar never fires. */
+  onClose?: boolean
   /** Whether the condition held at the last evaluation (edge detection). */
   lastState?: boolean
   /** Watchlist "any" rules: symbols that matched last time. */
@@ -187,6 +189,10 @@ export function evalPrice(
   price: number,
   prevPrice: number | undefined,
   pct24h: number | undefined,
+  /** Highest and lowest trade since the previous sample, when known: a wick
+   *  through the level between two samples is a cross too (TradingView
+   *  triggers intrabar). */
+  range?: { hi: number; lo: number },
 ): boolean {
   if (!isNum(price)) return false
   const v = rule.value
@@ -196,9 +202,9 @@ export function evalPrice(
     case 'below':
       return price <= v
     case 'crosses_above':
-      return prevPrice != null && prevPrice <= v && price > v
+      return prevPrice != null && prevPrice <= v && (price > v || (range != null && range.hi > v))
     case 'crosses_below':
-      return prevPrice != null && prevPrice >= v && price < v
+      return prevPrice != null && prevPrice >= v && (price < v || (range != null && range.lo < v))
     case 'pct_change_24h_above':
       return isNum(pct24h) && pct24h > v
     case 'pct_change_24h_below':
@@ -239,11 +245,14 @@ export function chartedCandlesFit(c: ChartedCandles, sym: string, tf: string): b
 
 /** Whether a technical condition holds on the latest candle (candles oldest first, `c` = close). */
 export function evalTechnical(
-  rule: Pick<AlertRule, 'condition' | 'value' | 'value2'>,
+  rule: Pick<AlertRule, 'condition' | 'value' | 'value2' | 'onClose'>,
   candles: { c: number }[],
 ): boolean {
   if (!candles || candles.length < MIN_TECH_CANDLES) return false
-  const close = candles.map((k) => +k.c)
+  // On bar close: the last candle is still forming, judge the one before.
+  const bars = rule.onClose ? candles.slice(0, -1) : candles
+  if (bars.length < MIN_TECH_CANDLES) return false
+  const close = bars.map((k) => +k.c)
   const i = close.length - 1
   const j = i - 1
   switch (rule.condition) {

@@ -3406,11 +3406,14 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
     { time: 400, price: 25 },
   ])
   eq('edit: fractional bar shift rounds', E.shiftPoints(pts, 1.4, times, up)[0].time, 300)
-  eq('edit: clamped at the right end keeps the shape', E.shiftPoints(pts, 9, times, up), [
-    { time: 400, price: 15 },
-    { time: 500, price: 25 },
+  // Past the loaded bars the shift carries on in whole bars (a target in the
+  // future, history not loaded yet), keeping the shape.
+  eq('edit: past the right end, in whole bars', E.shiftPoints(pts, 9, times, up), [
+    { time: 1100, price: 15 },
+    { time: 1200, price: 25 },
   ])
-  eq('edit: clamped at the left end', E.shiftPoints(pts, -9, times, up)[0].time, 100)
+  eq('edit: past the left end too', E.shiftPoints(pts, -9, times, up)[0].time, -700)
+  eq('edit: an anchor already in the future can move right', E.shiftPoints([{ time: 700, price: 1 }], 1, times, up)[0].time, 800)
   eq('edit: vertical-only drag keeps off-bar times', E.shiftPoints([{ time: 250, price: 1 }], 0, times, up), [
     { time: 250, price: 6 },
   ])
@@ -3559,6 +3562,25 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('pine align: history paged in front', P.alignByTime(series, run, paged).a, [null, 100, 200, 300])
   const other = [k(10, 7), k(20, 8), k(30, 9)]
   eq('pine align: another coin draws nothing', P.alignByTime(series, run, other).a, [null, null, null])
+}
+
+// ---- round 2: intrabar alert crosses, on-close technicals, Pine context ----------
+{
+  const R = await import(src('features/alerts/rules.ts'))
+  const up = { condition: 'crosses_above', value: 100 }
+  eq('alert: a wick through the level between samples crosses', R.evalPrice(up, 99, 98, 0, { hi: 101, lo: 97 }), true)
+  eq('alert: no wick, no cross', R.evalPrice(up, 99, 98, 0, { hi: 99.5, lo: 97 }), false)
+  eq('alert: a plain cross still fires', R.evalPrice(up, 101, 99, 0), true)
+  const flat = Array.from({ length: 70 }, () => ({ c: 100 }))
+  const spike = flat.concat([{ c: 200 }])
+  const sma = { condition: 'close_above_sma', value: 50 }
+  eq('alert: forming bar judged by default', R.evalTechnical(sma, spike), true)
+  eq('alert: on bar close ignores the forming bar', R.evalTechnical({ ...sma, onClose: true }, spike), false)
+  const P = await import(src('features/charts/pine/indicator.ts'))
+  eq('pine period: minutes, hours, day, week, month, seconds', ['15m', '4h', '1d', '1w', '1M', '30s'].map(P.pinePeriod), ['15', '240', 'D', 'W', 'M', '30S'])
+  const RT = await import(src('features/charts/pine/runtime.ts'))
+  eq('pine gradient: midpoint blends', RT.gradientColor(50, 0, 100, '#000000', '#ffffff'), 'rgba(128,128,128,1.00)')
+  eq('pine gradient: clamped at the ends', RT.gradientColor(150, 0, 100, '#000000', '#ffffff'), 'rgba(255,255,255,1.00)')
 }
 
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')

@@ -80,6 +80,18 @@ export function onAlertsChange(fn: () => void): () => void {
 // ---------------------------------------------------------------- live data
 
 const prevPrice: Record<string, number> = {}
+/** Trade extremes per symbol since the last evaluation (the charted coin's tape). */
+const tradeRange: Record<string, { hi: number; lo: number }> = {}
+/** Every trade print of the charted coin: remembered for intrabar crosses. */
+export function noteAlertTrade(sym: string, price: number): void {
+  if (!Number.isFinite(price)) return
+  const r = tradeRange[sym]
+  if (!r) tradeRange[sym] = { hi: price, lo: price }
+  else {
+    if (price > r.hi) r.hi = price
+    if (price < r.lo) r.lo = price
+  }
+}
 const extraTickers: Record<string, { last: number; pct: number; ts: number }> = {}
 const badSymbols = new Set<string>()
 const candleCache: Record<string, { ts: number; candles: CandleFlat[] }> = {}
@@ -241,7 +253,7 @@ function evaluate(fetchMore: boolean): void {
     if (r.kind === 'price' && r.sym) {
       const t = tickerOf(r.sym)
       if (t) {
-        hit = evalPrice(r, t.last, prevPrice[r.sym], t.pct)
+        hit = evalPrice(r, t.last, prevPrice[r.sym], t.pct, tradeRange[r.sym])
         detail = /pct/.test(r.condition)
           ? r.sym + ' 24h ' + t.pct.toFixed(2) + '% · $' + pfmt(t.last)
           : r.sym + ' now $' + pfmt(t.last)
@@ -290,6 +302,7 @@ function evaluate(fetchMore: boolean): void {
   seen.forEach((s) => {
     const t = tickerOf(s)
     if (t) prevPrice[s] = t.last
+    delete tradeRange[s]
   })
   if (changed) saveRules(next)
   if (fired.length) {
@@ -316,6 +329,7 @@ export interface NewRule {
   value2?: number
   once: boolean
   cooldownMin?: number
+  onClose?: boolean
 }
 
 export function normSym(sym: string): string {
@@ -350,9 +364,17 @@ export function addRule(n: NewRule): string | null {
     value2: n.value2 != null && Number.isFinite(n.value2) ? n.value2 : undefined,
     once: n.once,
     cooldownMin: n.once ? undefined : (n.cooldownMin ?? DEFAULT_COOLDOWN_MIN),
+    onClose: n.kind === 'technical' ? !!n.onClose : undefined,
     enabled: true,
     created: Date.now(),
     triggerCount: 0,
+  }
+  // A cross is judged against the previous sample: seed it with the current
+  // price, or a rule could fire at once on a crossing from before it existed.
+  if (sym) {
+    const t = tickerOf(sym)
+    if (t) prevPrice[sym] = t.last
+    delete tradeRange[sym]
   }
   saveRules([...rules, r])
   renderAlerts()

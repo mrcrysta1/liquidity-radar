@@ -74,6 +74,11 @@ export interface PineResult {
 export interface RunOptions {
   /** Wall-clock budget; a script over it stops with an error. */
   maxMs?: number
+  /** The chart's symbol and interval, as Pine spells them ("BTCUSDT", "60", "D"). */
+  ticker?: string
+  period?: string
+  /** The instrument's price step; 0.01 left round_to_mintick at 0 on cheap coins. */
+  mintick?: number
 }
 
 type Val = number | boolean | string | Val[] | FnRef | null | undefined
@@ -255,6 +260,23 @@ function normColor(c: string): string {
   if (/^#[0-9a-f]{8}$/i.test(c)) return withAlpha(c.slice(0, 7), parseInt(c.slice(7, 9), 16) / 255)
   return c
 }
+/** [r, g, b, a] of a #RRGGBB / #RRGGBBAA / rgb() / rgba() colour, or null. */
+function rgbaOf(c: string): [number, number, number, number] | null {
+  const n = normColor(c)
+  if (/^#[0-9a-f]{6}$/i.test(n))
+    return [parseInt(n.slice(1, 3), 16), parseInt(n.slice(3, 5), 16), parseInt(n.slice(5, 7), 16), 1]
+  const m = /^rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?/.exec(n)
+  return m ? [+m[1], +m[2], +m[3], m[4] == null ? 1 : +m[4]] : null
+}
+/** Pine's color.from_gradient: the colour `v` reaches between lo and hi, blended. */
+export function gradientColor(v: number, lo: number, hi: number, c0: string, c1: string): string {
+  const a = rgbaOf(c0)
+  const b = rgbaOf(c1)
+  if (!a || !b || !isFinite(v)) return v <= (lo + hi) / 2 ? c0 : c1
+  const t = hi === lo ? 1 : Math.max(0, Math.min(1, (v - lo) / (hi - lo)))
+  const mix = (i: number) => a[i] + (b[i] - a[i]) * t
+  return `rgba(${Math.round(mix(0))},${Math.round(mix(1))},${Math.round(mix(2))},${mix(3).toFixed(2)})`
+}
 const isColor = (v: Val): v is string => typeof v === 'string' && /^(#|rgba?\()/.test(v)
 
 export function runPine(
@@ -292,6 +314,13 @@ export function runPine(
   let curLine = 0
   let depth = 0
   const deadline = Date.now() + (opts.maxMs ?? 2500)
+  const mintick = opts.mintick && opts.mintick > 0 ? opts.mintick : 0.01
+  const SYMINFO: Record<string, Val> = {
+    'timeframe.period': opts.period ?? '',
+    'syminfo.ticker': opts.ticker ?? '',
+    'syminfo.tickerid': opts.ticker ?? '',
+    'syminfo.mintick': mintick,
+  }
   let ops = 0
   const tick = () => {
     if ((++ops & 1023) === 0 && Date.now() > deadline)
@@ -385,6 +414,7 @@ export function runPine(
     if (g) return g[i] ?? NA
     const s = seriesAt(name, i)
     if (s !== undefined) return s
+    if (name in SYMINFO) return SYMINFO[name]
     if (name in CONSTS) return CONSTS[name]
     if (fns.has(name)) return fns.get(name)!
     if (TA_VARS.includes(name)) {
@@ -922,7 +952,7 @@ export function runPine(
       return Math.round(x * m) / m
     },
     avg: (...a) => a.reduce((x, y) => x + y, 0) / a.length,
-    round_to_mintick: (x) => Math.round(x / 0.01) * 0.01,
+    round_to_mintick: (x) => Math.round(x / mintick) * mintick,
     todegrees: (x) => (x * 180) / Math.PI,
     toradians: (x) => (x * Math.PI) / 180,
     random: (lo = 0, hi = 1) => lo + Math.random() * (hi - lo),
@@ -1121,8 +1151,12 @@ export function runPine(
       f.startsWith('array.') ||
       f.startsWith('strategy.')
     ) {
+      // Arrays are not implemented: a script built on them would plot wrong
+      // values with only a warning to show for it. Stop it with a clear error.
+      if (f.startsWith('array.'))
+        throw new PineError('Unsupported function ' + f + ': arrays are not available yet', curLine)
       if (!res.warnings.includes(f)) res.warnings.push(f)
-      return f.startsWith('array.') ? NA : null
+      return null
     }
     if (f === 'na') return isNa(a(0))
     if (f === 'nz') {
@@ -1142,10 +1176,7 @@ export function runPine(
     if (f === 'color.rgb')
       return `rgba(${an(0)},${an(1)},${an(2)},${(1 - an(3, 'transp', 0) / 100).toFixed(2)})`
     if (f === 'color.from_gradient') {
-      const v = an(0)
-      const lo = an(1)
-      const hi = an(2)
-      return v <= (lo + hi) / 2 ? String(a(3)) : String(a(4))
+      return gradientColor(an(0), an(1), an(2), String(a(3)), String(a(4)))
     }
     if (f === 'str.tostring') {
       const v = a(0)

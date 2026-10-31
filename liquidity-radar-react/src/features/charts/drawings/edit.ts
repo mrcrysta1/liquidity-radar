@@ -3,6 +3,7 @@
 // ./geometry and the bar times on screen — no chart, no DOM — so the eraser,
 // the selection and the tests all agree on what a click hits.
 import type { Pt, Shape } from './geometry'
+import { logicalToTime, timeToLogical } from './timeMap.ts'
 
 /** How close (px) a click must land to a line to hit it. */
 export const HIT_PX = 7
@@ -108,10 +109,12 @@ export function nearestBar(times: number[], t: number): number {
 
 /**
  * Move a whole drawing by `dBars` bars and a price shift. Each anchor moves by
- * whole bars of the data on screen, and the shift in time is clamped so the shape keeps its form at
- * the ends of the data instead of squashing against them. `movePrice` maps a
- * price to the dragged price (done in pixels by the caller, so a log scale
- * moves evenly); null leaves that anchor's price unchanged.
+ * whole bars, counted in bar-index space so anchors past the last bar (a
+ * position's target, a fib extension) or before the first loaded one move
+ * too; they used to be clamped to the loaded bars, so such a drawing could not
+ * be dragged towards that side at all. `movePrice` maps a price to the dragged
+ * price (done in pixels by the caller, so a log scale moves evenly); null
+ * leaves that anchor's price unchanged.
  */
 export function shiftPoints(
   start: Pt[],
@@ -119,17 +122,18 @@ export function shiftPoints(
   times: number[],
   movePrice: (price: number) => number | null,
 ): Pt[] {
-  if (!times.length) return start.map((p) => ({ ...p }))
-  const idx = start.map((p) => nearestBar(times, p.time))
-  const lo = Math.min(...idx)
-  const hi = Math.max(...idx)
-  const d = Math.max(-lo, Math.min(times.length - 1 - hi, Math.round(dBars)))
-  return start.map((p, i) => {
+  if (times.length < 2) return start.map((p) => ({ ...p }))
+  const d = Math.round(dBars)
+  return start.map((p) => {
     const np = movePrice(p.price)
+    const l = timeToLogical(times, p.time)
+    const base = l == null ? null : Math.round(l)
+    const t0 = base == null ? null : logicalToTime(times, base)
+    const t1 = base == null ? null : logicalToTime(times, base + d)
     return {
       // Shift by whole bars and keep any offset inside the bar (an anchor
       // placed on a lower timeframe), so a purely vertical drag keeps times.
-      time: p.time + (times[idx[i] + d] - times[idx[i]]),
+      time: t0 == null || t1 == null ? p.time : p.time + (t1 - t0),
       price: np != null && Number.isFinite(np) ? np : p.price,
     }
   })

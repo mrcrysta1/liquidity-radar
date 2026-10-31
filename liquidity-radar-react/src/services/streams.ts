@@ -46,6 +46,11 @@ let gapRefillAt = 0
 // onto an animation frame so a busy market cannot outrun the renderer.
 let tradeFrame = 0
 let tradePending: { p: number; q: number; T: number } | null = null
+/** Called with every trade print of the charted symbol (price alerts read the tape). */
+const tradeListeners: Array<(sym: string, price: number) => void> = []
+export function onTradePrint(fn: (sym: string, price: number) => void): void {
+  tradeListeners.push(fn)
+}
 /** The last trade painted onto the live candle (price, trade time). */
 let lastTrade: { p: number; q: number; T: number } | null = null
 const raf: (fn: () => void) => number =
@@ -291,6 +296,7 @@ export function connectStreams(cb: StreamsCallbacks): void {
     }
     ingestTrade(state.symbol, bucketStart, +d.q, !!d.m)
     ingestWhaleAgg(state.symbol, +d.a, p, +d.q, +d.T, !!d.m)
+    tradeListeners.forEach((fn) => fn(state.symbol, p))
     tradePending = { p: p, q: +d.q, T: +d.T }
     if (!tradeFrame) tradeFrame = raf(flushTrade)
   })

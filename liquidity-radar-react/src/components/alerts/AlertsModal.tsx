@@ -39,6 +39,8 @@ export function AlertsModal() {
   const [value2, setValue2] = useState('')
   const [tf, setTf] = useState('15m')
   const [once, setOnce] = useState(true)
+  // Technical alerts: judge closed bars only (no fire-then-uncross in a bar).
+  const [onClose, setOnClose] = useState(true)
   const [cooldown, setCooldown] = useState(15)
   const boxRef = useRef<HTMLDivElement>(null)
 
@@ -81,6 +83,7 @@ export function AlertsModal() {
       value2: hasValue2 && value2.trim() !== '' ? Number(value2) : undefined,
       once,
       cooldownMin: once ? undefined : cooldown,
+      onClose: kind === 'technical' ? onClose : undefined,
     })
     if (err) {
       showToast(err)
@@ -213,6 +216,12 @@ export function AlertsModal() {
             )}
           </div>
           <div className="al-opts">
+            {kind === 'technical' && (
+              <label title="Judge closed bars only: a cross that un-crosses inside the bar never fires">
+                <input type="checkbox" checked={onClose} onChange={(e) => setOnClose(e.target.checked)} /> On bar
+                close
+              </label>
+            )}
             <label>
               <input type="radio" name="alOnce" checked={once} onChange={() => setOnce(true)} /> Once
             </label>

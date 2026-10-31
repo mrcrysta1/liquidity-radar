@@ -2,20 +2,21 @@
 // candle set). A slow or runaway script used to block the page for up to its
 // 2.5s budget on every new bar; here it only delays its own lines.
 import { runPine } from './runtime.ts'
-import type { InputValue, PineBar } from './runtime.ts'
+import type { InputValue, PineBar, RunOptions } from './runtime.ts'
 
 interface Job {
   id: number
   script: string
   candles: PineBar[]
   inputs: Record<string, InputValue>
+  opts?: RunOptions
 }
 
 self.onmessage = (e: MessageEvent<Job>) => {
-  const { id, script, candles, inputs } = e.data
+  const { id, script, candles, inputs, opts } = e.data
   const t0 = performance.now()
   try {
-    const result = runPine(script, candles, inputs)
+    const result = runPine(script, candles, inputs, opts || {})
     self.postMessage({ id, result, ms: performance.now() - t0 })
   } catch (err) {
     self.postMessage({ id, error: err instanceof Error ? err.message : String(err), ms: performance.now() - t0 })

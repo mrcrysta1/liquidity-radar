@@ -259,6 +259,46 @@ export function subscribePine(fn: () => void): () => void {
 const statusKey = (s: PineStatus) =>
   (s.error || '') + '|' + s.warnings.join(',') + '|' + s.inputs.map((i) => i.key).join(',')
 
+// ---- the chart a script runs on (syminfo / timeframe) ----
+let chartSym = ''
+let chartPeriod = ''
+/** The chart's symbol and interval id ("1h", "1d"…), as live runs report them. */
+export function setPineChart(symbol: string, tf: string): void {
+  chartSym = symbol
+  chartPeriod = pinePeriod(tf)
+}
+/** Pine's spelling of an interval: minutes as a number, then S / D / W / M. */
+export function pinePeriod(tf: string): string {
+  const m = /^(\d+)([smhdwM])$/.exec(tf || '')
+  if (!m) return ''
+  const n = Number(m[1])
+  switch (m[2]) {
+    case 's':
+      return n + 'S'
+    case 'm':
+      return String(n)
+    case 'h':
+      return String(n * 60)
+    case 'd':
+      return n === 1 ? 'D' : n + 'D'
+    case 'w':
+      return n === 1 ? 'W' : n + 'W'
+    default:
+      return n === 1 ? 'M' : n + 'M'
+  }
+}
+/** The price step for these candles: one unit of the last close's last decimal. */
+function mintickOf(candles: CandleFlat[]): number {
+  const c = candles[candles.length - 1]?.c
+  if (!c || !isFinite(c)) return 0.01
+  const a = Math.abs(c)
+  const d = a >= 100 ? 2 : a >= 1 ? 4 : a >= 0.01 ? 5 : a >= 0.0001 ? 6 : 8
+  return Number((10 ** -d).toFixed(d))
+}
+function runOpts(candles: CandleFlat[]) {
+  return { ticker: chartSym, period: chartPeriod, mintick: mintickOf(candles) }
+}
+
 // ---- the worker: live runs happen off the main thread ----
 // Each changed candle set posts one run; the chart keeps drawing the last
 // result until the answer arrives, then redraws (onPineResult). Where there
@@ -379,13 +419,13 @@ export function pineLive(inst: PineInstance, candles: CandleFlat[]): IndicatorDe
     const bars = candles.map((k) => ({ t: k.t, o: k.o, h: k.h, l: k.l, c: k.c, v: k.v }))
     jobs.set(id, { inst, sig, shape, last, candles })
     inFlight.set(inst.uid, id)
-    w.postMessage({ id, script: inst.script || '', candles: bars, inputs: inst.pineInputs || {} })
+    w.postMessage({ id, script: inst.script || '', candles: bars, inputs: inst.pineInputs || {}, opts: runOpts(candles) })
     return shown
   }
   const t0 = Date.now()
   let b: Built
   try {
-    b = build(inst, runPine(inst.script || '', candles, inst.pineInputs), candles)
+    b = build(inst, runPine(inst.script || '', candles, inst.pineInputs, runOpts(candles)), candles)
   } catch (e) {
     const m = pineMeta(inst)
     b = failed(inst, e, m.status.overlay, m.status.inputs)

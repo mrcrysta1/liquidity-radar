@@ -2,7 +2,7 @@ import * as LightweightCharts from 'lightweight-charts'
 import { createZonedChart } from './zonedTimeScale'
 import { keepMainPane } from './chartPalette'
 import { chartSettings, subscribeChartSettings } from './chartSettings'
-import { onPineResult } from './pine/indicator'
+import { onPineResult, setPineChart } from './pine/indicator'
 import { venueOf } from '../../utils/coins'
 import { COINS, TICKER_COINS } from '../../constants/market'
 import { fmt, pfmt, nfmt, cfmt, chgHtml, priceDecimals, priceFormatFor } from '../../utils/format'
@@ -905,6 +905,7 @@ export function updateChartData(fit = false): void {
   requestAnimationFrame(syncScaleNavView)
   renderWhaleBubbles()
   drawnKey = state.candlesKey || ''
+  setPineChart(state.symbol, getTimeframe())
   if (fit) {
     // A fresh fit starts at bar 0 like a pan to the oldest bar would; history
     // paging must wait for this dataset's own first pan, not a past one.
@@ -1437,7 +1438,12 @@ function setupDrawLayer(): void {
     const def = drawToolDef(getDrawTool())
     if (!def) return
     const r = overlay.getBoundingClientRect()
-    if (def.points === 0) commitPending(e.clientX - r.left, e.clientY - r.top)
+    if (def.points !== 0) return
+    // The double-click's own two clicks already placed points on the same
+    // spot: drop the extras so the line does not end in stacked vertices.
+    const buf = chartState.drawBuf
+    while (buf.length > 1 && samePlace(buf[buf.length - 1], buf[buf.length - 2])) buf.pop()
+    commitPending(e.clientX - r.left, e.clientY - r.top)
   })
   // Freehand: press, drag, release. Pointer events, so a finger or pen draws
   // exactly like the mouse; capture keeps the stroke even past the edge.
@@ -1594,6 +1600,14 @@ function placeDrawPointFromXY(x: Any, y: Any): void {
   redrawDrawings()
 }
 
+/** Two anchors on (nearly) the same bar and price, i.e. one place clicked twice. */
+function samePlace(a: Any, b: Any): boolean {
+  if (!a || !b || a.time !== b.time) return false
+  const ya = candleSeries?.priceToCoordinate(a.price)
+  const yb = candleSeries?.priceToCoordinate(b.price)
+  return ya != null && yb != null ? Math.abs(ya - yb) <= 3 : a.price === b.price
+}
+
 /** Turn the points collected so far into a drawing. (x, y) is the last click. */
 function commitPending(x: number, y: number): void {
   const def = drawToolDef(getDrawTool())
@@ -1601,6 +1615,16 @@ function commitPending(x: number, y: number): void {
   const pts = chartState.drawBuf
   const min = def.points > 0 ? def.points : 2
   if (pts.length < min) return
+  // Only the newest DRAWINGS_MAX_PER_COIN are saved: say so instead of
+  // letting the oldest vanish on the next reload.
+  if (currentDrawings().length >= DRAWINGS_MAX_PER_COIN) {
+    chartState.drawBuf = []
+    chartState._preview = null
+    publishDrawingCount()
+    redrawDrawings()
+    showToast('This coin already has ' + DRAWINGS_MAX_PER_COIN + ' drawings — delete some to add more')
+    return
+  }
   const drawing: Any = { type: def.id, color: def.color || '#4FC3F7', points: pts.slice() }
   chartState.drawBuf = []
   chartState._preview = null
@@ -1890,6 +1914,34 @@ function setupDrawSelect(wrap: HTMLElement): void {
   ;['mousedown', 'mousemove', 'touchstart', 'touchmove'].forEach((type) =>
     wrap.addEventListener(type, swallow, { capture: true, passive: false }),
   )
+  // While placing a drawing: Esc cancels it (then disarms the tool), Enter
+  // finishes an open-ended one (polyline, path), as the tool hints say.
+  window.addEventListener(
+    'keydown',
+    function (e) {
+      if (e.ctrlKey || e.metaKey || e.altKey || chartState._sel >= 0) return
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable))
+        return
+      if (!wrap.isConnected || !wrap.offsetParent || !getDrawTool()) return
+      if (e.key === 'Escape') {
+        e.stopPropagation()
+        if (chartState.drawBuf.length) {
+          chartState.drawBuf = []
+          chartState._preview = null
+          publishDrawingCount()
+          redrawDrawings()
+        } else setDrawTool(null)
+      } else if (e.key === 'Enter') {
+        const def = drawToolDef(getDrawTool())
+        if (def && def.points === 0 && chartState.drawBuf.length >= 2) {
+          e.preventDefault()
+          commitPending(0, 0)
+        }
+      }
+    },
+    true,
+  )
   // Delete / Backspace removes the selection, Esc drops it.
   window.addEventListener(
     'keydown',
@@ -2008,7 +2060,7 @@ function paintShape(
     const w = ctx.measureText(l.text).width
     if (l.box) {
       const bx = l.align === 'center' ? l.x - w / 2 : l.align === 'right' ? l.x - w : l.x
-      ctx.fillStyle = 'rgba(6,11,24,.78)'
+      ctx.fillStyle = isLightTheme() ? 'rgba(255,255,255,.88)' : 'rgba(6,11,24,.78)'
       ctx.fillRect(bx - 4, l.y - 10, w + 8, 14)
       ctx.strokeStyle = doomed ? stroke : l.color || base
       ctx.lineWidth = 1
