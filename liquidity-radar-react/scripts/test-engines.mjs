@@ -3428,6 +3428,36 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('timeMap: round trip off-bar', M.logicalToTime(times, M.timeToLogical(times, 57600)), 57600)
 }
 
+// ---- time axis: day boundaries in the chart zone ---------------------------------
+{
+  const Z = await import(src('features/charts/zonedTimeScale.ts'))
+  const H = 3600
+  // Hourly bars across 2026-10-30 → 31 UTC.
+  const base = Date.UTC(2026, 9, 30, 0) / 1000
+  const pts = () => Array.from({ length: 30 }, (_, i) => ({ time: { t: base + i * H }, timeWeight: 0 }))
+  const dayAt = (p) => p.filter((x) => x.timeWeight === Z.WEIGHT.Day).map((x) => new Date(x.time.t * 1000).toISOString().slice(11, 16))
+  const utc = pts()
+  Z.fillZonedWeights(utc, 0, 'UTC', false)
+  // The first bar sits on midnight too, so the library's first-point guess marks it.
+  eq('zoned ticks: UTC day boundaries at 00:00 UTC', dayAt(utc), ['00:00', '00:00'])
+  // Los Angeles is UTC-7 on 30 Oct 2026: local midnight is 07:00 UTC.
+  const la = pts()
+  Z.fillZonedWeights(la, 0, 'America/Los_Angeles', false)
+  eq('zoned ticks: LA day boundary at local midnight (07:00 UTC)', dayAt(la), ['07:00'])
+  // Daily-and-longer bars keep UTC sessions whatever the zone.
+  const d = pts()
+  Z.fillZonedWeights(d, 0, 'America/Los_Angeles', true)
+  eq('zoned ticks: daily bars keep the UTC day', dayAt(d), ['00:00', '00:00'])
+  // Incremental fill from an index matches a full fill.
+  const part = pts()
+  Z.fillZonedWeights(part, 0, 'Asia/Karachi', false)
+  const inc = pts()
+  Z.fillZonedWeights(inc.slice(0, 10), 0, 'Asia/Karachi', false)
+  Z.fillZonedWeights(inc, 10, 'Asia/Karachi', false)
+  eq('zoned ticks: incremental fill equals a full fill', inc.slice(10).map((x) => x.timeWeight), part.slice(10).map((x) => x.timeWeight))
+  eq('zoned ticks: year beats month beats day', [Z.weightBetween(Date.UTC(2027, 0, 1), Date.UTC(2026, 11, 31)), Z.weightBetween(Date.UTC(2026, 10, 1), Date.UTC(2026, 9, 31))], [70, 60])
+}
+
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')
 if (fails.length) {
   fails.forEach((f) => console.log('  FAIL  ' + f))

@@ -11,6 +11,7 @@
 // 'mc<position>'), drawn by its own renderer over its own candles; the
 // header's indicators button is a React portal (PanelIndicatorButtons).
 import * as LightweightCharts from 'lightweight-charts'
+import { createZonedChart } from './zonedTimeScale'
 import { poll } from '../../services/pollScheduler'
 import { pfmt } from '../../utils/format'
 import { state } from '../../services/store'
@@ -353,7 +354,7 @@ function mcInitChart(p: McPanel): void {
   const th = chartTheme()
   // Times print in the chart zone (./timezone); the bars stay in UTC.
   const tz = chartTzOptions(() => isDailyTf(p.interval))
-  const c: Any = LightweightCharts.createChart(el, {
+  const c: Any = createZonedChart(LightweightCharts, el, () => isDailyTf(p.interval), {
     width: w,
     height: h,
     localization: tz.localization,

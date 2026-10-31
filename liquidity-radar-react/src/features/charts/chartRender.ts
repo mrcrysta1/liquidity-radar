@@ -1,4 +1,5 @@
 import * as LightweightCharts from 'lightweight-charts'
+import { createZonedChart } from './zonedTimeScale'
 import { venueOf } from '../../utils/coins'
 import { COINS, TICKER_COINS } from '../../constants/market'
 import { fmt, pfmt, nfmt, cfmt, chgHtml, priceDecimals } from '../../utils/format'
@@ -389,7 +390,7 @@ export function initChart(): void {
   // faint symbol watermark (see ./chartPalette).
   const tv: Any = tvChartOptions(undefined, mainIsDaily)
   watermarkShown = watermarkText()
-  chart = LightweightCharts.createChart(el, {
+  chart = createZonedChart(LightweightCharts, el, mainIsDaily, {
     // autoSize lets the library watch the container itself. Passing explicit
     // width/height instead makes it write inline sizes onto the element, which
     // then override the CSS — that is what used to leave the chart stuck at
