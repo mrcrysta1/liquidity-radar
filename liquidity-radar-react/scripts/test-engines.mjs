@@ -3411,6 +3411,23 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('edit: start points are not mutated', pts[0], { time: 200, price: 10 })
 }
 
+// ---- drawings: anchors that fall between, before or after the loaded bars ----------
+{
+  const M = await import(src('features/charts/drawings/timeMap.ts'))
+  // 4h bars (14400s apart); anchors placed on 15m land between them.
+  const times = [0, 14400, 28800, 43200]
+  eq('timeMap: exact bar', M.timeToLogical(times, 28800), 2)
+  eq('timeMap: 15m anchor between 4h bars', M.timeToLogical(times, 14400 + 3600), 1.25)
+  eq('timeMap: older than the loaded history', M.timeToLogical(times, -28800), -2)
+  eq('timeMap: right of the last bar', M.timeToLogical(times, 43200 + 14400 * 3), 6)
+  eq('timeMap: nothing loaded', M.timeToLogical([], 5), null)
+  eq('timeMap: one bar, other time', M.timeToLogical([100], 5), null)
+  eq('timeMap: logical → bar time', M.logicalToTime(times, 1.4), 14400)
+  eq('timeMap: future bar time', M.logicalToTime(times, 5), 43200 + 14400 * 2)
+  eq('timeMap: past bar time', M.logicalToTime(times, -1), -14400)
+  eq('timeMap: round trip off-bar', M.logicalToTime(times, M.timeToLogical(times, 57600)), 57600)
+}
+
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')
 if (fails.length) {
   fails.forEach((f) => console.log('  FAIL  ' + f))

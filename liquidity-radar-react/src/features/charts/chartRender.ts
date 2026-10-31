@@ -62,6 +62,7 @@ import {
 import { shape } from './drawings/geometry'
 import type { Drawing, MapCtx, Shape } from './drawings/geometry'
 import { handleAt, hitShape, shiftPoints } from './drawings/edit'
+import { logicalToTime, timeToLogical } from './drawings/timeMap'
 import { fetchOlderKlines, historyExhausted } from '../../services/marketData'
 import { attachDeltaPane, blankDeltaPane, renderDeltaPane } from './deltaPane'
 import { subscribeSymbol } from '../actions/userActions'
@@ -1262,8 +1263,28 @@ function updateDrawHit(): void {
  * the same idea as TradingView's magnet.
  */
 const MAGNET_PX = 14
+
+/** Bar times on screen in seconds, rebuilt only when the displayed bars change. */
+let barTimesOf: Any[] | null = null
+let barTimes: number[] = []
+function shownBarTimes(): number[] {
+  const bars = displayCandles()
+  if (bars !== barTimesOf) {
+    barTimesOf = bars
+    barTimes = bars.map((k) => Math.floor(k.t / 1000))
+  }
+  return barTimes
+}
+
 function snapToCandle(x: Any, y: Any): Any {
-  const time = chart.timeScale().coordinateToTime(x)
+  const ts = chart.timeScale()
+  // Past the last bar the chart has no time; count bars on from the end, so
+  // trend lines and fibs can be projected into the future.
+  let time = ts.coordinateToTime(x)
+  if (time == null) {
+    const logical = ts.coordinateToLogical(x)
+    time = logical == null ? null : logicalToTime(shownBarTimes(), logical)
+  }
   let price: number | null
   try {
     price = candleSeries ? candleSeries.coordinateToPrice(y) : null
@@ -1403,7 +1424,13 @@ function resizeDrawCanvas(): void {
 function mapCtx(cw: number, ch: number): MapCtx {
   const ts = chart.timeScale()
   return {
-    x: (t: number) => ts.timeToCoordinate(snapChartTime(t) as Any),
+    // Through logical space, not timeToCoordinate: that needs a bar at exactly
+    // `t`, so an anchor from another interval (13:15 on 4h) or outside the
+    // loaded bars had no x and the whole drawing vanished.
+    x: (t: number) => {
+      const logical = timeToLogical(shownBarTimes(), snapChartTime(t))
+      return logical == null ? null : ts.logicalToCoordinate(logical as Any)
+    },
     y: (pr: number) => (candleSeries ? candleSeries.priceToCoordinate(pr) : null),
     cw: cw,
     ch: ch,
