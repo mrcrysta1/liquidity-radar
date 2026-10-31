@@ -4,6 +4,8 @@
 // radar-worker/sql/002_bot.sql: the bot tables allow anonymous *select* and
 // nothing else). Without those two variables the Neural Net page simply
 // shows the in-browser engine alone.
+import type { Outcome } from './onTrack'
+
 const DB_URL = (import.meta.env.VITE_WHALE_DB_URL as string | undefined)?.replace(/\/+$/, '')
 const DB_KEY = import.meta.env.VITE_WHALE_DB_KEY as string | undefined
 export const SERVER_BOT = !!(DB_URL && DB_KEY)
@@ -73,4 +75,25 @@ export async function loadAccount(): Promise<{ account: BinanceAccount | null; h
   const rows = await rest<Array<{ key: string; value: unknown }>>('bot_state?select=key,value&key=in.(account,heartbeat)')
   const get = (k: string) => rows.find((r) => r.key === k)?.value ?? null
   return { account: get('account') as BinanceAccount | null, heartbeat: get('heartbeat') as { t: number; mode: string; venue: string } | null }
+}
+
+/** When the current strategy went live: gated, 4-hour candles (PR #126). Older trades were a different setup. */
+export const STRATEGY_SINCE = Date.parse('2026-10-31T06:12:00Z')
+
+/** Closed real (gated) and shadow trades of the current strategy, for the "Is it on track?" panel. */
+export async function loadOutcomes(): Promise<{ real: Outcome[]; shadow: Outcome[] } | null> {
+  if (!SERVER_BOT) return null
+  const since = new Date(STRATEGY_SINCE).toISOString()
+  const [real, shadow] = await Promise.all([
+    rest<Array<{ p_win: number; r_multiple: number | null; opened_at: string; exit_reason: string | null }>>(
+      `bot_trades?select=p_win,r_multiple,opened_at,exit_reason&status=eq.closed&mode=eq.gated&opened_at=gte.${since}&order=opened_at.desc&limit=1000`,
+    ),
+    rest<Array<{ p_cal: number; r_net: number | null; bar_time: string; exit_reason: string | null }>>(
+      `bot_shadow_trades?select=p_cal,r_net,bar_time,exit_reason&status=eq.closed&bar_time=gte.${since}&order=bar_time.desc&limit=1000`,
+    ),
+  ])
+  return {
+    real: real.filter((x) => x.r_multiple != null).map((x) => ({ p: x.p_win, r: x.r_multiple!, t: Date.parse(x.opened_at), exit: x.exit_reason })),
+    shadow: shadow.filter((x) => x.r_net != null).map((x) => ({ p: x.p_cal, r: x.r_net!, t: Date.parse(x.bar_time), exit: x.exit_reason })),
+  }
 }

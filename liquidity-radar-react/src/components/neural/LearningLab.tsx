@@ -22,6 +22,7 @@ import { useSL } from '../../features/selflearn/useSL'
 import { SL_MARKETS, badgeSym, marketLabel, perpPrice } from '../../features/selflearn/perp'
 import { SERVER_BOT, loadBot } from '../../features/selflearn/serverBot'
 import { BinanceAccount } from './BinanceAccount'
+import { OnTrackPanel } from './OnTrack'
 import type { BotEvent, BotTrade } from '../../features/selflearn/serverBot'
 import { useTick } from '../useTick'
 import { CoinPicker } from '../chart/CoinPicker'
@@ -472,6 +473,7 @@ export function LearningLab() {
     <div className="nn-page lab-page">
       <Guard name="Lab header"><LabHead /></Guard>
       <Guard name="Binance account"><BinanceAccount><BotActivity /></BinanceAccount></Guard>
+      <Guard name="On track"><OnTrackPanel /></Guard>
       <Guard name="Models"><Models /></Guard>
       <div className="lab-row">
         <Guard name="Performance"><Performance /></Guard>
