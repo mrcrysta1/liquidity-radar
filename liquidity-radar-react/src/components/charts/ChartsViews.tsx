@@ -28,9 +28,7 @@ import {
   mcSetColumns,
   onMcChange,
 } from '../../features/charts/multiCharts'
-import { toggleReplay } from '../../features/charts/replay'
 import { PanelIndicatorButtons } from '../chart/PanelIndicatorButtons'
-import { chartScreenshot } from '../../features/charts/chartRender'
 import { renderAlerts } from '../../features/alerts/alerts'
 import { openModal, showToast } from '../../utils/dom'
 
@@ -317,19 +315,24 @@ export function ChartIntel() {
 
 export function WorkspaceHead() {
   useBump(onMcChange)
+  useTick(5000, ['multichart'])
   const cols = mcColumns()
+  // The feed state, not a badge that always said "Live".
+  const live = document.getElementById('statusTxt')?.textContent === 'Live'
   return (
     <div className="ws-head">
+      {/* "Comparison grid": the toolbar's layout picker splits the main chart
+          into cells; this is a separate grid of small charts below it. */}
       <span className="ws-title">
         <HomeIcon id="radar" size={20} />
-        Multi-Chart Workspace
+        Comparison Grid
       </span>
       <label className="ws-ctl">
         <HomeIcon id="overview" size={15} />
         <select
           value={cols}
           onChange={(e) => mcSetColumns(Number(e.target.value))}
-          aria-label="Grid layout"
+          aria-label="Comparison grid columns"
         >
           <option value={2}>Grid · 2 columns</option>
           <option value={3}>Grid · 3 columns</option>
@@ -337,9 +340,9 @@ export function WorkspaceHead() {
         </select>
       </label>
       <span className="ws-ctl ws-count">{mcCount()} Charts</span>
-      <span className="ws-live">
+      <span className={'ws-live' + (live ? '' : ' off')}>
         <i />
-        Live
+        {live ? 'Live' : 'Connecting'}
       </span>
       {/* Portals the indicators button into every multi-chart panel header
           (this workspace's and the layouts around the main chart). */}
@@ -348,18 +351,11 @@ export function WorkspaceHead() {
   )
 }
 
-function download(canvas: HTMLCanvasElement, name: string) {
-  canvas.toBlob((b) => {
-    if (!b) return
-    const url = URL.createObjectURL(b)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = name
-    a.click()
-    setTimeout(() => URL.revokeObjectURL(url), 2000)
-  }, 'image/png')
-}
-
+/**
+ * Shortcuts the chart's own toolbar does not have. Replay, Indicators, the
+ * grid-column cycle and PNG export were here too, duplicating the toolbar's
+ * replay / indicators / snapshot buttons and the grid select above.
+ */
 export function QuickTools() {
   const now = useTick(5000, ['multichart'])
   const tools: Array<{ title: string; sub: string; icon: HomeIconId; run: () => void }> = [
@@ -372,7 +368,6 @@ export function QuickTools() {
           ? mcAdd(state.symbol, '1h')
           : showToast('The workspace is full — remove a chart first'),
     },
-    { title: 'Replay', sub: 'Step through history', icon: 'calendar', run: () => toggleReplay() },
     {
       title: 'Alerts',
       sub: 'Price alerts',
@@ -380,42 +375,6 @@ export function QuickTools() {
       run: () => {
         renderAlerts()
         openModal('alModal')
-      },
-    },
-    {
-      title: 'Layouts',
-      sub: 'Cycle 2 · 3 · 4 columns',
-      icon: 'overview',
-      run: () => mcSetColumns(mcColumns() >= 4 ? 2 : mcColumns() + 1),
-    },
-    {
-      title: 'Indicators',
-      sub: 'Add indicators',
-      icon: 'signals',
-      run: () => {
-        document
-          .getElementById('radarChartCard')
-          ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-        ;(document.querySelector('#radarChartCard .ind-open') as HTMLButtonElement | null)?.click()
-      },
-    },
-    {
-      title: 'Export',
-      sub: 'Save the chart as PNG',
-      icon: 'news',
-      run: () => {
-        const c = chartScreenshot()
-        if (c)
-          download(
-            c,
-            baseOf(state.symbol) +
-              '-' +
-              state.tf +
-              '-' +
-              new Date().toISOString().slice(0, 16).replace(':', '') +
-              '.png',
-          )
-        else showToast('Chart is not ready yet')
       },
     },
   ]
@@ -441,7 +400,7 @@ export function QuickTools() {
         <div className="qt-status">
           <span>
             <i className={live ? 'on' : ''} />
-            Market Status <em className={live ? 'up' : 'dn'}>{live ? 'Live' : 'Try'}</em>
+            Market Status <em className={live ? 'up' : 'dn'}>{live ? 'Live' : 'Connecting'}</em>
           </span>
           <small>
             Last update{' '}
