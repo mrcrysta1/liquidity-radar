@@ -46,7 +46,7 @@ const { buildPointFigure, clampPnfReversal, pnfBoxes } = await import(
 const { noteLimitResponse, cooldownLeft, isRateLimited, isBinanceUrl } = await import(
   src('api/rateLimit.ts')
 )
-const { pfmt, nfmt, cfmt } = await import(src('utils/format.ts'))
+const { pfmt, nfmt, cfmt, priceFormatFor } = await import(src('utils/format.ts'))
 const { safeUrl } = await import(src('utils/url.ts'))
 const { newsSimplify } = await import(src('features/news/newsItem.ts'))
 const { mergeNewsFeeds, loadNewsProgressive, hedge, newsDedup } = await import(src('features/news/newsLoad.ts'))
@@ -3426,6 +3426,13 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('timeMap: future bar time', M.logicalToTime(times, 5), 43200 + 14400 * 2)
   eq('timeMap: past bar time', M.logicalToTime(times, -1), -14400)
   eq('timeMap: round trip off-bar', M.logicalToTime(times, M.timeToLogical(times, 57600)), 57600)
+}
+
+// ---- price axis precision: minMove follows the instrument's size ------------------
+{
+  eq('priceFormat: BTC', priceFormatFor(77000), { type: 'price', precision: 2, minMove: 0.01 })
+  eq('priceFormat: PEPE', priceFormatFor(0.00001234), { type: 'price', precision: 8, minMove: 1e-8 })
+  eq('priceFormat: capped at 12', priceFormatFor(1e-15).precision, 12)
 }
 
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')

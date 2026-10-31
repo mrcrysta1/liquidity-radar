@@ -1,7 +1,7 @@
 import * as LightweightCharts from 'lightweight-charts'
 import { venueOf } from '../../utils/coins'
 import { COINS, TICKER_COINS } from '../../constants/market'
-import { fmt, pfmt, nfmt, cfmt, chgHtml, priceDecimals } from '../../utils/format'
+import { fmt, pfmt, nfmt, cfmt, chgHtml, priceDecimals, priceFormatFor } from '../../utils/format'
 import { baseOf, coinMeta } from '../../utils/coins'
 import { $, showToast } from '../../utils/dom'
 import { state } from '../../services/store'
@@ -373,6 +373,17 @@ function applyChartStyle(): void {
   priceSeriesSubs.forEach((f) => f(candleSeries))
 }
 export { renderWhaleBubbles } from './whaleBubbles'
+/**
+ * Give a price series the precision of the instrument it shows. Only re-applied
+ * when the decimals change, so a live tick costs nothing.
+ */
+export function syncPricePrecision(series: Any, price: number | undefined): void {
+  if (!series || price == null || !isFinite(price)) return
+  const pf = priceFormatFor(price)
+  if (series.__lrPrecision === pf.precision) return
+  series.__lrPrecision = pf.precision
+  series.applyOptions({ priceFormat: pf })
+}
 /** A value on the main chart, in at most the instrument's own price precision. */
 function chartPrice(p: number): string {
   const last = state.candles[state.candles.length - 1]
@@ -764,6 +775,7 @@ export function updateChartData(fit = false): void {
   const keep = fit ? null : ts.getVisibleLogicalRange()
   const prevFirst = chartState.firstBarTime as number | undefined
   candleSeries.setData(priceSeriesData(getChartStyle(), candles))
+  syncPricePrecision(candleSeries, candles[candles.length - 1].c)
   if (getChartStyle() === 'baseline') syncBaselineBase(chart, candleSeries, displayCandles)
   rangeShown = isRangeMode() ? candles : []
   renderIndicators(candles)

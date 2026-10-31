@@ -32,6 +32,16 @@ export function priceDecimals(p: number): number {
   return a >= 100 ? 2 : a >= 1 ? 4 : a >= 0.01 ? 5 : a >= 0.0001 ? 6 : tiny || 8
 }
 
+/**
+ * A lightweight-charts priceFormat for values the size of `p`. The axis places
+ * its ticks by minMove — left at the 0.01 default, a coin trading at 0.00001
+ * got an axis with almost no ticks or gridlines.
+ */
+export function priceFormatFor(p: number): { type: 'price'; precision: number; minMove: number } {
+  const precision = Math.min(12, priceDecimals(p))
+  return { type: 'price', precision, minMove: Number((10 ** -precision).toFixed(precision)) }
+}
+
 export function pfmt(p: number): string {
   if (!isFinite(p)) return '—'
   return fmt(p, priceDecimals(p))
