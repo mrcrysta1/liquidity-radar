@@ -301,9 +301,10 @@ export function PinePanel({ store = mainIndicatorStore }: { store?: IndicatorSto
       ) : (
         <div className="pine-msg">
           Pine v5 subset: indicator, strategy (entry/exit/close/order — Strategy Tester), input.*,
-          plot, hline, fill, plotshape/plotchar, alertcondition, var, :=, x[n], if/for/while,
-          functions, tuples, array.*, ta.*, math.*, color.*. Not drawn: bgcolor/barcolor, drawings
-          (label/line/box/table). Not run: request.security.
+          plot, hline, fill (per-bar colours), bgcolor, barcolor, plotshape/plotchar, alertcondition,
+          label/line/box/table, request.security (other intervals and Binance symbols, no lookahead),
+          var, :=, x[n], if/switch (also as expressions), for/for…in/while, break/continue, functions,
+          type + .new, methods, tuples, array.*, ta.*, math.*, color.*, str.*.
         </div>
       )}
 

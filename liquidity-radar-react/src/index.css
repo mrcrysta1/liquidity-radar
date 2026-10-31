@@ -6678,3 +6678,34 @@ html.lr-popout #fsBtn{display:none}
 .r4wl-sort:hover,.r4wl-sort.on{color:var(--txt)}
 .r4wl-sort.on.asc::after{content:' ▲';font-size:8px}
 .r4wl-sort.on.desc::after{content:' ▼';font-size:8px}
+
+/* r4-pine2: Pine table.new() overlay (features/charts/pine/overlay) */
+.pine-tables {
+  position: absolute;
+  pointer-events: none;
+  z-index: 3;
+  overflow: hidden;
+}
+.pine-table {
+  position: absolute;
+  border-collapse: collapse;
+  font-family: -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif;
+  color: var(--txt, #d1d4dc);
+  margin: 6px;
+  max-width: calc(100% - 12px);
+}
+.pine-table td {
+  padding: 3px 6px;
+  white-space: pre;
+  line-height: 1.25;
+}
+.pine-pos-top_left { top: 0; left: 0; }
+.pine-pos-top_center { top: 0; left: 50%; transform: translateX(-50%); }
+.pine-pos-top_right { top: 0; right: 0; }
+.pine-pos-middle_left { top: 50%; left: 0; transform: translateY(-50%); }
+.pine-pos-middle_center { top: 50%; left: 50%; transform: translate(-50%, -50%); }
+.pine-pos-middle_right { top: 50%; right: 0; transform: translateY(-50%); }
+/* Clear of the chart library attribution logo in that corner. */
+.pine-pos-bottom_left { bottom: 30px; left: 0; }
+.pine-pos-bottom_center { bottom: 0; left: 50%; transform: translateX(-50%); }
+.pine-pos-bottom_right { bottom: 0; right: 0; }

@@ -4,6 +4,7 @@ import { keepMainPane } from './chartPalette'
 import { chartSettings, subscribeChartSettings } from './chartSettings'
 import { canvasEdgeColor, settingsSeriesOptions } from './chartSettingsMath'
 import { onPineResult, setPineChart } from './pine/indicator'
+import { onPineBarColors, withPineBarColors } from './pine/barColors'
 import { venueOf } from '../../utils/coins'
 import { COINS, TICKER_COINS } from '../../constants/market'
 import { fmt, pfmt, nfmt, cfmt, chgHtml, priceDecimals, priceFormatFor } from '../../utils/format'
@@ -171,7 +172,7 @@ export function applyChartTheme(): void {
     syncLastPrice(shown[shown.length - 1])
     // Hollow candles carry their colours per bar: re-colour the data too.
     if (getChartStyle() === 'hollow' && shown.length)
-      candleSeries.setData(priceSeriesData('hollow', shown))
+      candleSeries.setData(withPineBarColors(priceSeriesData('hollow', shown), 'hollow'))
   }
   refreshIndicatorColors()
   renderLiveLegend()
@@ -596,6 +597,8 @@ export function initChart(): void {
   subscribeChartSettings(applyChartTheme)
   // Pine scripts run in a worker: draw each result as it arrives.
   onPineResult(() => (isReplayOn() ? updateChartData(false) : scheduleIndicatorRefresh()))
+  // Pine barcolor(): the candles take the scripts' colours (./pine/barColors).
+  onPineBarColors(repaintPriceSeries)
   wireLegendActions()
   initChartToolbar()
   initFullScreen()
@@ -1006,7 +1009,7 @@ export function updateChartData(fit = false): void {
   syncSecondsVisible()
   const keep = fit ? null : ts.getVisibleLogicalRange()
   const prevFirst = chartState.firstBarTime as number | undefined
-  candleSeries.setData(priceSeriesData(getChartStyle(), candles))
+  candleSeries.setData(withPineBarColors(priceSeriesData(getChartStyle(), candles), getChartStyle()))
   syncPricePrecision(candleSeries, candles[candles.length - 1].c)
   if (getChartStyle() === 'baseline') syncBaselineBase(chart, candleSeries, displayCandles)
   rangeShown = isRangeMode() ? candles : []
@@ -1109,6 +1112,22 @@ function pushRangeLive(): void {
   rangeShown = next
 }
 
+/** Re-send the price series (Pine bar colours changed), viewport kept; once per frame. */
+let repaintPending = false
+function repaintPriceSeries(): void {
+  if (repaintPending) return
+  repaintPending = true
+  requestAnimationFrame(() => {
+    repaintPending = false
+    const shown = displayCandles()
+    if (!chart || !candleSeries || isRangeMode() || !shown.length) return
+    const ts = chart.timeScale()
+    const keep = ts.getVisibleLogicalRange()
+    candleSeries.setData(withPineBarColors(priceSeriesData(getChartStyle(), shown), getChartStyle()))
+    if (keep) ts.setVisibleLogicalRange(keep)
+  })
+}
+
 // ---- Wheel zoom keeps the live edge, as on TradingView ----
 // lightweight-charts zooms around the cursor, so zooming out while looking at
 // the newest bars opened a wide empty stretch of future on the right. When
@@ -1191,7 +1210,9 @@ export function updateChartLast(c: Any): void {
     if (lb) c = lb
   } else {
     const shown = displayCandles()
-    candleSeries.update(priceSeriesPoint(getChartStyle(), c, barBefore(shown, c.t), shown))
+    candleSeries.update(
+      withPineBarColors([priceSeriesPoint(getChartStyle(), c, barBefore(shown, c.t), shown)], getChartStyle())[0],
+    )
     // A coin crossing a decimal threshold (1.00, 0.01…) gets its new precision
     // now, not at the next full redraw. Cheap: re-applied only on a change.
     syncPricePrecision(candleSeries, c.c)

@@ -2147,7 +2147,7 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   ok('pine: ta.alma is finite', Number.isFinite(last(r5.plots[3].values)))
   eq('pine: plotchar marks one bar with its char', r5.shapes.map((s) => [s.bar, s.text]), [[5, 'x']])
   const r6 = runPine('indicator("w")\nplot(close)\nfill(1, 2)\nlabel.new(bar_index, high, "x")', c)
-  eq('pine: drawings are ignored with a warning', r6.warnings, ['fill', 'label.new'])
+  eq('pine: a bad fill() warns; label.new now draws', [r6.warnings, r6.drawings.labels.length], [['fill'], 50])
   const r7 = runPine('indicator("wrap")\nx = close +\n     open\nplot(x)', c)
   near('pine: continuation after a trailing operator', last(r7.plots[0].values), last(c).c + last(c).o, 1e-9)
 
@@ -4582,6 +4582,171 @@ alertcondition(close > 12, "Up", "close above 12")`, k)
   eq('synthQuote: empty', SY.synthQuote([]), null)
   eq('ratio: n/a text', typeof SY.RATIO_NA, 'string')
 }
+
+// ---------------------------------------------------------------- r4-pine2: language, drawings, security
+{
+  const { runPine } = await import(src('features/charts/pine/runtime.ts'))
+  const S = await import(src('features/charts/pine/security.ts'))
+  const BC = await import(src('features/charts/pine/barColors.ts'))
+  const PI = await import(src('features/charts/pine/indicator.ts'))
+  const mk = (len, step = 900_000, t0 = 1_700_000_000_000) =>
+    Array.from({ length: len }, (_, i) => {
+      const o = 100 + Math.sin(i / 7) * 10 + i * 0.05
+      const cl = o + Math.cos(i / 3) * 2
+      return { t: t0 + i * step, o, h: Math.max(o, cl) + 1, l: Math.min(o, cl) - 1, c: cl, v: 100 + (i % 9) }
+    })
+  const c = mk(120)
+  const lastV = (p) => p.values[p.values.length - 1]
+  const lc = c[c.length - 1]
+  const up = lc.c > lc.o
+
+  // ---- language ----
+  const L = runPine(`indicator("lang")
+type Pivot
+    float price
+    int bar = 7
+    string kind = "high"
+method double(Pivot p, float k = 2) =>
+    p.price * k
+var Pivot pv = Pivot.new(1.5)
+pv.price := pv.price + 1
+q = Pivot.new(kind = "low", price = 3)
+s = switch
+    close > open => 1
+    => -1
+k = switch s
+    1 => "up"
+    -1 => "down"
+    => "?"
+x = if close > open
+    10
+else if close < open
+    20
+else
+    30
+var a = array.new_float()
+array.push(a, bar_index)
+tot = 0
+for v in a
+    if v % 2 == 1
+        continue
+    tot += 1
+    if tot >= 5
+        break
+cnt = 0
+for [i, v] in a
+    cnt += i
+f(a, b = 2) => a * b
+plot(pv.double(), "m")
+plot(pv.double(k = 10), "m10")
+plot(q.bar, "qbar")
+plot(q.kind == "low" ? 1 : 0, "qkind")
+plot(s, "s")
+plot(k == "up" ? 1 : k == "down" ? -1 : 0, "k")
+plot(x, "x")
+plot(tot, "tot")
+plot(cnt, "cnt")
+plot(f(3), "f3")
+plot(f(3, b = 5), "f35")
+plot(str.length(str.format("{0}|{1,number,#.##}", "ab", 1.2345)), "fmt")`, c)
+  const P = Object.fromEntries(L.plots.map((p) => [p.title, lastV(p)]))
+  eq('pine2: type fields, := and a method with a default', [P.m, P.m10], [(1.5 + 120) * 2, (1.5 + 120) * 10])
+  eq('pine2: Type.new by name with field defaults', [P.qbar, P.qkind], [7, 1])
+  eq('pine2: switch without and with a subject', [P.s, P.k], [up ? 1 : -1, up ? 1 : -1])
+  eq('pine2: if as an expression', P.x, up ? 10 : lc.c < lc.o ? 20 : 30)
+  eq('pine2: for…in with continue/break', P.tot, 5)
+  eq('pine2: for [i, v] in', P.cnt, (119 * 120) / 2)
+  eq('pine2: default and named function arguments', [P.f3, P.f35], [6, 15])
+  eq('pine2: str.format with a number pattern', P.fmt, 'ab|1.23'.length)
+  const bad = (() => {
+    try {
+      runPine('type P\n    float a\np = P.new(1)\nplot(p.b)', c)
+    } catch (e) {
+      return e.message
+    }
+  })()
+  ok('pine2: unknown field is a located error', /Line 4.*no field 'b'/.test(bad || ''), bad)
+
+  // ---- drawings ----
+  const D = runPine(`indicator("d", overlay=true, max_labels_count=3)
+label.new(bar_index, na, "L" + str.tostring(bar_index), yloc=yloc.abovebar, style=label.style_label_down)
+var line ln = na
+var box bx = na
+if barstate.islast
+    ln := line.new(bar_index - 10, low, bar_index, high, extend=extend.right, color=color.red)
+    ln.set_width(3)
+    line.set_y1(ln, 50)
+    bx := box.new(bar_index - 5, high, bar_index + 5, low, bgcolor=color.new(color.green, 80), text="B")
+    tmp = line.new(time, 1, time, 2, xloc=xloc.bar_time)
+    line.delete(tmp)
+var tb = table.new(position.top_right, 3, 3, border_width=1)
+if barstate.islast
+    table.cell(tb, 0, 0, "Close", bgcolor=color.gray)
+    table.cell(tb, 1, 0, str.tostring(close, "#.##"))
+plot(array.size(label.all), "nl")
+plot(line.get_price(ln, bar_index - 5), "lp")`, c)
+  const dr = D.drawings
+  eq('pine2: max_labels_count keeps the newest labels', dr.labels.map((l) => l.text), ['L117', 'L118', 'L119'])
+  eq('pine2: yloc.abovebar sits on the bar high', [dr.labels[2].y, dr.labels[2].t], [lc.h, lc.t])
+  eq('pine2: line.new + set_* (xloc bar_index → time)', [dr.lines.length, dr.lines[0].t1, dr.lines[0].y1, dr.lines[0].width, dr.lines[0].extend], [1, c[109].t, 50, 3, 'right'])
+  eq('pine2: a box past the last bar gets a future time', dr.boxes[0].t2, lc.t + 5 * 900_000)
+  eq('pine2: table trimmed to its filled cells', [dr.tables[0].rows, dr.tables[0].columns, dr.tables[0].cells[0][1].text], [1, 2, String(Math.round(lc.c * 100) / 100)])
+  eq('pine2: label.all counts live labels', lastV(D.plots[0]), 3)
+  near('pine2: line.get_price interpolates', lastV(D.plots[1]), 50 + ((lc.h - 50) * 5) / 10, 1e-9)
+  eq('pine2: drawing calls no longer warn', D.warnings, [])
+
+  // ---- bgcolor / barcolor / fill colours ----
+  const B = runPine(`indicator("b", overlay=true)
+bgcolor(close > open ? color.new(color.green, 90) : na, offset=1)
+barcolor(close > open ? color.lime : na)
+p1 = plot(close)
+p2 = plot(open)
+fill(p1, p2, color = close > open ? color.green : color.red)`, c)
+  const ups = c.map((k) => k.c > k.o)
+  eq('pine2: bgcolor offset shifts a bar right', B.bgcolors.map(Boolean), [false, ...ups.slice(0, -1)])
+  eq('pine2: barcolor per bar, na = chart colour', B.barcolors.map(Boolean), ups)
+  ok('pine2: fill keeps per-bar colours', B.fills[0].colors.length === c.length && B.fills[0].colors.some(Boolean), B.fills[0].colors?.length)
+
+  BC.setPineBarColors(new Map([[c[1].t, '#ff0000']]))
+  const items = [{ time: c[0].t / 1000, open: 1, close: 2 }, { time: c[1].t / 1000, open: 2, close: 1 }]
+  eq('pine2: bar colours applied to candle data only on their bars', BC.withPineBarColors(items, 'candle').map((d) => d.color), [undefined, '#ff0000'])
+  eq('pine2: line styles take no bar colours', BC.withPineBarColors(items, 'line'), items)
+  BC.setPineBarColors(new Map())
+
+  // ---- request.security ----
+  eq('pine2: timeframe spellings', ['60', '1H', 'D', '1D', '3D', 'W', '30S', 'x', ''].map(S.normTf), ['60', '60', 'D', 'D', '3D', 'W', '30S', null, null])
+  eq('pine2: app interval ids', ['60', '240', '45', 'D', 'W', 'M', '1440'].map(S.appTf), ['1h', '4h', '45m', '1d', '1w', '1M', '1d'])
+  eq('pine2: symbols lose the exchange prefix', S.normSymbol('BINANCE:ethusdt'), 'ETHUSDT')
+  // Chart 15m bars, requested 1h bars on the same clock.
+  const ch = Array.from({ length: 10 }, (_, i) => ({ t: i * 15 }))
+  const hr = Array.from({ length: 3 }, (_, j) => ({ t: j * 60 }))
+  eq('pine2: no lookahead — value lands where the hour closes; last bar sees the forming hour', Array.from(S.alignSecurity(ch, hr, 60)), [-1, -1, -1, 0, 0, 0, 0, 1, 1, 2])
+  eq('pine2: lookahead_on — the hour the bar opens in', Array.from(S.alignSecurity(ch, hr, 60, true)), [0, 0, 0, 0, 1, 1, 1, 1, 2, 2])
+  eq('pine2: gaps_on — only where a value first appears', Array.from(S.alignSecurity(ch, hr, 60, false, true)), [-1, -1, -1, 0, -1, -1, -1, 1, -1, 2])
+  const sec = `indicator("s")
+plot(request.security("BINANCE:BTCUSDT", "60", close), "same sym")
+plot(request.security(syminfo.tickerid, "15", close), "chart")
+plot(request.security("ETHUSDT", "60", ta.sma(close, 2)), "eth")`
+  const opt = { ticker: 'BTCUSDT', period: '15' }
+  const r1 = runPine(sec, c, {}, opt)
+  eq('pine2: missing bars are reported, not fetched', r1.securityNeeds.map((x) => x.key), ['BTCUSDT|60', 'ETHUSDT|60'])
+  eq('pine2: the chart\'s own symbol/interval needs nothing', lastV(r1.plots[1]), lc.c)
+  const htf = mk(40, 3_600_000)
+  const r2 = runPine(sec, c, {}, { ...opt, security: { 'BTCUSDT|60': htf, 'ETHUSDT|60': htf } })
+  eq('pine2: nothing missing once the bars are given', r2.securityNeeds, undefined)
+  const v = r2.plots[0].values
+  eq('pine2: hourly close appears at the hour\'s last 15m bar', [v[2], v[3], v[6], v[7]], [null, htf[0].c, htf[0].c, htf[1].c])
+  const e = r2.plots[2].values
+  near('pine2: expression evaluated on the requested bars', e[7], (htf[0].c + htf[1].c) / 2, 1e-9)
+  eq('pine2: no value before the requested series has one', e[3], null)
+
+  // ---- page side: a script that only draws gets a carrier series ----
+  const def = PI.pineLive({ uid: 'r4pi-bg', type: 'pine', script: 'indicator("bg", overlay=true)\nbgcolor(color.red)' }, c)
+  eq('pine2: draw-only script has an invisible carrier output', def.outputs.map((o) => o.key + ':' + o.kind), ['draw:signal'])
+  eq('pine2: its run is kept for the drawing layer', PI.pineDrawState('r4pi-bg').result.bgcolors.length, c.length)
+  PI.forgetPine('r4pi-bg')
+}
+
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')
 if (fails.length) {
   fails.forEach((f) => console.log('  FAIL  ' + f))

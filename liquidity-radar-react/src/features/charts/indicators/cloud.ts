@@ -4,7 +4,8 @@
 // Where the two lines cross between bars, the fill is split at the crossing
 // so each side gets its own colour, as TradingView draws it.
 //
-// Data points: { time, a, b }. A point without both values is whitespace.
+// Data points: { time, a, b, color? }. A point without both values is
+// whitespace; a colour overrides the fill for the step ending at it.
 
 type Any = any
 
@@ -60,6 +61,10 @@ export function cloudView(): Any {
               const x1 = bars[i + 1].x * hr
               const d0 = p0.a - p0.b
               const d1 = p1.a - p1.b
+              // A point's own colour (Pine fill() per bar) shades the step up to it.
+              const own: string | undefined = p1.color
+              const up = own || opts.upColor
+              const down = own || opts.downColor
               if (d0 >= 0 === d1 >= 0) {
                 quad(
                   [
@@ -68,7 +73,7 @@ export function cloudView(): Any {
                     [x1, yb1 * vr],
                     [x0, yb0 * vr],
                   ],
-                  d0 >= 0 ? opts.upColor : opts.downColor,
+                  d0 >= 0 ? up : down,
                 )
                 continue
               }
@@ -82,7 +87,7 @@ export function cloudView(): Any {
                   [xc, yc],
                   [x0, yb0 * vr],
                 ],
-                d0 >= 0 ? opts.upColor : opts.downColor,
+                d0 >= 0 ? up : down,
               )
               quad(
                 [
@@ -90,7 +95,7 @@ export function cloudView(): Any {
                   [x1, ya1 * vr],
                   [x1, yb1 * vr],
                 ],
-                d1 >= 0 ? opts.upColor : opts.downColor,
+                d1 >= 0 ? up : down,
               )
             }
           })
