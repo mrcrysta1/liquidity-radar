@@ -39,19 +39,27 @@ export function hitShape(sh: Shape, x: number, y: number): boolean {
   for (const l of sh.labels) {
     if (!l.box) continue
     const [lo, hi] = labelSpan(l)
-    if (x >= lo && x <= hi && Math.abs(l.y - y) < 12) return true
+    // The box runs from about one font size above the baseline to 4px below.
+    const fs = l.size || 10
+    if (x >= lo && x <= hi && y >= l.y - fs - 2 && y <= l.y + 6) return true
   }
   return false
 }
 
 /**
  * Horizontal extent of a boxed label. The text is measured by eye (no canvas
- * here): about 6.5px a character at the 11px label font, plus the padding.
+ * here): about 0.65 of the font size a character (6.5px at the default 10px,
+ * larger for a text drawing set to a bigger font), plus the padding.
  * A fixed ±60px around x missed the right of long left-aligned labels and
  * caught clicks on empty space to their left.
  */
-export function labelSpan(l: { x: number; text: string; align?: 'left' | 'right' | 'center' }): [number, number] {
-  const w = l.text.length * 6.5 + 12
+export function labelSpan(l: {
+  x: number
+  text: string
+  align?: 'left' | 'right' | 'center'
+  size?: number
+}): [number, number] {
+  const w = l.text.length * ((l.size || 10) * 0.65) + 12
   if (l.align === 'left') return [l.x, l.x + w]
   if (l.align === 'right') return [l.x - w, l.x]
   return [l.x - w / 2, l.x + w / 2]

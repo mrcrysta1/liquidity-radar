@@ -3583,6 +3583,47 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('pine gradient: clamped at the ends', RT.gradientColor(150, 0, 100, '#000000', '#ffffff'), 'rgba(255,255,255,1.00)')
 }
 
+// ---- r3-drawings: angle constraint, stacking, position tool, anchored VWAP --------
+{
+  const O = await import(src('features/charts/drawings/ops.ts'))
+  eq('constrain: nearly flat snaps to horizontal', O.constrainAngle(0, 0, 100, 8), [100, 0])
+  eq('constrain: nearly vertical snaps to vertical', O.constrainAngle(0, 0, 6, -90), [0, -90])
+  const [dx, dy] = O.constrainAngle(0, 0, 50, 46)
+  ok('constrain: near 45 degrees snaps to the diagonal', Math.abs(dx - dy) < 1e-9 && dx > 45, [dx, dy])
+  eq('constrain: no movement stays put', O.constrainAngle(5, 5, 5, 5), [5, 5])
+  const L = ['a', 'b', 'c', 'd']
+  eq('order: bring to front returns the new index', O.reorder(L, 1, 'front'), 3)
+  eq('order: front moves it last (painted on top)', L, ['a', 'c', 'd', 'b'])
+  eq('order: send to back', [O.reorder(L, 2, 'back'), L], [0, ['d', 'a', 'c', 'b']])
+  eq('order: out of range is left alone', O.reorder(L, 9, 'front'), 9)
+  const orig = { type: 'trend', color: '#fff', points: [{ time: 1, price: 2 }], locked: true, hidden: true }
+  const copy = O.cloneDrawing(orig)
+  copy.points[0].price = 9
+  eq('clone: deep copy, never locked or hidden', [copy.locked, copy.hidden, orig.points[0].price, copy.type], [undefined, undefined, 2, 'trend'])
+  const st = O.positionStats('long', 100, 95, 110, 104, 10000, 1)
+  eq('position: quantity risks 1% at the stop', st.qty, 20)
+  eq('position: amounts and R:R', [st.riskAmt, st.rewardAmt, st.rr], [100, 200, 2])
+  eq('position: distances and % to target / stop', [st.targetDist, st.targetPct, st.stopDist, st.stopPct], [10, 10, -5, -5])
+  eq('position: open P&L at the last price', [st.pnl, st.pnlPct], [80, 0.8])
+  const sh = O.positionStats('short', 100, 105, 90, 104, 10000, 1)
+  eq('position: a short loses as price rises', [sh.qty, sh.pnl], [20, -80])
+  eq('position: no last price, no P&L', O.positionStats('long', 100, 95, 110, null).pnl, null)
+  eq('position: stop on the entry sizes nothing', O.positionStats('long', 100, 100, 110, 101).qty, 0)
+  const P = (e, s, t) => [{ time: 1, price: e }, { time: 2, price: s }, { time: 3, price: t }]
+  eq('sides: a long with the stop above entry is mirrored', O.fixPositionSides('long', P(100, 104, 110)).map((p) => p.price), [100, 96, 110])
+  eq('sides: a short with stop and target swapped', O.fixPositionSides('short', P(100, 95, 106)).map((p) => p.price), [100, 105, 94])
+  eq('sides: a correct long is untouched', O.fixPositionSides('long', P(100, 95, 110)).map((p) => p.price), [100, 95, 110])
+  eq('sides: dragging clamps just short of the entry', O.fixPositionSides('long', P(100, 104, 110), true)[1].price, 99.95)
+  eq('sides: other tools pass through', O.fixPositionSides('trend', P(1, 2, 3)).map((p) => p.price), [1, 2, 3])
+  const bars = [
+    { h: 12, l: 9, c: 9, v: 2 },
+    { h: 21, l: 18, c: 21, v: 0 },
+    { h: 33, l: 27, c: 30, v: 1 },
+  ]
+  eq('avwap: cumulative typical price x volume', O.anchoredVwap(bars), [10, 10, 50 / 3])
+  eq('avwap: no volume yet falls back to the typical price', O.anchoredVwap([{ h: 3, l: 1, c: 2, v: 0 }]), [2])
+}
+
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')
 if (fails.length) {
   fails.forEach((f) => console.log('  FAIL  ' + f))
