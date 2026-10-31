@@ -7,8 +7,11 @@
 // of where the user is.
 import { state } from '../../services/store'
 import type { CandleFlat } from '../../services/market'
+import { countAtOrBefore, countFromDate, randomCount } from './replayMath'
 
-export const SPEEDS = [0.5, 1, 2, 5, 10]
+export const SPEEDS = [0.25, 0.5, 1, 2, 3, 5, 10, 20]
+/** Bars per step button press — TradingView's "step" sizes. */
+export const STEP_SIZES = [1, 5, 10, 20, 50]
 /** Replay opens here: far enough back to have something to play forward into. */
 const START_FRACTION = 0.6
 
@@ -20,9 +23,24 @@ interface ReplayState {
   at: number
   playing: boolean
   speed: number
+  /**
+   * Picking the start bar: the full series is drawn and the next chart click
+   * cuts it there (TradingView's "Select bar"). The default start stays in
+   * idx, so any transport action before a click just starts from it.
+   */
+  selecting: boolean
+  stepBars: number
 }
 
-const rs: ReplayState = { on: false, idx: 0, at: 0, playing: false, speed: 1 }
+const rs: ReplayState = {
+  on: false,
+  idx: 0,
+  at: 0,
+  playing: false,
+  speed: 1,
+  selecting: false,
+  stepBars: 1,
+}
 
 /** Set the position by count, remembering it as the last visible bar's time. */
 function setIdx(i: number): void {
@@ -38,14 +56,7 @@ function setIdx(i: number): void {
 function syncIdx(): void {
   const a = state.candles
   if (!rs.on || !rs.at || a[rs.idx - 1]?.t === rs.at) return
-  let lo = 0
-  let hi = a.length
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1
-    if (a[mid].t <= rs.at) lo = mid + 1
-    else hi = mid
-  }
-  rs.idx = Math.max(1, lo)
+  rs.idx = Math.max(1, countAtOrBefore(a, rs.at))
 }
 let timer: ReturnType<typeof setInterval> | null = null
 
@@ -81,6 +92,8 @@ export function replayInfo(): {
   total: number
   playing: boolean
   speed: number
+  selecting: boolean
+  stepBars: number
   at: CandleFlat | null
 } {
   syncIdx()
@@ -92,13 +105,15 @@ export function replayInfo(): {
     total,
     playing: rs.playing,
     speed: rs.speed,
+    selecting: rs.selecting,
+    stepBars: rs.stepBars,
     at: rs.on && idx > 0 ? state.candles[idx - 1] : null,
   }
 }
 
 /** The candles the chart should draw right now. */
 export function visibleCandles(): CandleFlat[] {
-  if (!rs.on) return state.candles
+  if (!rs.on || rs.selecting) return state.candles
   syncIdx()
   return state.candles.slice(0, Math.max(1, Math.min(rs.idx, state.candles.length)))
 }
@@ -125,47 +140,125 @@ function startTimer(): void {
 }
 
 export function toggleReplay(): void {
-  rs.on = !rs.on
+  if (rs.on) return exitReplay()
+  rs.on = true
   rs.playing = false
   stopTimer()
-  if (rs.on) {
-    const n = state.candles.length
-    setIdx(Math.max(1, Math.min(n, Math.floor(n * START_FRACTION))))
-  }
-  emit(true, true)
+  const n = state.candles.length
+  setIdx(Math.max(1, Math.min(n, Math.floor(n * START_FRACTION))))
+  // Like TradingView, replay opens by asking for the start bar. The chart
+  // still shows every bar while picking, so the view is left where it is.
+  rs.selecting = true
+  emit(true, false)
 }
 
 export function exitReplay(): void {
   if (!rs.on) return
+  const wasSelecting = rs.selecting
   rs.on = false
   rs.playing = false
+  rs.selecting = false
   stopTimer()
+  // Leaving the picker draws the same full series: no refit needed.
+  emit(true, !wasSelecting)
+}
+
+export function isSelecting(): boolean {
+  return rs.on && rs.selecting
+}
+
+/** Re-open the start-bar picker (turning replay on if it is off). */
+export function startSelect(): void {
+  if (!rs.on) return toggleReplay()
+  rs.playing = false
+  stopTimer()
+  rs.selecting = true
+  emit(true, false)
+}
+
+/**
+ * Leave the picker before a transport action. The series shrinks from all
+ * bars to the replay slice, so the view is refitted onto the cut — otherwise
+ * it could be left over bars that no longer exist.
+ */
+function endSelect(): boolean {
+  if (!rs.selecting) return false
+  rs.selecting = false
+  return true
+}
+
+/**
+ * Start from the bar opening at `t` (ms) — a click on the chart. The view is
+ * kept: the clicked bar stays under the cursor and the future to its right
+ * just disappears, as on TradingView.
+ */
+export function selectBarAt(t: number): void {
+  if (!rs.on || !state.candles.length) return
+  rs.selecting = false
+  setIdx(Math.max(1, countAtOrBefore(state.candles, t)))
+  emit()
+}
+
+/** Start from a calendar date (ms). False when it lies outside the loaded bars. */
+export function selectDate(t: number): boolean {
+  const a = state.candles
+  if (!a.length || !Number.isFinite(t)) return false
+  if (!rs.on) toggleReplay()
+  rs.playing = false
+  stopTimer()
+  rs.selecting = false
+  setIdx(countFromDate(a, t))
+  emit(true, true)
+  return t >= a[0].t && t <= a[a.length - 1].t
+}
+
+/** Start from a random bar, away from both ends of the loaded history. */
+export function randomBar(): void {
+  if (!state.candles.length) return
+  if (!rs.on) toggleReplay()
+  rs.playing = false
+  stopTimer()
+  rs.selecting = false
+  setIdx(randomCount(state.candles.length, Math.random))
   emit(true, true)
 }
 
 export function playPause(): void {
   if (!rs.on) return
+  const refit = endSelect()
   syncIdx()
   if (rs.idx >= state.candles.length) setIdx(Math.max(1, Math.floor(state.candles.length * 0.5)))
   rs.playing = !rs.playing
   if (rs.playing) startTimer()
   else stopTimer()
-  emit()
+  emit(true, refit)
 }
 
 export function step(delta: number): void {
   if (!rs.on) return
   rs.playing = false
   stopTimer()
+  const refit = endSelect()
   syncIdx()
   setIdx(Math.max(1, Math.min(state.candles.length, rs.idx + delta)))
-  emit()
+  emit(true, refit)
+}
+
+/** One press of the step buttons: the chosen step size, either way. */
+export function stepBy(dir: 1 | -1): void {
+  step(dir * rs.stepBars)
+}
+
+export function setStepBars(n: number): void {
+  rs.stepBars = STEP_SIZES.indexOf(n) === -1 ? 1 : n
+  emit(false)
 }
 
 export function seek(idx: number): void {
   if (!rs.on) return
+  const refit = endSelect()
   setIdx(Math.max(1, Math.min(state.candles.length, Math.round(idx))))
-  emit()
+  emit(true, refit)
 }
 
 export function setSpeed(s: number): void {
@@ -176,6 +269,7 @@ export function setSpeed(s: number): void {
 
 export function restart(): void {
   if (!rs.on) return
+  const refit = endSelect()
   setIdx(1)
-  emit()
+  emit(true, refit)
 }
