@@ -26,6 +26,7 @@ import { state } from '../../services/store'
 import { md, mdTf, mdVal } from '../../services/market'
 import { storageGet, storageSet } from '../../services/storage'
 import { chartTheme, mapCandle } from '../charts/chartRender'
+import { addBrandMark } from '../charts/brandMark'
 
 type Any = any
 
@@ -707,7 +708,7 @@ function renderSigAnaChart(candles: Any[], sym: string): void {
     const c = LightweightCharts.createChart(el, {
       width: el.clientWidth,
       height: 300,
-      layout: { background: { type: LightweightCharts.ColorType.Solid, color: th.bg }, textStyle: { color: th.txt } } as Any,
+      layout: { background: { type: LightweightCharts.ColorType.Solid, color: th.bg }, textStyle: { color: th.txt }, attributionLogo: false } as Any,
       grid: { vertLines: { color: th.grid }, horzLines: { color: th.grid } },
       crosshair: { mode: 0 },
       rightPriceScale: { borderColor: th.border },
@@ -715,6 +716,7 @@ function renderSigAnaChart(candles: Any[], sym: string): void {
     })
     const cs = c.addSeries(LightweightCharts.CandlestickSeries, { upColor: th.up, downColor: th.dn, borderVisible: false, wickUpColor: th.up, wickDownColor: th.dn })
     cs.setData(candles.map(mapCandle))
+    addBrandMark(el)
     c.timeScale().fitContent()
     sigAnaObserver = new ResizeObserver(() => { if (el.clientWidth) c.applyOptions({ width: el.clientWidth }) })
     sigAnaObserver.observe(el)

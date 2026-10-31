@@ -6509,3 +6509,9 @@ dialog.cset-dialog[open],dialog.kbd-dialog[open]{position:fixed;inset:0;margin:a
 .st-id{color:var(--primary)}
 @media (max-width:900px){.st-panel{left:8px;right:8px;bottom:8px;max-height:60vh}}
 @media (max-width:640px){.st-title{display:none}}
+
+/* r4-brand: our radar mark where the TradingView logo was (features/charts/brandMark.ts) */
+.chart-brand{position:absolute;left:10px;bottom:36px;width:26px;height:26px;z-index:3;opacity:.7;pointer-events:none;user-select:none;filter:drop-shadow(0 1px 2px rgba(0,0,0,.35))}
+.rc-body .chart-brand,.mc-body .chart-brand{width:20px;height:20px;left:8px;bottom:32px;opacity:.6}
+@media (max-width:640px){.chart-brand{width:20px;height:20px;bottom:32px}}
+.sidenav-foot a{color:inherit;text-decoration:underline;text-underline-offset:2px}

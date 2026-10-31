@@ -423,6 +423,13 @@ export function Sidebar() {
         <div className="sidenav-foot">
           <span>Liquidity Radar v5.0</span>
           <small>Powered by Zain</small>
+          {/* Required by the charting library's licence: our charts hide its logo (features/charts/brandMark). */}
+          <small>
+            Charts by{' '}
+            <a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer">
+              TradingView
+            </a>
+          </small>
         </div>
       </aside>
     </>
