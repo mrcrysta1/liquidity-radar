@@ -13,6 +13,7 @@ import type { ReactNode } from 'react'
 import { state } from '../../services/store'
 import { COINS, HOT_LIST } from '../../constants/market'
 import { instrumentOf, isInstrument } from '../../constants/instruments'
+import { isSynthetic, RATIO_NA } from '../../services/syntheticSymbol'
 import { baseOf, coinMeta } from '../../utils/coins'
 import { cfmt, pfmt } from '../../utils/format'
 import { calcMACD, calcRSI, emaArr } from '../../utils/indicators'
@@ -281,7 +282,7 @@ export function AnalysisStats() {
       </div>
       <div className="card an-stat">
         <span className="an-si c"><Ico d={I.fund} /></span>
-        <span><small>Funding Rate</small><b className={rate == null ? '' : rate >= 0 ? 'up' : 'dn'}>{rate == null ? '—' : (rate * 100).toFixed(4) + '%'}</b><em>{left != null ? 'next in ' + hms(left) : isInstrument(sym) ? 'no perpetual' : 'loading'}</em></span>
+        <span><small>Funding Rate</small><b className={rate == null ? '' : rate >= 0 ? 'up' : 'dn'}>{rate == null ? '—' : (rate * 100).toFixed(4) + '%'}</b><em>{left != null ? 'next in ' + hms(left) : isSynthetic(sym) ? 'n/a for ratios' : isInstrument(sym) ? 'no perpetual' : 'loading'}</em></span>
       </div>
       <div className="card an-stat an-sent">
         <span><small>Market Sentiment</small><em>{fg?.value_classification ?? 'Fear & Greed'}</em></span>
@@ -352,7 +353,7 @@ export function OrderFlow({ tab = 'analysis', id = 'anFlow' }: { tab?: string; i
   const sym = state.symbol
   const [flow, setFlow] = useState<{ sym: string; f: Flow } | null>(null)
   useEffect(() => {
-    if (isInstrument(sym)) return
+    if (isInstrument(sym) || isSynthetic(sym)) return
     let alive = true
     const load = () => {
       if (getActiveTab() !== tab) return
@@ -396,7 +397,7 @@ export function OrderFlow({ tab = 'analysis', id = 'anFlow' }: { tab?: string; i
   return (
     <Card title="Order Flow" icon={I.flow} id={id} className="an-of" right={<span className="an-live on">Live</span>}>
       <small className="an-sub">Buy vs sell volume · last {f ? f.n.toLocaleString() + ' trades' + (f.mins ? ` (${f.mins < 1 ? '<1' : Math.round(f.mins)} min)` : '') : '1,000 trades'}</small>
-      {isInstrument(sym) ? <p className="an-empty">No public trade tape for {sym}.</p> : !f ? <p className="an-empty">Loading trades…</p> : (
+      {isSynthetic(sym) ? <p className="an-empty">{RATIO_NA}.</p> : isInstrument(sym) ? <p className="an-empty">No public trade tape for {sym}.</p> : !f ? <p className="an-empty">Loading trades…</p> : (
         <div className="an-ofb">
           <svg width="128" height="128" viewBox="0 0 128 128" aria-hidden="true">
             <circle cx="64" cy="64" r={r} fill="none" stroke="var(--red)" strokeWidth="12" />

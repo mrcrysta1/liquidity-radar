@@ -7,6 +7,7 @@ import { esc, pfmt, cfmt, nfmt, timeAgo, chgHtml, sigOf } from '../../utils/form
 import { baseOf } from '../../utils/coins'
 import { $ } from '../../utils/dom'
 import { state } from '../../services/store'
+import { isSynthetic, RATIO_NA } from '../../services/syntheticSymbol'
 
 interface FngData { value: string; classification: string }
 
@@ -187,6 +188,11 @@ export function renderFutures(): void {
 
 export function renderWhales(): void {
   const list = state.whales as WhalePrint[]
+  if (isSynthetic(state.symbol)) {
+    $('whaleCount')!.textContent = 'RATIO'
+    $('whaleList')!.innerHTML = '<div class="fc-note">' + RATIO_NA + ' — a ratio has no trade tape.</div>'
+    return
+  }
   $('whaleCount')!.textContent = list.length + ' BLOCK TRADES · ≥ $50,000'
   if (!list.length) { $('whaleList')!.innerHTML = '<div class="fc-note">No block trades ≥ $50k in the recent tape. Quiet book.</div>'; return }
   $('whaleList')!.innerHTML = list.slice(0, 24).map((w) => {

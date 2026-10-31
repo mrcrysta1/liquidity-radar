@@ -46,6 +46,7 @@ import { subscribeReversalSettings } from './series/reversalSettings'
 import { tfDef } from '../../services/timeframe'
 import { mountCloseTimer, updateCloseTimer } from './closeTimer'
 import { getTimeframe, tfLabel } from './timeframes'
+import { synthTicker } from '../../services/synthQuote'
 import { fmtChartDate, isDailyTf } from './timezone'
 import {
   chartPalette,
@@ -2539,7 +2540,8 @@ function redrawDrawings(includePreview?: Any): void {
 
 // ---- Hero / overview renders ----
 export function renderHero(): void {
-  const t = state.tickers[state.symbol] as Any
+  // A ratio / spread has no ticker: its quote comes from its own candles.
+  const t = (state.tickers[state.symbol] ?? synthTicker()) as Any
   const meta = coinMeta(state.symbol)
   $('heroIcon')!.textContent = meta.icon
   $('heroIcon')!.style.borderColor = meta.color + '55'
@@ -2573,7 +2575,8 @@ export function renderHero(): void {
     setTimeout(() => el.classList.remove('flash-up', 'flash-down'), 450)
   }
   el.dataset.p = cur
-  $('heroChg')!.innerHTML = chgHtml(t.pct) + ' <span style="color:var(--dim)">24h</span>'
+  $('heroChg')!.innerHTML =
+    t.pct == null ? '' : chgHtml(t.pct) + ' <span style="color:var(--dim)">24h</span>'
   $('heroUpdated')!.textContent = '· ' + new Date().toLocaleTimeString()
   // An instrument priced by Yahoo reports no trade count, and FX and indices
   // report no volume at all. Printing a formatted undefined — or a confident
@@ -2673,6 +2676,17 @@ export function chartScreenshot(): HTMLCanvasElement | null {
     ctx.textAlign = 'right'
     ctx.fillText(when + '  ·  Liquidity Radar', out.width - Math.round(10 * kx), headH / 2)
     return out
+  } catch {
+    return null
+  }
+}
+
+/** The time span the main chart shows, in UTC seconds (the data export). */
+export function chartVisibleRange(): { from: number; to: number } | null {
+  try {
+    const r = chart?.timeScale().getVisibleRange()
+    const n = (x: Any): number => Number(typeof x === 'object' && x ? x.t : x)
+    return r && isFinite(n(r.from)) && isFinite(n(r.to)) ? { from: n(r.from), to: n(r.to) } : null
   } catch {
     return null
   }
