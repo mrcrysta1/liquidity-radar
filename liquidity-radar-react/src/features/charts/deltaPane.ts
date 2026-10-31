@@ -82,6 +82,7 @@ function ensureSeries(): void {
     },
     chart.panes().length,
   )
+  freshPane = true
   drawn = { first: 0, last: 0 }
 }
 
@@ -95,8 +96,11 @@ function removeSeries(): void {
   series = null
 }
 
+/** Set when the strip's pane was just created: its size is set once, so a divider drag sticks. */
+let freshPane = false
 function layout(hasPane: boolean, _otherPanes: number): void {
-  if (!chart || !hasPane || !series) return
+  if (!chart || !hasPane || !series || !freshPane) return
+  freshPane = false
   // A thin strip: half the height of an indicator pane.
   try {
     series.getPane().setStretchFactor(0.5)
@@ -123,7 +127,7 @@ export function renderDeltaPane(candles: CandleFlat[], otherPaneCount = 0): void
   ensureSeries()
   const bars = getDeltaBars()
   const byT = new Map(bars.map((b) => [b.t, b]))
-  const data = candles.map((c) => deltaPoint(c.t, byT.get(c.t)?.delta ?? 0))
+  const data = candles.map((c) => deltaPoint(c.t, barDelta(c, byT.get(c.t)?.delta)))
   series.setData(data)
   drawn = { first: candles[0].t, last: candles[candles.length - 1].t }
   layout(true, otherPaneCount)
@@ -134,6 +138,17 @@ export function blankDeltaPane(): void {
   series?.setData([])
   // The next draw is a full one: updateDeltaLast must not append to nothing.
   drawn = { first: 0, last: 0 }
+}
+
+/**
+ * Buy minus sell volume for a bar. Binance klines carry the taker-buy volume,
+ * which gives the whole history (2 × tb − v); the trade tape only counts from
+ * page load, so the pane used to show one bar and a flat line. The tape is
+ * the fallback for feeds without it.
+ */
+function barDelta(c: CandleFlat, live: number | undefined): number {
+  if (c.tb != null && Number.isFinite(c.tb)) return 2 * c.tb - c.v
+  return live ?? 0
 }
 
 const deltaPoint = (t: number, v: number) => ({
@@ -158,15 +173,15 @@ export function updateDeltaLast(candles: CandleFlat[], otherPaneCount = 0): void
   }
   const t = candles[n - 1].t
   const bars = getDeltaBars()
-  let v = 0
+  let live: number | undefined
   for (let i = bars.length - 1; i >= 0; i--) {
     if (bars[i].t === t) {
-      v = bars[i].delta
+      live = bars[i].delta
       break
     }
     if (bars[i].t < t) break
   }
-  series.update(deltaPoint(t, v))
+  series.update(deltaPoint(t, barDelta(candles[n - 1], live)))
   drawn.last = t
 }
 

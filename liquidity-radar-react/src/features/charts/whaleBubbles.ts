@@ -18,7 +18,7 @@ import { mainPaneHeight } from './chartPalette'
 import { displayCandles } from './series/rangeView'
 import { getWhaleView, onWhaleFlowChange, syncWhaleSymbol } from '../whales/whaleFlow'
 import type { WhaleOrder } from '../whales/whaleFlow'
-import { bubbleRadius, gapLabelSpot } from '../whales/whaleMath'
+import { bubbleRadius } from '../whales/whaleMath'
 import { fmtChartDate } from './timezone'
 
 
@@ -200,16 +200,9 @@ function paintCoverage(
       ctx.stroke()
       ctx.setLineDash([])
     }
-    const spot = gapLabelSpot({ left: l, width: w, edge: x1 < paneW, paneH, loading })
-    if (spot) {
-      ctx.fillStyle = 'rgba(143,163,191,.75)'
-      ctx.textAlign = spot.align
-      ctx.fillText(
-        spot.align === 'right' ? '◂ no whale data scanned' : 'no whale data scanned',
-        spot.x,
-        spot.y,
-      )
-    }
+    // The shading alone marks the gap: a "no whale data scanned" caption on
+    // the candles read as debug output and was captured in every snapshot.
+    // The whale legend chip carries the coverage status in words.
   }
   ctx.restore()
 }

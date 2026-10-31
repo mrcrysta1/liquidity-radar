@@ -306,7 +306,7 @@ export function connectStreams(cb: StreamsCallbacks): void {
   make('kl', WS + s + '@kline_' + def.base, function (d: Any) {
     const k = d.k
     const b = sb()
-    const base = { t: k.t, o: +k.o + b, h: +k.h + b, l: +k.l + b, c: +k.c + b, v: +k.v }
+    const base = { t: k.t, o: +k.o + b, h: +k.h + b, l: +k.l + b, c: +k.c + b, v: +k.v, tb: +k.V }
     if (!mdVal.candle(base)) return
     const folder = mainFolder.key === bufKey ? mainFolder.folder : null
     let c = def.factor > 1 ? (folder ? folder.push(base) : null) : base

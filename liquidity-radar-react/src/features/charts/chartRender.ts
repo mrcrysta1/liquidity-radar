@@ -15,6 +15,7 @@ import {
   blankIndicators,
   indicatorLegend,
   indicatorPaneCount,
+  indicatorPaneOf,
   refreshIndicatorColors,
   renderIndicators,
 } from './indicators/render'
@@ -771,7 +772,63 @@ const REMOVE =
   '<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M6 6 18 18M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
 function buildIndicatorLegend(at?: number): string {
   const rows = indicatorLegend(displayCandles(), at)
-  if (!rows.length) return ''
+  // Indicators in a pane of their own get their values in that pane, as on
+  // TradingView; only the price pane's overlays stay in the main legend.
+  const byPane = new Map<number, typeof rows>()
+  const main: typeof rows = []
+  rows.forEach((r) => {
+    const pane = r.hidden ? 0 : indicatorPaneOf(r.uid)
+    if (!pane) main.push(r)
+    else byPane.set(pane, [...(byPane.get(pane) || []), r])
+  })
+  renderPaneLegends(byPane)
+  if (!main.length) return ''
+  return legendRowsHtml(main)
+}
+/** Legends at the top-left of each indicator pane (lightweight-charts v5 panes). */
+let paneLegendHtml = ''
+function renderPaneLegends(byPane: Map<number, Parameters<typeof legendRowsHtml>[0]>): void {
+  const wrap = $('chartWrap')
+  if (!wrap) return
+  let box = $('paneLegends')
+  if (!box) {
+    box = document.createElement('div')
+    box.id = 'paneLegends'
+    box.className = 'pane-legends'
+    wrap.appendChild(box)
+    wireLegendActions(box)
+  }
+  const html = [...byPane.entries()]
+    .map(([pane, rows]) => '<div class="legend pane-legend" data-pane="' + pane + '">' + legendRowsHtml(rows) + '</div>')
+    .join('')
+  if (html !== paneLegendHtml) {
+    box.innerHTML = html
+    paneLegendHtml = html
+  }
+  placePaneLegends()
+}
+/** Keep each pane legend at its pane's top edge (panes are resized by drag). */
+function placePaneLegends(): void {
+  const box = $('paneLegends')
+  if (!box || !chart) return
+  let tops: number[] = []
+  try {
+    let y = 0
+    tops = chart.panes().map((p: Any) => {
+      const top = y
+      y += p.getHeight() + 1
+      return top
+    })
+  } catch {
+    return
+  }
+  box.querySelectorAll<HTMLElement>('.pane-legend').forEach((el) => {
+    const top = tops.at(Number(el.dataset.pane))
+    el.style.display = top == null ? 'none' : ''
+    if (top != null) el.style.top = top + 4 + 'px'
+  })
+}
+function legendRowsHtml(rows: ReturnType<typeof indicatorLegend>): string {
   return rows
     .map(
       (r) =>
@@ -807,8 +864,7 @@ function buildIndicatorLegend(at?: number): string {
     .join('')
 }
 /** The legend's eye and remove buttons drive the indicator store. */
-function wireLegendActions(): void {
-  const el = $('legendOHLC')
+function wireLegendActions(el: HTMLElement | null = $('legendOHLC')): void {
   if (!el) return
   el.addEventListener('click', (e) => {
     const btn = (e.target as HTMLElement).closest('button[data-act]') as HTMLElement | null
@@ -2081,6 +2137,7 @@ function publishSelection(): void {
 }
 
 function redrawDrawings(includePreview?: Any): void {
+  placePaneLegends()
   renderVolumeProfile(visibleCandles())
   renderWhaleBubbles()
   const cv = chartState.drawCanvas
@@ -2246,22 +2303,44 @@ export function chartScreenshot(): HTMLCanvasElement | null {
     const el = $('chart')
     const wrap = $('chartWrap')
     if (!el || !wrap || !el.clientWidth) return shot
-    const out = document.createElement('canvas')
-    out.width = shot.width
-    out.height = shot.height
-    const ctx = out.getContext('2d')
-    if (!ctx) return shot
-    ctx.drawImage(shot, 0, 0)
     // The screenshot is in device pixels; overlays are measured in CSS pixels.
     const cr = el.getBoundingClientRect()
     const kx = shot.width / cr.width
     const ky = shot.height / cr.height
+    // A header strip, as TradingView snapshots carry: symbol, interval,
+    // exchange, the last bar's OHLC and when it was taken.
+    const headH = Math.round(30 * ky)
+    const out = document.createElement('canvas')
+    out.width = shot.width
+    out.height = shot.height + headH
+    const ctx = out.getContext('2d')
+    if (!ctx) return shot
+    const pal = chartPalette()
+    ctx.fillStyle = pal.bg
+    ctx.fillRect(0, 0, out.width, headH)
+    ctx.drawImage(shot, 0, headH)
     wrap.querySelectorAll('canvas').forEach((c) => {
       if (el.contains(c) || !c.width || !c.height) return
       const r = c.getBoundingClientRect()
       if (!r.width || !r.height || getComputedStyle(c).display === 'none') return
-      ctx.drawImage(c, (r.left - cr.left) * kx, (r.top - cr.top) * ky, r.width * kx, r.height * ky)
+      ctx.drawImage(c, (r.left - cr.left) * kx, headH + (r.top - cr.top) * ky, r.width * kx, r.height * ky)
     })
+    const lcs = legendCandles(getChartStyle(), displayCandles())
+    const lc = lcs[lcs.length - 1]
+    const title =
+      legendSymbol(state.symbol) + ' · ' + tfLabel(getTimeframe()) + ' · ' + legendExchange(state.symbol)
+    const ohlc = lc
+      ? '   O ' + chartPrice(lc.o) + '  H ' + chartPrice(lc.h) + '  L ' + chartPrice(lc.l) + '  C ' + chartPrice(lc.c)
+      : ''
+    const when = fmtChartDate(Date.now(), { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    ctx.textBaseline = 'middle'
+    ctx.font = '600 ' + Math.round(13 * ky) + 'px ' + "-apple-system, 'Trebuchet MS', Roboto, sans-serif"
+    ctx.fillStyle = isLightTheme() ? '#131722' : '#D1D4DC'
+    ctx.textAlign = 'left'
+    ctx.fillText(title + ohlc, Math.round(10 * kx), headH / 2)
+    ctx.font = Math.round(11 * ky) + 'px ' + "-apple-system, 'Trebuchet MS', Roboto, sans-serif"
+    ctx.textAlign = 'right'
+    ctx.fillText(when + '  ·  Liquidity Radar', out.width - Math.round(10 * kx), headH / 2)
     return out
   } catch {
     return null

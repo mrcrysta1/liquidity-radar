@@ -78,7 +78,8 @@ function useMenuKeys(open: boolean, menuRef: RefObject<HTMLElement | null>) {
   useEffect(() => {
     if (!open) return
     const on = menuRef.current?.querySelector<HTMLElement>('[aria-checked="true"]')
-    ;(on || menuRef.current?.querySelector<HTMLElement>('button'))?.focus()
+    // preventScroll: focusing the checked zone scrolled the whole page.
+    ;(on || menuRef.current?.querySelector<HTMLElement>('button'))?.focus({ preventScroll: true })
   }, [open, menuRef])
   return (e: ReactKeyboardEvent) => {
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Home' && e.key !== 'End') return
@@ -92,7 +93,8 @@ function useMenuKeys(open: boolean, menuRef: RefObject<HTMLElement | null>) {
         : e.key === 'End'
           ? items.length - 1
           : (i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length
-    items[next].focus()
+    items[next].focus({ preventScroll: true })
+    items[next].scrollIntoView({ block: 'nearest' })
   }
 }
 

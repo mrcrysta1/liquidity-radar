@@ -79,6 +79,8 @@ export interface IndicatorRenderer {
   clear(): void
   blank(): void
   paneCount(): number
+  /** The pane (0 = price) an indicator instance draws in. */
+  paneOf(uid: string): number
 }
 
 /** The fraction of the chart's height `n` indicator panes take at the bottom. */
@@ -443,12 +445,24 @@ export function createIndicatorRenderer(
       held.delete(key)
     })
 
+    // Pane sizes are set only when panes come or go: re-applying them on
+    // every refresh (four times a second) undid a divider drag at once.
     if (panes.join('|') !== paneOrder.join('|')) {
       paneOrder = panes
       layoutScales()
-    } else if (panes.length) {
-      layoutScales()
     }
+  }
+
+  function paneOf(uid: string): number {
+    for (const [key, h] of held) {
+      if (!key.startsWith(uid + '.') || h.scaleId === 'right') continue
+      try {
+        return h.series.getPane().paneIndex()
+      } catch (e) {
+        return 0
+      }
+    }
+    return 0
   }
 
   /** Volume-scale indicators; everything else is a price or an oscillator. */
@@ -519,6 +533,7 @@ export function createIndicatorRenderer(
     clear: clearIndicators,
     blank: blankIndicators,
     paneCount: indicatorPaneCount,
+    paneOf,
   }
 }
 
@@ -547,3 +562,5 @@ export const clearIndicators = (): void => main.clear()
 export const blankIndicators = (): void => main.blank()
 /** How many indicator panes currently occupy the bottom of the main chart. */
 export const indicatorPaneCount = (): number => main.paneCount()
+/** The pane (0 = price) a main-chart indicator draws in. */
+export const indicatorPaneOf = (uid: string): number => main.paneOf(uid)

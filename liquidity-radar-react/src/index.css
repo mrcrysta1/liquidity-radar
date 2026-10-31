@@ -6203,3 +6203,51 @@ html[data-palette="glass"] .acct-card{background:linear-gradient(145deg,rgba(255
 .cset-dialog footer button{padding:6px 14px;border-radius:6px;border:1px solid var(--border2);background:transparent;color:var(--txt);cursor:pointer;font-weight:600}
 .cset-dialog footer .cset-done{background:var(--primary);border-color:var(--primary);color:#fff}
 .cset-dialog button:focus-visible,.cset-dialog input:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+
+/* Round 2: the indicator count badge widened the toolbar past one row at
+   1440px. Where the bar is narrow, the count stands in for the word
+   ("fx 2"); the tooltip still says what the button is. */
+#radarChartCard .sec-head{container-type:inline-size}
+@container (max-width:900px){
+  #radarChartCard .tvb .ind-open:has(.rail-count) .tvb-label{display:none}
+}
+
+/* Round 2: on a desktop the chart grows with the window's height (it was a
+   fixed 400px); plain pixel values, which syncStageHeight reads. */
+@media(min-width:1024px) and (min-height:820px){:root{--ch:480px}}
+@media(min-width:1024px) and (min-height:960px){:root{--ch:560px}}
+@media(min-width:1024px) and (min-height:1100px){:root{--ch:640px}}
+
+/* Round 2, phones: the drawing strip hides behind the pencil in the toolbar,
+   and a multi-chart layout stacks its cells one per row (2x2 left ~140px
+   per cell). */
+#radarChartCard .tvb .tvb-draw-toggle{display:none}
+@media(max-width:640px){
+  #radarChartCard .tvb .tvb-draw-toggle{display:inline-flex}
+  #radarChartCard .tvb .tvb-draw-toggle[aria-pressed="true"]{color:var(--tv-blue)}
+  #radarChartCard .chart-stage:not(.draw-open)>.tv-drawbar{display:none}
+  #radarChartCard .chart-stage:not(.draw-open){grid-template-columns:minmax(0,1fr)}
+  #radarChartCard .chart-stage:not(.draw-open)>.chart-layout{grid-column:1 / -1}
+  #chartLayout.multi{grid-template-columns:minmax(0,1fr) !important;grid-template-rows:none !important;grid-auto-rows:280px;height:auto !important}
+  #chartLayout.multi>*{grid-column:auto !important}
+}
+
+/* Round 2: each indicator pane's legend sits in that pane (placed by JS at
+   the pane's top edge), not in the price pane's legend. */
+#chartWrap .pane-legends{position:absolute;inset:0;pointer-events:none;z-index:5}
+#chartWrap .pane-legend{position:absolute;left:8px;max-width:calc(100% - 90px);background:transparent;border:0;padding:0 4px}
+
+/* Round 2: the time-zone list scrolls inside its menu (it was cut off at both
+   ends), and the settings / shortcut dialogs sit in the middle of the
+   screen rather than pinned to the page's top-left. */
+.sn-menu.sn-tz-list{max-height:min(60vh,440px);overflow-y:auto}
+dialog.cset-dialog[open],dialog.kbd-dialog[open]{position:fixed;inset:0;margin:auto;max-height:min(85dvh,680px)}
+
+/* Round 2: the drawing properties bar sits under the legend (it covered the
+   OHLC values); phones get 36px touch targets in the bottom bar and zoom
+   bar; the chart card clears the sticky header when scrolled into view. */
+#radarChartCard .dp-bar{top:52px}
+#radarChartCard{scroll-margin-top:110px}
+@media(hover:none) and (max-width:900px){
+  #radarChartCard .sn-btn,#radarChartCard .sn-zoom button{min-height:36px;min-width:36px}
+}

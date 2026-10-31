@@ -251,13 +251,17 @@ export function foldBucket(bucket: CandleFlat[]): CandleFlat | null {
   if (!bucket.length) return null
   const first = bucket[0]
   const out: CandleFlat = { t: first.t, o: first.o, h: first.h, l: first.l, c: first.c, v: first.v }
+  // Taker-buy volume sums too, when every base bar has it.
+  let tb: number | undefined = first.tb
   for (let i = 1; i < bucket.length; i++) {
     const c = bucket[i]
     if (c.h > out.h) out.h = c.h
     if (c.l < out.l) out.l = c.l
     out.c = c.c
     out.v += c.v
+    tb = tb != null && c.tb != null ? tb + c.tb : undefined
   }
+  if (tb != null) out.tb = tb
   return out
 }
 
