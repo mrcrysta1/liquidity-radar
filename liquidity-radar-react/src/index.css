@@ -6509,3 +6509,42 @@ dialog.cset-dialog[open],dialog.kbd-dialog[open]{position:fixed;inset:0;margin:a
 .st-id{color:var(--primary)}
 @media (max-width:900px){.st-panel{left:8px;right:8px;bottom:8px;max-height:60vh}}
 @media (max-width:640px){.st-title{display:none}}
+
+/* r4-data: chart data export / pop-out menu, watchlist columns, popout window */
+.r4d-menu-wrap{position:relative;display:flex}
+#radarChartCard .r4d-menu-wrap .tvb-tip{left:auto;right:0;transform:translateY(-3px)}
+#radarChartCard .r4d-menu-wrap .chart-tool-btn:hover>.tvb-tip{transform:none}
+.r4d-menu{
+  position:absolute;top:calc(100% + 6px);right:0;z-index:92;min-width:236px;padding:4px;
+  display:flex;flex-direction:column;background:var(--card);border:1px solid var(--border2);
+  border-radius:12px;box-shadow:var(--shade-2);
+}
+.r4d-menu button{
+  display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:8px 10px;
+  background:none;border:none;border-radius:8px;color:var(--txt);font:inherit;font-size:13px;
+  text-align:left;cursor:pointer;
+}
+.r4d-menu button:hover,.r4d-menu button:focus-visible{background:rgb(var(--pRGB)/.1);outline:none}
+.r4d-menu small{color:var(--dim);font-size:var(--text-2xs);white-space:nowrap}
+html.lr-popout #fsBtn{display:none}
+.r4wl-chooser{
+  margin:0;padding:6px 8px 8px;border:1px solid var(--border2);border-radius:8px;
+  display:grid;grid-template-columns:1fr;gap:4px;font-size:var(--text-xs);
+}
+.r4wl-chooser legend{padding:0 4px;color:var(--dim);font-size:var(--text-2xs)}
+.r4wl-chooser label{display:flex;align-items:center;gap:6px;cursor:pointer}
+.r4wl .cs-wl-q{width:74px}
+.r4wl-c{width:50px;flex-shrink:0;text-align:right;font-family:var(--mono);font-size:var(--text-2xs)}
+.r4wl-c.up{color:var(--green)}
+.r4wl-c.dn{color:var(--red)}
+.r4wl-head,.r4wl-head:hover{background:none;border-color:transparent}
+.r4wl-head .cs-wl-main{cursor:default;padding-top:0;padding-bottom:0}
+.r4wl-badge{width:22px;flex-shrink:0}
+.r4wl-ghost{visibility:hidden}
+.r4wl-sort{
+  background:none;border:none;padding:0;color:var(--dim);font:inherit;font-size:var(--text-2xs);
+  cursor:pointer;white-space:nowrap;
+}
+.r4wl-sort:hover,.r4wl-sort.on{color:var(--txt)}
+.r4wl-sort.on.asc::after{content:' ▲';font-size:8px}
+.r4wl-sort.on.desc::after{content:' ▼';font-size:8px}

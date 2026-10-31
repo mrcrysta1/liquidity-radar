@@ -4256,6 +4256,82 @@ alertcondition(close > 12, "Up", "close above 12")`, k)
   eq('depth: empty grid has no cap', DH.intensityCap([0, 0]), 0)
 }
 
+{
+  // r4-data: chart CSV export, watchlist columns, popout URL / sync, ratio quote
+  const DX = await import(src('features/charts/dataExport.ts'))
+  eq('csv: plain cell', DX.csvCell('RSI 14'), 'RSI 14')
+  eq('csv: comma and quote escaped', DX.csvCell('MACD, "fast"'), '"MACD, ""fast"""')
+  eq('csv: newline quoted', DX.csvCell('a\nb'), '"a\nb"')
+  eq('csv: formula neutered', DX.csvCell('=HYPERLINK(1)'), "'=HYPERLINK(1)")
+  eq('csv: negative number untouched', DX.csvCell(-1.5), '-1.5')
+  eq('csv: NaN / null blank', [DX.csvCell(NaN), DX.csvCell(null), DX.csvCell(undefined)], ['', '', ''])
+  eq('csv: iso utc', DX.isoAtOffset(Date.UTC(2026, 9, 31, 12, 5, 9), 0), '2026-10-31T12:05:09Z')
+  eq('csv: iso +05:00', DX.isoAtOffset(Date.UTC(2026, 9, 31, 22, 0), 300), '2026-11-01T03:00:00+05:00')
+  eq('csv: iso -03:30', DX.isoAtOffset(Date.UTC(2026, 9, 31, 2, 0), -210), '2026-10-30T22:30:00-03:30')
+  const H = 3600000
+  const bars = [2, 0, 1, 3].map((i) => ({ t: i * H, o: i, h: i + 1, l: i - 1, c: i + 0.5, v: 10 * i }))
+  const csv = DX.buildChartCsv({
+    bars,
+    columns: [
+      { label: 'SMA 2 · SMA', times: [0, H, 2 * H, 3 * H], values: [null, 1.25, 2.5, NaN] },
+      // A column over a different span, out of order: joined on time.
+      { label: 'X, y', times: [3 * H, H], values: [7, 6] },
+    ],
+    from: H,
+    to: 2 * H,
+  })
+  const lines = csv.trim().split('\r\n')
+  eq('csv: header', lines[0], 'time,open,high,low,close,volume,SMA 2 · SMA,"X, y"')
+  eq('csv: range kept, sorted', lines.length, 3)
+  eq('csv: row aligned by time', lines[1], '1970-01-01T01:00:00Z,1,2,0,1.5,10,1.25,6')
+  eq('csv: missing value blank', lines[2], '1970-01-01T02:00:00Z,2,3,1,2.5,20,2.5,')
+  const csvTz = DX.buildChartCsv({ bars: bars.slice(0, 1), offsetOf: () => 60 })
+  eq('csv: chart zone offset applied', csvTz.split('\r\n')[1].split(',')[0], '1970-01-01T03:00:00+01:00')
+  eq('csv: file name safe for ratios', DX.csvFileName('BTCUSDT/ETHUSDT', '1h', Date.UTC(2026, 9, 31, 17, 0)), 'BTCUSDT_ETHUSDT-1h-2026-10-31T1700.csv')
+
+  const WC = await import(src('features/favorites/watchColumns.ts'))
+  eq('wlcols: default', WC.sanitizeWatchPrefs(null), { cols: ['chg'], sort: null })
+  eq('wlcols: unknown dropped, catalogue order', WC.sanitizeWatchPrefs({ cols: ['rsi', 'bogus', 'vol'] }).cols, ['vol', 'rsi'])
+  eq('wlcols: sort on a hidden column dropped', WC.sanitizeWatchPrefs({ cols: ['vol'], sort: { key: 'rsi', dir: 'asc' } }).sort, null)
+  eq('wlcols: valid sort kept', WC.sanitizeWatchPrefs({ cols: [], sort: { key: 'last', dir: 'asc' } }).sort, { key: 'last', dir: 'asc' })
+  const tg = WC.toggleWatchCol({ cols: ['chg', 'rsi'], sort: { key: 'rsi', dir: 'desc' } }, 'rsi')
+  eq('wlcols: toggle off clears its sort', tg, { cols: ['chg'], sort: null })
+  eq('wlcols: toggle on', WC.toggleWatchCol({ cols: ['rsi'], sort: null }, 'vol').cols, ['vol', 'rsi'])
+  let s1 = WC.nextWatchSort(null, 'vol')
+  eq('wlcols: first click desc', s1, { key: 'vol', dir: 'desc' })
+  s1 = WC.nextWatchSort(s1, 'vol')
+  eq('wlcols: second click asc', s1, { key: 'vol', dir: 'asc' })
+  eq('wlcols: third click back to list order', WC.nextWatchSort(s1, 'vol'), null)
+  eq('wlcols: symbol sorts asc first', WC.nextWatchSort(null, 'sym'), { key: 'sym', dir: 'asc' })
+  const vals = { A: 3, B: null, C: 5, D: 3 }
+  const by = (it) => vals[it]
+  eq('wlcols: sort desc, missing last, ties stable', WC.sortWatch(['A', 'B', 'C', 'D'], { key: 'vol', dir: 'desc' }, by), ['C', 'A', 'D', 'B'])
+  eq('wlcols: sort asc, missing still last', WC.sortWatch(['B', 'C', 'A'], { key: 'vol', dir: 'asc' }, by), ['A', 'C', 'B'])
+  eq('wlcols: strings sort', WC.sortWatch(['ETH', 'BTC'], { key: 'sym', dir: 'asc' }, (x) => x), ['BTC', 'ETH'])
+  eq('wlcols: no sort keeps order', WC.sortWatch(['B', 'A'], null, by), ['B', 'A'])
+
+  const PO = await import(src('features/charts/popoutMath.ts'))
+  const qs = PO.popoutSearch({ sym: 'BTCUSDT+ETHUSDT', tf: '1h', ch: 'abc123' })
+  eq('popout: round trip keeps + in a spread', PO.parsePopout(qs), { sym: 'BTCUSDT+ETHUSDT', tf: '1h', ch: 'abc123' })
+  eq('popout: normal app', PO.parsePopout('?sym=BTCUSDT'), null)
+  eq('popout: junk cleaned', PO.parsePopout('?popout=1&sym=<x>&tf=1h;x&ch=A!'), { sym: '', tf: '', ch: '' })
+  eq('popout: sym upper-cased', PO.parsePopout('?popout=1&sym=ethusdt&tf=4h').sym, 'ETHUSDT')
+  eq('popout: sync msg sym', PO.readSyncMsg({ k: 'sym', v: 'BTCUSDT/ETHUSDT' }), { k: 'sym', v: 'BTCUSDT/ETHUSDT' })
+  eq('popout: sync msg tf', PO.readSyncMsg({ k: 'tf', v: '15m' }), { k: 'tf', v: '15m' })
+  eq('popout: bad msgs ignored', [PO.readSyncMsg(null), PO.readSyncMsg({ k: 'x', v: 'a' }), PO.readSyncMsg({ k: 'tf', v: 'drop table' })], [null, null, null])
+
+  const SY = await import(src('services/syntheticSymbol.ts'))
+  const day = 86400000
+  const sc = [
+    { t: 0, o: 1, h: 1.2, l: 0.9, c: 1, v: 0 },
+    { t: day / 2, o: 1, h: 1.6, l: 0.95, c: 1.5, v: 0 },
+    { t: day, o: 1.5, h: 2.1, l: 1.4, c: 2, v: 0 },
+  ]
+  eq('synthQuote: last, 24h change and range', SY.synthQuote(sc), { last: 2, pct: 100, high: 2.1, low: 0.95 })
+  eq('synthQuote: under a day has no change', SY.synthQuote(sc.slice(1)).pct, null)
+  eq('synthQuote: empty', SY.synthQuote([]), null)
+  eq('ratio: n/a text', typeof SY.RATIO_NA, 'string')
+}
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')
 if (fails.length) {
   fails.forEach((f) => console.log('  FAIL  ' + f))

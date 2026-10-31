@@ -114,6 +114,13 @@ export interface IndicatorRenderer {
   paneCount(): number
   /** The pane (0 = price) an indicator instance draws in. */
   paneOf(uid: string): number
+  /** Every shown output over `candles`, index-aligned (the CSV export). */
+  columns(candles: CandleFlat[]): IndicatorColumn[]
+}
+
+export interface IndicatorColumn {
+  label: string
+  values: ArrayLike<number | null | undefined>
 }
 
 /** The fraction of the chart's height `n` indicator panes take at the bottom. */
@@ -589,6 +596,20 @@ export function createIndicatorRenderer(
     return out
   }
 
+  function columns(candles: CandleFlat[]): IndicatorColumn[] {
+    if (!candles.length) return []
+    const tf = tfGroupFor(barStepMs(candles))
+    const out: IndicatorColumn[] = []
+    computeActive(candles).forEach(({ inst, def, outputs: outs }) => {
+      if (!inst.visible || !shownOnTf(inst, tf)) return
+      const name = instanceLabel(def, inst.params)
+      valueOutputs(def)
+        .filter((o) => outputLook(inst, o).visible && outs[o.key])
+        .forEach((o) => out.push({ label: name + ' · ' + o.label, values: outs[o.key] }))
+    })
+    return out
+  }
+
   /** Re-tint every series — called when the palette or light/dark mode changes. */
   function refreshIndicatorColors(): void {
     active().forEach(({ inst, def }) => {
@@ -628,6 +649,7 @@ export function createIndicatorRenderer(
     blank: blankIndicators,
     paneCount: indicatorPaneCount,
     paneOf,
+    columns,
   }
 }
 
@@ -658,3 +680,5 @@ export const blankIndicators = (): void => main.blank()
 export const indicatorPaneCount = (): number => main.paneCount()
 /** The pane (0 = price) a main-chart indicator draws in. */
 export const indicatorPaneOf = (uid: string): number => main.paneOf(uid)
+/** The main chart's shown indicator outputs over `candles`, for the CSV export. */
+export const indicatorColumns = (candles: CandleFlat[]): IndicatorColumn[] => main.columns(candles)
