@@ -126,6 +126,11 @@ export function renderDeltaPane(candles: CandleFlat[], otherPaneCount = 0): void
   layout(true, otherPaneCount)
 }
 
+/** Empty the series but keep the pane, so a new dataset lands on a clean time scale. */
+export function blankDeltaPane(): void {
+  series?.setData([])
+}
+
 export function clearDeltaPane(): void {
   removeSeries()
 }

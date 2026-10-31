@@ -8,6 +8,7 @@ import { state } from '../../services/store'
 import { storageGet, storageSet } from '../../services/storage'
 import {
   attachIndicatorChart,
+  blankIndicators,
   indicatorLegend,
   indicatorPaneCount,
   refreshIndicatorColors,
@@ -62,7 +63,8 @@ import { shape } from './drawings/geometry'
 import type { Drawing, MapCtx, Shape } from './drawings/geometry'
 import { handleAt, hitShape, shiftPoints } from './drawings/edit'
 import { fetchOlderKlines, historyExhausted } from '../../services/marketData'
-import { attachDeltaPane, renderDeltaPane } from './deltaPane'
+import { attachDeltaPane, blankDeltaPane, renderDeltaPane } from './deltaPane'
+import { subscribeSymbol } from '../actions/userActions'
 import { attachWhaleBubbles, renderWhaleBubbles, watchLiveWhales } from './whaleBubbles'
 import { attachVolumeProfile, renderVolumeProfile } from './volumeProfileOverlay'
 import { onDeltaChange } from '../delta/delta'
@@ -465,6 +467,8 @@ export function initChart(): void {
   // a fresh data load, so there is one place where series are built.
   onIndicatorsChange(() => updateChartData(false))
   onReplayChange((modeChanged: boolean) => updateChartData(modeChanged))
+  // A new coin empties state.candles before its bars load; clear the chart with it.
+  subscribeSymbol(() => updateChartData(true))
   // Which derived bars are on screen ('' for time candles): range ↔ renko
   // rebuilds the bars as surely as leaving them does.
   const derivedKind = (): string => (isRangeMode() ? getChartStyle() : '')
@@ -726,7 +730,23 @@ function wireLegendActions(): void {
 export function updateChartData(fit = false): void {
   if (!chart) return
   const candles = displayCandles()
-  if (!candles.length) return
+  // A new dataset (fit) must not share the time scale with the old one, even
+  // for a moment: lightweight-charts 4.1 misplaces the new bars when, say, 1h
+  // candles land beside a 15m indicator or delta series — the bars render as a
+  // weeks-long gap, then "Value is null" errors blank the plot. So empty the
+  // series that follow the candles first; they are redrawn just below.
+  if (fit || !candles.length) {
+    blankIndicators()
+    blankDeltaPane()
+  }
+  // Symbol or interval changed and the new bars are still loading: clear the
+  // previous market rather than leave it under the new title.
+  if (!candles.length) {
+    candleSeries.setData([])
+    chartState.firstBarTime = undefined
+    syncWatermark()
+    return
+  }
   const ts = chart.timeScale()
   syncSecondsVisible()
   const keep = fit ? null : ts.getVisibleLogicalRange()
