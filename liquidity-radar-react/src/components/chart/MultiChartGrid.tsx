@@ -14,6 +14,7 @@
 // portalled into `.mc-ind[data-ind-slot]` by PanelIndicatorButtons.
 import { useEffect, useRef, useSyncExternalStore } from 'react'
 import { CoinPicker } from './CoinPicker'
+import { LinkChip } from './LinkChip'
 import { state } from '../../services/store'
 import { baseOf, coinMeta } from '../../utils/coins'
 import {
@@ -75,6 +76,8 @@ function McCell({ panel, slot }: { panel: McPanelView; slot: number }) {
           </span>
         </span>
         <div className="mc-controls">
+          {/* Its link group: panels in one group follow each other. */}
+          <LinkChip linkKey={'mc' + slot} />
           <span
             className="mc-ind"
             data-ind-slot={'mc' + slot}

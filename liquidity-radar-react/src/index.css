@@ -6251,3 +6251,27 @@ dialog.cset-dialog[open],dialog.kbd-dialog[open]{position:fixed;inset:0;margin:a
 @media(hover:none) and (max-width:900px){
   #radarChartCard .sn-btn,#radarChartCard .sn-zoom button{min-height:36px;min-width:36px}
 }
+
+/* r3-sync: link groups — the coloured group chip on each chart header and the
+   sync toggles (features/charts/linkGroups, components/chart/LinkChip). */
+.lk-chip{display:inline-flex;align-items:center;gap:2px;flex-shrink:0}
+.lk-chip.open{padding:1px 3px;border-radius:9px;background:var(--sunk-2);border:1px solid var(--border2)}
+.lk-btn{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;padding:0;border:0;border-radius:50%;background:none;cursor:pointer}
+.lk-btn:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
+.lk-btn.sel .lk-dot{box-shadow:0 0 0 2px var(--card),0 0 0 3px var(--txt)}
+.lk-dot{display:inline-flex;align-items:center;justify-content:center;width:13px;height:13px;border-radius:50%;
+  font:700 8px/1 var(--mono);font-style:normal;color:#fff}
+.lk-dot.none{background:none;border:1.5px dashed var(--muted)}
+.lk-btn:hover .lk-dot{filter:brightness(1.15)}
+/* A cell head is title-left / interval-right: the chip leads, the title takes the slack. */
+.rc-link{display:inline-flex;flex-shrink:0}
+.rc-link+.rc-title{margin-right:auto}
+/* The main chart's chip, top right of its plot (clear of the legend and price scale). */
+.rc-link-main{position:absolute;top:6px;right:72px;z-index:6}
+.rc-link-main[hidden]{display:none}
+.lk-sync{border-top:0;padding-top:2px}
+.lk-opts{display:inline-flex;align-items:center;gap:3px;padding:3px 6px;border-radius:10px;border:1px solid var(--edge,var(--border2));background:var(--sunk-2);font-size:11px}
+.lk-opts-k{color:var(--muted);margin-right:2px}
+.lk-opt{padding:2px 7px;border-radius:7px;border:1px solid transparent;background:none;color:var(--dim);font-size:11px;cursor:pointer}
+.lk-opt.on{color:var(--txt);border-color:var(--border2);background:var(--card)}
+.lk-opt:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
