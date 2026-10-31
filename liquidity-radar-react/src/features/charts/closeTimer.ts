@@ -10,6 +10,8 @@ import { bucketEnd, tfDef } from '../../services/timeframe'
 import { getTimeframe } from './timeframes'
 import { isReplayOn } from './replay'
 import { chartPalette } from './chartPalette'
+import { getChartStyle } from './chartStyle'
+import { heikinAshiBar } from './series/heikinAshi'
 
 type Any = any
 
@@ -49,12 +51,15 @@ export function mountCloseTimer(chart: Any, series: () => Any): void {
 export function updateCloseTimer(): void {
   if (!el || !deps) return
   const s = deps.series()
-  const last = state.candles[state.candles.length - 1]
+  const raw = state.candles[state.candles.length - 1]
   // Nothing to count down to while replaying history, or before data arrives.
-  if (!s || !last || isReplayOn()) {
+  if (!s || !raw || isReplayOn()) {
     el.style.display = 'none'
     return
   }
+  // On Heikin Ashi the series (and the last-price label above this) shows the
+  // HA bar, whose close and colour differ from the raw candle's.
+  const last = getChartStyle() === 'heikin' ? heikinAshiBar(state.candles, raw) : raw
   let y: number | null
   try {
     y = s.priceToCoordinate(last.c)

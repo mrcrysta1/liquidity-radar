@@ -25,6 +25,7 @@ import type { Computed } from './graph'
 import { cloudView } from './cloud'
 import { volumeColor } from '../chartPalette'
 import { PINE_TYPE, pineLive, pineStatus } from '../pine/indicator'
+import { priceFormatFor } from '../../../utils/format'
 
 type Any = any
 
@@ -36,6 +37,25 @@ interface Held {
   /** Price lines (Pine hline) on this series, and what they were built from. */
   lines?: Any[]
   linesSig?: string
+  /** Decimals last given to a pane series' priceFormat. */
+  precision?: number
+}
+
+/**
+ * Pane values get decimals that fit their size: at the default precision 2,
+ * MACD or ATR on PEPE printed 0.00 on the axis, labels and legend. Large
+ * histograms (volume, OBV) keep the abbreviated volume format.
+ */
+function syncPaneFormat(h: Held, data: Any[]): void {
+  if (h.scaleId === 'right' || h.kind === 'signal' || h.kind === 'cloud') return
+  let max = 0
+  for (const d of data) if (isFinite(d.value)) max = Math.max(max, Math.abs(d.value))
+  if (!max) return
+  if (h.kind === 'histogram' && max >= 1000) return
+  const pf = max >= 1 ? { type: 'price' as const, precision: 2, minMove: 0.01 } : priceFormatFor(max)
+  if (h.precision === pf.precision) return
+  h.precision = pf.precision
+  h.series.applyOptions({ priceFormat: pf })
 }
 
 export interface IndicatorRendererOptions {
@@ -302,6 +322,7 @@ export function createIndicatorRenderer(
             })
           })
         h.series.setData(data)
+        syncPaneFormat(h, data)
         if (out.kind === 'signal') h.series.setMarkers(markers)
       })
       // hline()s ride on the first drawn series; when that series is swapped

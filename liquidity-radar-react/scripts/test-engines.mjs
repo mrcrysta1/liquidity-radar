@@ -46,7 +46,7 @@ const { buildPointFigure, clampPnfReversal, pnfBoxes } = await import(
 const { noteLimitResponse, cooldownLeft, isRateLimited, isBinanceUrl } = await import(
   src('api/rateLimit.ts')
 )
-const { pfmt, nfmt, cfmt } = await import(src('utils/format.ts'))
+const { pfmt, nfmt, cfmt, priceFormatFor } = await import(src('utils/format.ts'))
 const { safeUrl } = await import(src('utils/url.ts'))
 const { newsSimplify } = await import(src('features/news/newsItem.ts'))
 const { mergeNewsFeeds, loadNewsProgressive, hedge, newsDedup } = await import(src('features/news/newsLoad.ts'))
@@ -3381,6 +3381,13 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   ])
   eq('edit: unmappable price stays put', E.shiftPoints(pts, 0, times, () => null)[1].price, 20)
   eq('edit: start points are not mutated', pts[0], { time: 200, price: 10 })
+}
+
+// ---- price axis precision: minMove follows the instrument's size ------------------
+{
+  eq('priceFormat: BTC', priceFormatFor(77000), { type: 'price', precision: 2, minMove: 0.01 })
+  eq('priceFormat: PEPE', priceFormatFor(0.00001234), { type: 'price', precision: 8, minMove: 1e-8 })
+  eq('priceFormat: capped at 12', priceFormatFor(1e-15).precision, 12)
 }
 
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')
