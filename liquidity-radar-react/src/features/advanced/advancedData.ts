@@ -4,6 +4,7 @@
 // writes into the single app state object, matching services/marketData.ts.
 import { jget } from '../../api/client'
 import { isInstrument } from '../../constants/instruments'
+import { isSynthetic, RATIO_NA } from '../../services/syntheticSymbol'
 import { state } from '../../services/store'
 import { futuresSymbolOf, symbolScoped } from '../../services/symbolScope'
 import { VENUES, isUsdQuoted } from './venues'
@@ -46,6 +47,11 @@ const baseOf = (sym: string): string => sym.replace(/USDT$/i, '')
 const current = (): string => state.symbol
 
 export async function fetchDeepOB(): Promise<void> {
+  // A ratio / spread has no book of its own.
+  if (isSynthetic(state.symbol)) {
+    state.deepOb = null
+    return
+  }
   await symbolScoped(
     current,
     (sym) =>
@@ -154,9 +160,10 @@ export function noteVenue(id: string, ok: boolean, now = Date.now()): void {
 export async function fetchCrossExchange(): Promise<void> {
   // None of these venues list metals, FX, indices or equities. "No market" is
   // already how this table says so, which beats firing a 400 at every venue.
-  if (isInstrument(state.symbol)) {
+  if (isInstrument(state.symbol) || isSynthetic(state.symbol)) {
+    const err = isSynthetic(state.symbol) ? RATIO_NA : 'no market'
     state.crossEx = VENUES.map((v) => ({
-      id: v.id, name: v.name, kind: v.kind, usd: isUsdQuoted(v.id), err: 'no market',
+      id: v.id, name: v.name, kind: v.kind, usd: isUsdQuoted(v.id), err,
     }))
     return
   }

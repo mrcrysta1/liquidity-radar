@@ -6,11 +6,10 @@ import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { state } from '../../services/store'
 import { baseOf } from '../../utils/coins'
-import { pfmt } from '../../utils/format'
 import { useTick, CHART_TABS } from '../useTick'
 import { HomeIcon } from '../home/icons'
 import type { HomeIconId } from '../home/icons'
-import { evidence, pivots } from '../../features/analysis/insights'
+import { evidence } from '../../features/analysis/insights'
 import {
   getConfluenceRows,
   confluenceSummary,
@@ -78,7 +77,6 @@ const Row = ({
 function Overview() {
   const cs = state.candles as Candle[]
   const st = structure(cs)
-  const p = pivots()
   const closes = cs.map((c) => c.c)
   const rets = closes
     .slice(-97)
@@ -111,22 +109,8 @@ function Overview() {
               : 'No clear swing structure'}
         </span>
       </Row>
-      <Row icon="radar" tone="" title="Key Levels">
-        {p ? (
-          <dl className="ci-kv">
-            <dt className="dn">Resistance</dt>
-            <dd>
-              {pfmt(p.R[0])} – {pfmt(p.R[1])}
-            </dd>
-            <dt className="up">Support</dt>
-            <dd>
-              {pfmt(p.S[0])} – {pfmt(p.S[1])}
-            </dd>
-          </dl>
-        ) : (
-          <span>Waiting for the 24h range…</span>
-        )}
-      </Row>
+      {/* Key Levels lived here too, repeating the Radar tab's Key Levels card
+          and the Structure panel's support / resistance (audit U11). */}
       <Row icon="sentiment" tone="" title={'Volatility (' + rets.length + ' bars)'}>
         <b>{vol != null ? vol.toFixed(2) + '%' : '—'}</b>
         <span className="ci-tag">

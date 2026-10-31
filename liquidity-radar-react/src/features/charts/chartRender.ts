@@ -2,7 +2,9 @@ import * as LightweightCharts from 'lightweight-charts'
 import { createZonedChart } from './zonedTimeScale'
 import { keepMainPane } from './chartPalette'
 import { chartSettings, subscribeChartSettings } from './chartSettings'
+import { canvasEdgeColor, settingsSeriesOptions } from './chartSettingsMath'
 import { onPineResult, setPineChart } from './pine/indicator'
+import { onPineBarColors, withPineBarColors } from './pine/barColors'
 import { venueOf } from '../../utils/coins'
 import { COINS, TICKER_COINS } from '../../constants/market'
 import { fmt, pfmt, nfmt, cfmt, chgHtml, priceDecimals, priceFormatFor } from '../../utils/format'
@@ -46,6 +48,7 @@ import { subscribeReversalSettings } from './series/reversalSettings'
 import { tfDef } from '../../services/timeframe'
 import { mountCloseTimer, updateCloseTimer } from './closeTimer'
 import { getTimeframe, tfLabel } from './timeframes'
+import { synthTicker } from '../../services/synthQuote'
 import { fmtChartDate, isDailyTf } from './timezone'
 import {
   chartPalette,
@@ -78,6 +81,9 @@ import {
 import type { DrawingCommand } from './drawTools'
 import { createDrawingHistory } from './drawings/history'
 import { shape } from './drawings/geometry'
+import { paintDrawingShape } from './drawings/paint'
+import { DRAWINGS_KEY, publishLiveDrawings, storedDrawingsChanged } from './drawings/shared'
+import { visibleOnTf } from './drawings/visibility'
 import type { Drawing, MapCtx, Shape } from './drawings/geometry'
 import { handleAt, hitShape, shiftPoints } from './drawings/edit'
 import { logicalToTime, timeToLogical } from './drawings/timeMap'
@@ -166,7 +172,7 @@ export function applyChartTheme(): void {
     syncLastPrice(shown[shown.length - 1])
     // Hollow candles carry their colours per bar: re-colour the data too.
     if (getChartStyle() === 'hollow' && shown.length)
-      candleSeries.setData(priceSeriesData('hollow', shown))
+      candleSeries.setData(withPineBarColors(priceSeriesData('hollow', shown), 'hollow'))
   }
   refreshIndicatorColors()
   renderLiveLegend()
@@ -184,12 +190,13 @@ function watermarkText(): string {
 /** Apply the chart settings (./chartSettings) over the theme's options. */
 function applyChartSettings(): void {
   if (!chart) return
-  const st = chartSettings()
-  chart.applyOptions({
-    grid: { vertLines: { visible: st.grid }, horzLines: { visible: st.grid } },
-    crosshair: { mode: st.magnet ? 1 : 0 },
-  })
-  candleSeries?.applyOptions({ priceLineVisible: st.priceLine })
+  // Grid, background and crosshair come with tvChartOptions; the magnet is
+  // re-applied because initChart starts the crosshair in free mode.
+  chart.applyOptions({ crosshair: { mode: chartSettings().magnet ? 1 : 0 } })
+  candleSeries?.applyOptions(settingsSeriesOptions(chartSettings(), getChartStyle()))
+  // The chart boxes paint this behind the canvas, so a sliver the canvas
+  // does not cover (under the time axis) matches it instead of showing grey.
+  document.documentElement.style.setProperty('--chart-bg', canvasEdgeColor(chartSettings(), chartPalette().bg))
   syncWatermark()
   updateCloseTimer()
 }
@@ -257,6 +264,8 @@ export function themePriceSeries(series: Any, id: ChartStyleId): void {
   } else {
     themeLineFamilySeries(series, id, lineFamilyColors())
   }
+  // The user's candle colours and scale labels (./chartSettings) win.
+  series.applyOptions(settingsSeriesOptions(chartSettings(), id))
 }
 /** The palette the line-family styles (series/lineFamily) are drawn in. */
 function lineFamilyColors(): LineFamilyColors {
@@ -416,7 +425,7 @@ function applyChartStyle(): void {
       /* already detached */
     }
   }
-  candleSeries.applyOptions({ priceLineVisible: chartSettings().priceLine })
+  candleSeries.applyOptions(settingsSeriesOptions(chartSettings(), getChartStyle()))
   chartState.styleSeries = candleSeries
   priceSeriesSubs.forEach((f) => f(candleSeries))
 }
@@ -583,9 +592,13 @@ export function initChart(): void {
   }).observe(el)
   setupDrawLayer()
   applyChartSettings()
-  subscribeChartSettings(applyChartSettings)
+  // A full re-theme: background, grid and candle colours are theme options
+  // with the settings merged over them (chartPalette tvChartOptions).
+  subscribeChartSettings(applyChartTheme)
   // Pine scripts run in a worker: draw each result as it arrives.
   onPineResult(() => (isReplayOn() ? updateChartData(false) : scheduleIndicatorRefresh()))
+  // Pine barcolor(): the candles take the scripts' colours (./pine/barColors).
+  onPineBarColors(repaintPriceSeries)
   wireLegendActions()
   initChartToolbar()
   initFullScreen()
@@ -738,8 +751,10 @@ function renderLegend(
   const ref = prevClose != null && isFinite(prevClose) && prevClose > 0 ? prevClose : o
   const d = c - ref
   const pct = ref ? (d / ref) * 100 : 0
+  // leg-o / leg-chg / leg-vol: the chart settings' status-line switches
+  // hide them by class (index.css r4-ux); the nth-child rules still count them.
   const val = (k: string, x: Any) =>
-    '<span class="leg-k">' + k + '</span><b style="color:' + col + '">' + pfmt(x) + '</b>'
+    '<span class="leg-k leg-o">' + k + '</span><b class="leg-o" style="color:' + col + '">' + pfmt(x) + '</b>'
   const html =
     '<div class="leg-main' +
     (isCross ? ' leg-cross' : '') +
@@ -754,7 +769,7 @@ function renderLegend(
     val('H', h) +
     val('L', l) +
     val('C', c) +
-    '<b style="color:' +
+    '<b class="leg-chg" style="color:' +
     col +
     '">' +
     fmtChg(d, ref) +
@@ -762,7 +777,7 @@ function renderLegend(
     (pct >= 0 ? '+' : '\u2212') +
     Math.abs(pct).toFixed(2) +
     '%)</b>' +
-    (v != null ? '<span class="leg-k">Vol</span><b>' + nfmt(v) + '</b>' : '') +
+    (v != null ? '<span class="leg-k leg-vol">Vol</span><b class="leg-vol">' + nfmt(v) + '</b>' : '') +
     '</span></div>' +
     indicatorLegendHtml() +
     compareLegendHtml()
@@ -879,7 +894,14 @@ function legendRowsHtml(rows: ReturnType<typeof indicatorLegend>): string {
               '<b style="color:' +
               p.color +
               '">' +
-              (p.big ? nfmt(p.value) : chartPrice(p.value)) +
+              (p.precision != null
+                ? p.value.toLocaleString('en-US', {
+                    minimumFractionDigits: p.precision,
+                    maximumFractionDigits: p.precision,
+                  })
+                : p.big
+                  ? nfmt(p.value)
+                  : chartPrice(p.value)) +
               '</b>',
           )
           .join('') +
@@ -987,7 +1009,7 @@ export function updateChartData(fit = false): void {
   syncSecondsVisible()
   const keep = fit ? null : ts.getVisibleLogicalRange()
   const prevFirst = chartState.firstBarTime as number | undefined
-  candleSeries.setData(priceSeriesData(getChartStyle(), candles))
+  candleSeries.setData(withPineBarColors(priceSeriesData(getChartStyle(), candles), getChartStyle()))
   syncPricePrecision(candleSeries, candles[candles.length - 1].c)
   if (getChartStyle() === 'baseline') syncBaselineBase(chart, candleSeries, displayCandles)
   rangeShown = isRangeMode() ? candles : []
@@ -1090,6 +1112,22 @@ function pushRangeLive(): void {
   rangeShown = next
 }
 
+/** Re-send the price series (Pine bar colours changed), viewport kept; once per frame. */
+let repaintPending = false
+function repaintPriceSeries(): void {
+  if (repaintPending) return
+  repaintPending = true
+  requestAnimationFrame(() => {
+    repaintPending = false
+    const shown = displayCandles()
+    if (!chart || !candleSeries || isRangeMode() || !shown.length) return
+    const ts = chart.timeScale()
+    const keep = ts.getVisibleLogicalRange()
+    candleSeries.setData(withPineBarColors(priceSeriesData(getChartStyle(), shown), getChartStyle()))
+    if (keep) ts.setVisibleLogicalRange(keep)
+  })
+}
+
 // ---- Wheel zoom keeps the live edge, as on TradingView ----
 // lightweight-charts zooms around the cursor, so zooming out while looking at
 // the newest bars opened a wide empty stretch of future on the right. When
@@ -1172,7 +1210,9 @@ export function updateChartLast(c: Any): void {
     if (lb) c = lb
   } else {
     const shown = displayCandles()
-    candleSeries.update(priceSeriesPoint(getChartStyle(), c, barBefore(shown, c.t), shown))
+    candleSeries.update(
+      withPineBarColors([priceSeriesPoint(getChartStyle(), c, barBefore(shown, c.t), shown)], getChartStyle())[0],
+    )
     // A coin crossing a decimal threshold (1.00, 0.01…) gets its new precision
     // now, not at the next full redraw. Cheap: re-applied only on a change.
     syncPricePrecision(candleSeries, c.c)
@@ -1312,7 +1352,6 @@ function initChartToolbar(): void {
 // valid across timeframes of the same coin but means nothing on another one.
 // The set on screen follows state.symbol lazily: whatever touches the drawings
 // goes through currentDrawings(), which swaps sets the moment the coin changes.
-const DRAWINGS_KEY = 'lr-drawings-v1'
 const DRAWINGS_MAX_COINS = 50
 const DRAWINGS_MAX_PER_COIN = 200
 let drawingsSym: string | null = null
@@ -1389,6 +1428,7 @@ function writeDrawings(): void {
   const keys = Object.keys(all)
   keys.slice(0, Math.max(0, keys.length - DRAWINGS_MAX_COINS)).forEach((k) => delete all[k])
   storageSet(DRAWINGS_KEY, all)
+  storedDrawingsChanged()
 }
 
 function publishDrawingCount(): void {
@@ -2119,6 +2159,7 @@ function drawingAt(x: Any, y: Any, skipLocked = false): number {
   const drawings = currentDrawings()
   for (let i = drawings.length - 1; i >= 0; i--) {
     if (drawings[i].hidden || (skipLocked && drawings[i].locked)) continue
+    if (!visibleOnTf(drawings[i], getTimeframe())) continue
     const sh = shapeOf(drawings[i], cw, ch)
     if (sh && hitShape(sh, x, y)) return i
   }
@@ -2335,8 +2376,6 @@ function setupDrawSelect(wrap: HTMLElement): void {
 }
 
 /** Per-drawing line style from the selection toolbar (width in px). */
-const DASHES: Record<string, number[]> = { dashed: [6, 4], dotted: [1.5, 3] }
-
 function paintShape(
   ctx: Any,
   sh: Shape,
@@ -2345,93 +2384,7 @@ function paintShape(
   selected = false,
   style: { width?: number; dash?: string } = {},
 ): void {
-  const stroke = doomed ? cv('red') || '#FF1744' : base
-  sh.fills.forEach((f) => {
-    if (f.pts.length < 6) return
-    ctx.save()
-    ctx.fillStyle = doomed ? 'rgba(255,23,68,.14)' : f.color
-    ctx.beginPath()
-    ctx.moveTo(f.pts[0], f.pts[1])
-    for (let i = 2; i < f.pts.length; i += 2) ctx.lineTo(f.pts[i], f.pts[i + 1])
-    ctx.closePath()
-    ctx.fill()
-    ctx.restore()
-  })
-  if (doomed) {
-    ctx.save()
-    ctx.strokeStyle = 'rgba(255,23,68,.32)'
-    ctx.lineWidth = 9
-    ctx.lineCap = 'round'
-    sh.segs.forEach((g) => {
-      ctx.beginPath()
-      ctx.moveTo(g.x1, g.y1)
-      ctx.lineTo(g.x2, g.y2)
-      ctx.stroke()
-    })
-    ctx.restore()
-  }
-  sh.segs.forEach((g) => {
-    ctx.save()
-    ctx.strokeStyle = doomed ? stroke : g.color || base
-    // The drawing's own width / style apply to its main lines; decoration
-    // (soft) keeps the tool's look.
-    const own = !g.soft
-    ctx.lineWidth = g.width || (doomed ? 2.2 : own && style.width ? style.width : 1.7)
-    ctx.lineCap = 'round'
-    ctx.setLineDash(g.dash || (own && style.dash ? DASHES[style.dash] || [] : []))
-    ctx.beginPath()
-    ctx.moveTo(g.x1, g.y1)
-    ctx.lineTo(g.x2, g.y2)
-    ctx.stroke()
-    ctx.restore()
-  })
-  sh.arcs.forEach((a) => {
-    if (a.rx <= 0 || a.ry <= 0) return
-    ctx.save()
-    ctx.strokeStyle = doomed ? stroke : a.color || base
-    ctx.lineWidth = doomed ? 2.2 : style.width || 1.7
-    ctx.setLineDash(a.dash || (style.dash ? DASHES[style.dash] || [] : []))
-    ctx.beginPath()
-    ctx.ellipse(a.cx, a.cy, a.rx, a.ry, 0, 0, Math.PI * 2)
-    ctx.stroke()
-    ctx.restore()
-  })
-  sh.handles.forEach((h) => {
-    ctx.save()
-    ctx.fillStyle = doomed ? stroke : base
-    ctx.beginPath()
-    if (selected) {
-      // Selected: hollow grab handles, as on TradingView.
-      ctx.fillStyle = isLightTheme() ? '#ffffff' : '#0b1220'
-      ctx.strokeStyle = base
-      ctx.lineWidth = 1.6
-      ctx.arc(h.x, h.y, 4.5, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.stroke()
-    } else {
-      ctx.arc(h.x, h.y, 2.6, 0, Math.PI * 2)
-      ctx.fill()
-    }
-    ctx.restore()
-  })
-  sh.labels.forEach((l) => {
-    ctx.save()
-    const fs = l.size || 10
-    ctx.font = fs + 'px JetBrains Mono, monospace'
-    ctx.textAlign = l.align || 'left'
-    const w = ctx.measureText(l.text).width
-    if (l.box) {
-      const bx = l.align === 'center' ? l.x - w / 2 : l.align === 'right' ? l.x - w : l.x
-      ctx.fillStyle = isLightTheme() ? 'rgba(255,255,255,.88)' : 'rgba(6,11,24,.78)'
-      ctx.fillRect(bx - 4, l.y - fs, w + 8, fs + 4)
-      ctx.strokeStyle = doomed ? stroke : l.color || base
-      ctx.lineWidth = 1
-      ctx.strokeRect(bx - 4, l.y - fs, w + 8, fs + 4)
-    }
-    ctx.fillStyle = doomed ? stroke : l.color || base
-    ctx.fillText(l.text, l.x, l.y)
-    ctx.restore()
-  })
+  paintDrawingShape(ctx, sh, base, { doomed, selected, style, light: isLightTheme(), red: cv('red') || '#FF1744' })
 }
 
 /** Tell the selection toolbar which drawing is selected and how it looks. */
@@ -2450,6 +2403,9 @@ function publishSelection(): void {
           text: typeof d.text === 'string' ? d.text : null,
           account: typeof d.account === 'number' ? d.account : null,
           risk: typeof d.risk === 'number' ? d.risk : null,
+          hideOn: Array.isArray(d.hideOn) ? d.hideOn.slice() : [],
+          bg: typeof d.bg === 'string' ? d.bg : null,
+          border: typeof d.border === 'string' ? d.border : null,
         }
       : null,
   )
@@ -2489,8 +2445,14 @@ function redrawDrawings(includePreview?: Any): void {
   ctx.rect(px0, 0, px1 - px0, mainPaneHeight(chart, ch))
   ctx.clip()
 
-  currentDrawings().forEach(function (d: Any, i: number) {
+  const tfNow = getTimeframe()
+  const list = currentDrawings()
+  // Layout cells and grid panels on this coin paint the same set (drawings/overlay).
+  publishLiveDrawings(String(state.symbol || ''), list)
+  list.forEach(function (d: Any, i: number) {
     if (d.hidden) return
+    // "Visible on intervals": hidden on this timeframe's group, unless selected.
+    if (i !== chartState._sel && !visibleOnTf(d, tfNow)) return
     const sh = shapeOf(d, cw, ch)
     if (sh)
       paintShape(ctx, sh, d.color, i === chartState._eraseHit, i === chartState._sel, {
@@ -2539,7 +2501,8 @@ function redrawDrawings(includePreview?: Any): void {
 
 // ---- Hero / overview renders ----
 export function renderHero(): void {
-  const t = state.tickers[state.symbol] as Any
+  // A ratio / spread has no ticker: its quote comes from its own candles.
+  const t = (state.tickers[state.symbol] ?? synthTicker()) as Any
   const meta = coinMeta(state.symbol)
   $('heroIcon')!.textContent = meta.icon
   $('heroIcon')!.style.borderColor = meta.color + '55'
@@ -2573,7 +2536,8 @@ export function renderHero(): void {
     setTimeout(() => el.classList.remove('flash-up', 'flash-down'), 450)
   }
   el.dataset.p = cur
-  $('heroChg')!.innerHTML = chgHtml(t.pct) + ' <span style="color:var(--dim)">24h</span>'
+  $('heroChg')!.innerHTML =
+    t.pct == null ? '' : chgHtml(t.pct) + ' <span style="color:var(--dim)">24h</span>'
   $('heroUpdated')!.textContent = '· ' + new Date().toLocaleTimeString()
   // An instrument priced by Yahoo reports no trade count, and FX and indices
   // report no volume at all. Printing a formatted undefined — or a confident
@@ -2673,6 +2637,17 @@ export function chartScreenshot(): HTMLCanvasElement | null {
     ctx.textAlign = 'right'
     ctx.fillText(when + '  ·  Liquidity Radar', out.width - Math.round(10 * kx), headH / 2)
     return out
+  } catch {
+    return null
+  }
+}
+
+/** The time span the main chart shows, in UTC seconds (the data export). */
+export function chartVisibleRange(): { from: number; to: number } | null {
+  try {
+    const r = chart?.timeScale().getVisibleRange()
+    const n = (x: Any): number => Number(typeof x === 'object' && x ? x.t : x)
+    return r && isFinite(n(r.from)) && isFinite(n(r.to)) ? { from: n(r.from), to: n(r.to) } : null
   } catch {
     return null
   }

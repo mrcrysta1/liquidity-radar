@@ -14,16 +14,21 @@ import {
   replayInfo,
   restart,
   seek,
-  selectDate,
+  selectDateLoading,
   setSpeed,
   setStepBars,
+  setUpdateInterval,
   startSelect,
   stepBy,
   subscribeReplay,
   toggleReplay,
+  updateIntervals,
 } from '../../features/charts/replay'
 import {
+  cancelAllOrders,
+  cancelOrder,
   canTrade,
+  orderTicket,
   paperBook,
   paperBuy,
   paperFlatten,
@@ -32,8 +37,13 @@ import {
   paperSummary,
   resetPaper,
   setPaperQty,
+  setPickingPrice,
+  setTicketPrice,
+  setTicketType,
   subscribePaper,
+  workingOrders,
 } from '../../features/charts/paperSession'
+import type { OrderType } from '../../features/charts/paperTrading'
 
 function useReplay() {
   const [, force] = useState(0)
@@ -44,7 +54,14 @@ function useReplay() {
 function usePaper() {
   const [, force] = useState(0)
   useEffect(() => subscribePaper(() => force((n) => n + 1)), [])
-  return { book: paperBook(), sum: paperSummary(), can: canTrade(), qty: paperQty() }
+  return {
+    book: paperBook(),
+    sum: paperSummary(),
+    can: canTrade(),
+    qty: paperQty(),
+    ticket: orderTicket(),
+    orders: workingOrders(),
+  }
 }
 
 /** A date-input value (YYYY-MM-DD) as midnight in the chart's time zone. */
@@ -108,12 +125,21 @@ const PAUSE = 'M9 5.5h2.6v13H9zM12.9 5.5h2.6v13h-2.6z'
 /** Where replay starts: pick a bar on the chart, a date, or a random bar. */
 function ReplayStart({ selecting }: { selecting: boolean }) {
   const [date, setDate] = useState('')
+  const [busy, setBusy] = useState(false)
   const go = (v: string) => {
     setDate(v)
     const t = dateInZone(v)
     if (!Number.isFinite(t)) return
-    // Replay can only cut what is loaded; say so rather than silently clamp.
-    if (!selectDate(t)) showToast('That date is outside the loaded bars — replay starts at the nearest one')
+    // A date before the loaded bars pages older history in to reach it;
+    // past what can be loaded, say so rather than silently clamp.
+    selectDateLoading(t, () => {
+      setBusy(true)
+      showToast('Loading older history…')
+    })
+      .then((ok) => {
+        if (!ok) showToast('That date is outside the available history — replay starts at the nearest bar')
+      })
+      .finally(() => setBusy(false))
   }
   return (
     <div className="replay-start">
@@ -131,6 +157,7 @@ function ReplayStart({ selecting }: { selecting: boolean }) {
         type="date"
         className="replay-date"
         value={date}
+        disabled={busy}
         onChange={(e) => go(e.target.value)}
         aria-label="Start replay from date"
         title="Select date"
@@ -145,9 +172,13 @@ function ReplayStart({ selecting }: { selecting: boolean }) {
 
 /** Paper trading at the replay bar's close: orders, position, P&L, trade list. */
 function ReplayTrade() {
-  const { book, sum, can, qty } = usePaper()
+  const { book, sum, can, qty, ticket, orders } = usePaper()
   const [qtyText, setQtyText] = useState(String(qty))
+  const [pxText, setPxText] = useState('')
   const pos = book.pos
+  const pending = ticket.type !== 'market'
+  // The price box follows the ticket (a chart pick) unless it is being typed in.
+  const pxShown = pxText !== '' && Number(pxText) === ticket.price ? pxText : ticket.price ? String(ticket.price) : ''
   return (
     <div className="replay-trade" role="group" aria-label="Paper trading">
       <div className="replay-orders">
@@ -164,6 +195,44 @@ function ReplayTrade() {
           aria-label="Order quantity"
           title="Quantity"
         />
+        <select
+          className="replay-otype"
+          value={ticket.type}
+          onChange={(e) => setTicketType(e.target.value as 'market' | OrderType)}
+          aria-label="Order type"
+          title="Order type"
+        >
+          <option value="market">Market</option>
+          <option value="limit">Limit</option>
+          <option value="stop">Stop</option>
+        </select>
+        {pending && (
+          <>
+            <input
+              className="replay-qty replay-px"
+              type="number"
+              min={0}
+              step="any"
+              value={pxShown}
+              onChange={(e) => {
+                setPxText(e.target.value)
+                setTicketPrice(Number(e.target.value))
+              }}
+              aria-label="Order price"
+              title="Order price"
+            />
+            <button
+              type="button"
+              className={'replay-pickpx' + (ticket.picking ? ' on' : '')}
+              disabled={!can}
+              aria-pressed={ticket.picking}
+              onClick={() => setPickingPrice(!ticket.picking)}
+              title="Trade from chart: click the chart to set the order price"
+            >
+              <Icon d="M12 3v4M12 17v4M3 12h4M17 12h4M12 9.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5Z" />
+            </button>
+          </>
+        )}
         <button type="button" className="replay-buy" disabled={!can} onClick={paperBuy}>
           Buy
         </button>
@@ -179,6 +248,23 @@ function ReplayTrade() {
           Flatten
         </button>
       </div>
+      {orders.length > 0 && (
+        <div className="replay-working" aria-label="Working orders">
+          {orders.map((o) => (
+            <span key={o.id} className={'replay-order ' + (o.side === 'buy' ? 'up' : 'dn')}>
+              {(o.side === 'buy' ? 'Buy ' : 'Sell ') + o.type + ' ' + size(o.qty) + ' @ ' + pfmt(o.price)}
+              <button type="button" onClick={() => cancelOrder(o.id)} aria-label="Cancel order" title="Cancel">
+                ×
+              </button>
+            </span>
+          ))}
+          {orders.length > 1 && (
+            <button type="button" className="replay-reset" onClick={cancelAllOrders}>
+              Cancel all
+            </button>
+          )}
+        </div>
+      )}
       <div className="replay-pnl">
         <span>
           Pos{' '}
@@ -276,6 +362,8 @@ export function ReplayBar() {
   const stamp = r.at ? stampOf(r.at.t) : '—'
   const done = r.idx >= r.total
   const n = r.stepBars
+  const ups = updateIntervals()
+  const unit = r.sub ? r.sub + ' step' : 'bar'
 
   return (
     <div className="replay-bar" role="group" aria-label="Bar replay">
@@ -285,7 +373,7 @@ export function ReplayBar() {
         </button>
         <button
           type="button"
-          title={n === 1 ? 'Step back' : 'Step back ' + n + ' bars'}
+          title={n === 1 ? 'Step back' : 'Step back ' + n + ' ' + unit + 's'}
           onClick={() => stepBy(-1)}
           aria-label="Step back"
         >
@@ -302,7 +390,7 @@ export function ReplayBar() {
         </button>
         <button
           type="button"
-          title={n === 1 ? 'Step forward' : 'Step forward ' + n + ' bars'}
+          title={n === 1 ? 'Step forward' : 'Step forward ' + n + ' ' + unit + 's'}
           onClick={() => stepBy(1)}
           aria-label="Step forward"
         >
@@ -345,14 +433,32 @@ export function ReplayBar() {
         value={n}
         onChange={(e) => setStepBars(Number(e.target.value))}
         aria-label="Bars per step"
-        title="Bars per step"
+        title={r.sub ? 'Update-interval steps per press' : 'Bars per step'}
       >
         {STEP_SIZES.map((k) => (
           <option key={k} value={k}>
-            {k} bar{k === 1 ? '' : 's'}
+            {k} {r.sub ? '×' + r.sub : 'bar' + (k === 1 ? '' : 's')}
           </option>
         ))}
       </select>
+
+      {ups.length > 0 && (
+        <select
+          className="replay-speed replay-upd"
+          value={r.sub}
+          onChange={(e) => setUpdateInterval(e.target.value)}
+          aria-label="Update interval"
+          title="Update interval: how much of the bar in progress each step reveals"
+        >
+          <option value="">Per bar</option>
+          {ups.map((id) => (
+            <option key={id} value={id}>
+              Update {id}
+            </option>
+          ))}
+        </select>
+      )}
+      {r.loading && <span className="replay-loading">Loading…</span>}
 
       <ReplayStart selecting={false} />
 

@@ -59,6 +59,9 @@ export function parseSynthetic(raw: unknown, whole?: (s: string) => boolean): Sy
   return { expr: a + op + b, a, op, b, k: 0 }
 }
 
+/** What a panel says when its data has no meaning for a ratio / spread. */
+export const RATIO_NA = 'Not available for ratio symbols'
+
 export function isSynthetic(sym: unknown): boolean {
   return parseSynthetic(sym) != null
 }
@@ -130,4 +133,42 @@ export function scaleSeries(a: CandleFlat[], op: SynthOp, k: number): CandleFlat
 /** Combine whatever the legs returned, for the expression `s`. */
 export function synthesize(s: Synthetic, a: CandleFlat[], b: CandleFlat[] | null): CandleFlat[] {
   return s.b ? combineSeries(a, b || [], s.op) : scaleSeries(a, s.op, s.k)
+}
+
+/** A ratio's own "ticker": the last close, and the 24h change, high and low. */
+export interface SynthQuote {
+  last: number
+  /** Change over the last 24h of bars, in %; null with under a day loaded. */
+  pct: number | null
+  high: number
+  low: number
+}
+
+/**
+ * The quote a ratio / spread has no venue to report, read off its combined
+ * candles (oldest first): the hero shows this instead of a dash.
+ */
+export function synthQuote(candles: CandleFlat[]): SynthQuote | null {
+  const n = candles.length
+  if (!n || !Number.isFinite(candles[n - 1].c)) return null
+  const lastBar = candles[n - 1]
+  const since = lastBar.t - 86_400_000
+  let high = -Infinity
+  let low = Infinity
+  let ref: CandleFlat | null = null
+  for (let i = n - 1; i >= 0; i--) {
+    const c = candles[i]
+    if (c.t <= since) {
+      ref = c
+      break
+    }
+    if (c.h > high) high = c.h
+    if (c.l < low) low = c.l
+  }
+  return {
+    last: lastBar.c,
+    pct: ref && ref.c ? ((lastBar.c - ref.c) / Math.abs(ref.c)) * 100 : null,
+    high,
+    low,
+  }
 }

@@ -188,7 +188,8 @@ function ink(rootSel) {
     if (!root) return { err: 'no root ' + rootSel }
     let cv = null
     let area = 0
-    root.querySelectorAll('canvas').forEach((c) => {
+    // Skip the drawings overlay (drawings/overlay): it covers the whole cell and is empty without drawings.
+    root.querySelectorAll('canvas:not(.r4dr-overlay)').forEach((c) => {
       const a = c.width * c.height
       if (a > area) {
         area = a

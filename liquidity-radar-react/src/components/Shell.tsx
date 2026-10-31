@@ -5,6 +5,7 @@
 // the original index.html — do not hand-edit; App.tsx consumes <Shell/>.
 import { TimeframePicker } from './chart/TimeframePicker'
 import { LayoutPicker } from './chart/LayoutPicker'
+import { ToolbarOverflow } from './chart/ToolbarOverflow'
 import { IndicatorPicker } from './chart/IndicatorPicker'
 import { ReplayBar, ReplayButton } from './chart/ReplayBar'
 import { CoinPicker } from './chart/CoinPicker'
@@ -21,6 +22,7 @@ const LiqHeatmap = lazy(() => loadLiqHeatmap().then((m) => ({ default: m.LiqHeat
 const CrossExchangeTable = lazy(() => loadCrossExchange().then((m) => ({ default: m.CrossExchangeTable })))
 import { DrawEditTools, DrawQuickTools, DrawToolPicker } from './chart/DrawToolPicker'
 import { ScreenshotButton } from './chart/ScreenshotButton'
+import { ChartDataMenu } from './chart/ChartDataMenu'
 import { OverlayTogglePicker } from './chart/OverlayTogglePicker'
 import { OBImbalanceGauge } from './chart/OBImbalanceGauge'
 import { DivergenceBanner } from './chart/DivergenceBanner'
@@ -198,8 +200,6 @@ export function Shell() {
               <ChartStylePicker />
               <span className="tvb-sep" aria-hidden="true" />
               <IndicatorPicker />
-              <span className="tvb-sep" aria-hidden="true" />
-              <LayoutPicker />
               <span className="badge b-cyan" id="wsKlineState">WS SYNCING</span>
               <span className="tvb-sep tvb-sep-end" aria-hidden="true" />
               {/* Phones: the drawing strip took 36px of a ~260px plot, so it
@@ -219,8 +219,13 @@ export function Shell() {
                 </svg>
                 <span className="tvb-tip">Drawing tools</span>
               </button>
-              <ReplayButton />
-              <ScreenshotButton />
+              {/* Low-priority tools fold behind "…" when the row would wrap. */}
+              <ToolbarOverflow>
+                <LayoutPicker />
+                <ReplayButton />
+                <ScreenshotButton />
+                <ChartDataMenu />
+              </ToolbarOverflow>
               {/* The engine swaps this button's tooltip and label on toggle;
                   the icon is drawn in CSS so it survives that. */}
               <button className="chart-tool-btn tvb-icon" id="fsBtn" aria-label="Full screen">

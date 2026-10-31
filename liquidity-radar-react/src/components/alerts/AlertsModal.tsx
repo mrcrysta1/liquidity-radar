@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { MouseEvent } from 'react'
 import { state } from '../../services/store'
 import { closeModal, showToast } from '../../utils/dom'
+import { takeDrawingAlertRequest } from '../../features/alerts/drawingAlert'
 import { useFavorites, watchList } from '../../features/favorites/favorites'
 import {
   addRule,
@@ -325,7 +326,19 @@ export function AlertsModal() {
       if (el.classList.contains('open')) {
         setSym(state.symbol)
         if (state.tf && TECH_TFS.includes(state.tf)) setTf(state.tf)
-        setPicks(readPicks())
+        const pk = readPicks()
+        setPicks(pk)
+        // Opened from the drawing toolbar's "Add alert": a rule on that drawing.
+        if (takeDrawingAlertRequest() && pk.selLines.length) {
+          const s = pk.selLines
+          setKind('cond')
+          setCond(CONDS_BY_KIND.cond[0])
+          setRows([
+            s.length >= 2
+              ? { ...newRow(), op: 'enter' as CondOp, b: 'l:' + s[0], c: 'l:' + s[1] }
+              : { ...newRow(), op: 'cross' as CondOp, b: 'l:' + s[0] },
+          ])
+        }
       }
     })
     mo.observe(el, { attributes: true, attributeFilter: ['class'] })

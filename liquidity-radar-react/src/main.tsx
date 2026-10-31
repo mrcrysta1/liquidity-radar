@@ -1,6 +1,10 @@
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
+import { bootPopout } from './features/charts/popout'
+
+// A `?popout=1` window is the chart alone (features/charts/popout).
+bootPopout()
 
 // NOTE: StrictMode deliberately omitted — it double-runs effects in dev and
 // would open duplicate WebSocket streams and duplicate chart instances.

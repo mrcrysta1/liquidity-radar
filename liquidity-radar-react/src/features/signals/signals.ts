@@ -7,6 +7,7 @@
 import * as LightweightCharts from 'lightweight-charts'
 import { getNeuralRead, neuralAdjustment, neuralVerdict, setNeuralAllowed, trainOneNeural } from './neuralSignal'
 import { instrumentOf, isInstrument } from '../../constants/instruments'
+import { isSynthetic } from '../../services/syntheticSymbol'
 import { loadCandleWindow } from '../../services/marketData'
 import { COINS } from '../../constants/market'
 import { esc, pfmt, cfmt, chgHtml } from '../../utils/format'
@@ -26,6 +27,7 @@ import { state } from '../../services/store'
 import { md, mdTf, mdVal } from '../../services/market'
 import { storageGet, storageSet } from '../../services/storage'
 import { chartTheme, mapCandle } from '../charts/chartRender'
+import { addBrandMark } from '../charts/brandMark'
 
 type Any = any
 
@@ -155,7 +157,8 @@ function getWhaleFlow(sym: string): Promise<Any> {
   // Metals, FX, indices and equities have no public trade tape. Returning
   // null leaves the whale term out of the blend rather than scoring them
   // against a zero they never had the chance to earn.
-  if (isInstrument(sym)) return Promise.resolve(null)
+  // A ratio / spread (BTCUSDT/ETHUSDT) has no tape of its own either.
+  if (isInstrument(sym) || isSynthetic(sym)) return Promise.resolve(null)
   const cached = whaleFlowCache[sym]
   if (cached && Date.now() - cached.ts < 30000) return cached
   return jget('https://api.binance.com/api/v3/trades?symbol=' + sym + '&limit=500').then(function (trades: Any) {
@@ -225,7 +228,7 @@ function scanKlineFetch(sym: string, tfKey: string): Promise<Any[]> {
     scanCache[key] = { ts: Date.now(), candles: state.candles.slice() }
     return Promise.resolve(scanCache[key].candles)
   }
-  if (isInstrument(sym)) {
+  if (isInstrument(sym) || isSynthetic(sym)) {
     // marketData knows where each instrument is priced: gold is Binance's
     // perpetual shifted onto spot (the chart's price), the rest Yahoo.
     return loadCandleWindow(sym, tfKey, 60).then(function (candles) {
@@ -344,7 +347,7 @@ export function scanSignals(): void {
       // One market's worth of deep history, fetched only for whichever
       // market is actually being trained this sweep.
       const loadDeep = function (sym: string): Promise<Any[]> {
-        if (isInstrument(sym)) return loadCandleWindow(sym, '1h', 400) as Promise<Any[]>
+        if (isInstrument(sym) || isSynthetic(sym)) return loadCandleWindow(sym, '1h', 400) as Promise<Any[]>
         return fetchKlineRows(sym, '1h', 400)
           .then(function (data: Any) {
             return data.map((k: Any) => ({ t: k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5] })).filter(mdVal.candle)
@@ -598,7 +601,7 @@ export function analyzeSigCoin(input: string): void {
   const tfPromises: Promise<Any>[] = tfs.map(function (tf) {
     // Gold, FX and the other instruments are not exchange pairs; their candles
     // come through marketData, which knows where each one is priced.
-    const rows: Promise<Any> = isInstrument(sym)
+    const rows: Promise<Any> = isInstrument(sym) || isSynthetic(sym)
       ? loadCandleWindow(sym, tf, 120).then((cs) => cs.map((c) => [c.t, c.o, c.h, c.l, c.c, c.v]))
       : fetchKlineRows(sym, tf, 120)
     return rows.then(function (data: Any) {
@@ -617,7 +620,7 @@ export function analyzeSigCoin(input: string): void {
     })
   })
   // The crypto news endpoint has nothing to say about the S&P or the euro.
-  const newsPromise: Promise<Any> = isInstrument(sym)
+  const newsPromise: Promise<Any> = isInstrument(sym) || isSynthetic(sym)
     ? Promise.resolve(null)
     : jget('https://cryptocurrency.cv/api/news?coin=' + baseOf(sym).toLowerCase()).catch(function () {
     return { articles: [] }
@@ -707,7 +710,7 @@ function renderSigAnaChart(candles: Any[], sym: string): void {
     const c = LightweightCharts.createChart(el, {
       width: el.clientWidth,
       height: 300,
-      layout: { background: { type: LightweightCharts.ColorType.Solid, color: th.bg }, textStyle: { color: th.txt } } as Any,
+      layout: { background: { type: LightweightCharts.ColorType.Solid, color: th.bg }, textStyle: { color: th.txt }, attributionLogo: false } as Any,
       grid: { vertLines: { color: th.grid }, horzLines: { color: th.grid } },
       crosshair: { mode: 0 },
       rightPriceScale: { borderColor: th.border },
@@ -715,6 +718,7 @@ function renderSigAnaChart(candles: Any[], sym: string): void {
     })
     const cs = c.addSeries(LightweightCharts.CandlestickSeries, { upColor: th.up, downColor: th.dn, borderVisible: false, wickUpColor: th.up, wickDownColor: th.dn })
     cs.setData(candles.map(mapCandle))
+    addBrandMark(el)
     c.timeScale().fitContent()
     sigAnaObserver = new ResizeObserver(() => { if (el.clientWidth) c.applyOptions({ width: el.clientWidth }) })
     sigAnaObserver.observe(el)

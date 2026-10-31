@@ -171,8 +171,15 @@ export interface YahooQuote {
  */
 export async function yahooQuote(sym: string): Promise<YahooQuote | null> {
   const inst = instrumentOf(sym)
-  if (!inst) return null
-  const url = CHART + encodeURIComponent(inst.yahoo) + '?interval=1d&range=5d'
+  return inst ? yahooQuoteOf(inst.yahoo, sym) : null
+}
+
+/**
+ * The same quote for a raw Yahoo symbol (ETH=F, a directory hit not yet in
+ * the instrument table), reported under `sym`.
+ */
+export async function yahooQuoteOf(yahooSym: string, sym = yahooSym): Promise<YahooQuote | null> {
+  const url = CHART + encodeURIComponent(yahooSym) + '?interval=1d&range=5d'
   try {
     const raw = (await jgetProxied(url, { to: 12000 })) as ChartResponse
     const res = raw?.chart?.result?.[0]

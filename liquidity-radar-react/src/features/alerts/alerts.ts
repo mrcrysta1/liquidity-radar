@@ -25,6 +25,7 @@ import { jget } from '../../api/client'
 import { isRateLimited } from '../../api/rateLimit'
 import { COINS } from '../../constants/market'
 import { isInstrument } from '../../constants/instruments'
+import { isSynthetic } from '../../services/syntheticSymbol'
 import { symOf, watchList } from '../favorites/favorites'
 import {
   ALERT_LIMITS,
@@ -109,16 +110,25 @@ export function noteAlertTrade(sym: string, price: number): void {
     if (price < r.lo) r.lo = price
   }
 }
-const extraTickers: Record<string, { last: number; pct: number; ts: number }> = {}
+/** A watchlist / alert quote; high, low and quote volume when the source had them. */
+export interface TickQuote {
+  last: number
+  pct: number
+  high?: number
+  low?: number
+  qvol?: number
+}
+const extraTickers: Record<string, TickQuote & { ts: number }> = {}
 const badSymbols = new Set<string>()
 const candleCache: Record<string, { ts: number; candles: CandleFlat[] }> = {}
 let refreshing = false
 
-function tickerOf(sym: string): { last: number; pct: number } | null {
+function tickerOf(sym: string): TickQuote | null {
   const t = state.tickers && state.tickers[sym]
-  if (t && Number.isFinite(+t.last)) return { last: +t.last, pct: +t.pct }
+  if (t && Number.isFinite(+t.last))
+    return { last: +t.last, pct: +t.pct, high: t.high, low: t.low, qvol: +t.qvol }
   const x = extraTickers[sym]
-  return x && Number.isFinite(x.last) ? { last: x.last, pct: x.pct } : null
+  return x && Number.isFinite(x.last) ? x : null
 }
 const watchSymbols = (): string[] => watchList().map(symOf)
 const techKey = (r: AlertRule) => r.sym + '|' + (r.tf || '15m')
@@ -166,7 +176,7 @@ function candleKeys(r: AlertRule): string[] {
 async function topUpTickers(syms: Iterable<string>, now: number): Promise<boolean> {
   let got = false
   const tk = [...syms]
-    .filter((s) => !(state.tickers && state.tickers[s]) && !badSymbols.has(s) && !isInstrument(s))
+    .filter((s) => !(state.tickers && state.tickers[s]) && !badSymbols.has(s) && !isInstrument(s) && !isSynthetic(s))
     .filter((s) => !extraTickers[s] || now - extraTickers[s].ts > 60000)
     .slice(0, 6)
   for (const s of tk) {
@@ -175,7 +185,14 @@ async function topUpTickers(syms: Iterable<string>, now: number): Promise<boolea
       const d = (await jget(
         'https://api.binance.com/api/v3/ticker/24hr?symbol=' + encodeURIComponent(s),
       )) as Record<string, unknown>
-      extraTickers[s] = { last: Number(d.lastPrice), pct: Number(d.priceChangePercent), ts: Date.now() }
+      extraTickers[s] = {
+        last: Number(d.lastPrice),
+        pct: Number(d.priceChangePercent),
+        high: Number(d.highPrice),
+        low: Number(d.lowPrice),
+        qvol: Number(d.quoteVolume),
+        ts: Date.now(),
+      }
       got = true
     } catch (e) {
       // A 400 means Binance has no such pair — stop asking.

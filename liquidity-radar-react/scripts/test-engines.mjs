@@ -2147,7 +2147,7 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   ok('pine: ta.alma is finite', Number.isFinite(last(r5.plots[3].values)))
   eq('pine: plotchar marks one bar with its char', r5.shapes.map((s) => [s.bar, s.text]), [[5, 'x']])
   const r6 = runPine('indicator("w")\nplot(close)\nfill(1, 2)\nlabel.new(bar_index, high, "x")', c)
-  eq('pine: drawings are ignored with a warning', r6.warnings, ['fill', 'label.new'])
+  eq('pine: a bad fill() warns; label.new now draws', [r6.warnings, r6.drawings.labels.length], [['fill'], 50])
   const r7 = runPine('indicator("wrap")\nx = close +\n     open\nplot(x)', c)
   near('pine: continuation after a trailing operator', last(r7.plots[0].values), last(c).c + last(c).o, 1e-9)
 
@@ -4254,6 +4254,497 @@ alertcondition(close > 12, "Up", "close above 12")`, k)
   eq('depth: binned into pixel rows', Array.from(cells), [13, 3, 0, 0])
   eq('depth: intensity cap is a percentile', DH.intensityCap([0, 1, 2, 3, 4, 100], 0.75), 4)
   eq('depth: empty grid has no cap', DH.intensityCap([0, 0]), 0)
+}
+
+{
+  // r4-ux: chart settings sections (U9), collector state (U17), VP plot edge (U21).
+  const CS = await import(src('features/charts/chartSettingsMath.ts'))
+  const legacy = CS.normalizeSettings({ grid: false, magnet: true })
+  eq('r4ux settings: legacy grid seeds both directions', [legacy.gridVert, legacy.gridHorz, legacy.magnet], [false, false, true])
+  const bad = CS.normalizeSettings({ crosshair: 'wavy', bodyUp: 'red', bgColor: '', priceLine: 'yes', bodyDown: '#00ff00' })
+  eq('r4ux settings: invalid values fall back', [bad.crosshair, bad.bodyUp, bad.bgColor, bad.priceLine, bad.bodyDown], ['dashed', '', CS.DEFAULT_SETTINGS.bgColor, true, '#00ff00'])
+  eq('r4ux settings: junk storage gives defaults', CS.normalizeSettings('x'), CS.DEFAULT_SETTINGS)
+  eq('r4ux settings: crosshair line styles', ['dashed', 'dotted', 'solid'].map(CS.crosshairLineStyle), [3, 1, 0])
+  const grad = CS.settingsChartOptions({ ...CS.DEFAULT_SETTINGS, background: 'gradient', bgColor: '#111111', bgColor2: '#222222', gridVert: false, magnet: true, priceLabels: 'exact' }, '#ffffff')
+  eq('r4ux settings: gradient background', grad.layout.background, { type: 'gradient', topColor: '#111111', bottomColor: '#222222' })
+  eq('r4ux settings: grid, magnet, label mode', [grad.grid.vertLines.visible, grad.grid.horzLines.visible, grad.crosshair.mode, grad.rightPriceScale.alignLabels], [false, true, 1, false])
+  eq('r4ux settings: theme background writes the palette back', CS.settingsChartOptions(CS.DEFAULT_SETTINGS, '#abcdef').layout.background, { type: 'solid', color: '#abcdef' })
+  eq('r4ux settings: canvas edge colour', [CS.canvasEdgeColor(CS.DEFAULT_SETTINGS, '#fff'), CS.canvasEdgeColor({ ...CS.DEFAULT_SETTINGS, background: 'gradient', bgColor2: '#010203' }, '#fff')], ['#fff', '#010203'])
+  const custom = { ...CS.DEFAULT_SETTINGS, bodyUp: '#00aa00', wickDown: '#aa0000', symbolLabel: false }
+  eq('r4ux settings: candle colours on candles', CS.settingsSeriesOptions(custom, 'candle'), { priceLineVisible: true, lastValueVisible: false, upColor: '#00aa00', wickDownColor: '#aa0000' })
+  eq('r4ux settings: hollow keeps per-bar bodies', CS.settingsSeriesOptions(custom, 'hollow'), { priceLineVisible: true, lastValueVisible: false, wickDownColor: '#aa0000' })
+  eq('r4ux settings: line styles take no candle colours', CS.settingsSeriesOptions(custom, 'line'), { priceLineVisible: true, lastValueVisible: false })
+  eq('r4ux settings: a border colour turns borders on', CS.settingsSeriesOptions({ ...CS.DEFAULT_SETTINGS, borderUp: '#123456' }, 'candle').borderVisible, true)
+  eq('r4ux settings: legend classes', CS.legendHideClasses({ ...CS.DEFAULT_SETTINGS, legendVolume: false }), { 'cs-hide-ohlc': false, 'cs-hide-chg': false, 'cs-hide-vol': true, 'cs-hide-indv': false })
+
+  const WM = await import(src('features/whales/whaleMath.ts'))
+  const now = 1_800_000_000_000
+  eq('r4ux collector: states by age', [
+    WM.collectorState(false, now, now),
+    WM.collectorState(true, now - 5_000, now),
+    WM.collectorState(true, now - 10 * 60_000, now),
+    WM.collectorState(true, now - 49 * 3600_000, now),
+    WM.collectorState(true, NaN, now),
+  ], ['none', 'live', 'offline', 'unavailable', 'unavailable'])
+
+  const VP = await import(src('features/charts/volumeProfile.ts'))
+  eq('r4ux vp: plot edge is chart offset + left scale + plot width', VP.plotRightEdge(10, 0, 700, 800), 710)
+  eq('r4ux vp: plot edge capped to the canvas', VP.plotRightEdge(0, 50, 900, 800), 800)
+  eq('r4ux vp: nothing laid out draws nothing', [VP.plotRightEdge(0, 0, 0, 800), VP.plotRightEdge(-4, 0, 300, 800)], [0, 300])
+}
+
+// ---- r4-drawings2: visible-on-intervals + the second batch of drawing tools ----------
+{
+  const V = await import(src('features/charts/drawings/visibility.ts'))
+  eq('r4dr vis: 15s is seconds', V.tfGroup('15s'), 'sec')
+  eq('r4dr vis: 45m is minutes', V.tfGroup('45m'), 'min')
+  eq('r4dr vis: 4h is hours', V.tfGroup('4h'), 'hour')
+  eq('r4dr vis: 1M (month) is days and up', V.tfGroup('1M'), 'day')
+  eq('r4dr vis: 1w is days and up', V.tfGroup('1w'), 'day')
+  ok('r4dr vis: no hideOn shows everywhere', V.visibleOnTf({}, '1m') && V.visibleOnTf({}, '1d'))
+  ok('r4dr vis: hidden on minutes', !V.visibleOnTf({ hideOn: ['min'] }, '15m') && V.visibleOnTf({ hideOn: ['min'] }, '1h'))
+  eq('r4dr vis: junk entries dropped', V.hiddenGroups({ hideOn: ['x', 'day', 3] }), ['day'])
+  eq('r4dr vis: toggle on', V.toggleHidden({}, 'sec'), ['sec'])
+  eq('r4dr vis: toggle last off clears', V.toggleHidden({ hideOn: ['sec'] }, 'sec'), undefined)
+
+  const X = await import(src('features/charts/drawings/shapesExtra.ts'))
+  const c = X.circleThrough({ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 1, y: 1 })
+  eq('r4dr arc: circle through three points', [c.x, c.y, c.r], [1, 0, 1])
+  eq('r4dr arc: collinear has no circle', X.circleThrough({ x: 0, y: 0 }, { x: 1, y: 1 }, { x: 2, y: 2 }), null)
+  const ap = X.arcPoints({ x: 0, y: 0 }, { x: 1, y: -1 }, { x: 2, y: 0 }, 4)
+  ok('r4dr arc: passes through the bulge side', ap[2].y < -0.9 && Math.abs(ap[4].x - 2) < 1e-9)
+  const bz = X.bezierPoints({ x: 0, y: 0 }, { x: 5, y: 10 }, { x: 10, y: 0 }, 2)
+  eq('r4dr curve: bezier midpoint', [bz[1].x, bz[1].y], [5, 5])
+  const rr = X.rotatedRect({ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 3, y: 4 })
+  eq('r4dr rotrect: far side through the third point', [rr[2].x, rr[2].y, rr[3].x, rr[3].y], [10, 4, 0, 4])
+  eq('r4dr ratio: retrace', X.ratio(105, 110, 110, 100), '0.500')
+  eq('r4dr ratio: zero span', X.ratio(1, 2, 3, 3), '')
+  const gb = X.ghostBars(100, 110, 5)
+  ok('r4dr ghost: count and chained opens', gb.length === 5 && gb.every((b, i) => i === 0 || b.o === gb[i - 1].c))
+  ok('r4dr ghost: wicks wrap bodies', gb.every((b) => b.h >= Math.max(b.o, b.c) && b.l <= Math.min(b.o, b.c)))
+  eq('r4dr ghost: starts and ends on the path', [gb[0].o, gb[4].c], [100, 110])
+  // A minimal map: time = x, price = y.
+  const m = {
+    x: (t) => t,
+    y: (p) => p,
+    cw: 500,
+    ch: 500,
+    fmt: (p) => String(p),
+    closesBetween: () => [],
+    barsBetween: () => 4,
+    timeLabel: () => '',
+    candles: () => [
+      { t: 10000, o: 5, h: 8, l: 4, c: 7, v: 1 },
+      { t: 20000, o: 7, h: 9, l: 6, c: 6, v: 1 },
+    ],
+  }
+  const run = (type, points, extra = {}) => {
+    const s = { segs: [], fills: [], arcs: [], labels: [], handles: [] }
+    const P = points.map((p) => ({ x: p.time, y: p.price }))
+    const done = X.extraShape({ type, color: '#4FC3F7', points, ...extra }, P, m, s)
+    return { done, s }
+  }
+  ok('r4dr extra: unknown type falls through', !run('trend', [{ time: 1, price: 1 }]).done)
+  const bp = run('barspattern', [
+    { time: 10, price: 5 },
+    { time: 20, price: 5 },
+    { time: 100, price: 50 },
+  ])
+  // Copy starts at x=100, price shifted so the first open sits on 50.
+  ok('r4dr bars pattern: copy placed at the third point', bp.s.segs.some((g) => g.x1 === 100 && g.y1 === 53 && g.y2 === 49))
+  const ic = run('icon', [{ time: 50, price: 50 }], { text: '🔥' })
+  eq('r4dr icon: glyph label', ic.s.labels[0].text, '🔥')
+  ok('r4dr icon: clickable box', ic.s.fills.length === 1)
+  const cy = run('cypher', [0, 1, 2, 3, 4].map((i) => ({ time: i * 10, price: [100, 200, 150, 250, 180][i] })))
+  ok('r4dr cypher: X..D tagged with ratios', cy.s.labels.filter((l) => l.box).length === 5 && cy.s.labels.some((l) => l.text === '0.500'))
+  const fc = run('forecast', [
+    { time: 0, price: 100 },
+    { time: 40, price: 110 },
+  ])
+  ok('r4dr forecast: % and bars', fc.s.labels[0].text.includes('+10.00%') && fc.s.labels[0].text.includes('4 bars'))
+  const pn = run('pricenote', [
+    { time: 0, price: 100 },
+    { time: 40, price: 80 },
+  ], { bg: '#00000040', border: 'none' })
+  eq('r4dr price note: carries the box style', [pn.s.labels[0].text, pn.s.labels[0].bg, pn.s.labels[0].border], ['100', '#00000040', 'none'])
+  ok('r4dr extra: every new tool id handled', X.EXTRA_TOOL_IDS.every((id) => run(id, [0, 1, 2, 3, 4, 5].map((i) => ({ time: i * 10, price: 100 + i }))).done))
+}
+
+// ---- r4-replay2: update-interval forming bar, working orders, fill markers ----
+{
+  const RM = await import(src('features/charts/replayMath.ts'))
+  const subs = [
+    { t: 0, o: 10, h: 12, l: 9, c: 11, v: 1 },
+    { t: 60, o: 11, h: 15, l: 10, c: 14, v: 2 },
+    { t: 120, o: 14, h: 14, l: 7, c: 8, v: 3 },
+  ]
+  eq('replay2: forming bar folds sub-bars up to the cursor', RM.formingBar(subs, 0, 60), { t: 0, o: 10, h: 15, l: 9, c: 14, v: 3 })
+  eq('replay2: forming bar of every sub-bar is the whole bar', RM.formingBar(subs, 0, 120), { t: 0, o: 10, h: 15, l: 7, c: 8, v: 6 })
+  eq('replay2: forming bar keeps the main bar open time', RM.formingBar(subs.slice(1), 0, 60).t, 0)
+  eq('replay2: nothing formed before the first sub-bar', RM.formingBar(subs, 0, -1), null)
+  eq('replay2: next / previous sub-bar', [RM.nextSubTime(subs, 0), RM.nextSubTime(subs, 120), RM.prevSubTime(subs, 120), RM.prevSubTime(subs, 0)], [60, null, 60, null])
+  const opts = [{ id: '1s', ms: 1000 }, { id: '1m', ms: 60000 }, { id: '1h', ms: 3600000 }, { id: '1d', ms: 86400000 }]
+  eq('replay2: update intervals for 1h bars', RM.updateIntervalsFor(3600000, opts).map((o) => o.id), ['1s', '1m'])
+  eq('replay2: 1s steps stop past 1h bars', RM.updateIntervalsFor(86400000, opts).map((o) => o.id), ['1m', '1h'])
+
+  const PT = await import(src('features/charts/paperTrading.ts'))
+  const b = { o: 100, h: 105, l: 95 }
+  eq('replay2: buy limit fills at its price', PT.orderFill({ side: 'buy', type: 'limit', price: 97 }, b), 97)
+  eq('replay2: buy limit below the bar waits', PT.orderFill({ side: 'buy', type: 'limit', price: 90 }, b), null)
+  eq('replay2: gap through a buy limit fills at the open', PT.orderFill({ side: 'buy', type: 'limit', price: 101 }, b), 100)
+  eq('replay2: buy stop fills at its price', PT.orderFill({ side: 'buy', type: 'stop', price: 104 }, b), 104)
+  eq('replay2: gap through a buy stop fills at the open', PT.orderFill({ side: 'buy', type: 'stop', price: 99 }, b), 100)
+  eq('replay2: sell limit / sell stop', [PT.orderFill({ side: 'sell', type: 'limit', price: 103 }, b), PT.orderFill({ side: 'sell', type: 'stop', price: 96 }, b), PT.orderFill({ side: 'sell', type: 'stop', price: 94 }, b)], [103, 96, null])
+  eq('replay2: order type from the picked price', [PT.orderTypeFor('buy', 90, 100), PT.orderTypeFor('buy', 110, 100), PT.orderTypeFor('sell', 110, 100), PT.orderTypeFor('sell', 90, 100)], ['limit', 'stop', 'limit', 'stop'])
+
+  let bk = PT.buy(PT.emptyBook(), 1, 100, 120000)
+  bk = PT.sell(bk, 1, 110, 60000)
+  bk = PT.sell(bk, 2, 120, 300000)
+  const bars = [{ t: 0 }, { t: 60000 }, { t: 120000 }, { t: 180000 }]
+  const mk = PT.fillMarkers(bk.fills, bars, 180000, { up: 'g', dn: 'r' })
+  eq('replay2: fill markers sorted, future fills hidden', mk.map((m) => [m.time, m.shape, m.color]), [[60, 'arrowDown', 'r'], [120, 'arrowUp', 'g']])
+  eq('replay2: fill marker text', mk[1].text, 'Buy 1 @ 100')
+  eq('replay2: fill snaps to the bar it happened in', PT.fillMarkers([{ side: 'buy', qty: 1, price: 1, t: 150000 }], bars, 1e9, { up: 'g', dn: 'r' })[0].time, 120)
+  eq('replay2: fill before the first bar is not drawn', PT.fillMarkers([{ side: 'buy', qty: 1, price: 1, t: -5 }], bars, 1e9, { up: 'g', dn: 'r' }), [])
+}
+
+// ---- r4-indicators2: multi-timeframe inputs, volume profile, auto trendlines, catalogue ----
+{
+  const MT = await import(src('features/charts/indicators/mtf.ts'))
+  const M = await import(src('features/charts/indicators/math.ts'))
+  const R = await import(src('features/charts/indicators/registry.ts'))
+  const S = await import(src('features/charts/indicators/store.ts'))
+  const G = await import(src('features/charts/indicators/graph.ts'))
+  const VP = await import(src('features/charts/indicators/vprofile.ts'))
+  const H = 3600000
+  const bar = (t, c, v = 1) => ({ t, o: c, h: c, l: c, c, v })
+
+  // Alignment: 1h chart, 4h bars. A 4h bar shows from the chart bar whose
+  // close ends it; before any closed 4h bar there is nothing.
+  const chartT = Array.from({ length: 10 }, (_, i) => i * H)
+  const htfT = [0, 4 * H, 8 * H]
+  eq('mtf: closed 4h bar from the chart bar that closes it; live bar shows the forming one',
+    MT.alignIndex(chartT, H, htfT, 4 * H, false), [-1, -1, -1, 0, 0, 0, 0, 1, 1, 2])
+  eq('mtf: wait for close keeps the live bar on the last closed bar',
+    MT.alignIndex(chartT, H, htfT, 4 * H, true), [-1, -1, -1, 0, 0, 0, 0, 1, 1, 1])
+  eq('mtf: values mapped by index', MT.mapAligned([10, 20, 30], [-1, 0, 0, 1, 2]), [null, 10, 10, 20, 30])
+  eq('mtf: once = only on the first bar of each period', MT.mapAligned([10, 20], [0, 0, 1, 1], true), [10, null, 20, null])
+  ok('mtf: applies only to a longer timeframe', MT.mtfApplies('1h', 15 * 60000) && !MT.mtfApplies('1h', H) && !MT.mtfApplies(undefined, H))
+  eq('mtf: weeks open on Monday', MT.mtfBucketStart(Date.UTC(2024, 0, 3, 12), '1w'), Date.UTC(2024, 0, 1))
+  const ch = Array.from({ length: 10 }, (_, i) => bar(i * H, 100 + i, 2))
+  const rs = MT.resampleTo(ch, '4h')
+  eq('mtf: resample folds OHLCV', rs.map((k) => [k.t, k.o, k.h, k.l, k.c, k.v]),
+    [[0, 100, 103, 100, 103, 8], [4 * H, 104, 107, 104, 107, 8], [8 * H, 108, 109, 108, 109, 4]])
+  // Fetched bars running past the chart (replay) are cut at the chart's
+  // bucket, and the forming bucket is rebuilt from what the chart has seen.
+  const ahead = [bar(0, 1), bar(4 * H, 2), { t: 8 * H, o: 1, h: 999, l: 1, c: 999, v: 99 }, bar(12 * H, 3)]
+  const wf = MT.withForming(ahead, ch, '4h')
+  eq('mtf: no lookahead from fetched bars', wf.map((k) => [k.t, k.h, k.c, k.v]), [[0, 1, 1, 1], [4 * H, 2, 2, 1], [8 * H, 109, 109, 4]])
+  ok('mtf: bars needed covers span + warm-up, capped', MT.mtfBarsNeeded(ch, '1h') === 9 + 300 && MT.mtfBarsNeeded(ch, '1h', 300, 50) === 50)
+
+  // computeAll with a frame: SMA(2) of 4h closes onto the 1h bars.
+  const smaInst = { uid: 'a', type: 'sma', params: { length: 2 }, source: 'close', visible: true }
+  const frame = { candles: rs, idx: MT.alignIndex(ch.map((k) => k.t), H, rs.map((k) => k.t), 4 * H, false) }
+  const [cmp] = G.computeAll([smaInst], ch, (i) => R.indicatorDef(i.type), R.sourceSeries, () => frame)
+  eq('mtf: indicator computed on the higher timeframe and aligned', cmp.outputs.v,
+    [null, null, null, null, null, null, null, 105, 105, 108])
+
+  // Store: the timeframe persists; junk and drawing indicators drop it.
+  const san = S.sanitizeIndicators([
+    { uid: 'x1', type: 'rsi', params: {}, source: 'close', visible: true, tf: '4h', tfWait: true },
+    { uid: 'x2', type: 'rsi', params: {}, source: 'close', visible: true, tf: '7h' },
+    { uid: 'x3', type: 'zigzag', params: {}, source: 'close', visible: true, tf: '1h' },
+  ])
+  eq('mtf: stored timeframe kept / bad dropped / not on drawings', san.map((i) => [i.tf ?? null, i.tfWait ?? null]), [['4h', true], [null, null], [null, null]])
+  eq('mtf: serialized', S.serializeIndicators(san)[0].tf, '4h')
+
+  // Trendlines: lows rising 100 → 110 → 120 every 20 bars, highs in between.
+  const zz = (pts) => {
+    const v = []
+    for (let k = 1; k < pts.length; k++)
+      for (let j = 0; j < 10; j++) v.push(pts[k - 1] + ((pts[k] - pts[k - 1]) * j) / 10)
+    v.push(pts[pts.length - 1])
+    return v.map((x, i) => ({ t: i * 60000, o: x, h: x, l: x, c: x, v: 1 }))
+  }
+  const up = zz([100, 130, 110, 140, 120, 150, 135])
+  const lows = [{ i: 0, price: 100, high: false }, { i: 20, price: 110, high: false }, { i: 40, price: 120, high: false }]
+  const sup = M.fitTrendline(up, lows, false, 0.5)
+  ok('trend: support through three rising lows', sup && sup.a === 0 && Math.abs(sup.slope - 0.5) < 1e-9 && sup.touches === 3, sup)
+  eq('trend: line extended to the last bar', M.trendSeries(up.length, sup)[up.length - 1], 100 + 0.5 * (up.length - 1))
+  // A close under the line breaks it: no line through those lows survives.
+  const broken = up.map((k, i) => (i === 45 ? { ...k, c: 100, l: 100 } : k))
+  eq('trend: a line broken by a close is rejected', M.fitTrendline(broken, lows, false, 0.5), null)
+  eq('trend: needs two pivots', M.fitTrendline(up, lows.slice(0, 1), false), null)
+  const highs = [{ i: 10, price: 130, high: true }, { i: 30, price: 140, high: true }, { i: 50, price: 150, high: true }]
+  const res = M.fitTrendline(up, highs, true, 0.5)
+  ok('trend: resistance through rising highs', res && res.a === 10 && res.touches === 3, res)
+  const at = M.autoTrendlines(up, 5, 3, 0.5)
+  ok('trend: auto trendlines find both sides', at.supFit && at.resFit && at.sup[at.sup.length - 1] < at.res[at.res.length - 1], at)
+
+  // Catalogue additions.
+  const cs = Array.from({ length: 60 }, (_, i) => ({ t: i, o: 100 + i, h: 102 + i, l: 99 + i, c: 101 + i, v: 10 }))
+  const er = M.elderRay(cs, 13)
+  ok('elder: bull = high − EMA, bear = low − EMA', er.bull[12] != null && Math.abs(er.bull[59] - er.bear[59] - 3) < 1e-9 && er.bull[11] === null)
+  const mi = M.massIndex(cs, 9, 25)
+  ok('mass index: constant range → sum length', Math.abs(mi[59] - 25) < 1e-9 && mi[20] === null, mi[59])
+  const lin = cs.map((k) => k.c)
+  eq('dpo: a straight line detrends to a constant', M.dpo(lin, 20).slice(-2), [20.5, 20.5])
+  ok('coppock: rising prices → positive', M.coppock(lin, 10, 14, 11)[59] > 0 && M.coppock(lin, 10, 14, 11)[20] === null)
+  const lrc = M.linregChannel(lin, 30, 2)
+  ok('lr channel: fits a line exactly, zero width, only the window', Math.abs(lrc.mid[59] - 160) < 1e-9 && Math.abs(lrc.upper[59] - 160) < 1e-6 && lrc.mid[29] === null && Math.abs(lrc.mid[30] - 131) < 1e-9, lrc.mid[59])
+  ;['vprofile', 'autotrend', 'lrc', 'elder', 'massindex', 'coppock', 'dpo', 'supertrend', 'ichimoku', 'keltner', 'donchian', 'vortex', 'aroon', 'uo', 'cmf', 'trix', 'hv'].forEach((id) =>
+    ok('catalogue: ' + id, !!R.indicatorDef(id)))
+  const vpDef = R.indicatorDef('vprofile')
+  eq('vprofile: label names the range mode', R.instanceLabel(vpDef, { ...R.defaultParams(vpDef), mode: 1 }), 'Volume Profile Session/200/48/70/30')
+  eq('vprofile: no value outputs', R.valueOutputs(vpDef).length, 0)
+  ok('vprofile / trendlines take no timeframe', !R.takesMtf(vpDef) && !R.takesMtf(R.indicatorDef('autotrend')) && R.takesMtf(R.indicatorDef('rsi')))
+
+  // Volume profile ranges by mode (4 bars a day).
+  const times = Array.from({ length: 10 }, (_, i) => i * 6 * H)
+  eq('vprofile: fixed lookback = newest bars', VP.profileRanges(times, 2, null, 3), [[7, 9]])
+  eq('vprofile: visible range', VP.profileRanges(times, 0, { from: 2.4, to: 7.2 }, 0), [[2, 8]])
+  eq('vprofile: sessions from the day start of the first visible bar', VP.profileRanges(times, 1, { from: 5, to: 9 }, 0), [[4, 7], [8, 9]])
+}
+
+{
+  // r4-data: chart CSV export, watchlist columns, popout URL / sync, ratio quote
+  const DX = await import(src('features/charts/dataExport.ts'))
+  eq('csv: plain cell', DX.csvCell('RSI 14'), 'RSI 14')
+  eq('csv: comma and quote escaped', DX.csvCell('MACD, "fast"'), '"MACD, ""fast"""')
+  eq('csv: newline quoted', DX.csvCell('a\nb'), '"a\nb"')
+  eq('csv: formula neutered', DX.csvCell('=HYPERLINK(1)'), "'=HYPERLINK(1)")
+  eq('csv: negative number untouched', DX.csvCell(-1.5), '-1.5')
+  eq('csv: NaN / null blank', [DX.csvCell(NaN), DX.csvCell(null), DX.csvCell(undefined)], ['', '', ''])
+  eq('csv: iso utc', DX.isoAtOffset(Date.UTC(2026, 9, 31, 12, 5, 9), 0), '2026-10-31T12:05:09Z')
+  eq('csv: iso +05:00', DX.isoAtOffset(Date.UTC(2026, 9, 31, 22, 0), 300), '2026-11-01T03:00:00+05:00')
+  eq('csv: iso -03:30', DX.isoAtOffset(Date.UTC(2026, 9, 31, 2, 0), -210), '2026-10-30T22:30:00-03:30')
+  const H = 3600000
+  const bars = [2, 0, 1, 3].map((i) => ({ t: i * H, o: i, h: i + 1, l: i - 1, c: i + 0.5, v: 10 * i }))
+  const csv = DX.buildChartCsv({
+    bars,
+    columns: [
+      { label: 'SMA 2 · SMA', times: [0, H, 2 * H, 3 * H], values: [null, 1.25, 2.5, NaN] },
+      // A column over a different span, out of order: joined on time.
+      { label: 'X, y', times: [3 * H, H], values: [7, 6] },
+    ],
+    from: H,
+    to: 2 * H,
+  })
+  const lines = csv.trim().split('\r\n')
+  eq('csv: header', lines[0], 'time,open,high,low,close,volume,SMA 2 · SMA,"X, y"')
+  eq('csv: range kept, sorted', lines.length, 3)
+  eq('csv: row aligned by time', lines[1], '1970-01-01T01:00:00Z,1,2,0,1.5,10,1.25,6')
+  eq('csv: missing value blank', lines[2], '1970-01-01T02:00:00Z,2,3,1,2.5,20,2.5,')
+  const csvTz = DX.buildChartCsv({ bars: bars.slice(0, 1), offsetOf: () => 60 })
+  eq('csv: chart zone offset applied', csvTz.split('\r\n')[1].split(',')[0], '1970-01-01T03:00:00+01:00')
+  eq('csv: file name safe for ratios', DX.csvFileName('BTCUSDT/ETHUSDT', '1h', Date.UTC(2026, 9, 31, 17, 0)), 'BTCUSDT_ETHUSDT-1h-2026-10-31T1700.csv')
+
+  const WC = await import(src('features/favorites/watchColumns.ts'))
+  eq('wlcols: default', WC.sanitizeWatchPrefs(null), { cols: ['chg'], sort: null })
+  eq('wlcols: unknown dropped, catalogue order', WC.sanitizeWatchPrefs({ cols: ['rsi', 'bogus', 'vol'] }).cols, ['vol', 'rsi'])
+  eq('wlcols: sort on a hidden column dropped', WC.sanitizeWatchPrefs({ cols: ['vol'], sort: { key: 'rsi', dir: 'asc' } }).sort, null)
+  eq('wlcols: valid sort kept', WC.sanitizeWatchPrefs({ cols: [], sort: { key: 'last', dir: 'asc' } }).sort, { key: 'last', dir: 'asc' })
+  const tg = WC.toggleWatchCol({ cols: ['chg', 'rsi'], sort: { key: 'rsi', dir: 'desc' } }, 'rsi')
+  eq('wlcols: toggle off clears its sort', tg, { cols: ['chg'], sort: null })
+  eq('wlcols: toggle on', WC.toggleWatchCol({ cols: ['rsi'], sort: null }, 'vol').cols, ['vol', 'rsi'])
+  let s1 = WC.nextWatchSort(null, 'vol')
+  eq('wlcols: first click desc', s1, { key: 'vol', dir: 'desc' })
+  s1 = WC.nextWatchSort(s1, 'vol')
+  eq('wlcols: second click asc', s1, { key: 'vol', dir: 'asc' })
+  eq('wlcols: third click back to list order', WC.nextWatchSort(s1, 'vol'), null)
+  eq('wlcols: symbol sorts asc first', WC.nextWatchSort(null, 'sym'), { key: 'sym', dir: 'asc' })
+  const vals = { A: 3, B: null, C: 5, D: 3 }
+  const by = (it) => vals[it]
+  eq('wlcols: sort desc, missing last, ties stable', WC.sortWatch(['A', 'B', 'C', 'D'], { key: 'vol', dir: 'desc' }, by), ['C', 'A', 'D', 'B'])
+  eq('wlcols: sort asc, missing still last', WC.sortWatch(['B', 'C', 'A'], { key: 'vol', dir: 'asc' }, by), ['A', 'C', 'B'])
+  eq('wlcols: strings sort', WC.sortWatch(['ETH', 'BTC'], { key: 'sym', dir: 'asc' }, (x) => x), ['BTC', 'ETH'])
+  eq('wlcols: no sort keeps order', WC.sortWatch(['B', 'A'], null, by), ['B', 'A'])
+
+  const PO = await import(src('features/charts/popoutMath.ts'))
+  const qs = PO.popoutSearch({ sym: 'BTCUSDT+ETHUSDT', tf: '1h', ch: 'abc123' })
+  eq('popout: round trip keeps + in a spread', PO.parsePopout(qs), { sym: 'BTCUSDT+ETHUSDT', tf: '1h', ch: 'abc123' })
+  eq('popout: normal app', PO.parsePopout('?sym=BTCUSDT'), null)
+  eq('popout: junk cleaned', PO.parsePopout('?popout=1&sym=<x>&tf=1h;x&ch=A!'), { sym: '', tf: '', ch: '' })
+  eq('popout: sym upper-cased', PO.parsePopout('?popout=1&sym=ethusdt&tf=4h').sym, 'ETHUSDT')
+  eq('popout: sync msg sym', PO.readSyncMsg({ k: 'sym', v: 'BTCUSDT/ETHUSDT' }), { k: 'sym', v: 'BTCUSDT/ETHUSDT' })
+  eq('popout: sync msg tf', PO.readSyncMsg({ k: 'tf', v: '15m' }), { k: 'tf', v: '15m' })
+  eq('popout: bad msgs ignored', [PO.readSyncMsg(null), PO.readSyncMsg({ k: 'x', v: 'a' }), PO.readSyncMsg({ k: 'tf', v: 'drop table' })], [null, null, null])
+
+  const SY = await import(src('services/syntheticSymbol.ts'))
+  const day = 86400000
+  const sc = [
+    { t: 0, o: 1, h: 1.2, l: 0.9, c: 1, v: 0 },
+    { t: day / 2, o: 1, h: 1.6, l: 0.95, c: 1.5, v: 0 },
+    { t: day, o: 1.5, h: 2.1, l: 1.4, c: 2, v: 0 },
+  ]
+  eq('synthQuote: last, 24h change and range', SY.synthQuote(sc), { last: 2, pct: 100, high: 2.1, low: 0.95 })
+  eq('synthQuote: under a day has no change', SY.synthQuote(sc.slice(1)).pct, null)
+  eq('synthQuote: empty', SY.synthQuote([]), null)
+  eq('ratio: n/a text', typeof SY.RATIO_NA, 'string')
+}
+
+// ---------------------------------------------------------------- r4-pine2: language, drawings, security
+{
+  const { runPine } = await import(src('features/charts/pine/runtime.ts'))
+  const S = await import(src('features/charts/pine/security.ts'))
+  const BC = await import(src('features/charts/pine/barColors.ts'))
+  const PI = await import(src('features/charts/pine/indicator.ts'))
+  const mk = (len, step = 900_000, t0 = 1_700_000_000_000) =>
+    Array.from({ length: len }, (_, i) => {
+      const o = 100 + Math.sin(i / 7) * 10 + i * 0.05
+      const cl = o + Math.cos(i / 3) * 2
+      return { t: t0 + i * step, o, h: Math.max(o, cl) + 1, l: Math.min(o, cl) - 1, c: cl, v: 100 + (i % 9) }
+    })
+  const c = mk(120)
+  const lastV = (p) => p.values[p.values.length - 1]
+  const lc = c[c.length - 1]
+  const up = lc.c > lc.o
+
+  // ---- language ----
+  const L = runPine(`indicator("lang")
+type Pivot
+    float price
+    int bar = 7
+    string kind = "high"
+method double(Pivot p, float k = 2) =>
+    p.price * k
+var Pivot pv = Pivot.new(1.5)
+pv.price := pv.price + 1
+q = Pivot.new(kind = "low", price = 3)
+s = switch
+    close > open => 1
+    => -1
+k = switch s
+    1 => "up"
+    -1 => "down"
+    => "?"
+x = if close > open
+    10
+else if close < open
+    20
+else
+    30
+var a = array.new_float()
+array.push(a, bar_index)
+tot = 0
+for v in a
+    if v % 2 == 1
+        continue
+    tot += 1
+    if tot >= 5
+        break
+cnt = 0
+for [i, v] in a
+    cnt += i
+f(a, b = 2) => a * b
+plot(pv.double(), "m")
+plot(pv.double(k = 10), "m10")
+plot(q.bar, "qbar")
+plot(q.kind == "low" ? 1 : 0, "qkind")
+plot(s, "s")
+plot(k == "up" ? 1 : k == "down" ? -1 : 0, "k")
+plot(x, "x")
+plot(tot, "tot")
+plot(cnt, "cnt")
+plot(f(3), "f3")
+plot(f(3, b = 5), "f35")
+plot(str.length(str.format("{0}|{1,number,#.##}", "ab", 1.2345)), "fmt")`, c)
+  const P = Object.fromEntries(L.plots.map((p) => [p.title, lastV(p)]))
+  eq('pine2: type fields, := and a method with a default', [P.m, P.m10], [(1.5 + 120) * 2, (1.5 + 120) * 10])
+  eq('pine2: Type.new by name with field defaults', [P.qbar, P.qkind], [7, 1])
+  eq('pine2: switch without and with a subject', [P.s, P.k], [up ? 1 : -1, up ? 1 : -1])
+  eq('pine2: if as an expression', P.x, up ? 10 : lc.c < lc.o ? 20 : 30)
+  eq('pine2: for…in with continue/break', P.tot, 5)
+  eq('pine2: for [i, v] in', P.cnt, (119 * 120) / 2)
+  eq('pine2: default and named function arguments', [P.f3, P.f35], [6, 15])
+  eq('pine2: str.format with a number pattern', P.fmt, 'ab|1.23'.length)
+  const bad = (() => {
+    try {
+      runPine('type P\n    float a\np = P.new(1)\nplot(p.b)', c)
+    } catch (e) {
+      return e.message
+    }
+  })()
+  ok('pine2: unknown field is a located error', /Line 4.*no field 'b'/.test(bad || ''), bad)
+
+  // ---- drawings ----
+  const D = runPine(`indicator("d", overlay=true, max_labels_count=3)
+label.new(bar_index, na, "L" + str.tostring(bar_index), yloc=yloc.abovebar, style=label.style_label_down)
+var line ln = na
+var box bx = na
+if barstate.islast
+    ln := line.new(bar_index - 10, low, bar_index, high, extend=extend.right, color=color.red)
+    ln.set_width(3)
+    line.set_y1(ln, 50)
+    bx := box.new(bar_index - 5, high, bar_index + 5, low, bgcolor=color.new(color.green, 80), text="B")
+    tmp = line.new(time, 1, time, 2, xloc=xloc.bar_time)
+    line.delete(tmp)
+var tb = table.new(position.top_right, 3, 3, border_width=1)
+if barstate.islast
+    table.cell(tb, 0, 0, "Close", bgcolor=color.gray)
+    table.cell(tb, 1, 0, str.tostring(close, "#.##"))
+plot(array.size(label.all), "nl")
+plot(line.get_price(ln, bar_index - 5), "lp")`, c)
+  const dr = D.drawings
+  eq('pine2: max_labels_count keeps the newest labels', dr.labels.map((l) => l.text), ['L117', 'L118', 'L119'])
+  eq('pine2: yloc.abovebar sits on the bar high', [dr.labels[2].y, dr.labels[2].t], [lc.h, lc.t])
+  eq('pine2: line.new + set_* (xloc bar_index → time)', [dr.lines.length, dr.lines[0].t1, dr.lines[0].y1, dr.lines[0].width, dr.lines[0].extend], [1, c[109].t, 50, 3, 'right'])
+  eq('pine2: a box past the last bar gets a future time', dr.boxes[0].t2, lc.t + 5 * 900_000)
+  eq('pine2: table trimmed to its filled cells', [dr.tables[0].rows, dr.tables[0].columns, dr.tables[0].cells[0][1].text], [1, 2, String(Math.round(lc.c * 100) / 100)])
+  eq('pine2: label.all counts live labels', lastV(D.plots[0]), 3)
+  near('pine2: line.get_price interpolates', lastV(D.plots[1]), 50 + ((lc.h - 50) * 5) / 10, 1e-9)
+  eq('pine2: drawing calls no longer warn', D.warnings, [])
+
+  // ---- bgcolor / barcolor / fill colours ----
+  const B = runPine(`indicator("b", overlay=true)
+bgcolor(close > open ? color.new(color.green, 90) : na, offset=1)
+barcolor(close > open ? color.lime : na)
+p1 = plot(close)
+p2 = plot(open)
+fill(p1, p2, color = close > open ? color.green : color.red)`, c)
+  const ups = c.map((k) => k.c > k.o)
+  eq('pine2: bgcolor offset shifts a bar right', B.bgcolors.map(Boolean), [false, ...ups.slice(0, -1)])
+  eq('pine2: barcolor per bar, na = chart colour', B.barcolors.map(Boolean), ups)
+  ok('pine2: fill keeps per-bar colours', B.fills[0].colors.length === c.length && B.fills[0].colors.some(Boolean), B.fills[0].colors?.length)
+
+  BC.setPineBarColors(new Map([[c[1].t, '#ff0000']]))
+  const items = [{ time: c[0].t / 1000, open: 1, close: 2 }, { time: c[1].t / 1000, open: 2, close: 1 }]
+  eq('pine2: bar colours applied to candle data only on their bars', BC.withPineBarColors(items, 'candle').map((d) => d.color), [undefined, '#ff0000'])
+  eq('pine2: line styles take no bar colours', BC.withPineBarColors(items, 'line'), items)
+  BC.setPineBarColors(new Map())
+
+  // ---- request.security ----
+  eq('pine2: timeframe spellings', ['60', '1H', 'D', '1D', '3D', 'W', '30S', 'x', ''].map(S.normTf), ['60', '60', 'D', 'D', '3D', 'W', '30S', null, null])
+  eq('pine2: app interval ids', ['60', '240', '45', 'D', 'W', 'M', '1440'].map(S.appTf), ['1h', '4h', '45m', '1d', '1w', '1M', '1d'])
+  eq('pine2: symbols lose the exchange prefix', S.normSymbol('BINANCE:ethusdt'), 'ETHUSDT')
+  // Chart 15m bars, requested 1h bars on the same clock.
+  const ch = Array.from({ length: 10 }, (_, i) => ({ t: i * 15 }))
+  const hr = Array.from({ length: 3 }, (_, j) => ({ t: j * 60 }))
+  eq('pine2: no lookahead — value lands where the hour closes; last bar sees the forming hour', Array.from(S.alignSecurity(ch, hr, 60)), [-1, -1, -1, 0, 0, 0, 0, 1, 1, 2])
+  eq('pine2: lookahead_on — the hour the bar opens in', Array.from(S.alignSecurity(ch, hr, 60, true)), [0, 0, 0, 0, 1, 1, 1, 1, 2, 2])
+  eq('pine2: gaps_on — only where a value first appears', Array.from(S.alignSecurity(ch, hr, 60, false, true)), [-1, -1, -1, 0, -1, -1, -1, 1, -1, 2])
+  const sec = `indicator("s")
+plot(request.security("BINANCE:BTCUSDT", "60", close), "same sym")
+plot(request.security(syminfo.tickerid, "15", close), "chart")
+plot(request.security("ETHUSDT", "60", ta.sma(close, 2)), "eth")`
+  const opt = { ticker: 'BTCUSDT', period: '15' }
+  const r1 = runPine(sec, c, {}, opt)
+  eq('pine2: missing bars are reported, not fetched', r1.securityNeeds.map((x) => x.key), ['BTCUSDT|60', 'ETHUSDT|60'])
+  eq('pine2: the chart\'s own symbol/interval needs nothing', lastV(r1.plots[1]), lc.c)
+  const htf = mk(40, 3_600_000)
+  const r2 = runPine(sec, c, {}, { ...opt, security: { 'BTCUSDT|60': htf, 'ETHUSDT|60': htf } })
+  eq('pine2: nothing missing once the bars are given', r2.securityNeeds, undefined)
+  const v = r2.plots[0].values
+  eq('pine2: hourly close appears at the hour\'s last 15m bar', [v[2], v[3], v[6], v[7]], [null, htf[0].c, htf[0].c, htf[1].c])
+  const e = r2.plots[2].values
+  near('pine2: expression evaluated on the requested bars', e[7], (htf[0].c + htf[1].c) / 2, 1e-9)
+  eq('pine2: no value before the requested series has one', e[3], null)
+
+  // ---- page side: a script that only draws gets a carrier series ----
+  const def = PI.pineLive({ uid: 'r4pi-bg', type: 'pine', script: 'indicator("bg", overlay=true)\nbgcolor(color.red)' }, c)
+  eq('pine2: draw-only script has an invisible carrier output', def.outputs.map((o) => o.key + ':' + o.kind), ['draw:signal'])
+  eq('pine2: its run is kept for the drawing layer', PI.pineDrawState('r4pi-bg').result.bgcolors.length, c.length)
+  PI.forgetPine('r4pi-bg')
 }
 
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')

@@ -10,6 +10,16 @@
 import type { CandleFlat } from '../../../services/market'
 import type { Series } from './math'
 import type { IndicatorDef, SourceKey } from './registry'
+import { mapAligned } from './mtf.ts'
+
+/**
+ * Higher-timeframe bars an instance computes on (multi-timeframe input), and
+ * the alignIndex map from chart bars to them (see ./mtf).
+ */
+export interface Frame {
+  candles: CandleFlat[]
+  idx: number[]
+}
 
 export interface GraphInstance {
   uid: string
@@ -62,6 +72,8 @@ export function computeAll<I extends GraphInstance>(
    *  script — one built from the script's run over these candles. */
   defOf: (inst: I, candles: CandleFlat[]) => IndicatorDef | null,
   baseSource: (key: SourceKey, c: CandleFlat[]) => number[],
+  /** A higher timeframe to compute an instance on, or null for the chart's. */
+  frameOf?: (inst: I, def: IndicatorDef) => Frame | null,
 ): Array<Computed<I>> {
   const byUid = new Map<string, I>()
   items.forEach((i) => byUid.set(i.uid, i))
@@ -94,6 +106,19 @@ export function computeAll<I extends GraphInstance>(
       const key = (def.sourced ? inst.source : 'close') as SourceKey
       // A price overlay fed volume would squash the candles; give it a pane.
       if (def.placement === 'overlay' && key === 'volume') host = inst.uid
+      const frame = frameOf ? frameOf(inst, def) : null
+      if (frame && frame.candles.length) {
+        const raw = def.compute(baseSource(key, frame.candles), frame.candles, p)
+        // Markers (and the codes naming them) once per higher-timeframe bar.
+        const once = new Set<string>()
+        def.outputs.forEach((o) => {
+          if (o.kind === 'signal') once.add(o.key)
+          if (o.labelFrom) once.add(o.labelFrom.key)
+        })
+        const outputs: Record<string, Series> = {}
+        for (const k in raw) outputs[k] = mapAligned(raw[k], frame.idx, once.has(k))
+        return { inst, def, outputs, host }
+      }
       return { inst, def, outputs: def.compute(baseSource(key, candles), candles, p), host }
     }
     const dep = get(ref.uid)

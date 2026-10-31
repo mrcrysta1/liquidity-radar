@@ -163,3 +163,97 @@ export function summary(b: Book, price: number): Summary {
     worst,
   }
 }
+
+// ------------------------------------------------------- working orders
+// "Trade from chart": a limit or stop order resting at a price until a bar
+// trades through it. A bar that opens beyond the price fills at the open (a
+// gap gives the better price to a limit, the worse one to a stop), otherwise
+// at the order's price.
+
+export type OrderType = 'limit' | 'stop'
+
+export interface WorkingOrder {
+  id: number
+  side: 'buy' | 'sell'
+  type: OrderType
+  price: number
+  qty: number
+  /** Bar open time (ms) it was placed on: it can only fill on later bars. */
+  t: number
+}
+
+/** The fill price of `o` on `bar`, or null when the bar does not reach it. */
+export function orderFill(
+  o: Pick<WorkingOrder, 'side' | 'type' | 'price'>,
+  bar: { o: number; h: number; l: number },
+): number | null {
+  const p = o.price
+  if (!(p > 0)) return null
+  // A buy limit and a sell stop wait below; a sell limit and a buy stop above.
+  const below = (o.side === 'buy') === (o.type === 'limit')
+  if (below) {
+    if (bar.l > p) return null
+    return bar.o < p ? bar.o : p
+  }
+  if (bar.h < p) return null
+  return bar.o > p ? bar.o : p
+}
+
+/**
+ * Which side of the market a price is for an order type: a buy below the
+ * market is a limit, above it a stop (and the reverse for a sell) — so a
+ * price picked on the chart becomes the right kind of order.
+ */
+export function orderTypeFor(side: 'buy' | 'sell', price: number, market: number): OrderType {
+  const below = price < market
+  return (side === 'buy') === below ? 'limit' : 'stop'
+}
+
+export interface FillMarker {
+  /** Seconds, as the chart's time axis counts. */
+  time: number
+  position: 'belowBar' | 'aboveBar'
+  shape: 'arrowUp' | 'arrowDown'
+  color: string
+  text: string
+}
+
+/**
+ * Entry/exit arrows for the chart: a buy below its bar, a sell above, each
+ * on the bar it filled in (the bar opening at or before the fill — which
+ * also places it on range bars). Fills after `upTo` (ms, the replay cursor)
+ * or before the first bar are not drawn; the result is time-sorted, as the
+ * series markers require.
+ */
+export function fillMarkers(
+  fills: ReadonlyArray<Fill>,
+  bars: ReadonlyArray<{ t: number }>,
+  upTo: number,
+  colors: { up: string; dn: string },
+  label: (n: number) => string = String,
+): FillMarker[] {
+  if (!bars.length) return []
+  const out: Array<FillMarker & { k: number }> = []
+  fills.forEach((f, k) => {
+    if (f.t > upTo) return
+    let lo = 0
+    let hi = bars.length
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      if (bars[mid].t <= f.t) lo = mid + 1
+      else hi = mid
+    }
+    if (lo === 0) return
+    const buy = f.side === 'buy'
+    out.push({
+      k,
+      time: Math.floor(bars[lo - 1].t / 1000),
+      position: buy ? 'belowBar' : 'aboveBar',
+      shape: buy ? 'arrowUp' : 'arrowDown',
+      color: buy ? colors.up : colors.dn,
+      text: (buy ? 'Buy ' : 'Sell ') + Number(f.qty.toPrecision(6)) + ' @ ' + label(f.price),
+    })
+  })
+  out.sort((a, b) => a.time - b.time || a.k - b.k)
+  return out.map(({ k: _k, ...m }) => m)
+}

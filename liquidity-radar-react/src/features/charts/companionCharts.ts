@@ -51,7 +51,11 @@ import {
 } from './chartPalette'
 import { LAYOUTS, MAX_CHARTS, cells, layoutSpec, rowCount } from './layouts'
 import { isDailyTf } from './timezone'
+import { chartSettings, subscribeChartSettings } from './chartSettings'
+import { settingsSeriesOptions } from './chartSettingsMath'
 import { loadCandles } from '../../services/marketData'
+import { replayNow, subscribeReplay } from './replay'
+import { countAtOrBefore } from './replayMath'
 import { mdSym, mdTf } from '../../services/market'
 import { klineHub } from '../../services/failover'
 import type { CandleFlat } from '../../services/market'
@@ -72,6 +76,8 @@ import { registerCrosshairSync } from './crosshairSync'
 import { getLinkGroup, getSyncOptions, registerTimeSync, setMainLinkKey, subscribeLinks } from './linkGroups'
 import type { TimeSyncHandle } from './linkGroups'
 import { mountLinkChip, unmountLinkChips } from '../../components/chart/mountLinkChip'
+import { createDrawingOverlay } from './drawings/overlay'
+import type { DrawingOverlay } from './drawings/overlay'
 
 type Any = any
 
@@ -118,6 +124,11 @@ interface Panel {
   syncOff: (() => void) | null
   /** Its place in its link group's time-range sync. */
   timeLink: TimeSyncHandle | null
+  /** The main chart's drawings for this coin, read-only (./drawings/overlay). */
+  drawOv: DrawingOverlay | null
+
+  /** The bar-replay cut it was last drawn at ('' = live). */
+  cut: string
 }
 
 /** Live ticks redraw a panel's indicators at most this often. */
@@ -264,6 +275,8 @@ export function applyLayout(): void {
     subscribeTimeframe(alignLinks)
     subscribeSymbol(alignLinks)
     subscribeLinks(alignLinks)
+    // Bar replay plays every cell to the same moment as the main chart.
+    subscribeReplay(syncReplayCells)
   }
   applyGrid()
   // Panel headers changed: the indicator buttons re-mount into them.
@@ -479,6 +492,7 @@ function relink(p: Panel): void {
   p.candles = []
   p.shown = []
   p.hover = false
+  p.drawOv?.redraw()
   p.chart.applyOptions({ timeScale: { secondsVisible: isRangeCell(p) } })
   reload(p)
 }
@@ -520,6 +534,9 @@ function addPanel(pos: number): void {
     hover: false,
     syncOff: null,
     timeLink: null,
+    drawOv: null,
+
+    cut: '',
   }
   // No controls of its own: the toolbar drives whichever chart is active,
   // and clicking this one (or Enter/Space on it) makes it the active chart.
@@ -597,6 +614,8 @@ function destroyPanel(i: number): void {
   p.syncOff = null
   p.timeLink?.off()
   p.timeLink = null
+  p.drawOv?.dispose()
+  p.drawOv = null
   if (p.chart) {
     try {
       p.chart.remove()
@@ -636,7 +655,7 @@ function initChart(p: Panel): void {
       secondsVisible: isRangeCell(p),
       rightOffset: 5,
     },
-    crosshair: { ...tv.crosshair, mode: 0 },
+    // Crosshair style and magnet follow the chart settings (tvChartOptions).
     // Capped at the instrument's own precision, as on the main chart, so the
     // decimals do not flip as a coin crosses 1.00.
     localization: {
@@ -652,6 +671,7 @@ function initChart(p: Panel): void {
   // The same series the main chart builds for this style, so a cell keeps its
   // look whether or not it is the active one.
   p.candleSeries = createPriceSeries(chart, p.style)
+  p.candleSeries.applyOptions(settingsSeriesOptions(chartSettings(), p.style))
   p.volSeries = chart.addSeries(LightweightCharts.HistogramSeries, {
     priceFormat: { type: 'volume' },
     priceScaleId: 'vol',
@@ -674,6 +694,14 @@ function initChart(p: Panel): void {
   })
   p.ind.attach(chart)
   p.indOff = store.subscribe(() => drawIndicators(p))
+  p.drawOv = createDrawingOverlay({
+    host: body,
+    chart,
+    series: () => p.candleSeries,
+    bars: () => p.shown,
+    sym: () => p.sym,
+    tf: () => p.tf,
+  })
   chart.subscribeCrosshairMove((param: Any) =>
     hoverLegend(p, param.time && param.point ? param.time : null),
   )
@@ -791,7 +819,7 @@ const isRangeCell = (p: Panel): boolean => !!styleDef(p.style).rangeBars
  * the closed candles so the size holds still while the live one ticks.
  */
 function barsFor(p: Panel): CandleFlat[] {
-  const src = p.candles
+  const src = cellSource(p)
   if (!isRangeCell(p) || !src.length) return src
   // Tick bars come from the focused symbol's trade stream only; a cell has
   // none, so it shows its time candles rather than an empty chart.
@@ -845,8 +873,47 @@ function pushRangeBars(p: Panel): void {
   p.shown = next
 }
 
+/**
+ * The cell's candles as of the replay's "now": every bar opened by then, the
+ * same moment the main chart is cut at. Live (all of them) outside replay.
+ */
+function cellSource(p: Panel): CandleFlat[] {
+  const now = replayNow()
+  return now == null ? p.candles : p.candles.slice(0, countAtOrBefore(p.candles, now))
+}
+
+/**
+ * Bar replay moved (or started / ended): redraw each cell at the new cut,
+ * keeping its view while stepping and returning to the latest bar when
+ * replay starts or ends.
+ */
+function syncReplayCells(): void {
+  const now = replayNow()
+  const cut = now == null ? '' : String(now)
+  panels.forEach((p) => {
+    if (cut === p.cut || !p.chart || !p.candleSeries) return
+    const modeChanged = (cut === '') !== (p.cut === '')
+    p.cut = cut
+    if (!p.candles.length) return
+    const ts = p.chart.timeScale()
+    const keep = ts.getVisibleLogicalRange()
+    p.shown = barsFor(p)
+    p.candleSeries.setData(priceSeriesData(p.style, p.shown))
+    p.volSeries?.setData(p.shown.map(volBar))
+    if (p.style === 'baseline') syncBaselineBase(p.chart, p.candleSeries, () => p.shown)
+    drawIndicators(p)
+    if (modeChanged) ts.scrollToRealTime()
+    else if (keep) ts.setVisibleLogicalRange(keep)
+    const last = p.shown[p.shown.length - 1]
+    if (last) tvLastPrice(p.candleSeries, last.c >= last.o)
+    liveLegend(p)
+  })
+}
+
 function draw(p: Panel, candles: CandleFlat[]): void {
   p.candles = candles.slice()
+  const now = replayNow()
+  p.cut = now == null ? '' : String(now)
   p.shown = barsFor(p)
   p.candleSeries.setData(priceSeriesData(p.style, p.shown))
   syncPricePrecision(p.candleSeries, p.shown[p.shown.length - 1]?.c)
@@ -862,6 +929,7 @@ function draw(p: Panel, candles: CandleFlat[]): void {
   const last = p.shown[p.shown.length - 1]
   if (last) tvLastPrice(p.candleSeries, last.c >= last.o)
   liveLegend(p)
+  p.drawOv?.redraw()
 }
 
 /** "BTCUSDT, 1h" behind the bars, as on the main chart. */
@@ -876,8 +944,9 @@ function legendHtml(p: Panel, c: CandleFlat, prev?: CandleFlat): string {
   const d = c.c - ref
   const pct = ref ? (d / ref) * 100 : 0
   const sign = (x: number) => (x >= 0 ? '+' : '\u2212')
+  // Classes for the chart settings' status-line switches (index.css r4-ux).
   const val = (k: string, x: number) =>
-    '<span class="leg-k">' + k + '</span><b style="color:' + col + '">' + pfmt(x) + '</b>'
+    '<span class="leg-k leg-o">' + k + '</span><b class="leg-o" style="color:' + col + '">' + pfmt(x) + '</b>'
   return (
     '<span class="leg-sym">' +
     legendSymbol(p.sym) +
@@ -890,7 +959,7 @@ function legendHtml(p: Panel, c: CandleFlat, prev?: CandleFlat): string {
     val('H', c.h) +
     val('L', c.l) +
     val('C', c.c) +
-    '<b style="color:' +
+    '<b class="leg-chg" style="color:' +
     col +
     '">' +
     sign(d) +
@@ -932,6 +1001,8 @@ function connect(p: Panel, token: number): void {
         arr.push(c)
         if (arr.length > 1500) arr.shift()
       }
+      // Replaying: the tape is kept but not drawn — the cell stays at the cut.
+      if (p.cut) return
       if (isRangeCell(p)) pushRangeBars(p)
       else {
         p.shown = arr
@@ -943,6 +1014,7 @@ function connect(p: Panel, token: number): void {
       const lb = p.shown[p.shown.length - 1]
       if (lb) tvLastPrice(p.candleSeries, lb.c >= lb.o)
       liveLegend(p)
+      p.drawOv?.redraw()
     })
   } catch (e) {
     /* stream cap reached: the panel keeps its REST snapshot */
@@ -1018,6 +1090,9 @@ export function companionReweight(): void {
     if (keep) ts.setVisibleLogicalRange(keep)
   })
 }
+
+// Chart settings (the gear) re-theme the cells as they do the main chart.
+subscribeChartSettings(() => applyCompanionTheme())
 
 export function applyCompanionTheme(): void {
   const pal = chartPalette()

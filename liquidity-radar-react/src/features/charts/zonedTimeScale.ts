@@ -11,6 +11,7 @@
 //
 // The weight maths is pure (no chart, no DOM) so scripts/test-engines.mjs runs it.
 import { chartZone, tzOffsetMinutes } from './timezone.ts'
+import { addBrandMark, NO_TV_LOGO } from './brandMark.ts'
 
 type Any = any
 
@@ -158,8 +159,12 @@ export class ZonedTimeBehavior {
 
 /** createChart, with day boundaries in the chart zone. */
 export function createZonedChart(lwc: Any, el: HTMLElement, daily: () => boolean, options: Any): Any {
-  return lwc.createChartEx(el, new ZonedTimeBehavior(daily), {
+  const chart = lwc.createChartEx(el, new ZonedTimeBehavior(daily), {
     localization: { dateFormat: "dd MMM 'yy" },
     ...options,
+    // Our mark instead of the TradingView logo (see ./brandMark).
+    layout: { ...options.layout, ...NO_TV_LOGO.layout },
   })
+  addBrandMark(el)
+  return chart
 }

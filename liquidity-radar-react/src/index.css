@@ -6509,3 +6509,203 @@ dialog.cset-dialog[open],dialog.kbd-dialog[open]{position:fixed;inset:0;margin:a
 .st-id{color:var(--primary)}
 @media (max-width:900px){.st-panel{left:8px;right:8px;bottom:8px;max-height:60vh}}
 @media (max-width:640px){.st-title{display:none}}
+
+/* r4-brand: our radar mark where the TradingView logo was (features/charts/brandMark.ts) */
+.chart-brand{position:absolute;left:10px;bottom:36px;width:26px;height:26px;z-index:3;opacity:.7;pointer-events:none;user-select:none;filter:drop-shadow(0 1px 2px rgba(0,0,0,.35))}
+.rc-body .chart-brand,.mc-body .chart-brand{width:20px;height:20px;left:8px;bottom:32px;opacity:.6}
+@media (max-width:640px){.chart-brand{width:20px;height:20px;bottom:32px}}
+.sidenav-foot a{color:inherit;text-decoration:underline;text-underline-offset:2px}
+
+/* r4-ux: toolbar overflow, chart settings sections, legend switches,
+   Chart intelligence drawer, light-mode canvas edge. */
+/* U2 — the toolbar's "…" (components/chart/ToolbarOverflow). Unfolded, the
+   group is invisible to layout and its buttons sit in the row as before. */
+#radarChartCard .tvb{position:relative}
+.tvb-more,.tvb-more-items{display:contents}
+.tvb-more-btn{display:none !important}
+.tvb.tvb-folded .tvb-more{display:flex;position:relative;flex-shrink:0}
+.tvb.tvb-folded .tvb-more-btn{display:inline-flex !important}
+.tvb.tvb-folded .tvb-more-items{display:none}
+.tvb.tvb-folded .tvb-more.open .tvb-more-items{
+  display:flex;align-items:center;gap:2px;position:absolute;top:calc(100% + 4px);right:0;z-index:60;padding:4px;
+  background:var(--card);border:1px solid var(--tv-line,var(--border2));border-radius:6px;
+  box-shadow:var(--tv-menu-shadow,var(--shade-2));
+}
+/* Its menus open leftwards from the popover's right edge. */
+.tvb-more .layout-menu{left:auto;right:0}
+/* Snapshot (and "…") are the rightmost buttons again: keep their tips on screen. */
+#radarChartCard .tvb .tvb-more .shot-btn>.tvb-tip,#radarChartCard .tvb .tvb-more-btn>.tvb-tip{left:auto;right:0;transform:translateY(-3px)}
+#radarChartCard .tvb .tvb-more .shot-btn:hover>.tvb-tip,#radarChartCard .tvb .tvb-more .shot-btn:focus-visible>.tvb-tip,
+#radarChartCard .tvb .tvb-more-btn:hover>.tvb-tip,#radarChartCard .tvb .tvb-more-btn:focus-visible>.tvb-tip{transform:none}
+/* The symbol block gives way before anything wraps. */
+#radarChartCard .tvb .cp-trigger{max-width:100%;overflow:hidden}
+#radarChartCard .tvb .cp-id{min-width:0;overflow:hidden}
+#radarChartCard .tvb .cp-id b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@container (max-width:1040px){#radarChartCard .tvb .cp-quote .cp-chg{display:none}}
+
+/* U9 — Chart settings: a section list beside the options, as TradingView's. */
+.cset-dialog{width:min(560px,calc(100vw - 32px))}
+.cset-body{display:grid;grid-template-columns:136px minmax(0,1fr);min-height:300px;max-height:min(62vh,520px)}
+.cset-nav{display:flex;flex-direction:column;gap:2px;padding:8px;border-right:1px solid var(--border)}
+.cset-nav button{
+  text-align:left;padding:7px 10px;border:0;border-radius:6px;background:none;color:var(--muted);
+  cursor:pointer;font:inherit;font-size:13px;white-space:nowrap;
+}
+.cset-nav button:hover{background:var(--sunk-2);color:var(--txt)}
+.cset-nav button.on{background:rgb(var(--pRGB)/.14);color:var(--txt);font-weight:600}
+.cset-nav button:focus-visible{outline:2px solid var(--primary);outline-offset:-2px}
+.cset-pane{overflow-y:auto;min-width:0}
+.cset-dialog .cset-row{display:flex;align-items:center;gap:10px;padding:8px}
+.cset-row-label{flex:1;min-width:0;font-size:13px;font-weight:600}
+.cset-dialog .cset-row input[type=color]{
+  width:34px;height:24px;margin:0;padding:1px;border:1px solid var(--border2);border-radius:4px;
+  background:transparent;cursor:pointer;
+}
+.cset-row select{
+  min-width:130px;padding:4px 8px;border:1px solid var(--border2);border-radius:6px;
+  background:var(--card);color:var(--txt);font:inherit;font-size:13px;
+}
+.cset-dialog .cset-clear{
+  padding:3px 8px;border:1px solid var(--border2);border-radius:6px;background:none;color:var(--muted);
+  font-size:var(--text-xs);cursor:pointer;
+}
+.cset-dialog .cset-clear:hover{color:var(--txt)}
+.cset-note{padding:6px 8px;font-size:var(--text-xs);color:var(--dim)}
+@media(max-width:520px){
+  .cset-body{grid-template-columns:1fr;max-height:70vh}
+  .cset-nav{flex-direction:row;overflow-x:auto;border-right:0;border-bottom:1px solid var(--border)}
+}
+
+/* U9 — Status-line switches (classes set on <html> by features/charts/chartSettings). */
+html.cs-hide-ohlc .legend .leg-o,html.cs-hide-ohlc .rc-legend .leg-o,
+html.cs-hide-chg .legend .leg-chg,html.cs-hide-chg .rc-legend .leg-chg,
+html.cs-hide-vol .legend .leg-vol,
+html.cs-hide-indv .legend .leg-ind b{display:none}
+
+/* U11 — Chart intelligence opens as a drawer over the chart's right side,
+   leaving the chart its full width (ChartSidePanel DRAWER_TABS). Stacked on a
+   portrait screen it stays in the flow under the chart. */
+.chart-side{position:relative}
+@media not all and (max-width:900px) and (orientation:portrait){
+  .chart-stage.side-drawer .cs-panel.cs-drawer{
+    position:absolute;top:0;right:calc(100% + 6px);z-index:30;
+    width:320px;max-width:calc(100vw - 140px);max-height:100%;
+    box-shadow:var(--shade-3);
+  }
+}
+@media(max-width:900px) and (orientation:portrait){
+  .chart-stage.side-drawer .cs-panel{max-height:52vh}
+}
+
+/* U21 — light mode: the chart boxes are painted in the canvas's own colour
+   (--chart-bg, set with the chart settings), so the sliver under the time
+   axis the canvas does not cover no longer shows as a grey strip. */
+[data-theme="light"] #chart,[data-theme="light"] .chart-wrap{background:var(--chart-bg,var(--card))}
+
+/* r4-drawings2: read-only drawing overlays on layout cells / grid panels, visibility + text-box popovers, icon picker */
+.r4dr-overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3}
+#radarChartCard .r4dr-pop{min-width:190px}
+#radarChartCard .dp-pop label.r4dr-check{display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:var(--tv-txt)}
+#radarChartCard .dp-pop label.r4dr-check input{width:auto;height:auto;padding:0;margin:0;accent-color:var(--tv-blue)}
+#radarChartCard .r4dr-swatches{display:flex;flex-wrap:wrap;gap:4px}
+#radarChartCard .dp-swatch.r4dr-none{background:linear-gradient(135deg,transparent 45%,var(--red,#FF1744) 45%,var(--red,#FF1744) 55%,transparent 55%);border-color:var(--tv-line)}
+#radarChartCard .dp-swatch.r4dr-none.on{border-color:var(--tv-txt)}
+#radarChartCard .r4dr-icons .dp-btn{font-size:14px;line-height:1;min-width:26px}
+@media (max-width:640px){#radarChartCard .r4dr-icons{max-width:180px;flex-wrap:wrap}}
+
+/* r4-replay2: update interval, order ticket (limit/stop, trade from chart), working orders */
+.replay-upd{max-width:110px}
+.replay-loading{font-size:11px;color:var(--muted);font-family:var(--mono)}
+.replay-otype{
+  background:var(--bg);border:1px solid var(--border2);color:var(--txt);border-radius:7px;
+  padding:3px 5px;font-size:11px;font-family:var(--mono);outline:none;
+}
+[data-theme="light"] .replay-otype{background:var(--card);border-color:var(--border)}
+.replay-orders .replay-px{width:92px}
+.replay-orders .replay-pickpx{
+  display:inline-flex;align-items:center;padding:4px 6px;background:transparent;
+  border-color:var(--border2);color:var(--muted);
+}
+.replay-orders .replay-pickpx.on{color:var(--txt);border-color:var(--purple);background:rgb(var(--pRGB)/.15)}
+#chartWrap.replay-picking-price{cursor:crosshair}
+.replay-working{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-family:var(--mono)}
+.replay-order{
+  display:inline-flex;align-items:center;gap:4px;border:1px dotted currentColor;border-radius:7px;
+  padding:1px 3px 1px 7px;font-variant-numeric:tabular-nums;
+}
+.replay-order button{
+  background:transparent;border:0;color:var(--dim);cursor:pointer;font-size:13px;line-height:1;padding:0 3px;
+}
+.replay-order button:hover{color:var(--red)}
+@media (max-width:640px){.replay-orders{flex-wrap:wrap}}
+/* r4-indicators2: multi-timeframe "wait for bar close" toggle in indicator inputs */
+.ind-settings .ind-mtf-wait input{width:auto;align-self:flex-start;margin:4px 0 0;accent-color:var(--primary)}
+/* r4-data: chart data export / pop-out menu, watchlist columns, popout window */
+.r4d-menu-wrap{position:relative;display:flex}
+#radarChartCard .r4d-menu-wrap .tvb-tip{left:auto;right:0;transform:translateY(-3px)}
+#radarChartCard .r4d-menu-wrap .chart-tool-btn:hover>.tvb-tip{transform:none}
+.r4d-menu{
+  position:absolute;top:calc(100% + 6px);right:0;z-index:92;min-width:236px;padding:4px;
+  display:flex;flex-direction:column;background:var(--card);border:1px solid var(--border2);
+  border-radius:12px;box-shadow:var(--shade-2);
+}
+.r4d-menu button{
+  display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:8px 10px;
+  background:none;border:none;border-radius:8px;color:var(--txt);font:inherit;font-size:13px;
+  text-align:left;cursor:pointer;
+}
+.r4d-menu button:hover,.r4d-menu button:focus-visible{background:rgb(var(--pRGB)/.1);outline:none}
+.r4d-menu small{color:var(--dim);font-size:var(--text-2xs);white-space:nowrap}
+html.lr-popout #fsBtn{display:none}
+.r4wl-chooser{
+  margin:0;padding:6px 8px 8px;border:1px solid var(--border2);border-radius:8px;
+  display:grid;grid-template-columns:1fr;gap:4px;font-size:var(--text-xs);
+}
+.r4wl-chooser legend{padding:0 4px;color:var(--dim);font-size:var(--text-2xs)}
+.r4wl-chooser label{display:flex;align-items:center;gap:6px;cursor:pointer}
+.r4wl .cs-wl-q{width:74px}
+.r4wl-c{width:50px;flex-shrink:0;text-align:right;font-family:var(--mono);font-size:var(--text-2xs)}
+.r4wl-c.up{color:var(--green)}
+.r4wl-c.dn{color:var(--red)}
+.r4wl-head,.r4wl-head:hover{background:none;border-color:transparent}
+.r4wl-head .cs-wl-main{cursor:default;padding-top:0;padding-bottom:0}
+.r4wl-badge{width:22px;flex-shrink:0}
+.r4wl-ghost{visibility:hidden}
+.r4wl-sort{
+  background:none;border:none;padding:0;color:var(--dim);font:inherit;font-size:var(--text-2xs);
+  cursor:pointer;white-space:nowrap;
+}
+.r4wl-sort:hover,.r4wl-sort.on{color:var(--txt)}
+.r4wl-sort.on.asc::after{content:' ▲';font-size:8px}
+.r4wl-sort.on.desc::after{content:' ▼';font-size:8px}
+
+/* r4-pine2: Pine table.new() overlay (features/charts/pine/overlay) */
+.pine-tables {
+  position: absolute;
+  pointer-events: none;
+  z-index: 3;
+  overflow: hidden;
+}
+.pine-table {
+  position: absolute;
+  border-collapse: collapse;
+  font-family: -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif;
+  color: var(--txt, #d1d4dc);
+  margin: 6px;
+  max-width: calc(100% - 12px);
+}
+.pine-table td {
+  padding: 3px 6px;
+  white-space: pre;
+  line-height: 1.25;
+}
+.pine-pos-top_left { top: 0; left: 0; }
+.pine-pos-top_center { top: 0; left: 50%; transform: translateX(-50%); }
+.pine-pos-top_right { top: 0; right: 0; }
+.pine-pos-middle_left { top: 50%; left: 0; transform: translateY(-50%); }
+.pine-pos-middle_center { top: 50%; left: 50%; transform: translate(-50%, -50%); }
+.pine-pos-middle_right { top: 50%; right: 0; transform: translateY(-50%); }
+/* Clear of the chart library attribution logo in that corner. */
+.pine-pos-bottom_left { bottom: 30px; left: 0; }
+.pine-pos-bottom_center { bottom: 0; left: 50%; transform: translateX(-50%); }
+.pine-pos-bottom_right { bottom: 0; right: 0; }

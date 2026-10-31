@@ -38,3 +38,63 @@ export function randomCount(n: number, rnd: () => number): number {
   const hi = Math.max(lo, Math.floor(n * 0.9))
   return Math.min(n, lo + Math.floor(rnd() * (hi - lo + 1)))
 }
+
+// ------------------------------------------------- lower-interval stepping
+// TradingView Premium's "update interval": replaying 1h bars a minute (or a
+// second) at a time. The bar in progress is built from the lower-interval
+// sub-bars that have "happened" so far; the rest of it stays hidden.
+
+export interface SubBar {
+  t: number
+  o: number
+  h: number
+  l: number
+  c: number
+  v: number
+}
+
+/**
+ * The forming bar opening at `open`: every sub-bar from `open` up to and
+ * including the one opening at `upTo`, folded into one OHLCV bar stamped with
+ * the main bar's open time. Null when no sub-bar has happened yet.
+ */
+export function formingBar(subs: ReadonlyArray<SubBar>, open: number, upTo: number): SubBar | null {
+  let out: SubBar | null = null
+  for (const s of subs) {
+    if (s.t < open) continue
+    if (s.t > upTo) break
+    if (!out) out = { t: open, o: s.o, h: s.h, l: s.l, c: s.c, v: s.v }
+    else {
+      if (s.h > out.h) out.h = s.h
+      if (s.l < out.l) out.l = s.l
+      out.c = s.c
+      out.v += s.v
+    }
+  }
+  return out
+}
+
+/** Open time of the first sub-bar after `t`, or null past the last one. */
+export function nextSubTime(subs: ReadonlyArray<{ t: number }>, t: number): number | null {
+  const i = countAtOrBefore(subs, t)
+  return i < subs.length ? subs[i].t : null
+}
+
+/** Open time of the last sub-bar before `t`, or null before the first one. */
+export function prevSubTime(subs: ReadonlyArray<{ t: number }>, t: number): number | null {
+  const i = countAtOrBefore(subs, t - 1)
+  return i > 0 ? subs[i - 1].t : null
+}
+
+/**
+ * The update intervals a bar of `mainMs` can be replayed by: strictly
+ * shorter, and at most `maxRatio` sub-bars per bar so one bar stays a
+ * handful of requests (1s steps only reach up to 1h bars).
+ */
+export function updateIntervalsFor<T extends { ms: number }>(
+  mainMs: number,
+  options: ReadonlyArray<T>,
+  maxRatio = 3600,
+): T[] {
+  return options.filter((o) => o.ms < mainMs && mainMs / o.ms <= maxRatio)
+}

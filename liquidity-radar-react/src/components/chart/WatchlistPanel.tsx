@@ -30,6 +30,20 @@ import { CoinBadge } from '../common/CoinBadge'
 import { Btn, ChgPill } from '../market/CoinWishlist'
 import { CoinPicker } from './CoinPicker'
 import { CHART_TABS } from '../useTick'
+import { cfmt } from '../../utils/format'
+import { storageGet, storageSet } from '../../services/storage'
+import {
+  WATCH_COLS,
+  nextWatchSort,
+  sanitizeWatchPrefs,
+  sortWatch,
+  toggleWatchCol,
+} from '../../features/favorites/watchColumns'
+import type { WatchColId, WatchPrefs, WatchSortKey } from '../../features/favorites/watchColumns'
+import { requestRsi, rsiOf, useRsiVersion } from '../../features/favorites/watchRsi'
+import { requestTech, techOf, useTechVersion } from '../../features/screener/data'
+import { RATING_RANK } from '../../features/screener/logic'
+import type { Rating } from '../../features/screener/logic'
 
 type Edit = null | 'new' | 'rename'
 
@@ -40,6 +54,7 @@ const ICON_PATHS = {
   pencil: 'M4 20h4L19 9l-4-4L4 16v4ZM14 6l4 4',
   trash: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13',
   pin: 'M9 4h6l-1 6 3 3H7l3-3-1-6ZM12 13v7',
+  cols: 'M4 5h16v14H4zM9.5 5v14M14.5 5v14',
 } as const
 function Glyph({ d }: { d: keyof typeof ICON_PATHS }) {
   return (
@@ -56,17 +71,63 @@ function Glyph({ d }: { d: keyof typeof ICON_PATHS }) {
   )
 }
 
+const PREFS_KEY = 'lr-wl-cols'
+const RATING_SHORT: Record<Rating, string> = {
+  strong_buy: 'S.Buy',
+  buy: 'Buy',
+  neutral: 'Neutral',
+  sell: 'Sell',
+  strong_sell: 'S.Sell',
+}
+
+/** A column's value for sorting (the cell formats it). */
+function colValue(sym: string, base: string, key: WatchSortKey): number | string | null | undefined {
+  if (key === 'sym') return base
+  if (key === 'rsi') return rsiOf(sym)
+  if (key === 'rating') {
+    const r = techOf(sym)?.rating
+    return r ? RATING_RANK[r] : null
+  }
+  const t = liveTicker(sym)
+  if (!t) return null
+  return key === 'last' ? t.last : key === 'chg' ? t.pct : key === 'vol' ? t.qvol : t[key]
+}
+
+function Cell({ sym, id }: { sym: string; id: WatchColId }) {
+  const v = colValue(sym, '', id)
+  if (v == null || (typeof v === 'number' && !isFinite(v))) return <span className="r4wl-c">—</span>
+  if (id === 'rating') {
+    const r = techOf(sym)?.rating as Rating
+    return <span className={'r4wl-c ' + (+v > 0 ? 'up' : +v < 0 ? 'dn' : '')}>{RATING_SHORT[r]}</span>
+  }
+  const n = v as number
+  if (id === 'rsi')
+    return <span className={'r4wl-c ' + (n >= 70 ? 'dn' : n <= 30 ? 'up' : '')}>{n.toFixed(1)}</span>
+  return <span className="r4wl-c">{id === 'vol' ? cfmt(n).replace('$', '') : pfmt(n)}</span>
+}
+
 export function WatchlistPanel() {
   const st = useWatchlists()
   const wl = activeList(st)
-  const rows = orderedSymbols(wl)
+  const [prefs, setPrefsState] = useState<WatchPrefs>(() => sanitizeWatchPrefs(storageGet(PREFS_KEY, null)))
+  const [chooser, setChooser] = useState(false)
+  const setPrefs = (p: WatchPrefs) => {
+    setPrefsState(p)
+    storageSet(PREFS_KEY, p)
+  }
+  useRsiVersion()
+  useTechVersion()
+  const rows = sortWatch(orderedSymbols(wl), prefs.sort, (b, k) => colValue(symOf(b), b, k))
+  const sorted = prefs.sort != null
+  const extra = prefs.cols.filter((c) => c !== 'chg')
+  const showChg = prefs.cols.includes('chg')
   const [edit, setEdit] = useState<Edit>(null)
   const [name, setName] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
 
   // Off-universe coins get their price fetched now and every 20s after
   // (the top-up itself refreshes each one at most once a minute).
-  const symKey = rows.map(symOf).join(',')
+  const symKey = orderedSymbols(wl).map(symOf).join(',')
   useEffect(() => {
     if (!symKey) return
     const syms = symKey.split(',')
@@ -78,9 +139,37 @@ export function WatchlistPanel() {
     return () => clearInterval(id)
   }, [symKey])
 
+  // RSI (1h) and the Screener's rating load only while their column is on.
+  const wantRsi = prefs.cols.includes('rsi')
+  const wantRating = prefs.cols.includes('rating')
+  useEffect(() => {
+    if (!symKey || (!wantRsi && !wantRating)) return
+    const syms = symKey.split(',')
+    const run = () => {
+      if (document.hidden) return
+      if (wantRsi) requestRsi(syms)
+      if (wantRating) requestTech(syms)
+    }
+    run()
+    const id = setInterval(run, 60000)
+    return () => clearInterval(id)
+  }, [symKey, wantRsi, wantRating])
+
   useEffect(() => {
     if (edit) inputRef.current?.focus()
   }, [edit])
+
+  const sortBtn = (key: WatchSortKey, label: string, title?: string) => (
+    <button
+      type="button"
+      className={'r4wl-sort' + (prefs.sort?.key === key ? ' on ' + prefs.sort.dir : '')}
+      title={(title || label) + ' — click to sort'}
+      aria-label={'Sort by ' + (title || label)}
+      onClick={() => setPrefs({ ...prefs, sort: nextWatchSort(prefs.sort, key) })}
+    >
+      {label}
+    </button>
+  )
 
   const startEdit = (kind: Edit) => {
     setName(kind === 'rename' ? wl.name : '')
@@ -140,6 +229,9 @@ export function WatchlistPanel() {
           <Btn label={'Rename ' + wl.name} onClick={() => startEdit('rename')}>
             <Glyph d="pencil" />
           </Btn>
+          <Btn label="Columns" on={chooser} onClick={() => setChooser((o) => !o)}>
+            <Glyph d="cols" />
+          </Btn>
           <Btn
             label={canDelete ? 'Delete ' + wl.name : 'The Favourites list cannot be deleted'}
             disabled={!canDelete}
@@ -150,6 +242,22 @@ export function WatchlistPanel() {
             <Glyph d="trash" />
           </Btn>
         </div>
+      )}
+
+      {chooser && (
+        <fieldset className="r4wl-chooser">
+          <legend>Columns</legend>
+          {WATCH_COLS.map((c) => (
+            <label key={c.id} title={c.title}>
+              <input
+                type="checkbox"
+                checked={prefs.cols.includes(c.id)}
+                onChange={() => setPrefs(toggleWatchCol(prefs, c.id))}
+              />
+              {c.title}
+            </label>
+          ))}
+        </fieldset>
       )}
 
       <CoinPicker
@@ -176,7 +284,40 @@ export function WatchlistPanel() {
           {wl.id === FAV_ID ? ', or star (★) one in any coin search.' : '.'}
         </div>
       ) : (
-        <ul className="cs-wl-list" aria-label={wl.name}>
+        <ul className="cs-wl-list r4wl" aria-label={wl.name}>
+          <li className="cs-wl-row r4wl-head">
+            <div className="cs-wl-main">
+              <span className="r4wl-badge" aria-hidden="true" />
+              <span className="cs-wl-id">{sortBtn('sym', 'Symbol')}</span>
+              <span className="cs-wl-q">
+                {sortBtn('last', 'Last')}
+                {showChg && sortBtn('chg', 'Chg%', 'Change % (24h)')}
+              </span>
+              {extra.map((id) => {
+                const c = WATCH_COLS.find((x) => x.id === id)!
+                return (
+                  <span key={id} className="r4wl-c">
+                    {sortBtn(id, c.label, c.title)}
+                  </span>
+                )
+              })}
+            </div>
+            {/* Invisible copies of the row actions keep the columns aligned. */}
+            <span className="cs-wl-acts r4wl-ghost" aria-hidden="true">
+              <button type="button" className="chart-tool-btn" tabIndex={-1}>
+                <Glyph d="pin" />
+              </button>
+              <button type="button" className="chart-tool-btn" tabIndex={-1}>
+                ▲
+              </button>
+              <button type="button" className="chart-tool-btn" tabIndex={-1}>
+                ▼
+              </button>
+              <button type="button" className="chart-tool-btn" tabIndex={-1}>
+                ✕
+              </button>
+            </span>
+          </li>
           {rows.map((b, i) => {
             const sym = symOf(b)
             const t = liveTicker(sym)
@@ -200,8 +341,11 @@ export function WatchlistPanel() {
                   </span>
                   <span className="cs-wl-q">
                     <span className="cs-wl-px">{t && t.last ? pfmt(t.last) : '—'}</span>
-                    <ChgPill pct={t?.pct} />
+                    {showChg && <ChgPill pct={t?.pct} />}
                   </span>
+                  {extra.map((id) => (
+                    <Cell key={id} sym={sym} id={id} />
+                  ))}
                 </button>
                 <span className="cs-wl-acts">
                   <Btn
@@ -211,10 +355,10 @@ export function WatchlistPanel() {
                   >
                     <Glyph d="pin" />
                   </Btn>
-                  <Btn label={'Move ' + b + ' up'} disabled={first} onClick={() => moveInWatchlist(wl.id, b, -1)}>
+                  <Btn label={'Move ' + b + ' up'} disabled={first || sorted} onClick={() => moveInWatchlist(wl.id, b, -1)}>
                     ▲
                   </Btn>
-                  <Btn label={'Move ' + b + ' down'} disabled={last} onClick={() => moveInWatchlist(wl.id, b, 1)}>
+                  <Btn label={'Move ' + b + ' down'} disabled={last || sorted} onClick={() => moveInWatchlist(wl.id, b, 1)}>
                     ▼
                   </Btn>
                   <Btn label={'Remove ' + b + ' from ' + wl.name} onClick={() => removeFromWatchlist(wl.id, b)}>

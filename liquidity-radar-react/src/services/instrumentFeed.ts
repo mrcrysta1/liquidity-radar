@@ -11,7 +11,7 @@
 // fails loudly beats a burst that gets the whole app throttled.
 import { state } from './store'
 import { INSTRUMENT_HOT_LIST, binancePerpOf, isInstrument } from '../constants/instruments'
-import { yahooQuote } from './yahoo'
+import { yahooQuote, yahooQuoteOf } from './yahoo'
 import { perp24h } from './perpData'
 import { refreshSpotBasis, spotBasis } from './spotGold'
 
@@ -95,4 +95,28 @@ export async function primeInstrument(sym: string): Promise<void> {
   if (!isInstrument(sym)) return
   const q = await quote(sym)
   if (q) state.tickers[sym] = { last: q.last, pct: q.pct, qvol: q.qvol, high: q.high, low: q.low }
+}
+
+/**
+ * A one-off quote for a symbol search result that has no live price (an
+ * instrument off the hot list, a Yahoo directory hit such as ETH=F), written
+ * into state.tickers like every other quote. Each symbol is asked once per
+ * five minutes, success or not, and the caller trickles them one at a time —
+ * the same politeness toward Yahoo's keyless limit as the background feed.
+ * `yahooSym` is set for a directory hit, which is not in the instrument table.
+ */
+const searchAsked = new Map<string, number>()
+export async function searchQuote(sym: string, yahooSym?: string): Promise<boolean> {
+  const now = Date.now()
+  if (state.tickers[sym] || now - (searchAsked.get(sym) ?? 0) < 300_000) return false
+  searchAsked.set(sym, now)
+  let q: { last: number; pct: number; qvol: number; high?: number; low?: number } | null = null
+  if (isInstrument(sym)) q = await quote(sym)
+  else if (yahooSym) {
+    const y = await yahooQuoteOf(yahooSym, sym)
+    q = y ? { last: y.last, pct: y.pct, qvol: y.vol ?? 0, high: y.high, low: y.low } : null
+  }
+  if (!q || !isFinite(q.last)) return false
+  state.tickers[sym] = { last: q.last, pct: q.pct, qvol: q.qvol, high: q.high, low: q.low }
+  return true
 }

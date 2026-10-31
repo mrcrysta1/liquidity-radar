@@ -7,6 +7,7 @@ import { FIB_EXT_LEVELS, FIB_LEVELS, drawToolDef } from './catalog'
 import { buildVolumeProfile } from '../volumeProfile'
 import type { CandleFlat } from '../../../services/market'
 import { anchoredVwap, positionStats } from './ops'
+import { extraShape } from './shapesExtra'
 
 export interface Pt {
   time: number
@@ -28,6 +29,11 @@ export interface Drawing {
   /** Long / short position: account size and % of it risked. */
   account?: number
   risk?: number
+  /** Timeframe groups the drawing is hidden on (see ./visibility). */
+  hideOn?: string[]
+  /** Text drawings: box fill and border colours ('none' for no border). */
+  bg?: string
+  border?: string
 }
 
 export interface Seg {
@@ -62,6 +68,10 @@ export interface Label {
   box?: boolean
   /** Font size in px (default 10). */
   size?: number
+  /** Box fill (default: the theme's panel colour). */
+  bg?: string
+  /** Box border colour; 'none' draws none (default: the label colour). */
+  border?: string
 }
 export interface Shape {
   segs: Seg[]
@@ -706,13 +716,13 @@ export function shape(d: Drawing, c: MapCtx): Shape | null {
     }
 
     case 'text':
-      s.labels.push({ x: A.x, y: A.y, text: d.text || 'Text', box: true, size: d.fontSize })
+      s.labels.push({ x: A.x, y: A.y, text: d.text || 'Text', box: true, size: d.fontSize, bg: d.bg, border: d.border })
       s.segs.push({ x1: A.x - 2, y1: A.y, x2: A.x + 2, y2: A.y, soft: true })
       break
 
     case 'callout': {
       s.segs.push({ x1: A.x, y1: A.y, x2: B.x, y2: B.y, dash: [4, 3] })
-      s.labels.push({ x: B.x, y: B.y, text: d.text || 'Note', box: true, size: d.fontSize })
+      s.labels.push({ x: B.x, y: B.y, text: d.text || 'Note', box: true, size: d.fontSize, bg: d.bg, border: d.border })
       break
     }
     case 'note': {
@@ -726,6 +736,8 @@ export function shape(d: Drawing, c: MapCtx): Shape | null {
         box: true,
         size: d.fontSize,
         align: 'center',
+        bg: d.bg,
+        border: d.border,
       })
       break
     }
@@ -754,6 +766,7 @@ export function shape(d: Drawing, c: MapCtx): Shape | null {
     }
 
     default:
+      if (extraShape(d, P, c, s)) break
       for (let i = 0; i + 1 < P.length; i++)
         s.segs.push({ x1: P[i].x, y1: P[i].y, x2: P[i + 1].x, y2: P[i + 1].y })
   }

@@ -13,6 +13,7 @@ import { baseOf } from '../../utils/coins'
 import { instrumentOf } from '../../constants/instruments'
 import { pfmt } from '../../utils/format'
 import { chartTheme } from '../../features/charts/chartRender'
+import { addBrandMark } from '../../features/charts/brandMark'
 import { series } from '../../features/selflearn/features'
 import { fibSwing } from '../../features/selflearn/patterns'
 import { getFeed, labelBars, retainFeed, tfMs, useFeed } from '../../features/selflearn/pageFeed'
@@ -72,12 +73,13 @@ function ChartPane({ view, full, setFull }: { view: View; full: boolean; setFull
     const th = chartTheme()
     const chart = createChart(el, {
       autoSize: true,
-      layout: { background: { color: 'transparent' }, textColor: th.txt, fontSize: 11 },
+      layout: { background: { color: 'transparent' }, textColor: th.txt, fontSize: 11, attributionLogo: false },
       grid: { vertLines: { color: th.grid }, horzLines: { color: th.grid } },
       rightPriceScale: { borderColor: th.grid, scaleMargins: { top: 0.06, bottom: 0.34 } },
       timeScale: { borderColor: th.grid, timeVisible: true, secondsVisible: false, rightOffset: 4 },
       crosshair: { mode: CrosshairMode.Normal },
     })
+    addBrandMark(el)
     const candles = chart.addSeries(CandlestickSeries, {
       upColor: th.up, downColor: th.dn, wickUpColor: th.up, wickDownColor: th.dn, borderVisible: false,
     })

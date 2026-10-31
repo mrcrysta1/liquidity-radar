@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { Shell } from './components/Shell'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { afterEngineBoot } from './features/charts/popout'
 
 // Root component. The app shell is a 1:1 port of the original index.html body
 // (see src/components/Shell.tsx). The engine (src/engine) expects the full DOM
@@ -9,7 +10,10 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 // React has mounted the shell — preserving the original boot order.
 export default function App() {
   useEffect(() => {
-    import('./engine/app').then(({ initApp }) => initApp())
+    import('./engine/app').then(({ initApp }) => {
+      initApp()
+      afterEngineBoot()
+    })
   }, [])
 
   return (

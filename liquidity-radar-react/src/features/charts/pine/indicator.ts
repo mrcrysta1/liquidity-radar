@@ -22,6 +22,7 @@ import type { IndicatorDef, OutputDef } from '../indicators/registry'
 import type { Series } from '../indicators/math'
 import { runPine } from './runtime.ts'
 import type { InputValue, PineInput, PineResult, PineShape, StrategyReport } from './runtime.ts'
+import { onSecurityData, requestSecurity, securityData } from './securityFeed.ts'
 
 export const PINE_TYPE = 'pine'
 /** Longest script kept (characters) — it is persisted with the chart. */
@@ -55,6 +56,9 @@ export interface PineStatus {
 interface Built {
   def: IndicatorDef
   status: PineStatus
+  /** The run itself and the candles it ran over (drawings, bgcolor, barcolor). */
+  result?: PineResult
+  candles?: CandleFlat[]
 }
 
 /** Titles end up in legend HTML: keep them plain text. */
@@ -170,6 +174,7 @@ function build(inst: PineInstance, r: PineResult, candles: CandleFlat[], ms?: nu
       colorDown: color,
       kind: 'cloud',
       between: [side(f.plot1, 'a'), side(f.plot2, 'b')],
+      colors: f.colors,
     })
   })
   r.plots.forEach((p) => {
@@ -211,6 +216,18 @@ function build(inst: PineInstance, r: PineResult, candles: CandleFlat[], ms?: nu
     outputs.push({ key: 'shapes', label: 'Shapes', color: '#2962ff', kind: 'signal', markers })
     series.shapes = vals
   }
+  // A script that only draws (bgcolor, labels, lines, boxes, tables) still
+  // needs a series for its drawings to hang off (./overlay): an invisible
+  // carrier — the closes on the price pane, a flat line in a pane.
+  const draws = r.drawings
+  if (!outputs.length && (r.bgcolors || draws)) {
+    const ys = draws
+      ? [...draws.labels.map((l) => l.y), ...draws.lines.flatMap((l) => [l.y1, l.y2]), ...draws.boxes.flatMap((b) => [b.top, b.bottom])]
+      : []
+    const flat = ys.length ? (Math.min(...ys) + Math.max(...ys)) / 2 : 0
+    outputs.push({ key: 'draw', label: 'Drawings', color: '#2962ff', kind: 'signal', markers: [] })
+    series.draw = candles.map((c) => (r.overlay ? c.c : flat))
+  }
   const title = cleanTitle(inst.title || r.title)
   const def: IndicatorDef = {
     id: PINE_TYPE,
@@ -237,6 +254,8 @@ function build(inst: PineInstance, r: PineResult, candles: CandleFlat[], ms?: nu
       alertconditions: r.alertconditions,
       ms,
     },
+    result: r,
+    candles,
   }
 }
 
@@ -315,6 +334,8 @@ interface Live extends Built {
   last: string
   at: number
   throttle: number
+  /** request.security() bars arrived since this run: run again. */
+  stale?: boolean
 }
 const live = new Map<string, Live>()
 const statusListeners: Array<() => void> = []
@@ -370,9 +391,34 @@ function mintickOf(candles: CandleFlat[]): number {
   const d = a >= 100 ? 2 : a >= 1 ? 4 : a >= 0.01 ? 5 : a >= 0.0001 ? 6 : 8
   return Number((10 ** -d).toFixed(d))
 }
-function runOpts(candles: CandleFlat[]) {
-  return { ticker: chartSym, period: chartPeriod, mintick: mintickOf(candles) }
+function runOpts(candles: CandleFlat[], uid?: string) {
+  const keys = uid ? secKeys.get(uid) : undefined
+  const security =
+    keys && candles.length ? securityData(keys, candles[0].t, candles[candles.length - 1].t) : undefined
+  return { ticker: chartSym, period: chartPeriod, mintick: mintickOf(candles), security }
 }
+
+// ---- request.security(): bars fetched on the page (./securityFeed) ----
+/** The keys each instance's last run asked for. */
+const secKeys = new Map<string, string[]>()
+function afterRun(uid: string, r: PineResult | undefined, candles: CandleFlat[]): void {
+  if (!r) return
+  if (r.securityKeys) secKeys.set(uid, r.securityKeys)
+  else secKeys.delete(uid)
+  if (r.securityNeeds?.length && candles.length)
+    requestSecurity(r.securityNeeds, candles[0].t, candles[candles.length - 1].t)
+}
+// New bars for a key: every script that reads it runs again.
+onSecurityData((key) => {
+  let any = false
+  live.forEach((l, uid) => {
+    if (secKeys.get(uid)?.includes(key)) {
+      l.stale = true
+      any = true
+    }
+  })
+  if (any) resultListeners.slice().forEach((fn) => fn())
+})
 
 // ---- the worker: live runs happen off the main thread ----
 // Each changed candle set posts one run; the chart keeps drawing the last
@@ -465,6 +511,7 @@ function onWorkerResult(msg: {
   } else {
     try {
       b = build(job.inst, msg.result, job.candles)
+      afterRun(job.inst.uid, msg.result, job.candles)
     } catch (e) {
       const m = pineMeta(job.inst)
       b = failed(job.inst, e, m.status.overlay, m.status.inputs)
@@ -484,7 +531,7 @@ export function pineLive(inst: PineInstance, candles: CandleFlat[]): IndicatorDe
   const last = [lc.o, lc.h, lc.l, lc.c, lc.v].join(':')
   const prev = live.get(inst.uid)
   const now = Date.now()
-  if (prev && prev.sig === sig && prev.shape === shape) {
+  if (prev && prev.sig === sig && prev.shape === shape && !prev.stale) {
     if (prev.last === last) return prev.def
     // Only the forming bar moved: a slow script is not re-run on every tick.
     if (now - prev.at < prev.throttle) return prev.def
@@ -502,13 +549,21 @@ export function pineLive(inst: PineInstance, candles: CandleFlat[]): IndicatorDe
     const bars = candles.map((k) => ({ t: k.t, o: k.o, h: k.h, l: k.l, c: k.c, v: k.v }))
     jobs.set(id, { inst, sig, shape, last, candles })
     inFlight.set(inst.uid, id)
-    w.postMessage({ id, script: inst.script || '', candles: bars, inputs: inst.pineInputs || {}, opts: runOpts(candles) })
+    w.postMessage({
+      id,
+      script: inst.script || '',
+      candles: bars,
+      inputs: inst.pineInputs || {},
+      opts: runOpts(candles, inst.uid),
+    })
     return shown
   }
   const t0 = Date.now()
   let b: Built
   try {
-    b = build(inst, runPine(inst.script || '', candles, inst.pineInputs, runOpts(candles)), candles)
+    const r = runPine(inst.script || '', candles, inst.pineInputs, runOpts(candles, inst.uid))
+    b = build(inst, r, candles)
+    afterRun(inst.uid, r, candles)
   } catch (e) {
     const m = pineMeta(inst)
     b = failed(inst, e, m.status.overlay, m.status.inputs)
@@ -527,5 +582,16 @@ export function pineStatus(inst: PineInstance): PineStatus {
 /** Drop the cached run for an instance (it was removed). */
 export function forgetPine(uid: string): void {
   live.delete(uid)
+  secKeys.delete(uid)
   if (inFlight.delete(uid)) removed.add(uid)
+}
+
+/**
+ * What an instance's last live run drew besides its plots — drawings,
+ * bgcolor, barcolor — and the candles it ran over (./overlay maps them by
+ * time onto whatever the chart now shows). null before its first run.
+ */
+export function pineDrawState(uid: string): { result: PineResult; candles: CandleFlat[] } | null {
+  const l = live.get(uid)
+  return l?.result && l.candles ? { result: l.result, candles: l.candles } : null
 }
