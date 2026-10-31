@@ -15,6 +15,7 @@
 // createIndicatorRenderer draws one chart's store onto one chart; the main
 // price-action chart uses the module-level functions below, and each
 // multi-chart panel gets its own renderer over its own store.
+import { createSeriesMarkers, HistogramSeries, LineSeries } from 'lightweight-charts'
 import type { CandleFlat } from '../../../services/market'
 import type { IndicatorInstance } from './store'
 import { getIndicators, instanceDef } from './store'
@@ -39,6 +40,8 @@ interface Held {
   linesSig?: string
   /** Decimals last given to a pane series' priceFormat. */
   precision?: number
+  /** The markers plugin of a signal series. */
+  markers?: Any
 }
 
 /**
@@ -209,32 +212,48 @@ export function createIndicatorRenderer(
    */
   function layoutScales(): void {
     if (!chart) return
-    const panes = paneOrder
-    const n = panes.length
-    const bottom = paneBottom(n)
+    const n = paneOrder.length
+    // Indicators have their own panes now: the main pane keeps its usual margins.
     try {
-      if (opts.priceLayout) opts.priceLayout(chart, bottom)
-      else chart.priceScale('right').applyOptions({ scaleMargins: { top: 0.08, bottom } })
+      if (opts.priceLayout) opts.priceLayout(chart, 0)
+      else chart.priceScale('right').applyOptions({ scaleMargins: { top: 0.08, bottom: 0.04 } })
     } catch (e) {
       /* scale not mounted yet */
     }
-    panes.forEach((scaleId, i) => {
-      const slice = bottom / n
-      const top = 1 - bottom + slice * i
+    // The candles keep most of the height (about 70% with one pane, 60% with
+    // several); every pane can be dragged to another size.
+    try {
+      chart.panes()[0]?.setStretchFactor(n <= 1 ? 2.4 : 1.5 * n)
+      for (const h of held.values()) if (h.scaleId !== 'right') h.series.getPane().setStretchFactor(1)
+    } catch (e) {
+      /* pane removed between frames */
+    }
+  }
+
+  /**
+   * The native pane (lightweight-charts v5) an indicator draws in: the pane
+   * its other outputs already use, else a new one at the bottom. Panes used to
+   * be faked with price-scale margins inside the main pane, so they had no
+   * separators, could not be resized, and squeezed the candles.
+   */
+  function paneIndexFor(scaleId: string): number {
+    for (const h of held.values()) {
+      if (h.scaleId !== scaleId) continue
       try {
-        chart
-          .priceScale(scaleId)
-          .applyOptions({ scaleMargins: { top: top + 0.012, bottom: 1 - (top + slice) + 0.012 } })
+        return h.series.getPane().paneIndex()
       } catch (e) {
-        /* scale removed between frames */
+        /* series gone */
       }
-    })
+    }
+    return chart.addPane().paneIndex()
   }
 
   function makeSeries(out: OutputDef, scaleId: string): Any {
     const inPane = scaleId !== 'right'
+    // In its own pane an indicator uses that pane's right scale, with an axis.
+    const pane = inPane ? paneIndexFor(scaleId) : 0
     const common = {
-      priceScaleId: scaleId,
+      priceScaleId: 'right',
       lastValueVisible: inPane,
       priceLineVisible: false,
       crosshairMarkerVisible: false,
@@ -247,38 +266,38 @@ export function createIndicatorRenderer(
         title: '',
         upColor: out.color,
         downColor: out.colorDown || out.color,
-      })
+      }, pane)
     if (out.kind === 'signal')
       // Carries markers only: the points exist so markers have a time and a
       // value to sit against; the line itself is never drawn.
-      return chart.addLineSeries({
+      return chart.addSeries(LineSeries, {
         ...common,
         color: out.color,
         lineVisible: false,
         lastValueVisible: false,
         title: '',
-      })
+      }, pane)
     if (out.kind === 'dots')
-      return chart.addLineSeries({
+      return chart.addSeries(LineSeries, {
         ...common,
         color: out.color,
         lineVisible: false,
         pointMarkersVisible: true,
         pointMarkersRadius: 1.6,
-      })
+      }, pane)
     if (out.kind === 'histogram')
-      return chart.addHistogramSeries({
+      return chart.addSeries(HistogramSeries, {
         ...common,
         color: out.color,
         priceFormat: { type: 'volume' },
-      })
-    return chart.addLineSeries({
+      }, pane)
+    return chart.addSeries(LineSeries, {
       ...common,
       color: out.color,
       lineWidth: out.width ?? (out.dashed ? 1 : 2),
       lineStyle: out.dashed ? 2 : 0,
       lineType: out.kind === 'step' ? 1 : 0,
-    })
+    }, pane)
   }
 
   function histColor(
@@ -375,7 +394,11 @@ export function createIndicatorRenderer(
           })
         h.series.setData(data)
         syncPaneFormat(h, data)
-        if (out.kind === 'signal') h.series.setMarkers(markers)
+        // lightweight-charts v5: markers are a plugin on the series.
+        if (out.kind === 'signal') {
+          if (!h.markers) h.markers = createSeriesMarkers(h.series, [])
+          h.markers.setMarkers(markers)
+        }
       })
       // hline()s ride on the first drawn series; when that series is swapped
       // the new one starts without lines, so its signature starts empty.

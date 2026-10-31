@@ -6,8 +6,8 @@
 // flow, and a sentiment panel; Backtest runs the engine's own backtester.
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { createChart, CrosshairMode, LineStyle } from 'lightweight-charts'
-import type { IChartApi, IPriceLine, ISeriesApi, Time, UTCTimestamp } from 'lightweight-charts'
+import { createChart, createSeriesMarkers, CrosshairMode, LineStyle, CandlestickSeries, HistogramSeries, LineSeries } from 'lightweight-charts'
+import type { IChartApi, IPriceLine, ISeriesApi, ISeriesMarkersPluginApi, Time, UTCTimestamp } from 'lightweight-charts'
 import { state } from '../../services/store'
 import { baseOf } from '../../utils/coins'
 import { instrumentOf } from '../../constants/instruments'
@@ -61,6 +61,7 @@ function ChartPane({ view, full, setFull }: { view: View; full: boolean; setFull
     hi: ISeriesApi<'Line'>
     lo: ISeriesApi<'Line'>
     lines: IPriceLine[]
+    marks: ISeriesMarkersPluginApi<Time>
   } | null>(null)
   const [magnet, setMagnet] = useState(false)
 
@@ -77,20 +78,21 @@ function ChartPane({ view, full, setFull }: { view: View; full: boolean; setFull
       timeScale: { borderColor: th.grid, timeVisible: true, secondsVisible: false, rightOffset: 4 },
       crosshair: { mode: CrosshairMode.Normal },
     })
-    const candles = chart.addCandlestickSeries({
+    const candles = chart.addSeries(CandlestickSeries, {
       upColor: th.up, downColor: th.dn, wickUpColor: th.up, wickDownColor: th.dn, borderVisible: false,
     })
-    const vol = chart.addHistogramSeries({ priceScaleId: 'vol', priceFormat: { type: 'volume' }, lastValueVisible: false, priceLineVisible: false })
+    const vol = chart.addSeries(HistogramSeries, { priceScaleId: 'vol', priceFormat: { type: 'volume' }, lastValueVisible: false, priceLineVisible: false })
     chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.68, bottom: 0.18 }, visible: false })
-    const rsi = chart.addLineSeries({ priceScaleId: 'rsi', color: '#a78bfa', lineWidth: 1, priceLineVisible: false, lastValueVisible: true })
+    const rsi = chart.addSeries(LineSeries, { priceScaleId: 'rsi', color: '#a78bfa', lineWidth: 1, priceLineVisible: false, lastValueVisible: true })
     chart.priceScale('rsi').applyOptions({ scaleMargins: { top: 0.85, bottom: 0.01 } })
     rsi.createPriceLine({ price: 70, color: 'rgba(255,77,94,.45)', lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: false, title: '' })
     rsi.createPriceLine({ price: 30, color: 'rgba(34,224,138,.45)', lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: false, title: '' })
-    const pred = chart.addLineSeries({ color: '#d06bff', lineWidth: 2, lineStyle: LineStyle.Dashed, priceLineVisible: false, lastValueVisible: true, title: 'Predicted' })
+    const pred = chart.addSeries(LineSeries, { color: '#d06bff', lineWidth: 2, lineStyle: LineStyle.Dashed, priceLineVisible: false, lastValueVisible: true, title: 'Predicted' })
     const band = { color: 'rgba(208,107,255,.35)', lineWidth: 1 as const, lineStyle: LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false }
-    const hi = chart.addLineSeries(band)
-    const lo = chart.addLineSeries(band)
-    refs.current = { chart, candles, vol, rsi, pred, hi, lo, lines: [] }
+    const hi = chart.addSeries(LineSeries, band)
+    const lo = chart.addSeries(LineSeries, band)
+    // lightweight-charts v5: markers are a plugin on the series.
+    refs.current = { chart, candles, vol, rsi, pred, hi, lo, lines: [], marks: createSeriesMarkers(candles, []) }
     // Follow the light / dark switch.
     const mo = new MutationObserver(() => {
       const t = chartTheme()
@@ -178,7 +180,7 @@ function ChartPane({ view, full, setFull }: { view: View; full: boolean; setFull
         text: (t.side === 1 ? 'L ' : 'S ') + STRATS[t.strat].label,
       }))
       .sort((a, b) => (a.time as number) - (b.time as number))
-    r.candles.setMarkers(markers)
+    r.marks.setMarkers(markers)
     mine
       .filter((t) => t.closedAt == null)
       .forEach((t) => {

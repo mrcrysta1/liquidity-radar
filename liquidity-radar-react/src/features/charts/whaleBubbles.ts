@@ -13,6 +13,7 @@
 import { state } from '../../services/store'
 import { cfmt, pfmt } from '../../utils/format'
 import { getShowWhaleBubbles } from './overlayToggles'
+import { mainPaneHeight } from './chartPalette'
 // Range bars share the chart's time axis, so bubbles place against what is drawn.
 import { displayCandles } from './series/rangeView'
 import { getWhaleView, onWhaleFlowChange, syncWhaleSymbol } from '../whales/whaleFlow'
@@ -94,7 +95,8 @@ function paint(): void {
   if (v.sym !== state.symbol) return
   const ts = chart.timeScale()
   const paneW: number = ts.width()
-  const paneH: number = ch - ts.height()
+  // The price pane only: indicator panes (v5) sit below it on the same canvas.
+  const paneH: number = mainPaneHeight(chart, ch - ts.height())
   const spacing: number = ts.options().barSpacing || 6
   const dur =
     candles.length > 1 ? candles[candles.length - 1].t - candles[candles.length - 2].t : 60_000

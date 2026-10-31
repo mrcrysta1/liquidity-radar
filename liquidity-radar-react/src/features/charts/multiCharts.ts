@@ -12,6 +12,7 @@
 // header's indicators button is a React portal (PanelIndicatorButtons).
 import * as LightweightCharts from 'lightweight-charts'
 import { createZonedChart } from './zonedTimeScale'
+import { keepMainPane } from './chartPalette'
 import { poll } from '../../services/pollScheduler'
 import { pfmt } from '../../utils/format'
 import { state } from '../../services/store'
@@ -386,7 +387,8 @@ function mcInitChart(p: McPanel): void {
       horzLine: { color: th.pline, labelBackgroundColor: th.pline },
     },
   } as Any)
-  const cs = c.addCandlestickSeries({
+  keepMainPane(c)
+  const cs = c.addSeries(LightweightCharts.CandlestickSeries, {
     upColor: th.up,
     downColor: th.dn,
     borderVisible: false,
@@ -394,9 +396,9 @@ function mcInitChart(p: McPanel): void {
     wickDownColor: th.dn,
   })
   cs.priceScale().applyOptions({ scaleMargins: { top: 0.06, bottom: 0.36 } })
-  const vs = c.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: '' })
+  const vs = c.addSeries(LightweightCharts.HistogramSeries, { priceFormat: { type: 'volume' }, priceScaleId: '' })
   vs.priceScale().applyOptions({ scaleMargins: { top: 0.66, bottom: 0.22 } })
-  const rs = c.addLineSeries({
+  const rs = c.addSeries(LightweightCharts.LineSeries, {
     color: '#A78BFA',
     lineWidth: 1,
     priceScaleId: 'rsi',

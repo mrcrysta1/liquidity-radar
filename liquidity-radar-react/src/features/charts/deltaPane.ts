@@ -1,10 +1,10 @@
 // Draws taker buy/sell delta (CVD) as a histogram pane under the price
 // candles, the same way indicator panes stack (see indicators/render.ts) —
 // kept separate because delta is trade-tape driven, not candle-derived.
+import { HistogramSeries } from 'lightweight-charts'
 import type { CandleFlat } from '../../services/market'
 import { cumulativeDelta, getDeltaBars } from '../delta/delta'
 import { getShowDelta } from './overlayToggles'
-import { paneBottom } from './indicators/render'
 
 export type CvdDivergence = 'bullish' | 'bearish' | null
 
@@ -47,7 +47,6 @@ export { cumulativeDelta }
 
 type Any = any
 
-const SCALE_ID = 'delta'
 let chart: Any = null
 let series: Any = null
 
@@ -56,15 +55,34 @@ export function attachDeltaPane(c: Any): void {
   series = null
 }
 
+/**
+ * The delta histogram lives in its own native pane (lightweight-charts v5),
+ * always the last one, under any indicator panes. A pane added after it (a new
+ * RSI) would leave it in the middle, so it is then re-created at the bottom.
+ */
 function ensureSeries(): void {
-  if (series || !chart) return
-  series = chart.addHistogramSeries({
-    priceScaleId: SCALE_ID,
-    priceFormat: { type: 'volume' },
-    lastValueVisible: false,
-    priceLineVisible: false,
-    base: 0,
-  })
+  if (!chart) return
+  if (series) {
+    try {
+      const panes = chart.panes()
+      if (series.getPane().paneIndex() === panes.length - 1) return
+    } catch (e) {
+      /* fall through: re-create */
+    }
+    removeSeries()
+  }
+  series = chart.addSeries(
+    HistogramSeries,
+    {
+      priceScaleId: 'right',
+      priceFormat: { type: 'volume' },
+      lastValueVisible: false,
+      priceLineVisible: false,
+      base: 0,
+    },
+    chart.panes().length,
+  )
+  drawn = { first: 0, last: 0 }
 }
 
 function removeSeries(): void {
@@ -77,25 +95,13 @@ function removeSeries(): void {
   series = null
 }
 
-function layout(hasPane: boolean, otherPanes: number): void {
-  if (!chart) return
+function layout(hasPane: boolean, _otherPanes: number): void {
+  if (!chart || !hasPane || !series) return
+  // A thin strip: half the height of an indicator pane.
   try {
-    // Delta gets its own thin strip at the very bottom, under any indicator
-    // panes; the price scale's bottom margin is nudged to make room.
-    const deltaSlice = hasPane ? 0.12 : 0
-    // Same room for the indicator panes as their renderer gives them
-    // (paneBottom): this runs after it, so a different figure here pulled the
-    // candles down over the top of the panes (one RSI pane: 0.22 vs 0.3).
-    chart.priceScale('right').applyOptions({
-      scaleMargins: { top: 0.08, bottom: Math.min(0.7, paneBottom(otherPanes) + deltaSlice) },
-    })
-    if (hasPane) {
-      chart.priceScale(SCALE_ID).applyOptions({
-        scaleMargins: { top: 1 - deltaSlice + 0.02, bottom: 0 },
-      })
-    }
+    series.getPane().setStretchFactor(0.5)
   } catch (e) {
-    /* scale not mounted yet */
+    /* pane not mounted yet */
   }
 }
 

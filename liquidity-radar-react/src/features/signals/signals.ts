@@ -713,7 +713,7 @@ function renderSigAnaChart(candles: Any[], sym: string): void {
       rightPriceScale: { borderColor: th.border },
       timeScale: { timeVisible: true, secondsVisible: false },
     })
-    const cs = c.addCandlestickSeries({ upColor: th.up, downColor: th.dn, borderVisible: false, wickUpColor: th.up, wickDownColor: th.dn })
+    const cs = c.addSeries(LightweightCharts.CandlestickSeries, { upColor: th.up, downColor: th.dn, borderVisible: false, wickUpColor: th.up, wickDownColor: th.dn })
     cs.setData(candles.map(mapCandle))
     c.timeScale().fitContent()
     sigAnaObserver = new ResizeObserver(() => { if (el.clientWidth) c.applyOptions({ width: el.clientWidth }) })

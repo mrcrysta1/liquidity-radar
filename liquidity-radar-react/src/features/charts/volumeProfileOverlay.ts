@@ -10,6 +10,7 @@
 import type { CandleFlat } from '../../services/market'
 import { computeVolumeProfile, bucketPriceRange, type VolumeProfile } from './volumeProfile'
 import { getShowVolumeProfile, getVolumeProfileSettings } from './overlayToggles'
+import { mainPaneHeight } from './chartPalette'
 
 type Any = any
 
@@ -127,7 +128,7 @@ function paint(candles: CandleFlat[]): void {
   // Everything below is laid out against the plot area, not the canvas: `cw`
   // is where the price axis starts, and nothing is painted past it.
   const cw = plotRight(canvas.clientWidth)
-  const ch = canvas.clientHeight
+  const ch = mainPaneHeight(chart, canvas.clientHeight)
   if (cw < 1) return
   const maxBarPx = Math.max(40, cw * 0.16)
   ctx.save()

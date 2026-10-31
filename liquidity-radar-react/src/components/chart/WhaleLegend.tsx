@@ -14,10 +14,10 @@ import {
 } from '../../features/whales/whaleFlow'
 import { bubbleRadius, whaleLegendCompact } from '../../features/whales/whaleMath'
 import { getShowWhaleBubbles, onOverlayTogglesChange } from '../../features/charts/overlayToggles'
+import { scaleNavSnapshot, subscribeScaleNav } from '../../features/charts/scaleNav'
 import { chartDayKey, fmtChartDate } from '../../features/charts/timezone'
 
 // Narrow charts: sit above the zoom/reset buttons (time axis + 8px + button row).
-const LIFTED = { bottom: 74 } as const
 const CHIP_BTN = {
   display: 'inline-flex',
   alignItems: 'center',
@@ -51,11 +51,17 @@ export function WhaleLegend() {
   useEffect(() => {
     const a = onWhaleFlowChange(() => force((n) => n + 1))
     const b = onOverlayTogglesChange(() => force((n) => n + 1))
+    // Indicator panes sit between the candles and the time axis: follow
+    // their height so the legend stays over the price pane.
+    const c = subscribeScaleNav(() => force((n) => n + 1))
     return () => {
       a()
       b()
+      c()
     }
   }, [])
+  const below = scaleNavSnapshot().tsH
+  const place = (compact: boolean) => ({ bottom: below + (compact ? 48 : 4) })
 
   // The full legend covered about 40% of the plot's lower left (candles, the
   // VAH/POC/VAL labels): it starts as a one-line chip everywhere and expands on
@@ -90,7 +96,7 @@ export function WhaleLegend() {
         className="whale-legend"
         role="group"
         aria-label="Whale orders legend"
-        style={{ ...(compact ? LIFTED : null), padding: '2px 4px', maxWidth: 'calc(100% - 90px)' }}
+        style={{ ...place(compact), padding: '2px 4px', maxWidth: 'calc(100% - 90px)' }}
       >
         <button
           type="button"
@@ -119,7 +125,7 @@ export function WhaleLegend() {
       className="whale-legend"
       role="group"
       aria-label="Whale orders legend"
-      style={compact ? LIFTED : undefined}
+      style={place(compact)}
     >
       <div className="wl-row">
         <button
