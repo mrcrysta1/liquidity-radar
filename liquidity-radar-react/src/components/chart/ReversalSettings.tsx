@@ -11,6 +11,7 @@ import {
 } from '../../features/charts/series/reversalSettings'
 import { MAX_LINE_BREAK, MIN_LINE_BREAK } from '../../features/charts/series/lineBreak'
 import { MAX_PNF_REVERSAL, MIN_PNF_REVERSAL } from '../../features/charts/series/pointFigure'
+import { TICK_SIZES } from '../../features/charts/orderflow/tickBars'
 
 /**
  * A small number field applied on Enter or blur — every change rebuilds every
@@ -114,6 +115,38 @@ export function ReversalSettings({ id }: { id: ChartStyleId }) {
             onApply={(n) => setReversalSettings({ kagiPct: n })}
           />
         )}
+      </div>
+    )
+  }
+  if (id === 'tick') {
+    return (
+      <div className="range-set" onKeyDown={(e) => e.stopPropagation()}>
+        <div className="range-set-head">
+          <span>Tick bars</span>
+          <b>{s.ticks}T</b>
+        </div>
+        <div className="range-set-modes" role="radiogroup" aria-label="Trades per bar">
+          {TICK_SIZES.map((n) => (
+            <button
+              key={n}
+              type="button"
+              role="radio"
+              aria-checked={s.ticks === n}
+              className={'range-mode' + (s.ticks === n ? ' on' : '')}
+              onClick={() => setReversalSettings({ ticks: n })}
+            >
+              {n}T
+            </button>
+          ))}
+        </div>
+        <NumberField
+          key={s.ticks}
+          value={s.ticks}
+          label="Trades per bar"
+          unit="trades per bar"
+          onApply={(n) => setReversalSettings({ ticks: n })}
+        />
+        <small className="range-set-note">Built from live trades since the page opened.</small>
       </div>
     )
   }

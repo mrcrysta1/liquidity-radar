@@ -47,9 +47,24 @@ let gapRefillAt = 0
 // onto an animation frame so a busy market cannot outrun the renderer.
 let tradeFrame = 0
 let tradePending: { p: number; q: number; T: number } | null = null
+/**
+ * One aggTrade of the charted symbol, for the order-flow views (real
+ * footprint, tick bars). `bar`/`barEnd` bound the chart bar it belongs to,
+ * bucketed by the trade's own time as the delta pane does; `tf` is the
+ * interval that bucketing used.
+ */
+export interface TradePrintInfo {
+  qty: number
+  /** Binance `m`: the buyer was the maker, so the aggressor sold. */
+  buyerMaker: boolean
+  time: number
+  bar: number
+  barEnd: number
+  tf: string
+}
 /** Called with every trade print of the charted symbol (price alerts read the tape). */
-const tradeListeners: Array<(sym: string, price: number) => void> = []
-export function onTradePrint(fn: (sym: string, price: number) => void): void {
+const tradeListeners: Array<(sym: string, price: number, info: TradePrintInfo) => void> = []
+export function onTradePrint(fn: (sym: string, price: number, info: TradePrintInfo) => void): void {
   tradeListeners.push(fn)
 }
 /** The last trade painted onto the live candle (price, trade time). */
@@ -299,7 +314,15 @@ export function connectStreams(cb: StreamsCallbacks): void {
     }
     ingestTrade(state.symbol, bucketStart, +d.q, !!d.m)
     ingestWhaleAgg(state.symbol, +d.a, p, +d.q, +d.T, !!d.m)
-    tradeListeners.forEach((fn) => fn(state.symbol, p))
+    const info: TradePrintInfo = {
+      qty: +d.q,
+      buyerMaker: !!d.m,
+      time: +d.T,
+      bar: bucketStart,
+      barEnd: bucketEnd(bucketStart, def),
+      tf,
+    }
+    tradeListeners.forEach((fn) => fn(state.symbol, p, info))
     tradePending = { p: p, q: +d.q, T: +d.T }
     if (!tradeFrame) tradeFrame = raf(flushTrade)
   })

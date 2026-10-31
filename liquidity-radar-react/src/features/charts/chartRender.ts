@@ -88,6 +88,8 @@ import { subscribeSymbol } from '../actions/userActions'
 import { attachWhaleBubbles, renderWhaleBubbles, watchLiveWhales } from './whaleBubbles'
 import { attachVolumeProfile, renderVolumeProfile } from './volumeProfileOverlay'
 import { attachCompare, compareLegendHtml } from './compare'
+
+import { attachOrderflow } from './orderflow/orderflow'
 import { onDeltaChange } from '../delta/delta'
 import { onOverlayTogglesChange } from './overlayToggles'
 import { afterChartFit, attachScaleNav, subscribeScaleNav, syncView as syncScaleNavView } from './scaleNav'
@@ -235,7 +237,8 @@ export function themePriceSeries(series: Any, id: ChartStyleId): void {
     id === 'hollow' ||
     id === 'range' ||
     id === 'heikin' ||
-    id === 'linebreak'
+    id === 'linebreak' ||
+    id === 'tick'
   ) {
     series.applyOptions({
       upColor: id === 'hollow' ? 'rgba(0,0,0,0)' : th.up,
@@ -512,6 +515,10 @@ export function initChart(): void {
   attachVolumeProfile(chart, candleSeries, $('chartWrap')!)
   // Compare lines (./compare); their rows ride in the OHLC legend.
   attachCompare(chart, () => hoverTime == null && renderLiveLegend(), $('legendOHLC'))
+
+  // Real footprint, tick bars and the depth heatmap (./orderflow). It reads
+  // the live series through the getter and follows style changes itself.
+  attachOrderflow(chart, () => candleSeries)
   // The countdown reads the live series each time, so a style change that
   // replaces the series does not strand it.
   // Range bars do not close on the clock, so there is nothing to count down.
