@@ -52,6 +52,8 @@ import {
 import { LAYOUTS, MAX_CHARTS, cells, layoutSpec, rowCount } from './layouts'
 import { isDailyTf } from './timezone'
 import { loadCandles } from '../../services/marketData'
+import { replayNow, subscribeReplay } from './replay'
+import { countAtOrBefore } from './replayMath'
 import { mdSym, mdTf } from '../../services/market'
 import { klineHub } from '../../services/failover'
 import type { CandleFlat } from '../../services/market'
@@ -118,6 +120,8 @@ interface Panel {
   syncOff: (() => void) | null
   /** Its place in its link group's time-range sync. */
   timeLink: TimeSyncHandle | null
+  /** The bar-replay cut it was last drawn at ('' = live). */
+  cut: string
 }
 
 /** Live ticks redraw a panel's indicators at most this often. */
@@ -264,6 +268,8 @@ export function applyLayout(): void {
     subscribeTimeframe(alignLinks)
     subscribeSymbol(alignLinks)
     subscribeLinks(alignLinks)
+    // Bar replay plays every cell to the same moment as the main chart.
+    subscribeReplay(syncReplayCells)
   }
   applyGrid()
   // Panel headers changed: the indicator buttons re-mount into them.
@@ -520,6 +526,7 @@ function addPanel(pos: number): void {
     hover: false,
     syncOff: null,
     timeLink: null,
+    cut: '',
   }
   // No controls of its own: the toolbar drives whichever chart is active,
   // and clicking this one (or Enter/Space on it) makes it the active chart.
@@ -791,7 +798,7 @@ const isRangeCell = (p: Panel): boolean => !!styleDef(p.style).rangeBars
  * the closed candles so the size holds still while the live one ticks.
  */
 function barsFor(p: Panel): CandleFlat[] {
-  const src = p.candles
+  const src = cellSource(p)
   if (!isRangeCell(p) || !src.length) return src
   // Tick bars come from the focused symbol's trade stream only; a cell has
   // none, so it shows its time candles rather than an empty chart.
@@ -845,8 +852,47 @@ function pushRangeBars(p: Panel): void {
   p.shown = next
 }
 
+/**
+ * The cell's candles as of the replay's "now": every bar opened by then, the
+ * same moment the main chart is cut at. Live (all of them) outside replay.
+ */
+function cellSource(p: Panel): CandleFlat[] {
+  const now = replayNow()
+  return now == null ? p.candles : p.candles.slice(0, countAtOrBefore(p.candles, now))
+}
+
+/**
+ * Bar replay moved (or started / ended): redraw each cell at the new cut,
+ * keeping its view while stepping and returning to the latest bar when
+ * replay starts or ends.
+ */
+function syncReplayCells(): void {
+  const now = replayNow()
+  const cut = now == null ? '' : String(now)
+  panels.forEach((p) => {
+    if (cut === p.cut || !p.chart || !p.candleSeries) return
+    const modeChanged = (cut === '') !== (p.cut === '')
+    p.cut = cut
+    if (!p.candles.length) return
+    const ts = p.chart.timeScale()
+    const keep = ts.getVisibleLogicalRange()
+    p.shown = barsFor(p)
+    p.candleSeries.setData(priceSeriesData(p.style, p.shown))
+    p.volSeries?.setData(p.shown.map(volBar))
+    if (p.style === 'baseline') syncBaselineBase(p.chart, p.candleSeries, () => p.shown)
+    drawIndicators(p)
+    if (modeChanged) ts.scrollToRealTime()
+    else if (keep) ts.setVisibleLogicalRange(keep)
+    const last = p.shown[p.shown.length - 1]
+    if (last) tvLastPrice(p.candleSeries, last.c >= last.o)
+    liveLegend(p)
+  })
+}
+
 function draw(p: Panel, candles: CandleFlat[]): void {
   p.candles = candles.slice()
+  const now = replayNow()
+  p.cut = now == null ? '' : String(now)
   p.shown = barsFor(p)
   p.candleSeries.setData(priceSeriesData(p.style, p.shown))
   syncPricePrecision(p.candleSeries, p.shown[p.shown.length - 1]?.c)
@@ -932,6 +978,8 @@ function connect(p: Panel, token: number): void {
         arr.push(c)
         if (arr.length > 1500) arr.shift()
       }
+      // Replaying: the tape is kept but not drawn — the cell stays at the cut.
+      if (p.cut) return
       if (isRangeCell(p)) pushRangeBars(p)
       else {
         p.shown = arr

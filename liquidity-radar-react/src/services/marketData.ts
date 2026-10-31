@@ -167,6 +167,21 @@ export async function loadCandleWindow(
   return resample(rows, def).slice(-bars)
 }
 
+/**
+ * Up to `bars` candles of `tf` opening strictly before `before` (ms) — a
+ * window anywhere in history, e.g. bar replay's lower-interval sub-bars.
+ */
+export async function fetchKlineRows(
+  sym: string,
+  tf: string,
+  bars: number,
+  before: number,
+): Promise<CandleFlat[]> {
+  const def = tfDef(tf)
+  const { rows } = await fetchBase(sym, def.base, Math.max(1, bars) * def.factor, before - 1)
+  return resample(rows, def).filter((r) => r.t < before)
+}
+
 export async function loadCandles(
   sym: string,
   tf: string,
