@@ -27,6 +27,7 @@ import { commitMarket, marketRow, remoteMarket, searchMarkets } from '../../feat
 import type { MarketRow } from '../../features/markets/catalog'
 import { parseSynthetic } from '../../services/syntheticSymbol'
 import { isInstrument } from '../../constants/instruments'
+import { searchQuote } from '../../services/instrumentFeed'
 
 function Chg({ pct }: { pct: number | undefined }) {
   if (pct == null || !isFinite(pct)) return <span className="cp-chg">—</span>
@@ -60,10 +61,12 @@ function CoinId({ r, name = true }: { r: MarketRow; name?: boolean }) {
 
 function Quote({ sym }: { sym: string }) {
   const t = state.tickers[sym]
+  // No price (yet): no cell, rather than a "— —" that reads as a broken quote.
+  if (!t || !isFinite(t.last)) return null
   return (
     <span className="cp-quote">
-      <b>{t ? pfmt(t.last) : '—'}</b>
-      <Chg pct={t?.pct} />
+      <b>{pfmt(t.last)}</b>
+      <Chg pct={t.pct} />
     </span>
   )
 }
@@ -175,6 +178,28 @@ export function CoinMenu({
   const total = shown.length + (custom ? 1 : 0)
 
   const pick = (r: MarketRow) => onPick(commitMarket(r), r)
+
+  // Instruments off the polled hot list and Yahoo directory hits (ETH=F) have
+  // no live price: quote the first few on screen, one at a time (searchQuote).
+  const unpriced = shown
+    .filter((r) => (r.kind === 'instrument' || r.kind === 'remote') && !state.tickers[r.priceSym])
+    .slice(0, 6)
+    .map((r) => r.priceSym + '|' + (r.kind === 'remote' ? r.hit?.yahoo ?? '' : ''))
+    .join(',')
+  useEffect(() => {
+    if (!unpriced) return
+    let dead = false
+    void (async () => {
+      for (const it of unpriced.split(',')) {
+        if (dead) return
+        const [sym, ySym] = it.split('|')
+        if (await searchQuote(sym, ySym || undefined)) if (!dead) setLoaded((n) => n + 1)
+      }
+    })()
+    return () => {
+      dead = true
+    }
+  }, [unpriced])
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     // The engine's global key handler owns the letter shortcuts.
