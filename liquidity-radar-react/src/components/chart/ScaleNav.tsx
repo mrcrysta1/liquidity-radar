@@ -54,16 +54,46 @@ function useDismiss(open: boolean, ref: RefObject<HTMLElement | null>, close: ()
     const down = (e: PointerEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) close()
     }
+    // Captured and stopped: the global handler also binds Escape (it leaves
+    // full screen), and closing a menu must not do that too.
     const key = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') close()
+      if (e.key !== 'Escape') return
+      e.stopPropagation()
+      close()
     }
     document.addEventListener('pointerdown', down, true)
-    document.addEventListener('keydown', key)
+    document.addEventListener('keydown', key, true)
     return () => {
       document.removeEventListener('pointerdown', down, true)
-      document.removeEventListener('keydown', key)
+      document.removeEventListener('keydown', key, true)
     }
   }, [open, ref, close])
+}
+
+/**
+ * Keyboard for a popup menu: opening moves focus onto the checked item (or
+ * the first), and the arrows, Home and End move between items.
+ */
+function useMenuKeys(open: boolean, menuRef: RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    if (!open) return
+    const on = menuRef.current?.querySelector<HTMLElement>('[aria-checked="true"]')
+    ;(on || menuRef.current?.querySelector<HTMLElement>('button'))?.focus()
+  }, [open, menuRef])
+  return (e: ReactKeyboardEvent) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Home' && e.key !== 'End') return
+    const items = Array.from(menuRef.current?.querySelectorAll<HTMLElement>('button') || [])
+    if (!items.length) return
+    e.preventDefault()
+    const i = items.indexOf(document.activeElement as HTMLElement)
+    const next =
+      e.key === 'Home'
+        ? 0
+        : e.key === 'End'
+          ? items.length - 1
+          : (i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length
+    items[next].focus()
+  }
 }
 
 function Icon({ d, size = 14 }: { d: string; size?: number }) {
@@ -335,25 +365,7 @@ function TimeZoneMenu() {
   useFitMenu(listRef, open)
 
   // Opening moves focus onto the chosen zone, so the keyboard can pick at once.
-  useEffect(() => {
-    if (!open) return
-    const on = listRef.current?.querySelector<HTMLElement>('[aria-checked="true"]')
-    ;(on || listRef.current?.querySelector<HTMLElement>('button'))?.focus()
-  }, [open])
-  const onKey = (e: ReactKeyboardEvent) => {
-    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Home' && e.key !== 'End') return
-    const items = Array.from(listRef.current?.querySelectorAll<HTMLElement>('button') || [])
-    if (!items.length) return
-    e.preventDefault()
-    const i = items.indexOf(document.activeElement as HTMLElement)
-    const next =
-      e.key === 'Home'
-        ? 0
-        : e.key === 'End'
-          ? items.length - 1
-          : (i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length
-    items[next].focus()
-  }
+  const onKey = useMenuKeys(open, listRef)
 
   const now = clock.ms
   return (
@@ -405,14 +417,25 @@ export function ChartBottomBar() {
   const [moreOpen, setMoreOpen] = useState(false)
   const rangeRef = useRef<HTMLDivElement>(null)
   const moreRef = useRef<HTMLDivElement>(null)
-  const closeRange = () => setRangeOpen(false)
-  const closeMore = () => setMoreOpen(false)
+  const rangeBtnRef = useRef<HTMLButtonElement>(null)
+  const moreBtnRef = useRef<HTMLButtonElement>(null)
+  // Closing hands focus back to the button that opened the menu.
+  const closeRange = () => {
+    setRangeOpen(false)
+    rangeBtnRef.current?.focus()
+  }
+  const closeMore = () => {
+    setMoreOpen(false)
+    moreBtnRef.current?.focus()
+  }
   useDismiss(rangeOpen, rangeRef, closeRange)
   useDismiss(moreOpen, moreRef, closeMore)
   const rangeMenuRef = useRef<HTMLDivElement>(null)
   const moreMenuRef = useRef<HTMLDivElement>(null)
   useFitMenu(rangeMenuRef, rangeOpen)
   useFitMenu(moreMenuRef, moreOpen)
+  const rangeKeys = useMenuKeys(rangeOpen, rangeMenuRef)
+  const moreKeys = useMenuKeys(moreOpen, moreMenuRef)
 
   const sel = RANGE_PRESETS.find((p) => p.id === s.range)
   return (
@@ -434,6 +457,7 @@ export function ChartBottomBar() {
       <div className="sn-range-menu" ref={rangeRef}>
         <button
           type="button"
+          ref={rangeBtnRef}
           className={'sn-btn sn-drop' + (rangeOpen ? ' open' : '') + (sel ? ' on' : '')}
           aria-haspopup="menu"
           aria-expanded={rangeOpen}
@@ -448,6 +472,7 @@ export function ChartBottomBar() {
             role="menu"
             aria-label="Date range"
             ref={rangeMenuRef}
+            onKeyDown={rangeKeys}
           >
             {RANGE_PRESETS.map((p) => (
               <MenuItem
@@ -499,6 +524,7 @@ export function ChartBottomBar() {
       <div className="sn-more" ref={moreRef}>
         <button
           type="button"
+          ref={moreBtnRef}
           className={'sn-btn sn-drop' + (moreOpen ? ' open' : '')}
           aria-haspopup="menu"
           aria-expanded={moreOpen}
@@ -509,7 +535,13 @@ export function ChartBottomBar() {
           <Icon d="M5 12h.01M12 12h.01M19 12h.01" size={14} />
         </button>
         {moreOpen ? (
-          <div className="sn-menu up right" role="menu" aria-label="Price scale" ref={moreMenuRef}>
+          <div
+            className="sn-menu up right"
+            role="menu"
+            aria-label="Price scale"
+            ref={moreMenuRef}
+            onKeyDown={moreKeys}
+          >
             <ScaleMenuItems done={closeMore} />
           </div>
         ) : null}

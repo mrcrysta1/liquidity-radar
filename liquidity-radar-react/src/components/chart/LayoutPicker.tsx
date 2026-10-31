@@ -3,6 +3,7 @@
 // the same spec that lays out the real grid, so the preview cannot drift from
 // what you get.
 import { useEffect, useRef, useState } from 'react'
+import { useFitMenu } from './useFitMenu'
 import { LAYOUTS, cells, rowCount } from '../../features/charts/layouts'
 import type { LayoutSpec } from '../../features/charts/layouts'
 import { getLayout, setLayout, subscribeLayout } from '../../features/charts/companionCharts'
@@ -38,8 +39,11 @@ export function LayoutPicker() {
   const [open, setOpen] = useState(false)
   const [syncOn, setSyncOn] = useState(isCrosshairSyncOn)
   const wrapRef = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
   /** Cancels a name edit in the saved-layouts list; true when there was one. */
   const cancelEditRef = useRef<(() => boolean) | null>(null)
+  // A 236px menu anchored right ran off the left edge of a narrow screen.
+  useFitMenu(menuRef, open)
 
   useEffect(() => subscribeLayout(() => force((n) => n + 1)), [])
 
@@ -95,7 +99,7 @@ export function LayoutPicker() {
       </button>
 
       {open && (
-        <div className="layout-menu" onKeyDown={onKeyDown}>
+        <div className="layout-menu" ref={menuRef} onKeyDown={onKeyDown}>
           <div className="layout-menu-head">
             <span>Chart layout</span>
             <span className="layout-menu-hint">{current} on screen</span>
