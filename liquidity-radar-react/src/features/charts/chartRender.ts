@@ -1339,6 +1339,13 @@ function currentDrawings(): Any[] {
   return chartState.drawings
 }
 
+/** The charted coin's drawings (a copy) and the selected one's index — read
+ *  by "alert on a drawing" (features/alerts), which never edits them. */
+export function chartDrawings(): { sym: string; drawings: Drawing[]; selected: number } {
+  const drawings = currentDrawings().slice()
+  return { sym: String(state.symbol || ''), drawings, selected: chartState._sel ?? -1 }
+}
+
 /** Undo / redo over every saved change to the current coin's drawings. */
 const drawHistory = createDrawingHistory()
 const snapshotDrawings = (): string => JSON.stringify(chartState.drawings)

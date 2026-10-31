@@ -6416,3 +6416,20 @@ dialog.cset-dialog[open],dialog.kbd-dialog[open]{position:fixed;inset:0;margin:a
   .replay-start{width:100%;flex-wrap:wrap}
   .replay-trades{margin-left:0}
 }
+
+/* r3-alerts: conditions builder (AND rows), frequency + expiry/message/webhook options */
+.al-conds{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}
+.al-cond-head{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px}
+.al-cond{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:6px;border:1px solid var(--border);border-radius:8px;background:var(--sunk-1)}
+.al-cond .pf-input{padding:4px 6px;font-size:12px;width:auto}
+.al-cond-sel{flex:1 1 130px;min-width:0}
+.al-cond-op{flex:0 1 140px}
+.al-cond-num{flex:0 1 80px;min-width:60px}
+.al-cond-add{align-self:flex-start}
+.al-opts .al-freq{width:auto;padding:3px 6px;font-size:12px}
+.al-more{margin:0 0 10px;font-size:12px;color:var(--dim)}
+.al-more summary{cursor:pointer;font-weight:700}
+.al-more-row{display:flex;align-items:center;gap:8px;margin-top:6px}
+.al-more-row>span{flex:0 0 64px}
+.al-more-row .pf-input{flex:1;min-width:0;padding:4px 7px;font-size:12px}
+.al-note{margin-top:6px;font-size:11px}
