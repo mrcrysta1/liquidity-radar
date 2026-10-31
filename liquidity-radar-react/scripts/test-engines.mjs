@@ -1643,7 +1643,7 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   const kl = (closes) => closes.map((c, i) => ({ t: i * 60000, o: c, h: c + 1, l: c - 1, c, v: 1 }))
   const ramp = (n, f) => Array.from({ length: n }, (_, i) => f(i))
 
-  eq('alerts: limits', ALERT_LIMITS, { price: 1000, technical: 1000, watchlist: 15 })
+  eq('alerts: limits', ALERT_LIMITS, { price: 1000, technical: 1000, watchlist: 15, cond: 400 })
 
   // The charted candles only stand in for a rule when they are that market's.
   {
@@ -3581,6 +3581,95 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   const RT = await import(src('features/charts/pine/runtime.ts'))
   eq('pine gradient: midpoint blends', RT.gradientColor(50, 0, 100, '#000000', '#ffffff'), 'rgba(128,128,128,1.00)')
   eq('pine gradient: clamped at the ends', RT.gradientColor(150, 0, 100, '#000000', '#ffffff'), 'rgba(255,255,255,1.00)')
+}
+
+// ---- round 3: alerts — conditions (AND), drawings, Pine, frequency, webhook ----
+{
+  const C = await import(src('features/alerts/conditions.ts'))
+  const R = await import(src('features/alerts/rules.ts'))
+  const k = (t, c, extra = {}) => ({ t, o: c, h: c, l: c, c, v: 1, ...extra })
+  const bars = [k(0, 10), k(1, 11), k(2, 13)]
+  const ctx = (outputs = {}, pine = {}) => ({ candles: bars, outputs, pine })
+  const close = { t: 'price', field: 'close' }
+  const val = (v) => ({ t: 'value', v })
+  // Lines: a segment ends where it was drawn; a ray runs on; a level holds from its start.
+  const seg = { t1: 0, p1: 10, t2: 2, p2: 14, span: 'segment' }
+  eq('cond line: segment interpolates', C.linePriceAt(seg, 1), 12)
+  eq('cond line: segment stops at its end', C.linePriceAt(seg, 3), null)
+  eq('cond line: ray extends forward', C.linePriceAt({ ...seg, span: 'ray' }, 3), 16)
+  eq('cond line: ray not before its start', C.linePriceAt({ ...seg, span: 'ray' }, -1), null)
+  eq('cond line: extended both ways', C.linePriceAt({ ...seg, span: 'extended' }, -1), 8)
+  eq('cond line: level', C.linePriceAt({ t1: 0, p1: 5, t2: 0, p2: 5, span: 'level' }, 99), 5)
+  // Drawings: chart seconds become candle ms; a parallel channel gives both sides.
+  const ch = C.drawingLines({ type: 'parallel', points: [{ time: 0, price: 10 }, { time: 2, price: 14 }, { time: 1, price: 15 }] })
+  eq('cond drawing: channel has two sides', ch.map((x) => x.label), ['Channel bottom', 'Channel top'])
+  eq('cond drawing: channel top offset by the third point', C.linePriceAt(ch[1].line, 1000), 15)
+  eq('cond drawing: hline is a level everywhere', C.drawingLines({ type: 'hline', points: [{ time: 50, price: 7 }] })[0].line.span, 'level')
+  eq('cond drawing: vline offers nothing', C.drawingLines({ type: 'vline', points: [{ time: 1, price: 1 }] }).length, 0)
+  // Operators.
+  eq('cond: crossing up a value', C.evalCond({ a: close, op: 'cross_up', b: val(12) }, ctx(), 2), true)
+  eq('cond: no cross on the first bar', C.evalCond({ a: close, op: 'cross', b: val(5) }, ctx(), 0), false)
+  eq('cond: crossing down is not crossing up', C.evalCond({ a: close, op: 'cross_down', b: val(12) }, ctx(), 2), false)
+  const sma = { t: 'out', uid: 'i1', key: 'v' }
+  eq('cond: greater than another series', C.evalCond({ a: close, op: 'gt', b: sma }, ctx({ 'i1.v': [9, 12, 12] }), 2), true)
+  eq('cond: missing series value never holds', C.evalCond({ a: close, op: 'gt', b: sma }, ctx({ 'i1.v': [9, 12, null] }), 2), false)
+  eq('cond: crossing a trend line', C.evalCond({ a: close, op: 'cross_up', b: { t: 'line', line: { t1: 0, p1: 11, t2: 2, p2: 12, span: 'segment' } } }, ctx(), 2), true)
+  const band = { op: 'enter', b: val(12), c: val(14) }
+  eq('cond: entering a channel', C.evalCond({ a: close, ...band }, ctx(), 2), true)
+  eq('cond: exiting needs to have been inside', C.evalCond({ a: close, ...band, op: 'exit' }, ctx(), 2), false)
+  eq('cond: inside channel (bounds in any order)', C.evalCond({ a: close, op: 'inside', b: val(14), c: val(12) }, ctx(), 2), true)
+  eq('cond: moving up % in N bars', C.evalCond({ a: close, op: 'up_pct', b: val(30), bars: 2 }, ctx(), 2), true)
+  eq('cond: moving up % below the threshold', C.evalCond({ a: close, op: 'up_pct', b: val(31), bars: 2 }, ctx(), 2), false)
+  const pineOp = { t: 'pine', uid: 'p1', idx: 0, title: 'Buy' }
+  const pine = { p1: [{ title: 'Sell', values: [true, true, true] }, { title: 'Buy', values: [false, false, true] }] }
+  eq('cond: Pine alertcondition found by title after an edit', C.evalCond({ a: pineOp, op: 'true' }, ctx({}, pine), 2), true)
+  eq('cond: Pine alertcondition false bar', C.evalCond({ a: pineOp, op: 'true' }, ctx({}, pine), 1), false)
+  eq('cond: AND of all conditions', C.evalConds([{ a: close, op: 'gt', b: val(12) }, { a: close, op: 'lt', b: val(14) }], ctx(), 2), true)
+  eq('cond: AND fails on one', C.evalConds([{ a: close, op: 'gt', b: val(12) }, { a: close, op: 'lt', b: val(13) }], ctx(), 2), false)
+  eq('cond: judged bar on close is the last closed one', [C.judgedBar(10, false), C.judgedBar(10, true)], [9, 8])
+  // Validation.
+  eq('cond norm: more than five rejected', C.normalizeConds(Array(6).fill({ a: close, op: 'gt', b: val(1) })), null)
+  eq('cond norm: channel needs both bounds', C.normalizeConds([{ a: close, op: 'enter', b: val(1) }]), null)
+  eq('cond norm: bars clamped', C.normalizeConds([{ a: close, op: 'up_pct', b: val(1), bars: 9999 }])[0].bars, 500)
+  eq('cond uids: outputs and Pine', C.condUids([{ a: sma, op: 'gt', b: { t: 'out', uid: 'i2', key: 'x' } }, { a: pineOp, op: 'true' }]), ['i1', 'i2', 'p1'])
+  const saved = R.normalizeRules([
+    { kind: 'cond', id: 'a', sym: 'BTCUSDT', tf: '1h', condition: 'conditions', value: 0, conds: [{ a: close, op: 'gt', b: val(1) }], inds: [{ uid: 'i1', type: 'sma', params: { len: 9 }, source: 'close' }], freq: 'bar', webhook: 'https://example.com/h', message: 'Hi {{ticker}}' },
+    { kind: 'cond', id: 'b', sym: 'BTCUSDT', condition: 'conditions', value: 0, conds: [] },
+    { kind: 'watchlist', id: 'c', condition: 'any_technical', tech: 'rsi_above', value: 70, tf: '1h' },
+    { kind: 'watchlist', id: 'd', condition: 'any_technical', tech: 'nope', value: 70 },
+    { kind: 'price', id: 'e', sym: 'BTCUSDT', condition: 'above', value: 1, webhook: 'http://example.com' },
+  ])
+  eq('rules norm: cond rule kept, empty conds dropped', saved.map((r) => r.id), ['a', 'c', 'e'])
+  eq('rules norm: cond extras kept', [saved[0].freq, saved[0].tf, saved[0].inds.length, saved[0].message], ['bar', '1h', 1, 'Hi {{ticker}}'])
+  eq('rules norm: watchlist technical keeps tech + tf', [saved[1].tech, saved[1].tf], ['rsi_above', '1h'])
+  eq('rules norm: http webhook dropped', saved[2].webhook, undefined)
+  // Frequency and expiry.
+  const base = { id: 'x', kind: 'cond', sym: 'BTCUSDT', condition: 'conditions', value: 0, once: false, enabled: true, created: 0, triggerCount: 0 }
+  const perBar = { ...base, freq: 'bar' }
+  const s1 = R.stepRule(perBar, true, 1000, undefined, 60000)
+  const s2 = R.stepRule(s1.next, true, 2000, undefined, 60000)
+  const s3 = R.stepRule(s2.next, true, 3000, undefined, 120000)
+  eq('freq bar: fires, not again in the bar, again next bar', [s1.fire, s2.fire, s3.fire], [true, false, true])
+  eq('freq: legacy once/every derived', [R.freqOf({ once: true }), R.freqOf({ once: false })], ['once', 'every'])
+  const exp = R.stepRule({ ...base, expires: 500 }, true, 1000)
+  eq('expiry: a rule past it switches off unfired', [exp.fire, exp.next.enabled], [false, false])
+  eq('every time: cooldown 0 refires on each new edge', R.stepRule({ ...base, cooldownMin: 0, lastTriggered: 999, lastState: false }, true, 1000).fire, true)
+  // Technical % moves and watchlist technicals.
+  const ramp = Array.from({ length: 70 }, (_, i) => ({ c: 100 }))
+  ramp.push({ c: 110 })
+  eq('tech: moving up % in N bars', R.evalTechnical({ condition: 'move_up_pct', value: 10, value2: 1 }, ramp), true)
+  eq('tech: moving down % not on a rise', R.evalTechnical({ condition: 'move_down_pct', value: 1, value2: 1 }, ramp), false)
+  const wt = R.evalWatchTech({ tech: 'move_up_pct', value: 5, value2: 1 }, [{ symbol: 'A', candles: ramp }, { symbol: 'B', candles: ramp.slice(0, 70) }])
+  eq('watchlist technical: only matching symbols', wt.matched, ['A'])
+  // Message templates and webhook URLs.
+  eq('template: placeholders filled, unknown kept', C.fillTemplate('{{ticker}} {{ close }} {{interval}} {{nope}}', { ticker: 'BTCUSDT', close: '1.5', interval: '1h' }), 'BTCUSDT 1.5 1h {{nope}}')
+  eq('webhook url: https host ok', C.validWebhookUrl(' https://hooks.example.com/x '), 'https://hooks.example.com/x')
+  eq('webhook url: http, IP, localhost, credentials refused', ['http://a.com', 'https://10.0.0.1/x', 'https://localhost/x', 'https://u:p@a.com'].map(C.validWebhookUrl), [null, null, null, null])
+  const W = await import(pathToFileURL(resolve(__dirname, '..', 'api', 'alert-webhook.mjs')).href)
+  eq('relay: private addresses', ['10.1.2.3', '127.0.0.1', '169.254.1.1', '172.20.0.1', '192.168.1.1', '100.64.0.1', '::1', 'fd00::1', '::ffff:10.0.0.1'].every(W.isPrivateAddress), true)
+  eq('relay: public addresses', ['8.8.8.8', '1.1.1.1', '2606:4700::1111'].some(W.isPrivateAddress), false)
+  eq('relay: target checks', ['https://a.example.com/h', 'https://a.example.com:8443/h', 'https://1.2.3.4/h', 'https://x.internal/h'].map((u) => !!W.webhookTarget(u)), [true, false, false, false])
+  eq('relay: JSON messages go out as JSON', [W.messageType('{"a":1}'), W.messageType('BTC up')], ['application/json', 'text/plain; charset=utf-8'])
 }
 
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')
