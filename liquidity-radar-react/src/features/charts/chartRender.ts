@@ -53,11 +53,14 @@ import {
   isMagnet,
   onClearAllDrawings,
   onDrawToolChange,
+  onDeleteSelectedDrawing,
+  onEditSelectedDrawing,
   onRedoDrawing,
   onUndoDrawing,
   setDrawTool,
   setDrawingCount,
   setDrawingHistory,
+  setSelectedDrawing,
   setPendingPoints,
 } from './drawTools'
 import { createDrawingHistory } from './drawings/history'
@@ -955,6 +958,23 @@ function initChartToolbar(): void {
     currentDrawings()
     restoreDrawings(drawHistory.redo())
   })
+  // The floating toolbar over a selected drawing: restyle it or delete it.
+  onEditSelectedDrawing(function (patch) {
+    const d = currentDrawings()[chartState._sel]
+    if (!d) return
+    Object.assign(d, patch)
+    saveDrawings()
+    redrawDrawings()
+  })
+  onDeleteSelectedDrawing(function () {
+    const list = currentDrawings()
+    if (chartState._sel < 0 || !list[chartState._sel]) return
+    list.splice(chartState._sel, 1)
+    chartState._sel = -1
+    saveDrawings()
+    publishDrawingCount()
+    redrawDrawings()
+  })
   syncDrawHint()
 }
 
@@ -1625,7 +1645,17 @@ function setupDrawSelect(wrap: HTMLElement): void {
   )
 }
 
-function paintShape(ctx: Any, sh: Shape, base: string, doomed: boolean, selected = false): void {
+/** Per-drawing line style from the selection toolbar (width in px). */
+const DASHES: Record<string, number[]> = { dashed: [6, 4], dotted: [1.5, 3] }
+
+function paintShape(
+  ctx: Any,
+  sh: Shape,
+  base: string,
+  doomed: boolean,
+  selected = false,
+  style: { width?: number; dash?: string } = {},
+): void {
   const stroke = doomed ? cv('red') || '#FF1744' : base
   sh.fills.forEach((f) => {
     if (f.pts.length < 6) return
@@ -1654,9 +1684,12 @@ function paintShape(ctx: Any, sh: Shape, base: string, doomed: boolean, selected
   sh.segs.forEach((g) => {
     ctx.save()
     ctx.strokeStyle = doomed ? stroke : g.color || base
-    ctx.lineWidth = g.width || (doomed ? 2.2 : 1.7)
+    // The drawing's own width / style apply to its main lines; decoration
+    // (soft) keeps the tool's look.
+    const own = !g.soft
+    ctx.lineWidth = g.width || (doomed ? 2.2 : own && style.width ? style.width : 1.7)
     ctx.lineCap = 'round'
-    ctx.setLineDash(g.dash || [])
+    ctx.setLineDash(g.dash || (own && style.dash ? DASHES[style.dash] || [] : []))
     ctx.beginPath()
     ctx.moveTo(g.x1, g.y1)
     ctx.lineTo(g.x2, g.y2)
@@ -1667,8 +1700,8 @@ function paintShape(ctx: Any, sh: Shape, base: string, doomed: boolean, selected
     if (a.rx <= 0 || a.ry <= 0) return
     ctx.save()
     ctx.strokeStyle = doomed ? stroke : a.color || base
-    ctx.lineWidth = doomed ? 2.2 : 1.7
-    ctx.setLineDash(a.dash || [])
+    ctx.lineWidth = doomed ? 2.2 : style.width || 1.7
+    ctx.setLineDash(a.dash || (style.dash ? DASHES[style.dash] || [] : []))
     ctx.beginPath()
     ctx.ellipse(a.cx, a.cy, a.rx, a.ry, 0, 0, Math.PI * 2)
     ctx.stroke()
@@ -1711,6 +1744,14 @@ function paintShape(ctx: Any, sh: Shape, base: string, doomed: boolean, selected
   })
 }
 
+/** Tell the selection toolbar which drawing is selected and how it looks. */
+function publishSelection(): void {
+  const d = chartState._sel >= 0 ? chartState.drawings[chartState._sel] : null
+  setSelectedDrawing(
+    d ? { color: d.color || '#4FC3F7', width: d.width || 1.7, dash: d.dash || 'solid' } : null,
+  )
+}
+
 function redrawDrawings(includePreview?: Any): void {
   renderVolumeProfile(visibleCandles())
   renderWhaleBubbles()
@@ -1735,8 +1776,13 @@ function redrawDrawings(includePreview?: Any): void {
 
   currentDrawings().forEach(function (d: Any, i: number) {
     const sh = shapeOf(d, cw, ch)
-    if (sh) paintShape(ctx, sh, d.color, i === chartState._eraseHit, i === chartState._sel)
+    if (sh)
+      paintShape(ctx, sh, d.color, i === chartState._eraseHit, i === chartState._sel, {
+        width: d.width,
+        dash: d.dash,
+      })
   })
+  publishSelection()
 
   // A text drawing waiting for its caption stays visible while it is typed.
   if (chartState._captionDraft) {

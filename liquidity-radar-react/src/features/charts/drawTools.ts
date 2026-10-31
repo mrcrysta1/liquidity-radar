@@ -89,6 +89,38 @@ export function clearAllDrawings(): void {
   if (onClearAll) onClearAll()
 }
 
+/** Line style of a drawing, set from the selection toolbar. */
+export type DrawDash = 'solid' | 'dashed' | 'dotted'
+export interface SelectedDrawing {
+  color: string
+  width: number
+  dash: DrawDash
+}
+/** The drawing selected with the cursor tool, or null. */
+let selected: SelectedDrawing | null = null
+export function selectedDrawing(): SelectedDrawing | null {
+  return selected
+}
+export function setSelectedDrawing(v: SelectedDrawing | null): void {
+  if (JSON.stringify(v) === JSON.stringify(selected)) return
+  selected = v
+  emit()
+}
+let onEditSel: ((patch: Partial<SelectedDrawing>) => void) | null = null
+export function onEditSelectedDrawing(fn: (patch: Partial<SelectedDrawing>) => void): void {
+  onEditSel = fn
+}
+export function editSelectedDrawing(patch: Partial<SelectedDrawing>): void {
+  if (onEditSel) onEditSel(patch)
+}
+let onDeleteSel: (() => void) | null = null
+export function onDeleteSelectedDrawing(fn: () => void): void {
+  onDeleteSel = fn
+}
+export function deleteSelectedDrawing(): void {
+  if (onDeleteSel) onDeleteSel()
+}
+
 let onUndo: (() => void) | null = null
 export function onUndoDrawing(fn: () => void): void {
   onUndo = fn
