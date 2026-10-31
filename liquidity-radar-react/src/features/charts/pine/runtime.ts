@@ -8,16 +8,19 @@
 //
 // Output: plots (per-bar values + optional per-bar colours), hlines,
 // plotshape/plotchar/plotarrow markers, fill() between two plots/hlines,
-// bgcolor/barcolor per bar, alertcondition() series, the declared inputs
-// and — for a strategy() script — the broker emulator's trades and equity
-// (./strategy). Drawing objects (label/line/box/table) are accepted and
-// ignored, and reported back as warnings.
+// bgcolor/barcolor per bar, alertcondition() series, the declared inputs,
+// drawing objects (label/line/box/table, ./drawings), request.security()
+// values (./security) and — for a strategy() script — the broker
+// emulator's trades and equity (./strategy).
 //
 // Kept free of app imports (Node runs it directly in the engine tests).
 import { parse, PineError } from './parser.ts'
-import type { Expr, Stmt } from './parser.ts'
+import type { Expr, FnParam, Stmt } from './parser.ts'
 import { createBroker, DEFAULT_STRATEGY, STRATEGY_VARS } from './strategy.ts'
 import type { Broker, StrategyConfig, StrategyReport } from './strategy.ts'
+import { createDrawings, DrawRef, NOT_DRAWING } from './drawings.ts'
+import type { DrawKind, PineDrawingsOut } from './drawings.ts'
+import { alignSecurity, normSymbol, normTf, securityKey, tfMs } from './security.ts'
 
 /** One bar — the same shape as the app's CandleFlat (time in ms). */
 export interface PineBar {
@@ -84,13 +87,29 @@ export interface PineResult {
   alertconditions?: Array<{ title: string; message: string; values: (boolean | null)[] }>
   /** A strategy() script: what the broker emulator did. */
   strategy?: StrategyReport
+  /** label/line/box/table objects alive at the end of the run (x as times). */
+  drawings?: PineDrawingsOut
+  /** request.security() bars this run needed but was not given (fetch, then re-run). */
+  securityNeeds?: Array<{ key: string; symbol: string; tf: string }>
+  /** Every request.security() key the script asked for. */
+  securityKeys?: string[]
 }
 export interface PineFill {
   plot1: string
   plot2: string
   color: string
+  /** Per-bar colour where it differs from `color` (a transparent one where na). */
+  colors?: Array<string | undefined>
   title: string
 }
+export type {
+  PineDrawingsOut,
+  PineLabelOut,
+  PineLineOut,
+  PineBoxOut,
+  PineTableOut,
+  PineTableCell,
+} from './drawings.ts'
 export type { StrategyReport, StrategyTrade, StrategySummary } from './strategy.ts'
 export interface RunOptions {
   /** Wall-clock budget; a script over it stops with an error. */
@@ -100,9 +119,44 @@ export interface RunOptions {
   period?: string
   /** The instrument's price step; 0.01 left round_to_mintick at 0 on cheap coins. */
   mintick?: number
+  /**
+   * request.security() bars by key (security.ts securityKey: "ETHUSDT|240"),
+   * fetched by the page before the run.
+   */
+  security?: Record<string, PineBar[]>
+  /** Internal: this run evaluates request.security() expressions for `key`. */
+  securityCtx?: { key: string; captures: Map<string, unknown[]> }
 }
 
-type Val = number | boolean | string | Val[] | FnRef | PineArray | null | undefined
+type Val =
+  | number
+  | boolean
+  | string
+  | Val[]
+  | FnRef
+  | PineArray
+  | PineObj
+  | DrawRef
+  | null
+  | undefined
+/** An instance of a user-defined `type` — a reference, like Pine's objects. */
+class PineObj {
+  type: string
+  f: Record<string, Val>
+  constructor(type: string, f: Record<string, Val>) {
+    this.type = type
+    this.f = f
+  }
+}
+/** break / continue unwind to the innermost loop. */
+class LoopSignal {
+  loop: string
+  constructor(loop: string) {
+    this.loop = loop
+  }
+}
+const BREAK = new LoopSignal('break')
+const CONTINUE = new LoopSignal('continue')
 /**
  * A Pine array — a reference type: `var a = array.new_float()` is one array
  * for the whole run, mutated in place. (Plain JS arrays are tuples here.)
@@ -120,6 +174,8 @@ interface FnRef {
   fn: true
   name: string
   params: string[]
+  defaults?: Array<Expr | undefined>
+  method?: boolean
   body: Stmt[]
 }
 const NA = NaN
@@ -212,8 +268,54 @@ const CONSTS: Record<string, Val> = {
   'line.style_solid': 'solid',
   'line.style_dashed': 'dashed',
   'line.style_dotted': 'dotted',
-  'xloc.bar_index': 0,
-  'yloc.price': 0,
+  'line.style_arrow_left': 'arrow_left',
+  'line.style_arrow_right': 'arrow_right',
+  'line.style_arrow_both': 'arrow_both',
+  'xloc.bar_index': 'bar_index',
+  'xloc.bar_time': 'bar_time',
+  'yloc.price': 'price',
+  'yloc.abovebar': 'abovebar',
+  'yloc.belowbar': 'belowbar',
+  ...Object.fromEntries(
+    [
+      'none',
+      'xcross',
+      'cross',
+      'triangleup',
+      'triangledown',
+      'flag',
+      'circle',
+      'arrowup',
+      'arrowdown',
+      'square',
+      'diamond',
+      'label_up',
+      'label_down',
+      'label_left',
+      'label_right',
+      'label_lower_left',
+      'label_lower_right',
+      'label_upper_left',
+      'label_upper_right',
+      'label_center',
+      'text_outline',
+    ].map((s) => ['label.style_' + s, s]),
+  ),
+  ...Object.fromEntries(
+    ['top', 'middle', 'bottom'].flatMap((v) =>
+      ['left', 'center', 'right'].map((h) => ['position.' + v + '_' + h, v + '_' + h]),
+    ),
+  ),
+  'text.align_left': 'left',
+  'text.align_center': 'center',
+  'text.align_right': 'right',
+  'text.align_top': 'top',
+  'text.align_bottom': 'bottom',
+  'text.wrap_auto': 'auto',
+  'text.wrap_none': 'none',
+  'font.family_default': 'default',
+  'font.family_monospace': 'monospace',
+  'format.mintick': 'mintick',
   'strategy.long': 'long',
   'strategy.short': 'short',
   'strategy.direction.long': 'long',
@@ -238,19 +340,6 @@ const IGNORED = new Set([
   'plotcandle',
   'plotbar',
   'alert',
-  'label.new',
-  'label.set_text',
-  'label.set_xy',
-  'label.set_color',
-  'label.delete',
-  'line.new',
-  'line.set_xy1',
-  'line.set_xy2',
-  'line.delete',
-  'box.new',
-  'box.delete',
-  'table.new',
-  'table.cell',
   'max_bars_back',
   'runtime.error',
 ])
@@ -391,6 +480,14 @@ const OTHER_FNS = [
   'strategy.close_all',
   'strategy.cancel',
   'strategy.cancel_all',
+  'request.security',
+  'label.new',
+  'line.new',
+  'box.new',
+  'table.new',
+  'table.cell',
+  'str.upper',
+  'str.lower',
 ]
 const ARRAY_FNS = [
   'new_float',
@@ -490,6 +587,18 @@ export function runPine(
   const inputKeys = new Map<string, PineInput>()
   let inputOrdinal = 0
   const fns = new Map<string, FnRef>()
+  const types = new Map<string, FnParam[]>()
+  const drawings = createDrawings({
+    color: (v) => (isColor(v as Val) ? normColor(v as string) : ''),
+    num: (v) => num(v as Val),
+    fail: (msg) => {
+      throw new PineError(msg, curLine)
+    },
+  })
+  // request.security(): bars by key, their inner runs, what is missing.
+  const secNeeds = new Map<string, { key: string; symbol: string; tf: string }>()
+  const secKeys = new Set<string>()
+  const secRuns = new Map<string, { bars: PineBar[]; captures: Map<string, unknown[]>; align: Map<number, Int32Array> }>()
   const globals = new Map<string, Val[]>()
   const varInit = new Set<string>()
   const nodeBuf = new Map<string, Val[]>()
@@ -513,6 +622,30 @@ export function runPine(
   const tick = () => {
     if ((++ops & 1023) === 0 && Date.now() > deadline)
       throw new PineError('Script took too long to run (loop too large?)', curLine)
+  }
+  /** str.tostring's formats: "#.##" / "0.00" patterns, format.mintick / percent / volume. */
+  const fmtNum = (v: number, f?: string): string => {
+    if (!isFinite(v)) return 'NaN'
+    const decs = (s: string) => (s.includes('.') ? s.split('.')[1].length : 0)
+    if (f === 'mintick') return v.toFixed(Math.min(10, decs(String(mintick))))
+    if (f === 'percent') return v.toFixed(2) + '%'
+    if (f === 'integer') return String(Math.round(v))
+    if (f === 'volume') {
+      const a = Math.abs(v)
+      const [d, s] = a >= 1e9 ? [1e9, 'B'] : a >= 1e6 ? [1e6, 'M'] : a >= 1e3 ? [1e3, 'K'] : [1, '']
+      return String(Math.round((v / d) * 1000) / 1000) + s
+    }
+    const m = f ? /^[#0,]*(?:\.([#0]+))?(%?)$/.exec(f) : null
+    if (m) {
+      const fr = m[1] || ''
+      const x = m[2] ? v * 100 : v
+      let s = x.toFixed(fr.length)
+      // '#' places are optional: their trailing zeros go.
+      const opt = fr.length - fr.replace(/#+$/, '').length
+      for (let k = 0; k < opt && /\.\d*0$/.test(s); k++) s = s.slice(0, -1)
+      return s.replace(/\.$/, '') + m[2]
+    }
+    return String(Math.round(v * 1e4) / 1e4)
   }
 
   const O = candles.map((c) => c.o)
@@ -591,7 +724,9 @@ export function runPine(
     }
     a[bar] = v
   }
-  const lookup = (name: string, back = 0, line?: number, col?: number): Val => {
+  /** A declared variable in scope (not a namespace like `ta` or `color`). */
+  const isVar = (name: string) => !!localScope?.has(name) || globals.has(name)
+  const lookup =(name: string, back = 0, line?: number, col?: number): Val => {
     const i = bar - back
     if (i < 0) return NA
     if (localScope) {
@@ -600,6 +735,30 @@ export function runPine(
     }
     const g = globals.get(name)
     if (g) return g[i] ?? NA
+    // `p.price`: a field of an object held in a variable (`p.a.b` walks on).
+    const dot = name.indexOf('.')
+    // A variable that shadows a namespace (`color = …` then `color.red`)
+    // still reads the namespace.
+    const builtinName = name in CONSTS || name in SYMINFO || seriesAt(name, 0) !== undefined
+    if (dot > 0 && isVar(name.slice(0, dot)) && !builtinName) {
+      let v = lookup(name.slice(0, dot), back, line, col)
+      for (const fld of name.slice(dot + 1).split('.')) {
+        if (!(v instanceof PineObj)) {
+          if (isNa(v)) throw new PineError(`Cannot access field '${fld}' of an na object`, line ?? curLine, col)
+          throw new PineError(`'${name.slice(0, dot)}' has no field '${fld}'`, line ?? curLine, col)
+        }
+        if (!(fld in v.f))
+          throw new PineError(
+            `Type '${v.type}' has no field '${fld}'` + hint(didYouMean(fld, Object.keys(v.f))),
+            line ?? curLine,
+            col,
+          )
+        v = v.f[fld]
+      }
+      return v
+    }
+    const allOf = /^(label|line|box|table)\.all$/.exec(name)
+    if (allOf) return new PineArray(drawings.all(allOf[1] as DrawKind))
     const s = seriesAt(name, i)
     if (s !== undefined) return s
     if (name in SYMINFO) return SYMINFO[name]
@@ -1339,6 +1498,12 @@ export function runPine(
         res.title = String(a(0, 'title', res.title))
         res.shortTitle = String(a(1, 'shorttitle', ''))
         res.overlay = truthy(a(2, 'overlay', false))
+        const lim = (k: string) => (named[k] === undefined ? undefined : num(named[k]))
+        drawings.setLimits({
+          label: lim('max_labels_count'),
+          line: lim('max_lines_count'),
+          box: lim('max_boxes_count'),
+        })
         if (f === 'strategy' && !broker) {
           const pick = <T extends string>(v: Val, ok: readonly T[], def: T): T =>
             ok.includes(v as T) ? (v as T) : def
@@ -1453,18 +1618,21 @@ export function runPine(
         fl = { plot1: r1, plot2: r2, color: '', title: String(a(3, 'title', '')) }
         fillsByKey.set(key, fl)
       }
-      // The renderer shades a fill in one colour: the first one the script gives.
+      // The fill's own colour is the first one the script gives; bars that
+      // differ (a conditional colour, or na for no fill) are kept per bar.
       if (!fl.color && isColor(col)) fl.color = normColor(col)
+      const cv = isColor(col) ? normColor(col) : isNa(col) ? 'rgba(0,0,0,0)' : undefined
+      if (cv && cv !== fl.color) (fl.colors ??= [])[bar] = cv
       return null
     }
     if (f === 'bgcolor' || f === 'barcolor') {
-      const col = a(0, 'color')
+      let col = a(0, 'color')
       const arr = f === 'bgcolor' ? (bgcolors ??= []) : (barcolors ??= [])
-      if (isColor(col)) arr[bar] = normColor(col)
-      if (f === 'bgcolor' && !res.warnings.includes('bgcolor (not drawn)'))
-        res.warnings.push('bgcolor (not drawn)')
-      if (f === 'barcolor' && !res.warnings.includes('barcolor (not drawn)'))
-        res.warnings.push('barcolor (not drawn)')
+      const at = bar + (Math.round(num(named.offset ?? 0)) || 0)
+      // Pine v4's transp= on bgcolor.
+      if (isColor(col) && named.transp !== undefined)
+        col = withAlpha(normColor(col), 1 - num(named.transp) / 100)
+      if (isColor(col) && at >= 0 && at < n) arr[at] = normColor(col)
       return null
     }
     if (f === 'alertcondition') {
@@ -1618,13 +1786,13 @@ export function runPine(
       }
       return null
     }
-    if (
-      IGNORED.has(f) ||
-      f.startsWith('label.') ||
-      f.startsWith('line.') ||
-      f.startsWith('box.') ||
-      f.startsWith('table.')
-    ) {
+    if (/^(label|line|box|table)\./.test(f)) {
+      const r = drawings.call(f, (i, nm) => a(i, nm))
+      if (r !== NOT_DRAWING) return r as Val
+      if (!res.warnings.includes(f)) res.warnings.push(f)
+      return null
+    }
+    if (IGNORED.has(f) || /^(linefill|polyline|chart\.point)\./.test(f)) {
       if (!res.warnings.includes(f)) res.warnings.push(f)
       return null
     }
@@ -1650,9 +1818,15 @@ export function runPine(
     }
     if (f === 'str.tostring') {
       const v = a(0)
-      return typeof v === 'number' ? String(Math.round(v * 1e4) / 1e4) : String(v)
+      return typeof v === 'number' ? fmtNum(v, a(1, 'format') as string | undefined) : String(v)
     }
-    if (f === 'str.format') return String(a(0))
+    if (f === 'str.format')
+      return String(a(0)).replace(/\{(\d+)(?:,\s*number\s*(?:,\s*([^}]*))?)?\}/g, (_m, k, fm) => {
+        const v = args[Number(k) + 1]
+        return typeof v === 'number' ? fmtNum(v, fm ? String(fm).trim() : undefined) : String(v ?? '')
+      })
+    if (f === 'str.upper') return String(a(0)).toUpperCase()
+    if (f === 'str.lower') return String(a(0)).toLowerCase()
     if (f === 'str.contains') return String(a(0)).includes(String(a(1)))
     if (f === 'str.length') return String(a(0)).length
     if (f === 'int') return Math.trunc(an(0))
@@ -1755,11 +1929,100 @@ export function runPine(
     return UNHANDLED
   }
 
+  /** Pine's ==: strings by text, objects by identity, else as numbers. */
+  function valEq(l: Val, r: Val): boolean {
+    if (typeof l === 'string' || typeof r === 'string') return l === r
+    if (l instanceof DrawRef && r instanceof DrawRef) return l.kind === r.kind && l.id === r.id
+    if ((l !== null && typeof l === 'object') || (r !== null && typeof r === 'object')) return l === r
+    return num(l) === num(r)
+  }
+
+  // ---------- request.security ----------
+  const chartTf = normTf(opts.period ?? '') ?? ''
+  function security(e: Extract<Expr, { k: 'call' }>): Val {
+    const arg = (i: number, nm: string): Expr | undefined => e.args[i] ?? e.named[nm]
+    const ex = arg(2, 'expression')
+    if (!ex) throw new PineError('request.security needs an expression', e.line, e.col)
+    const symE = arg(0, 'symbol')
+    const tfE = arg(1, 'timeframe')
+    const symV = symE ? evalExpr(symE) : ''
+    const tfV = tfE ? evalExpr(tfE) : ''
+    const flag = (x: Expr | undefined) => (x ? truthy(evalExpr(x)) : false)
+    const gaps = flag(arg(3, 'gaps'))
+    const lookahead = flag(arg(4, 'lookahead'))
+    const sym = normSymbol(isNa(symV) || !symV ? (opts.ticker ?? '') : String(symV))
+    const tf = isNa(tfV) || tfV === '' ? chartTf : normTf(String(tfV))
+    const site = `${scopePath}${loopIter}/${e.id}`
+    const ctx = opts.securityCtx
+    if (ctx) {
+      // Inside a request's own run: capture the expression for its key; a
+      // nested request for anything else is na.
+      if (tf == null || securityKey(sym, tf) !== ctx.key) return NA
+      const v = evalExpr(ex)
+      let cap = ctx.captures.get(site)
+      if (!cap) ctx.captures.set(site, (cap = []))
+      cap[bar] = v
+      return v
+    }
+    if (tf == null) {
+      const w = `request.security: timeframe '${String(tfV)}' not supported`
+      if (!res.warnings.includes(w)) res.warnings.push(w)
+      return NA
+    }
+    // The chart's own symbol and interval: just the expression.
+    if (sym === normSymbol(opts.ticker ?? '') && (tf === chartTf || !chartTf)) return evalExpr(ex)
+    const key = securityKey(sym, tf)
+    secKeys.add(key)
+    let run = secRuns.get(key)
+    if (!run) {
+      const bars = opts.security?.[key]
+      if (!bars || !bars.length) {
+        secNeeds.set(key, { key, symbol: sym, tf })
+        return NA
+      }
+      const captures = new Map<string, unknown[]>()
+      runPine(source, bars, inputOverrides, {
+        ...opts,
+        ticker: sym,
+        period: tf,
+        security: undefined,
+        securityCtx: { key, captures },
+        maxMs: Math.max(200, deadline - Date.now()),
+      })
+      run = { bars, captures, align: new Map() }
+      secRuns.set(key, run)
+    }
+    const ak = (lookahead ? 1 : 0) + (gaps ? 2 : 0)
+    let al = run.align.get(ak)
+    if (!al) {
+      al = alignSecurity(candles, run.bars, tfMs(tf), lookahead, gaps)
+      run.align.set(ak, al)
+    }
+    const j = al[bar]
+    if (j < 0) return NA
+    return (run.captures.get(site)?.[j] as Val) ?? NA
+  }
+
+  /** `Type.new(…)`: fields by position or name, else their declared defaults. */
+  function construct(type: string, fields: FnParam[], e: Extract<Expr, { k: 'call' }>): PineObj {
+    const f: Record<string, Val> = {}
+    fields.forEach((fd, i) => {
+      const x = e.args[i] ?? e.named[fd.name]
+      f[fd.name] = x ? evalExpr(x) : fd.def ? evalExpr(fd.def) : NA
+    })
+    for (const k in e.named)
+      if (!fields.some((fd) => fd.name === k))
+        throw new PineError(`Type '${type}' has no field '${k}'`, e.line, e.col)
+    return new PineObj(type, f)
+  }
+
   function evalExpr(e: Expr): Val {
     tick()
     switch (e.k) {
       case 'num':
         return e.v
+      case 'block':
+        return exec(e.s)
       case 'str':
         return e.v
       case 'id':
@@ -1779,9 +2042,10 @@ export function runPine(
         const r = evalExpr(e.r)
         if (e.op === '+' && (typeof l === 'string' || typeof r === 'string'))
           return String(l) + String(r)
-        const str = typeof l === 'string' || typeof r === 'string'
-        if (e.op === '==') return str ? l === r : num(l) === num(r)
-        if (e.op === '!=') return str ? l !== r : num(l) !== num(r)
+        if (e.op === '==' || e.op === '!=') {
+          const same = valEq(l, r)
+          return e.op === '==' ? same : !same
+        }
         const x = num(l)
         const y = num(r)
         switch (e.op) {
@@ -1820,22 +2084,35 @@ export function runPine(
         return i < 0 ? NA : (buf[i] ?? NA)
       }
       case 'call': {
+        if (e.f === 'request.security' || e.f === 'security') return security(e)
         if (fns.has(e.f)) return callUser(fns.get(e.f)!, e)
         let f = e.f
-        const args = e.args.map(evalExpr)
-        // Method syntax on an array variable: `a.push(x)` is array.push(a, x).
-        const dot = f.indexOf('.')
-        if (dot > 0) {
-          const head = f.slice(0, dot)
-          const own = localScope?.get(head) ?? globals.get(head)
-          if (own) {
-            const v = own[bar] ?? NA
-            if (v instanceof PineArray) {
-              args.unshift(v)
-              f = 'array.' + f.slice(dot + 1)
-            }
+        // Method syntax: `a.push(x)` is array.push(a, x), `lb.set_x(x)` is
+        // label.set_x(lb, x), `p.area()` a user method on p; `Type.new(…)`
+        // builds an object of a user type.
+        const last = f.lastIndexOf('.')
+        let recv: Val | typeof UNHANDLED = UNHANDLED
+        if (last > 0) {
+          const owner = f.slice(0, last)
+          const m = f.slice(last + 1)
+          const ty = types.get(owner)
+          if (ty && m === 'new') return construct(owner, ty, e)
+          if (ty && m === 'copy') {
+            const o = e.args[0] ? evalExpr(e.args[0]) : NA
+            return o instanceof PineObj ? new PineObj(o.type, { ...o.f }) : NA
+          }
+          if (isVar(owner.split('.')[0])) {
+            recv = lookup(owner, 0, e.line, e.col)
+            const um = fns.get(m)
+            if (um?.method) return callUser(um, e, [recv])
+            if (recv instanceof PineObj && m === 'copy') return new PineObj(recv.type, { ...recv.f })
+            if (recv instanceof PineArray) f = 'array.' + m
+            else if (recv instanceof DrawRef) f = recv.kind + '.' + m
+            else recv = UNHANDLED
           }
         }
+        const args = e.args.map(evalExpr)
+        if (recv !== UNHANDLED) args.unshift(recv)
         const named: Record<string, Val> = {}
         for (const k in e.named) named[k] = evalExpr(e.named[k])
         let r: Val | typeof UNHANDLED
@@ -1860,9 +2137,17 @@ export function runPine(
       }
     }
   }
-  function callUser(fn: FnRef, node: Extract<Expr, { k: 'call' }>): Val {
+  function callUser(fn: FnRef, node: Extract<Expr, { k: 'call' }>, pre: Val[] = []): Val {
     if (depth > 64) throw new PineError(`Function '${fn.name}' calls itself too deeply`, node.line)
-    const args = node.args.map(evalExpr)
+    const args: Val[] = pre.concat(node.args.map(evalExpr))
+    for (const k in node.named) {
+      const i = fn.params.indexOf(k)
+      if (i < 0) throw new PineError(`'${fn.name}' has no parameter '${k}'`, node.line, node.col)
+      args[i] = evalExpr(node.named[k])
+    }
+    fn.defaults?.forEach((d, i) => {
+      if (d && args[i] === undefined) args[i] = evalExpr(d)
+    })
     const saveScope = localScope
     const savePath = scopePath
     scopePath = `${scopePath}${loopIter}/${node.id}`
@@ -1891,7 +2176,7 @@ export function runPine(
       return execInner(s)
     } catch (err) {
       // An engine slip (a JS TypeError, say) still points at the statement.
-      if (err instanceof PineError) throw err
+      if (err instanceof PineError || err === BREAK || err === CONTINUE) throw err
       throw new PineError(err instanceof Error ? err.message : String(err), s.line)
     } finally {
       curLine = saveLine
@@ -1900,8 +2185,58 @@ export function runPine(
   function execInner(s: Stmt): Val {
     switch (s.k) {
       case 'fn':
-        fns.set(s.name, { fn: true, name: s.name, params: s.params, body: s.body })
+        fns.set(s.name, {
+          fn: true,
+          name: s.name,
+          params: s.params,
+          defaults: s.defaults,
+          method: s.method,
+          body: s.body,
+        })
         return NA
+      case 'type':
+        types.set(s.name, s.fields)
+        return NA
+      case 'break':
+        throw BREAK
+      case 'continue':
+        throw CONTINUE
+      case 'switch': {
+        const subj = s.subj ? evalExpr(s.subj) : undefined
+        for (const c of s.cases) {
+          const hit = c.c === null || (s.subj ? valEq(subj, evalExpr(c.c)) : truthy(evalExpr(c.c)))
+          if (!hit) continue
+          let ret: Val = NA
+          for (const st of c.body) ret = exec(st)
+          return ret
+        }
+        return NA
+      }
+      case 'forin': {
+        const coll = evalExpr(s.coll)
+        const items =
+          coll instanceof PineArray ? coll.items.slice() : Array.isArray(coll) ? coll.slice() : null
+        if (!items) {
+          if (isNa(coll)) return NA
+          throw new PineError('for … in needs an array', s.line)
+        }
+        let ret: Val = NA
+        const m = localScope ?? globals
+        const saveIter = loopIter
+        try {
+          for (let k = 0; k < items.length; k++) {
+            if (s.idx) store(m, s.idx, k)
+            store(m, s.v, items[k])
+            loopIter = `${saveIter}#in${s.line}:${k}`
+            const r = loopBody(s.body)
+            if (r === BREAK) break
+            if (!(r instanceof LoopSignal)) ret = r
+          }
+        } finally {
+          loopIter = saveIter
+        }
+        return ret
+      }
       case 'expr':
         return evalExpr(s.e)
       case 'assign': {
@@ -1912,6 +2247,17 @@ export function runPine(
             varInit.add(key)
             store(m, s.name, evalExpr(s.e))
           }
+          return NA
+        }
+        const fdot = s.name.indexOf('.')
+        if (fdot > 0 && isVar(s.name.slice(0, fdot))) {
+          // `p.price := x`: set a field of the object in p.
+          const path = s.name.split('.')
+          const fld = path.pop()!
+          const o = lookup(path.join('.'), 0, s.line)
+          if (!(o instanceof PineObj)) throw new PineError(`Cannot set field '${fld}' of ${isNa(o) ? 'an na object' : "'" + path.join('.') + "'"}`, s.line)
+          if (!(fld in o.f)) throw new PineError(`Type '${o.type}' has no field '${fld}'`, s.line)
+          o.f[fld] = evalExpr(s.e)
           return NA
         }
         if (s.mode === 'reassign') {
@@ -1960,7 +2306,9 @@ export function runPine(
           if (guard++ > 100000) throw new PineError('Loop ran more than 100000 times', s.line)
           store(m, s.v, i)
           loopIter = `${saveIter}#${s.line}:${guard}`
-          for (const st of s.body) ret = exec(st)
+          const r = loopBody(s.body)
+          if (r === BREAK) break
+          if (!(r instanceof LoopSignal)) ret = r
         }
         loopIter = saveIter
         return ret
@@ -1972,12 +2320,25 @@ export function runPine(
         while (truthy(evalExpr(s.c))) {
           if (guard++ > 100000) throw new PineError('Loop ran more than 100000 times', s.line)
           loopIter = `${saveIter}#w${s.line}:${guard}`
-          for (const st of s.body) ret = exec(st)
+          const r = loopBody(s.body)
+          if (r === BREAK) break
+          if (!(r instanceof LoopSignal)) ret = r
         }
         loopIter = saveIter
         return ret
       }
     }
+  }
+  /** One pass of a loop body: its value, or the break / continue that ended it. */
+  function loopBody(body: Stmt[]): Val | LoopSignal {
+    let ret: Val = NA
+    try {
+      for (const st of body) ret = exec(st)
+    } catch (err) {
+      if (err instanceof LoopSignal) return err
+      throw err
+    }
+    return ret
   }
   // `var` values (and a function's locals) carry forward to the next bar.
   const carry = () => {
@@ -1993,11 +2354,24 @@ export function runPine(
     carry()
     // Orders placed on the previous bar fill before this bar's script runs.
     broker?.beginBar(bar)
-    for (const s of prog) exec(s)
+    try {
+      for (const s of prog) exec(s)
+    } catch (err) {
+      if (err === BREAK || err === CONTINUE)
+        throw new PineError(`'${(err as LoopSignal).loop}' outside a loop`, curLine)
+      throw err
+    }
     broker?.endBar(bar)
   }
   if (broker) res.strategy = broker.report()
-  if (fillsByKey.size) res.fills = [...fillsByKey.values()]
+  if (fillsByKey.size)
+    res.fills = [...fillsByKey.values()].map((f) =>
+      f.colors ? { ...f, colors: Array.from({ length: n }, (_, i) => f.colors![i]) } : f,
+    )
+  const drawn = drawings.output(candles)
+  if (drawn) res.drawings = drawn
+  if (secNeeds.size) res.securityNeeds = [...secNeeds.values()]
+  if (secKeys.size) res.securityKeys = [...secKeys]
   if (bgcolors) res.bgcolors = Array.from({ length: n }, (_, i) => bgcolors![i])
   if (barcolors) res.barcolors = Array.from({ length: n }, (_, i) => barcolors![i])
   if (alertsByKey.size) res.alertconditions = [...alertsByKey.values()]

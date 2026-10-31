@@ -2,8 +2,12 @@
 // (pro-terminal/src/core/pine/parser.ts).
 //
 // Supports: indicator()/study(), var/varip, =, :=, += -= *= /=, tuples
-// [a, b] = f(), if / else if / else, for … to … by, while, user functions
-// (single-line `f(x) => expr` and multi-line), ternary, and/or/not,
+// [a, b] = f(), if / else if / else, switch (with and without a subject;
+// both also as expressions, `x = if …` / `x = switch …`), for … to … by,
+// for x in coll / for [i, x] in coll, while, break / continue, user
+// functions (single-line `f(x) => expr` and multi-line, default parameter
+// values), `type` declarations with fields, `method` declarations,
+// ternary, and/or/not,
 // comparisons, arithmetic, history `x[1]`, named args, `//` comments, line
 // continuation, dotted namespaces (ta.sma, input.int, color.red, math.max)
 // and #RRGGBB(AA) colour literals.
@@ -128,7 +132,8 @@ export function lex(src: string): Tok[] {
         let v = ''
         while (j < s.length && s[j] !== ch) {
           if (s[j] === '\\') {
-            v += s[j + 1] ?? ''
+            const e = s[j + 1] ?? ''
+            v += e === 'n' ? '\n' : e === 't' ? '\t' : e
             j += 2
           } else v += s[j++]
         }
@@ -204,6 +209,12 @@ export type Expr =
     }
   | { k: 'idx'; e: Expr; i: Expr; id: number }
   | { k: 'tuple'; items: Expr[] }
+  /** `if` / `switch` used as an expression: the value of the branch taken. */
+  | { k: 'block'; s: Stmt }
+export interface FnParam {
+  name: string
+  def?: Expr
+}
 export type Stmt =
   | { k: 'assign'; name: string; e: Expr; mode: 'var' | 'varip' | 'let' | 'reassign'; line: number }
   | { k: 'tassign'; names: string[]; e: Expr; mode: 'var' | 'let'; line: number }
@@ -211,7 +222,21 @@ export type Stmt =
   | { k: 'if'; branches: Array<{ c: Expr | null; body: Stmt[] }>; line: number }
   | { k: 'for'; v: string; from: Expr; to: Expr; step?: Expr; body: Stmt[]; line: number }
   | { k: 'while'; c: Expr; body: Stmt[]; line: number }
-  | { k: 'fn'; name: string; params: string[]; body: Stmt[]; line: number }
+  | {
+      k: 'fn'
+      name: string
+      params: string[]
+      /** Default values, by parameter position. */
+      defaults?: Array<Expr | undefined>
+      /** A `method` declaration: callable as `x.name(…)` on its first argument. */
+      method?: boolean
+      body: Stmt[]
+      line: number
+    }
+  | { k: 'switch'; subj: Expr | null; cases: Array<{ c: Expr | null; body: Stmt[] }>; line: number }
+  | { k: 'forin'; v: string; idx?: string; coll: Expr; body: Stmt[]; line: number }
+  | { k: 'break' | 'continue'; line: number }
+  | { k: 'type'; name: string; fields: FnParam[]; line: number }
 
 const TYPE_NAMES = [
   'float',
@@ -225,11 +250,24 @@ const TYPE_NAMES = [
   'input',
   'line',
   'label',
+  'box',
+  'table',
+  'linefill',
+  'polyline',
+  'chart.point',
 ]
-const isTypeName = (v: string) => TYPE_NAMES.includes(v) || /^(array|matrix|map)</.test(v)
+const QUALIFIER = /^(series|simple|const)$/
 
 export function parse(src: string): Stmt[] {
   const toks = lex(src)
+  // User-defined types (`type Pivot`) are type names from their declaration on.
+  const userTypes = new Set<string>()
+  const isTypeName = (v: string) =>
+    TYPE_NAMES.includes(v) || userTypes.has(v) || /^(array|matrix|map)</.test(v)
+  /** Skip a declaration's qualifier and type (`series float`, `Pivot`) before its name. */
+  const skipType = () => {
+    while (is('id') && at(1).t === 'id' && (isTypeName(peek().v) || QUALIFIER.test(peek().v))) next()
+  }
   let p = 0
   let nodeId = 0
   const peek = () => toks[p]
@@ -278,32 +316,130 @@ export function parse(src: string): Stmt[] {
     return out
   }
 
-  function statement(): Stmt {
+  function ifStmt(): Stmt {
     const line = peek().line
-    if (is('id', 'if')) {
-      next()
-      const branches: Array<{ c: Expr | null; body: Stmt[] }> = [{ c: expr(), body: block() }]
-      for (;;) {
-        const save = p
-        skipNl()
-        if (is('id', 'else')) {
+    next()
+    const branches: Array<{ c: Expr | null; body: Stmt[] }> = [{ c: expr(), body: block() }]
+    for (;;) {
+      const save = p
+      skipNl()
+      if (is('id', 'else')) {
+        next()
+        if (is('id', 'if')) {
           next()
-          if (is('id', 'if')) {
-            next()
-            branches.push({ c: expr(), body: block() })
-          } else {
-            branches.push({ c: null, body: block() })
-            break
-          }
+          branches.push({ c: expr(), body: block() })
         } else {
-          p = save
+          branches.push({ c: null, body: block() })
           break
         }
+      } else {
+        p = save
+        break
       }
-      return { k: 'if', branches, line }
+    }
+    return { k: 'if', branches, line }
+  }
+
+  /** `switch [subject]` then one `value => …` (or `=> …` default) per line. */
+  function switchStmt(): Stmt {
+    const line = next().line
+    const subj = is('nl') ? null : expr()
+    expect('nl')
+    if (!is('indent')) fail('Expected the switch cases on indented lines')
+    next()
+    const cases: Array<{ c: Expr | null; body: Stmt[] }> = []
+    while (!is('dedent') && !is('eof')) {
+      skipNl()
+      if (is('dedent') || is('eof')) break
+      const c = is('op', '=>') ? null : expr()
+      expect('op', '=>')
+      cases.push({ c, body: is('nl') ? block() : [statement()] })
+    }
+    if (is('dedent')) next()
+    return { k: 'switch', subj, cases, line }
+  }
+
+  /** A parameter list `(a, float b = 2)`, or null when this is not one. */
+  function params(): { params: string[]; defaults: Array<Expr | undefined> } | null {
+    const ps: string[] = []
+    const defaults: Array<Expr | undefined> = []
+    next() // (
+    while (!is('op', ')')) {
+      if (!is('id')) return null
+      skipType()
+      ps.push(next().v)
+      if (is('op', '=')) {
+        next()
+        defaults[ps.length - 1] = expr()
+      }
+      if (is('op', ',')) next()
+      else if (!is('op', ')')) return null
+    }
+    next()
+    return { params: ps, defaults }
+  }
+
+  function statement(): Stmt {
+    const line = peek().line
+    if (is('id', 'if')) return ifStmt()
+    if (is('id', 'switch')) return switchStmt()
+    if (
+      (is('id', 'break') || is('id', 'continue')) &&
+      (at(1).t === 'nl' || at(1).t === 'dedent' || at(1).t === 'eof')
+    ) {
+      const k = next().v as 'break' | 'continue'
+      endStmt()
+      return { k, line }
+    }
+    if (is('id', 'export') && at(1).t === 'id' && /^(type|method)$/.test(at(1).v)) next()
+    if (is('id', 'type') && at(1).t === 'id' && at(2).t === 'nl') {
+      next()
+      const name = next().v
+      userTypes.add(name)
+      next() // nl
+      if (!is('indent')) fail(`Expected the fields of type '${name}' on indented lines`)
+      next()
+      const fields: FnParam[] = []
+      while (!is('dedent') && !is('eof')) {
+        skipNl()
+        if (is('dedent') || is('eof')) break
+        if (is('id', 'varip')) next()
+        while (is('id') && at(1).t === 'id') next() // the field's type
+        const f: FnParam = { name: expect('id').v }
+        if (is('op', '=')) {
+          next()
+          f.def = expr()
+        }
+        fields.push(f)
+        endStmt()
+      }
+      if (is('dedent')) next()
+      return { k: 'type', name, fields, line }
+    }
+    if (is('id', 'method') && at(1).t === 'id' && at(2).t === 'op' && at(2).v === '(') {
+      next()
+      const name = next().v
+      const ps = params()
+      if (!ps || !is('op', '=>')) return fail(`Expected '=>' after method ${name}(…)`)
+      next()
+      return { k: 'fn', name, ...ps, method: true, body: block(), line }
     }
     if (is('id', 'for')) {
       next()
+      // for x in coll / for [i, x] in coll
+      if (is('op', '[') || (is('id') && at(1).t === 'id' && at(1).v === 'in')) {
+        let v: string
+        let idx: string | undefined
+        if (is('op', '[')) {
+          const ns = names()
+          if (ns.length !== 2) fail('Expected [index, value] in a for … in loop')
+          idx = ns[0]
+          v = ns[1]
+        } else v = next().v
+        expect('id', 'in')
+        const coll = expr()
+        return { k: 'forin', v, idx, coll, body: block(), line }
+      }
       const v = expect('id').v
       expect('op', '=')
       const from = expr()
@@ -345,13 +481,21 @@ export function parse(src: string): Stmt[] {
         endStmt()
         return { k: 'tassign', names: ns, e, mode: 'var', line }
       }
-      if (isTypeName(peek().v) && at(1).t === 'id') next()
+      skipType()
       const name = expect('id').v
       expect('op', '=')
       const e = expr()
       endStmt()
       return { k: 'assign', name, e, mode, line }
     }
+    if (
+      is('id') &&
+      QUALIFIER.test(peek().v) &&
+      at(1).t === 'id' &&
+      isTypeName(at(1).v) &&
+      at(2).t === 'id'
+    )
+      next()
     if (
       is('id') &&
       isTypeName(peek().v) &&
@@ -385,35 +529,19 @@ export function parse(src: string): Stmt[] {
       }
     }
     // function definition: name(params) =>
-    if (is('id') && at(1).t === 'op' && at(1).v === '(') {
+    if (is('id') && !peek().v.includes('.') && at(1).t === 'op' && at(1).v === '(') {
       const save = p
       const name = next().v
-      next()
-      const params: string[] = []
-      let ok = true
-      while (!is('op', ')')) {
-        if (is('id')) {
-          if (isTypeName(peek().v) && at(1).t === 'id') next()
-          params.push(next().v)
-          if (is('op', '=')) {
-            next()
-            expr()
-          }
-        } else {
-          ok = false
-          break
-        }
-        if (is('op', ',')) next()
-        else if (!is('op', ')')) {
-          ok = false
-          break
-        }
+      let ps: ReturnType<typeof params>
+      try {
+        ps = params()
+      } catch {
+        ps = null
       }
-      if (ok && is('op', ')') && at(1).t === 'op' && at(1).v === '=>') {
-        next()
+      if (ps && is('op', '=>')) {
         next()
         const body = block()
-        return { k: 'fn', name, params, body, line }
+        return { k: 'fn', name, ...ps, body, line }
       }
       p = save
     }
@@ -424,7 +552,9 @@ export function parse(src: string): Stmt[] {
 
   function endStmt() {
     if (is('nl')) next()
-    else if (!is('dedent') && !is('eof')) fail(`Unexpected ${describe(peek())}`)
+    // An `if` / `switch` expression ends with its own block's dedent.
+    else if (!is('dedent') && !is('eof') && toks[p - 1]?.t !== 'dedent')
+      fail(`Unexpected ${describe(peek())}`)
   }
 
   function expr(): Expr {
@@ -536,6 +666,8 @@ export function parse(src: string): Stmt[] {
       next()
       return { k: 'tuple', items }
     }
+    if (t.t === 'id' && t.v === 'if') return { k: 'block', s: ifStmt() }
+    if (t.t === 'id' && t.v === 'switch') return { k: 'block', s: switchStmt() }
     if (t.t === 'id') {
       next()
       if (is('op', '(')) {
