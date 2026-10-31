@@ -6601,3 +6601,14 @@ html.cs-hide-indv .legend .leg-ind b{display:none}
    (--chart-bg, set with the chart settings), so the sliver under the time
    axis the canvas does not cover no longer shows as a grey strip. */
 [data-theme="light"] #chart,[data-theme="light"] .chart-wrap{background:var(--chart-bg,var(--card))}
+
+/* r4-drawings2: read-only drawing overlays on layout cells / grid panels, visibility + text-box popovers, icon picker */
+.r4dr-overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3}
+#radarChartCard .r4dr-pop{min-width:190px}
+#radarChartCard .dp-pop label.r4dr-check{display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:var(--tv-txt)}
+#radarChartCard .dp-pop label.r4dr-check input{width:auto;height:auto;padding:0;margin:0;accent-color:var(--tv-blue)}
+#radarChartCard .r4dr-swatches{display:flex;flex-wrap:wrap;gap:4px}
+#radarChartCard .dp-swatch.r4dr-none{background:linear-gradient(135deg,transparent 45%,var(--red,#FF1744) 45%,var(--red,#FF1744) 55%,transparent 55%);border-color:var(--tv-line)}
+#radarChartCard .dp-swatch.r4dr-none.on{border-color:var(--tv-txt)}
+#radarChartCard .r4dr-icons .dp-btn{font-size:14px;line-height:1;min-width:26px}
+@media (max-width:640px){#radarChartCard .r4dr-icons{max-width:180px;flex-wrap:wrap}}

@@ -17,6 +17,9 @@ import {
 } from '../../features/charts/drawTools'
 import type { DrawDash, SelectedInfo } from '../../features/charts/drawTools'
 import { POS_ACCOUNT_DEFAULT, POS_RISK_DEFAULT } from '../../features/charts/drawings/ops'
+import { TF_GROUPS, toggleHidden } from '../../features/charts/drawings/visibility'
+import { ICON_DEFAULT, ICON_SET } from '../../features/charts/drawings/shapesExtra'
+import { ALERTABLE_DRAWINGS, openAlertForSelectedDrawing } from '../../features/alerts/drawingAlert'
 
 const COLORS = ['#2962FF', '#4FC3F7', '#00E676', '#FFD54F', '#FF9800', '#FF1744', '#E040FB', '#B2B5BE']
 const WIDTHS = [1, 2, 3, 4]
@@ -42,6 +45,84 @@ const G = {
   star: 'M12 3.5l2.6 5.3 5.8.8-4.2 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.2-4.1 5.8-.8Z',
   calc: 'M6 3.5h12v17H6ZM9 7h6M9 11h.01M12 11h.01M15 11h.01M9 14.5h.01M12 14.5h.01M15 14.5h.01M9 18h.01M12 18h3',
   del: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13',
+  bell: 'M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15ZM10 20.5a2 2 0 0 0 4 0',
+  box: 'M3.5 6h17v12h-17ZM7.5 10h9M7.5 14h5',
+  vis: 'M3 5h18M3 12h18M3 19h18M8 3v4M16 10v4M11 17v4',
+}
+
+/** "Visible on intervals": hide the drawing on whole groups of timeframes. */
+function VisibilitySettings({ sel }: { sel: SelectedInfo }) {
+  return (
+    <div className="dp-pop r4dr-pop" role="group" aria-label="Visible on intervals">
+      <p className="dp-pop-note">Visible on intervals</p>
+      {TF_GROUPS.map((g) => (
+        <label key={g.id} className="r4dr-check">
+          <input
+            type="checkbox"
+            checked={!sel.hideOn.includes(g.id)}
+            onChange={() => editSelectedDrawing({ hideOn: toggleHidden(sel, g.id) })}
+          />
+          <span>{g.label}</span>
+        </label>
+      ))}
+    </div>
+  )
+}
+
+/** Background and border of a text drawing's box. */
+function TextBoxSettings({ sel }: { sel: SelectedInfo }) {
+  return (
+    <div className="dp-pop r4dr-pop" role="group" aria-label="Text box">
+      <p className="dp-pop-note">Background</p>
+      <div className="r4dr-swatches">
+        <button
+          type="button"
+          className={'dp-swatch r4dr-none' + (!sel.bg ? ' on' : '')}
+          aria-label="Default background"
+          title="Default"
+          onClick={() => editSelectedDrawing({ bg: undefined })}
+        />
+        {COLORS.map((c) => (
+          <button
+            key={c}
+            type="button"
+            className={'dp-swatch' + (sel.bg === c + '40' ? ' on' : '')}
+            aria-label={'Background ' + c}
+            style={{ background: c + '40' }}
+            onClick={() => editSelectedDrawing({ bg: c + '40' })}
+          />
+        ))}
+      </div>
+      <p className="dp-pop-note">Border</p>
+      <div className="r4dr-swatches">
+        <button
+          type="button"
+          className={'dp-swatch r4dr-none' + (sel.border === 'none' ? ' on' : '')}
+          aria-label="No border"
+          title="None"
+          onClick={() => editSelectedDrawing({ border: 'none' })}
+        />
+        <button
+          type="button"
+          className={'dp-swatch' + (!sel.border ? ' on' : '')}
+          aria-label="Border in the text colour"
+          title="Text colour"
+          style={{ background: sel.color }}
+          onClick={() => editSelectedDrawing({ border: undefined })}
+        />
+        {COLORS.map((c) => (
+          <button
+            key={c}
+            type="button"
+            className={'dp-swatch' + (sel.border === c ? ' on' : '')}
+            aria-label={'Border ' + c}
+            style={{ boxShadow: 'inset 0 0 0 3px ' + c }}
+            onClick={() => editSelectedDrawing({ border: c })}
+          />
+        ))}
+      </div>
+    </div>
+  )
 }
 
 function Glyph({ d, fill }: { d: string; fill?: boolean }) {
@@ -104,7 +185,7 @@ function PositionSettings({ sel, onClose }: { sel: SelectedInfo; onClose: () => 
 
 export function DrawingPropsBar() {
   const [, force] = useState(0)
-  const [pop, setPop] = useState<null | 'position'>(null)
+  const [pop, setPop] = useState<null | 'position' | 'vis' | 'box'>(null)
   const rootRef = useRef<HTMLDivElement>(null)
   useEffect(() => subscribeDrawTools(() => force((n) => n + 1)), [])
   const sel = selectedDrawing()
@@ -120,6 +201,9 @@ export function DrawingPropsBar() {
   const def = drawToolDef(sel.type)
   const isText = !!def?.text
   const isPosition = sel.type === 'long' || sel.type === 'short'
+  const isIcon = sel.type === 'icon'
+  const canAlert = ALERTABLE_DRAWINGS.includes(sel.type)
+  const togglePop = (p: 'position' | 'vis' | 'box') => setPop((cur) => (cur === p ? null : p))
   const template = toolTemplate(sel.type)
   return (
     <div className="dp-wrap" ref={rootRef}>
@@ -199,6 +283,65 @@ export function DrawingPropsBar() {
             >
               <Glyph d={G.text} />
             </button>
+            <button
+              type="button"
+              className={'dp-btn' + (pop === 'box' ? ' on' : '')}
+              aria-label="Text background and border"
+              aria-expanded={pop === 'box'}
+              title="Background and border"
+              onClick={() => togglePop('box')}
+            >
+              <Glyph d={G.box} />
+            </button>
+          </>
+        )}
+        {isIcon && (
+          <>
+            <span className="dp-sep" aria-hidden="true" />
+            <div className="dp-group r4dr-icons" role="radiogroup" aria-label="Icon">
+              {ICON_SET.map((ic) => {
+                const on = (sel.text || ICON_DEFAULT) === ic
+                return (
+                  <button
+                    key={ic}
+                    type="button"
+                    role="radio"
+                    aria-checked={on}
+                    aria-label={'Icon ' + ic}
+                    className={'dp-btn' + (on ? ' on' : '')}
+                    onClick={() => editSelectedDrawing({ text: ic })}
+                  >
+                    {ic}
+                  </button>
+                )
+              })}
+            </div>
+            <select
+              className="dp-select"
+              aria-label="Icon size"
+              value={sel.fontSize}
+              onChange={(e) => editSelectedDrawing({ fontSize: Number(e.target.value) })}
+            >
+              {FONT_SIZES.map((f) => (
+                <option key={f} value={f}>
+                  {Math.max(16, f * 2)}px
+                </option>
+              ))}
+            </select>
+          </>
+        )}
+        {canAlert && (
+          <>
+            <span className="dp-sep" aria-hidden="true" />
+            <button
+              type="button"
+              className="dp-btn"
+              aria-label="Add alert on this drawing"
+              title="Add alert"
+              onClick={openAlertForSelectedDrawing}
+            >
+              <Glyph d={G.bell} />
+            </button>
           </>
         )}
         {isPosition && (
@@ -210,13 +353,23 @@ export function DrawingPropsBar() {
               aria-label="Position settings"
               aria-expanded={pop === 'position'}
               title="Account size and risk"
-              onClick={() => setPop((p) => (p === 'position' ? null : 'position'))}
+              onClick={() => togglePop('position')}
             >
               <Glyph d={G.calc} />
             </button>
           </>
         )}
         <span className="dp-sep" aria-hidden="true" />
+        <button
+          type="button"
+          className={'dp-btn' + (pop === 'vis' || sel.hideOn.length ? ' on' : '')}
+          aria-label="Visible on intervals"
+          aria-expanded={pop === 'vis'}
+          title={sel.hideOn.length ? 'Hidden on some intervals' : 'Visible on intervals'}
+          onClick={() => togglePop('vis')}
+        >
+          <Glyph d={G.vis} />
+        </button>
         <button
           type="button"
           className={'dp-btn' + (sel.locked ? ' on' : '')}
@@ -292,6 +445,8 @@ export function DrawingPropsBar() {
         </button>
       </div>
       {pop === 'position' && isPosition && <PositionSettings sel={sel} onClose={() => setPop(null)} />}
+      {pop === 'vis' && <VisibilitySettings sel={sel} />}
+      {pop === 'box' && isText && <TextBoxSettings sel={sel} />}
     </div>
   )
 }

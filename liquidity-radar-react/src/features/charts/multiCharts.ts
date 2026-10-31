@@ -38,6 +38,8 @@ import { panelIndicatorStore, prunePanelSlots, shiftPanelSlots } from './indicat
 import { parseMcPanels } from './savedLayoutsMath'
 import { getLinkGroup, getSyncOptions, registerTimeSync, shiftLinkGroups, subscribeLinks } from './linkGroups'
 import type { TimeSyncHandle } from './linkGroups'
+import { createDrawingOverlay } from './drawings/overlay'
+import type { DrawingOverlay } from './drawings/overlay'
 
 type Any = any
 
@@ -60,6 +62,8 @@ interface McPanel {
   ro?: ResizeObserver | null
   /** Its place in its link group's time-range sync (./linkGroups). */
   timeLink?: TimeSyncHandle | null
+  /** The main chart's drawings for this coin, read-only (./drawings/overlay). */
+  drawOv?: DrawingOverlay | null
   [key: string]: Any
 }
 
@@ -321,6 +325,7 @@ function mcSetAll(p: McPanel): void {
   p.rsiSeries?.setData(rsiPoints(p.candles))
   mcDrawIndicators(p)
   mcPaintHead(p)
+  p.drawOv?.redraw()
 }
 
 function mcUpdateLast(p: McPanel, c: Any): void {
@@ -331,6 +336,7 @@ function mcUpdateLast(p: McPanel, c: Any): void {
   if (pts.length) p.rsiSeries?.update(pts[pts.length - 1])
   mcScheduleIndicators(p)
   mcPaintHead(p)
+  p.drawOv?.redraw()
 }
 
 export function mcAdd(sym: string, interval: string): void {
@@ -378,6 +384,8 @@ function mcDisposeChart(p: McPanel): void {
   mcDropIndicators(p)
   p.timeLink?.off()
   p.timeLink = null
+  p.drawOv?.dispose()
+  p.drawOv = null
   p.ro?.disconnect()
   p.ro = null
   if (p.chart) {
@@ -524,6 +532,14 @@ function mcInitChart(p: McPanel): void {
   p.candleSeries = cs
   p.volSeries = vs
   p.rsiSeries = rs
+  p.drawOv = createDrawingOverlay({
+    host: el,
+    chart: c,
+    series: () => p.candleSeries,
+    bars: () => p.candles,
+    sym: () => p.sym,
+    tf: () => p.interval,
+  })
   mcBindIndicators(p)
   // A chart rebuilt for an existing panel (its body remounted) keeps the
   // panel's data and socket; only a fresh panel, or a new symbol/interval,
