@@ -120,3 +120,26 @@ export const WHALE_LEGEND_COMPACT_W = 520
 export function whaleLegendCompact(chartWidth: number): boolean {
   return chartWidth > 0 && chartWidth < WHALE_LEGEND_COMPACT_W
 }
+
+/** Collector heartbeat silence that counts as "offline" (it beats every ~10s). */
+export const COLLECTOR_OFFLINE_MS = 120_000
+/** Past this the collector is not coming back soon: no stale date is shown. */
+export const COLLECTOR_GONE_MS = 48 * 3600_000
+
+/**
+ * The history collector's state for the whale legend: 'none' when this
+ * symbol has no server history, 'live', 'offline' (silent for minutes — the
+ * last-seen time is worth showing), or 'unavailable' (silent for days — a
+ * "last seen" date that old only alarms, so the legend just says history is
+ * unavailable).
+ */
+export function collectorState(
+  server: boolean,
+  updated: number,
+  now: number,
+): 'none' | 'live' | 'offline' | 'unavailable' {
+  if (!server) return 'none'
+  const age = Math.max(now, updated) - updated
+  if (!(updated > 0) || age > COLLECTOR_GONE_MS) return 'unavailable'
+  return age > COLLECTOR_OFFLINE_MS ? 'offline' : 'live'
+}
