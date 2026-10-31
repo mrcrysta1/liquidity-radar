@@ -53,6 +53,7 @@ import {
   chartTheme,
   updateChartData,
   isNewDataset,
+  showChartStatus,
   updateChartLast,
   renderHero,
   renderTicker,
@@ -335,10 +336,12 @@ export function initApp(){
         const secs=Math.ceil(cool/1000);
         const left=secs>90?Math.ceil(secs/60)+' min':secs+'s';
         $('legendOHLC').textContent='Binance rate limit — chart resumes in '+left;
+        showChartStatus('Binance rate limit — the chart resumes in '+left+'.');
         showToast('Binance rate limit reached — resuming in '+left);
         return;
       }
       $('legendOHLC').textContent='Chart data unavailable — retrying…';
+      showChartStatus('Chart data is unavailable. Retrying automatically.', ()=>fetchKlines(state.symbol));
       showToast('Klines unavailable — check network/Binance access');
     },
     onFR(){ runAnalytics();renderHero(); },

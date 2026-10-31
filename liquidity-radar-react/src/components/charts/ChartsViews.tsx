@@ -294,13 +294,39 @@ export function ChartIntel() {
         <h3>Chart Intelligence</h3>
         <span className="ci-sym">{baseOf(state.symbol)}/USDT</span>
       </header>
-      <div className="ci-tabs" role="tablist">
+      {/* Roving tabindex: Tab enters the strip once, the arrows (and Home /
+          End) move between tabs, as the ARIA tabs pattern expects. */}
+      <div
+        className="ci-tabs"
+        role="tablist"
+        aria-label="Chart intelligence views"
+        onKeyDown={(e) => {
+          const i = TABS.indexOf(tab)
+          const next =
+            e.key === 'ArrowRight'
+              ? (i + 1) % TABS.length
+              : e.key === 'ArrowLeft'
+                ? (i - 1 + TABS.length) % TABS.length
+                : e.key === 'Home'
+                  ? 0
+                  : e.key === 'End'
+                    ? TABS.length - 1
+                    : -1
+          if (next < 0) return
+          e.preventDefault()
+          setTab(TABS[next])
+          ;(e.currentTarget.children[next] as HTMLElement | undefined)?.focus()
+        }}
+      >
         {TABS.map((t) => (
           <button
             key={t}
             type="button"
             role="tab"
+            id={tabId(t)}
             aria-selected={t === tab}
+            aria-controls="ci-panel"
+            tabIndex={t === tab ? 0 : -1}
             className={t === tab ? 'on' : ''}
             onClick={() => setTab(t)}
           >
@@ -308,10 +334,15 @@ export function ChartIntel() {
           </button>
         ))}
       </div>
-      {tab === 'Overview' ? <Overview /> : tab === 'Signals' ? <Signals /> : <Insights />}
+      <div id="ci-panel" role="tabpanel" aria-labelledby={tabId(tab)}>
+        {tab === 'Overview' ? <Overview /> : tab === 'Signals' ? <Signals /> : <Insights />}
+      </div>
     </aside>
   )
 }
+
+/** A tab's element id ("AI Insights" has a space, which an id cannot). */
+const tabId = (t: string): string => 'ci-tab-' + t.replace(/\s+/g, '-')
 
 export function WorkspaceHead() {
   useBump(onMcChange)
@@ -371,7 +402,7 @@ export function QuickTools() {
     {
       title: 'Alerts',
       sub: 'Price alerts',
-      icon: 'star',
+      icon: 'bell',
       run: () => {
         renderAlerts()
         openModal('alModal')

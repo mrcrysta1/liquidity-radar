@@ -1853,7 +1853,17 @@ html.radar-fs #radarChartCard #fsBtn::before{
 
 @media(hover:none){
   #radarChartCard .tvb-tip,#radarChartCard .style-tip,#radarChartCard .draw-tip,#radarChartCard .layout-tip{display:none}
+  /* Touch has no hover, so icon-only buttons had no label at all. A long
+     press (held ~0.45s) shows it; a tap is over before the delay. */
+  #radarChartCard .chart-tool-btn,#radarChartCard .style-btn,#radarChartCard .draw-btn,#radarChartCard .layout-btn{
+    -webkit-touch-callout:none;-webkit-user-select:none;user-select:none;
+  }
+  #radarChartCard .chart-tool-btn:active>.tvb-tip,#radarChartCard .style-btn:active .style-tip,
+  #radarChartCard .draw-btn:active .draw-tip,#radarChartCard .layout-btn:active .layout-tip{
+    display:block;animation:lrTipHold .45s steps(1,end) both;
+  }
 }
+@keyframes lrTipHold{from{opacity:0;visibility:hidden}to{opacity:1;visibility:visible}}
 
 /* Tablets and phones: the top-bar and strip menus become sheets pinned to
    the viewport, since a menu hung off a button runs off a small screen. */
@@ -6131,3 +6141,40 @@ html[data-palette="glass"] .acct-card{background:linear-gradient(145deg,rgba(255
 #radarChartCard .dp-del:hover{color:var(--red)}
 #radarChartCard .dp-swatch:focus-visible,#radarChartCard .dp-btn:focus-visible{outline:2px solid var(--tv-blue);outline-offset:1px}
 #radarChartCard .dp-sep{width:1px;height:20px;margin:0 3px;background:var(--tv-line);flex-shrink:0}
+
+/* Over the plot when there is nothing to draw (features/charts showChartStatus). */
+.chart-status{
+  position:absolute;inset:0;z-index:7;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;
+  padding:16px;text-align:center;pointer-events:none;
+}
+.chart-status p{margin:0;max-width:360px;font-size:13px;color:var(--muted);background:var(--card);padding:8px 12px;border-radius:8px;border:1px solid var(--border)}
+.chart-status button{
+  pointer-events:auto;padding:6px 16px;border-radius:6px;border:1px solid var(--border2);cursor:pointer;
+  background:var(--card);color:var(--txt);font-weight:600;
+}
+.chart-status button:hover{border-color:var(--primary)}
+.chart-status button:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+
+/* Saved layouts in the layout menu (components/chart/SavedLayouts), in the
+   chart menus' TradingView look. Was a <style> string inside the component. */
+.sl{border-top:1px solid var(--border);padding:6px 8px 8px}
+.sl-head{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:2px 2px 6px;
+  font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.sl-btn{background:transparent;border:1px solid transparent;border-radius:4px;color:var(--dim);cursor:pointer;
+  font:inherit;font-size:var(--text-xs);padding:4px 7px;min-height:26px;line-height:1.2}
+.sl-btn:hover{background:var(--tv-hover,rgb(var(--pRGB)/.1));color:var(--txt)}
+.sl-btn:focus-visible,.sl-input:focus-visible{outline:2px solid var(--tv-blue,var(--primary));outline-offset:-2px}
+.sl-btn.pri{background:var(--tv-blue,var(--primary));border-color:var(--tv-blue,var(--primary));color:#fff}
+.sl-btn.danger{color:var(--red)}
+.sl-btn.danger.pri{background:var(--red);border-color:var(--red);color:#fff}
+.sl-save{color:var(--tv-blue,var(--primary));font-weight:600;text-transform:none;letter-spacing:0}
+.sl-form{display:flex;gap:4px;align-items:center;padding:2px 0 6px}
+.sl-input{flex:1;min-width:0;background:var(--bg,transparent);color:var(--txt);border:1px solid var(--border2);
+  border-radius:4px;padding:4px 7px;font:inherit;font-size:12px;min-height:26px}
+.sl-err{color:var(--red);font-size:var(--text-xs);padding:0 2px 6px}
+.sl-list{list-style:none;margin:0;padding:0;max-height:200px;overflow-y:auto}
+.sl-row{display:flex;align-items:center;gap:2px}
+.sl-name{flex:1;min-width:0;text-align:left;color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sl-meta{color:var(--dim);font-family:var(--mono);font-size:10px;margin-left:6px}
+.sl-confirm{flex:1;min-width:0;font-size:var(--text-xs);color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-left:4px}
+.sl-empty{color:var(--dim);font-size:var(--text-xs);padding:2px 2px 4px}

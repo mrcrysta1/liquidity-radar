@@ -396,9 +396,45 @@ function chartPrice(p: number): string {
   if (!last || !isFinite(p)) return pfmt(p)
   return fmt(p, Math.min(priceDecimals(p), priceDecimals(last.c)))
 }
+/**
+ * A message over the plot with an optional Retry, for when there is nothing
+ * to draw (load failed, rate limit, library missing). It used to be a line of
+ * text in the small legend pill, easy to miss and with no way to act on it.
+ */
+export function showChartStatus(msg: string, retry?: () => void): void {
+  const wrap = $('chartWrap')
+  if (!wrap) return
+  let el = $('chartStatus')
+  if (!el) {
+    el = document.createElement('div')
+    el.id = 'chartStatus'
+    el.className = 'chart-status'
+    el.setAttribute('role', 'status')
+    wrap.appendChild(el)
+  }
+  el.innerHTML = ''
+  const p = document.createElement('p')
+  p.textContent = msg
+  el.appendChild(p)
+  if (retry) {
+    const b = document.createElement('button')
+    b.type = 'button'
+    b.textContent = 'Retry'
+    b.addEventListener('click', () => {
+      p.textContent = 'Retrying…'
+      retry()
+    })
+    el.appendChild(b)
+  }
+}
+export function hideChartStatus(): void {
+  $('chartStatus')?.remove()
+}
+
 export function initChart(): void {
   if (!(window as Any).LightweightCharts) {
     $('legendOHLC')!.textContent = 'Chart library failed to load'
+    showChartStatus('The chart library failed to load.', () => location.reload())
     return
   }
   const el = $('chart')!
@@ -807,6 +843,7 @@ export function updateChartData(fit = false): void {
     syncWatermark()
     return
   }
+  hideChartStatus()
   const ts = chart.timeScale()
   syncSecondsVisible()
   const keep = fit ? null : ts.getVisibleLogicalRange()
@@ -1006,7 +1043,7 @@ export function updateChartLast(c: Any): void {
     renderLegend(c.o, c.h, c.l, c.c, c.v, hoverTime != null, prevBar?.c)
   syncLastPrice(c)
   scheduleIndicatorRefresh()
-  redrawDrawings()
+  scheduleDrawRedraw()
 }
 
 /**
@@ -1036,6 +1073,21 @@ function scheduleIndicatorRefresh(): void {
       updateCloseTimer()
     })
   }, wait)
+}
+
+/**
+ * Live ticks repaint the drawings at most once per frame: a busy tape could
+ * redraw every drawing (and the volume profile and whale bubbles with them)
+ * dozens of times between two frames.
+ */
+let drawRedrawPending = false
+function scheduleDrawRedraw(): void {
+  if (drawRedrawPending) return
+  drawRedrawPending = true
+  requestAnimationFrame(() => {
+    drawRedrawPending = false
+    redrawDrawings()
+  })
 }
 // ---- Toolbar wiring ----
 
@@ -1583,6 +1635,22 @@ function resizeDrawCanvas(): void {
  * and the eraser's hit test both go through this, so what you can click is
  * exactly what you can see.
  */
+/** [first, end) indices of the displayed bars with lo <= t <= hi (ms). */
+function barSpan(lo: number, hi: number): [number, number] {
+  const a = displayCandles()
+  const first = (x: number, incl: boolean) => {
+    let l = 0
+    let h = a.length
+    while (l < h) {
+      const m = (l + h) >> 1
+      if (incl ? a[m].t < x : a[m].t <= x) l = m + 1
+      else h = m
+    }
+    return l
+  }
+  return [first(lo, true), first(hi, false)]
+}
+
 /** Everything the geometry engine needs to turn prices and times into pixels. */
 function mapCtx(cw: number, ch: number): MapCtx {
   const ts = chart.timeScale()
@@ -1598,17 +1666,17 @@ function mapCtx(cw: number, ch: number): MapCtx {
     cw: cw,
     ch: ch,
     fmt: (pr: number) => pfmt(pr),
+    // Binary searches over the bars on screen: these run on every paint of a
+    // measure or regression drawing, and filtering 5000 bars each time added up.
     closesBetween(t1: number, t2: number) {
-      const lo = Math.min(t1, t2) * 1000
-      const hi = Math.max(t1, t2) * 1000
+      const [a, b] = barSpan(Math.min(t1, t2) * 1000, Math.max(t1, t2) * 1000)
       return displayCandles()
-        .filter((k) => k.t >= lo && k.t <= hi)
+        .slice(a, b)
         .map((k) => k.c)
     },
     barsBetween(t1: number, t2: number) {
-      const lo = Math.min(t1, t2) * 1000
-      const hi = Math.max(t1, t2) * 1000
-      return displayCandles().filter((k) => k.t >= lo && k.t <= hi).length
+      const [a, b] = barSpan(Math.min(t1, t2) * 1000, Math.max(t1, t2) * 1000)
+      return b - a
     },
     timeLabel(t: number) {
       return fmtChartDate(t * 1000, {
