@@ -33,7 +33,14 @@ export interface StreamsCallbacks {
   onKlineLive(): void
   onChartLast(c: Any): void
   onAnalytics(): void
+  /** Live bars skipped one or more intervals (the socket dropped): reload them. */
+  onKlineGap?(): void
 }
+
+// A gap is refilled over REST at most this often, so a flapping socket cannot
+// turn into a request storm.
+const GAP_REFILL_MS = 30000
+let gapRefillAt = 0
 
 // The trade tape can run to hundreds of prints a second; paints are coalesced
 // onto an animation frame so a busy market cannot outrun the renderer.
@@ -290,7 +297,15 @@ export function connectStreams(cb: StreamsCallbacks): void {
     if (arr.length && arr[arr.length - 1].t === c.t) {
       arr[arr.length - 1] = c
     } else if (arr.length && c.t > arr[arr.length - 1].t) {
+      // A bar further away than the next interval means bars were missed while
+      // the socket was down; they would otherwise be lost for good, drawn
+      // edge to edge with no visible gap.
+      const gap = c.t > bucketEnd(arr[arr.length - 1].t, def)
       arr.push(c)
+      if (gap && cb.onKlineGap && Date.now() - gapRefillAt > GAP_REFILL_MS) {
+        gapRefillAt = Date.now()
+        cb.onKlineGap()
+      }
       // Matches marketData's MAX_KEEP so lazily-paged history is not eaten.
       if (arr.length > 5000) arr.shift()
     } else {

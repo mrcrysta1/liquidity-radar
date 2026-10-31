@@ -728,6 +728,17 @@ function wireLegendActions(): void {
  * replay) keeps whatever the user has scrolled to; refitting on every redraw
  * would yank the view back to the right edge mid-drag.
  */
+/** The symbol + interval last drawn, to tell a new dataset from a reload of it. */
+let drawnKey = ''
+/**
+ * Whether freshly loaded candles are a different market or interval from what
+ * is on screen. A retry or a gap refill reloads the same series and must keep
+ * the user's zoom; only a genuinely new dataset is refitted.
+ */
+export function isNewDataset(): boolean {
+  return !state.candlesKey || state.candlesKey !== drawnKey
+}
+
 export function updateChartData(fit = false): void {
   if (!chart) return
   const candles = displayCandles()
@@ -758,7 +769,11 @@ export function updateChartData(fit = false): void {
   renderIndicators(candles)
   renderDeltaPane(timeOnlyCandles(), indicatorPaneCount())
   renderWhaleBubbles()
+  drawnKey = state.candlesKey || ''
   if (fit) {
+    // A fresh fit starts at bar 0 like a pan to the oldest bar would; history
+    // paging must wait for this dataset's own first pan, not a past one.
+    userMovedChart = false
     ts.fitContent()
     afterChartFit()
   } else if (keep) {

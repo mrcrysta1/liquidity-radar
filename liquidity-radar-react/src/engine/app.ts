@@ -52,6 +52,7 @@ import {
   initChart,
   chartTheme,
   updateChartData,
+  isNewDataset,
   updateChartLast,
   renderHero,
   renderTicker,
@@ -126,6 +127,8 @@ const streamCb={
   onKlineLive:noteKlineLive,
   onChartLast:updateChartLast,
   onAnalytics:runAnalytics,
+  // The socket came back after missing bars: reload the series to fill them.
+  onKlineGap:()=>fetchKlines(state.symbol),
 };
 
 // Gold refreshes every 5s. Rebuilding the whole ticker tape for it re-created
@@ -310,9 +313,9 @@ export function initApp(){
     onTickersStale(){
       $('topCoinsUpd').textContent=tickerFeed.freshness+' · '+new Date(tickerFeed.ts).toLocaleTimeString();
     },
-    onKlines(){ updateChartData(true);runAnalytics();mlOnCandles(state.symbol, state.tf, state.candles);syncAlertLines(); },
+    onKlines(){ updateChartData(isNewDataset());runAnalytics();mlOnCandles(state.symbol, state.tf, state.candles);syncAlertLines(); },
     onKlineCache(){ syncAlertLines();
-      updateChartData(true);runAnalytics();
+      updateChartData(isNewDataset());runAnalytics();
       renderKlineBadge();
       showToast('Klines live stream down — showing cached data');
     },
