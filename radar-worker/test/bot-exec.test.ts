@@ -83,7 +83,7 @@ test('a -1021 clock rejection re-syncs and retries once; stamps stay behind serv
   }
 })
 
-test('setup: margin type that cannot change (-4048, -4047) or is already set (-4046) is not fatal; other errors are', async () => {
+test('setup: margin type that cannot change (-4048, -4047, -4067) or is already set (-4046) is not fatal; other errors are', async () => {
   const real = globalThis.fetch
   const quiet = console.warn
   console.warn = () => {}
@@ -99,7 +99,7 @@ test('setup: margin type that cannot change (-4048, -4047) or is already set (-4
   }) as typeof fetch
   try {
     const f = new Futures('k', 's')
-    for (code of [-4048, -4047, -4046]) {
+    for (code of [-4048, -4047, -4067, -4046]) {
       calls.length = 0
       await f.setup('BTCUSDT', 3)
       assert.ok(calls.includes('/fapi/v1/leverage'), `leverage still set after ${code}`)
