@@ -951,7 +951,9 @@ function pushRangeLive(): void {
 // the newest bars opened a wide empty stretch of future on the right. When
 // the latest bar was in view, the zoom is re-anchored to it (same width, the
 // usual right offset); scrolled back into history, the cursor zoom stays.
-const LIVE_EDGE_OFFSET = 10
+// A few bars of breathing room past the live bar. Ten (the scroll offset) left
+// a wide empty band in a small layout cell, where hovering found no bar.
+const LIVE_EDGE_OFFSET = 4
 function anchorWheelZoomToLiveEdge(): void {
   const el = $('chart')
   if (!el) return
