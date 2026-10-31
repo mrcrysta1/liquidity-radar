@@ -14,8 +14,16 @@
 // ./panelStore). The module-level functions act on the main chart's store.
 import { storageGet, storageSet } from '../../../services/storage.ts'
 import type { IndicatorDef, SourceKey } from './registry.ts'
-import { SOURCES, defaultParams, indicatorDef, instanceLabel, valueOutputs } from './registry.ts'
+import {
+  SOURCES,
+  defaultParams,
+  indicatorDef,
+  instanceLabel,
+  takesMtf,
+  valueOutputs,
+} from './registry.ts'
 import { createsCycle, sourceRef } from './graph.ts'
+import { isMtfKey } from './mtf.ts'
 import {
   MAX_SCRIPT,
   PINE_TYPE,
@@ -45,7 +53,19 @@ export interface IndicatorInstance {
   levels?: number[]
   /** Interval groups the instance is hidden on (false); unset = shown. */
   tfVisibility?: Partial<Record<TfGroup, boolean>>
+  /** Multi-timeframe input: compute on these bars ('5m' … '1w'); unset = chart. */
+  tf?: string
+  /** With `tf`: the live bar shows the last closed value, not the forming one. */
+  tfWait?: boolean
 }
+
+/** The multi-timeframe fields of a stored instance, cleaned. */
+function sanitizeMtf(r: Record<string, unknown>, def: IndicatorDef): Partial<IndicatorInstance> {
+  if (!takesMtf(def) || !isMtfKey(r.tf)) return {}
+  return r.tfWait === true ? { tf: r.tf, tfWait: true } : { tf: r.tf }
+}
+const mtfOf = (i: IndicatorInstance): Partial<IndicatorInstance> =>
+  i.tf ? (i.tfWait ? { tf: i.tf, tfWait: true } : { tf: i.tf }) : {}
 
 export type LineStyleName = 'solid' | 'dashed' | 'dotted'
 export interface OutputStyle {
@@ -283,6 +303,7 @@ export function sanitizeIndicators(raw: unknown, max = MAX, prefix = 'i'): Indic
       params,
       source: def.sourced ? String(r.source ?? 'close') : 'close',
       visible: r.visible !== false,
+      ...sanitizeMtf(r, def),
       ...sanitizeLook(r),
     })
   }
@@ -320,6 +341,7 @@ export function serializeIndicators(items: IndicatorInstance[]): unknown[] {
           params: i.params,
           source: i.source,
           visible: i.visible,
+          ...mtfOf(i),
           ...lookOf(i),
         },
   )
@@ -354,6 +376,9 @@ export interface IndicatorStore {
   /** Replace the guide levels; null goes back to the def's. */
   setLevels(uid: string, levels: number[] | null): void
   setTfVisible(uid: string, group: TfGroup, on: boolean): void
+  /** Multi-timeframe input ('5m' … '1w'); null computes on the chart's bars. */
+  setTimeframe(uid: string, tf: string | null): void
+  setWaitClose(uid: string, on: boolean): void
   /** Drop every Style / Visibility override of one instance. */
   resetLook(uid: string): void
   /** Replace the set with a saved template, under fresh uids. */
@@ -377,6 +402,16 @@ export interface IndicatorStoreOptions {
   onCommit?(): void
 }
 
+/** Every store's redraw (listeners, then onCommit), for pokeIndicatorStores. */
+const allStores: Array<() => void> = []
+/**
+ * Redraw every chart's indicators without changing or saving anything: data
+ * an indicator reads arrived from elsewhere (higher-timeframe klines).
+ */
+export function pokeIndicatorStores(): void {
+  allStores.slice().forEach((fn) => fn())
+}
+
 export function createIndicatorStore(opts: IndicatorStoreOptions): IndicatorStore {
   const { max } = opts
   const prefix = opts.prefix || 'i'
@@ -389,6 +424,10 @@ export function createIndicatorStore(opts: IndicatorStoreOptions): IndicatorStor
   let items: IndicatorInstance[] = read()
   const listeners: Listener[] = []
   const notify = () => listeners.slice().forEach((fn) => fn())
+  allStores.push(() => {
+    notify()
+    if (opts.onCommit) opts.onCommit()
+  })
 
   function commit(): void {
     opts.save(serializeIndicators(items))
@@ -536,6 +575,23 @@ export function createIndicatorStore(opts: IndicatorStoreOptions): IndicatorStor
         if (on) delete tf[group]
         else tf[group] = false
         return { ...i, tfVisibility: tf }
+      })
+    },
+    setTimeframe(uidToEdit, tf) {
+      edit(uidToEdit, (i) => {
+        const next = { ...i }
+        delete next.tf
+        delete next.tfWait
+        const def = indicatorDef(i.type)
+        if (!tf || !def) return next
+        return { ...next, ...sanitizeMtf({ tf, tfWait: i.tfWait }, def) }
+      })
+    },
+    setWaitClose(uidToEdit, on) {
+      edit(uidToEdit, (i) => {
+        const next = { ...i }
+        delete next.tfWait
+        return on && i.tf ? { ...next, tfWait: true } : next
       })
     },
     resetLook(uidToEdit) {

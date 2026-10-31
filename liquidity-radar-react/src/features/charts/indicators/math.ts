@@ -1245,3 +1245,179 @@ export function patternSeries(n: number, patterns: ChartPattern[]): Series[] {
   })
   return out
 }
+
+// ------------------------------------------------- r4: more catalogue maths
+
+/** Elder-ray: bull power (high − EMA) and bear power (low − EMA). */
+export function elderRay(c: CandleFlat[], p = 13): { bull: Series; bear: Series } {
+  const e = ema(
+    c.map((k) => k.c),
+    p,
+  )
+  return {
+    bull: e.map((x, i) => (x == null ? null : c[i].h - x)),
+    bear: e.map((x, i) => (x == null ? null : c[i].l - x)),
+  }
+}
+
+/** Mass Index (Dorsey): rolling sum of EMA(H−L) / EMA(EMA(H−L)). */
+export function massIndex(c: CandleFlat[], emaLen = 9, sumLen = 25): Series {
+  const e1 = ema(
+    c.map((k) => k.h - k.l),
+    emaLen,
+  )
+  const e2 = onDefined(e1, (v) => ema(v, emaLen))
+  const ratio: Series = e1.map((x, i) =>
+    x != null && e2[i] != null && e2[i] !== 0 ? x / (e2[i] as number) : null,
+  )
+  return onDefined(ratio, (v) => sum(v, sumLen))
+}
+
+/** Coppock curve: WMA of the sum of a long and a short rate of change. */
+export function coppock(v: number[], wmaLen = 10, longRoc = 14, shortRoc = 11): Series {
+  const a = roc(v, longRoc)
+  const b = roc(v, shortRoc)
+  const s: Series = v.map((_, i) =>
+    a[i] != null && b[i] != null ? (a[i] as number) + (b[i] as number) : null,
+  )
+  return onDefined(s, (x) => wma(x, wmaLen))
+}
+
+/** Detrended Price Oscillator, TradingView's non-centred form:
+ *  source − SMA(n) as it was n/2 + 1 bars ago. */
+export function dpo(v: number[], p = 21): Series {
+  const back = Math.floor(p / 2) + 1
+  const m = sma(v, p)
+  return v.map((x, i) => (i - back >= 0 && m[i - back] != null ? x - (m[i - back] as number) : null))
+}
+
+/**
+ * Linear regression channel over the newest `p` bars, as TradingView draws
+ * it: the fitted line plus parallel lines `dev` standard deviations (of the
+ * residuals) either side. Bars before the window are null.
+ */
+export function linregChannel(
+  v: number[],
+  p = 100,
+  dev = 2,
+): { mid: Series; upper: Series; lower: Series } {
+  const n = v.length
+  const mid = NaNs(n)
+  const upper = NaNs(n)
+  const lower = NaNs(n)
+  const len = Math.min(Math.max(2, Math.floor(p)), n)
+  if (n < 2) return { mid, upper, lower }
+  const s = n - len
+  let sx = 0
+  let sy = 0
+  let sxy = 0
+  let sxx = 0
+  for (let x = 0; x < len; x++) {
+    const y = v[s + x]
+    sx += x
+    sy += y
+    sxy += x * y
+    sxx += x * x
+  }
+  const den = len * sxx - sx * sx
+  const slope = den ? (len * sxy - sx * sy) / den : 0
+  const icpt = (sy - slope * sx) / len
+  let ss = 0
+  for (let x = 0; x < len; x++) ss += (v[s + x] - (icpt + slope * x)) ** 2
+  const sd = Math.sqrt(ss / len)
+  for (let x = 0; x < len; x++) {
+    const y = icpt + slope * x
+    mid[s + x] = y
+    upper[s + x] = y + dev * sd
+    lower[s + x] = y - dev * sd
+  }
+  return { mid, upper, lower }
+}
+
+/** A fitted trendline: through pivots `a` and `b`, `touches` pivots on it. */
+export interface TrendFit {
+  a: number
+  b: number
+  /** Price at bar `a`, and the change per bar. */
+  price: number
+  slope: number
+  touches: number
+}
+
+/**
+ * The most recent valid trendline through pivots of one side (highs for
+ * resistance, lows for support): the newest pivot `b` that pairs with an
+ * older pivot `a` so that no close from `a` to the last bar breaks the line
+ * (beyond `tolPct`), with at least two pivots within `tolPct` of it. Among
+ * the pairs for that `b`, the one with most touches wins (then the longer).
+ */
+export function fitTrendline(
+  c: CandleFlat[],
+  pivots: ZigPivot[],
+  resistance: boolean,
+  tolPct = 0.5,
+  maxPivots = 12,
+): TrendFit | null {
+  const pts = pivots.slice(-maxPivots)
+  const n = c.length
+  const tol = Math.max(0, tolPct) / 100
+  for (let bi = pts.length - 1; bi >= 1; bi--) {
+    const B = pts[bi]
+    let best: TrendFit | null = null
+    for (let ai = bi - 1; ai >= 0; ai--) {
+      const A = pts[ai]
+      if (B.i <= A.i) continue
+      const slope = (B.price - A.price) / (B.i - A.i)
+      const at = (k: number) => A.price + slope * (k - A.i)
+      if (!(at(n - 1) > 0)) continue
+      let broken = false
+      for (let k = A.i; k < n && !broken; k++) {
+        const y = at(k)
+        broken = resistance ? c[k].c > y * (1 + tol) : c[k].c < y * (1 - tol)
+      }
+      if (broken) continue
+      let touches = 0
+      for (const p of pts) if (p.i >= A.i && Math.abs(p.price - at(p.i)) <= at(p.i) * tol) touches++
+      if (touches < 2) continue
+      if (!best || touches > best.touches)
+        best = { a: A.i, b: B.i, price: A.price, slope, touches }
+    }
+    if (best) return best
+  }
+  return null
+}
+
+/** A fitted line as a series: from its first pivot, extended to the last bar. */
+export function trendSeries(n: number, fit: TrendFit | null): Series {
+  const out = NaNs(n)
+  if (fit) for (let k = fit.a; k < n; k++) out[k] = fit.price + fit.slope * (k - fit.a)
+  return out
+}
+
+/** Auto trendlines: support and resistance fitted to ZigZag pivots. */
+export function autoTrendlines(
+  c: CandleFlat[],
+  devPct = 3,
+  depth = 5,
+  tolPct = 0.5,
+): { res: Series; sup: Series; resFit: TrendFit | null; supFit: TrendFit | null } {
+  const z = zigzag(c, devPct, depth)
+  const resFit = fitTrendline(
+    c,
+    z.pivots.filter((p) => p.high),
+    true,
+    tolPct,
+  )
+  const supFit = fitTrendline(
+    c,
+    z.pivots.filter((p) => !p.high),
+    false,
+    tolPct,
+  )
+  return {
+    res: trendSeries(c.length, resFit),
+    sup: trendSeries(c.length, supFit),
+    resFit,
+    supFit,
+  }
+}

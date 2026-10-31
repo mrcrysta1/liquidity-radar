@@ -19,7 +19,9 @@ import {
   SOURCES,
   indicatorDef,
   instanceLabel,
+  takesMtf,
 } from '../../features/charts/indicators/registry'
+import { MTF_OPTIONS } from '../../features/charts/indicators/mtf'
 import type { IndicatorDef } from '../../features/charts/indicators/registry'
 import { TF_GROUPS, instanceDef, mainIndicatorStore } from '../../features/charts/indicators/store'
 import type {
@@ -753,19 +755,32 @@ export function IndicatorPicker({
                   )}
                   {isEditing && settingsTab === 'inputs' && !pine && (
                     <div className="ind-settings">
-                      {!def.params.length && !def.sourced && (
+                      {!def.params.length && !def.sourced && !takesMtf(def) && (
                         <div className="ind-empty pine-span">No inputs.</div>
                       )}
                       {def.params.map((p) => (
                         <label key={p.key}>
                           <span>{p.label}</span>
-                          <NumberField
-                            min={p.min}
-                            max={p.max}
-                            step={p.step}
-                            value={inst.params[p.key]}
-                            onCommit={(v) => setParam(inst.uid, p.key, v)}
-                          />
+                          {p.options ? (
+                            <select
+                              value={inst.params[p.key]}
+                              onChange={(e) => setParam(inst.uid, p.key, Number(e.target.value))}
+                            >
+                              {p.options.map((o, k) => (
+                                <option key={o} value={k}>
+                                  {o}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <NumberField
+                              min={p.min}
+                              max={p.max}
+                              step={p.step}
+                              value={inst.params[p.key]}
+                              onCommit={(v) => setParam(inst.uid, p.key, v)}
+                            />
+                          )}
                         </label>
                       ))}
                       {def.sourced && (
@@ -784,6 +799,31 @@ export function IndicatorPicker({
                               </option>
                             ))}
                           </select>
+                        </label>
+                      )}
+                      {takesMtf(def) && (
+                        <label>
+                          <span>Timeframe</span>
+                          <select
+                            value={inst.tf ?? ''}
+                            onChange={(e) => store.setTimeframe(inst.uid, e.target.value || null)}
+                          >
+                            {MTF_OPTIONS.map((o) => (
+                              <option key={o.key} value={o.key}>
+                                {o.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
+                      {takesMtf(def) && inst.tf && (
+                        <label className="ind-mtf-wait">
+                          <span>Wait for bar close</span>
+                          <input
+                            type="checkbox"
+                            checked={!!inst.tfWait}
+                            onChange={(e) => store.setWaitClose(inst.uid, e.target.checked)}
+                          />
                         </label>
                       )}
                     </div>
