@@ -80,6 +80,7 @@ import { attachDeltaPane, blankDeltaPane, renderDeltaPane, updateDeltaLast } fro
 import { subscribeSymbol } from '../actions/userActions'
 import { attachWhaleBubbles, renderWhaleBubbles, watchLiveWhales } from './whaleBubbles'
 import { attachVolumeProfile, renderVolumeProfile } from './volumeProfileOverlay'
+import { attachCompare, compareLegendHtml } from './compare'
 import { onDeltaChange } from '../delta/delta'
 import { onOverlayTogglesChange } from './overlayToggles'
 import { afterChartFit, attachScaleNav, subscribeScaleNav, syncView as syncScaleNavView } from './scaleNav'
@@ -498,6 +499,8 @@ export function initChart(): void {
   attachDeltaPane(chart)
   attachWhaleBubbles(chart, candleSeries, $('chartWrap')!)
   attachVolumeProfile(chart, candleSeries, $('chartWrap')!)
+  // Compare lines (./compare); their rows ride in the OHLC legend.
+  attachCompare(chart, () => hoverTime == null && renderLiveLegend(), $('legendOHLC'))
   // The countdown reads the live series each time, so a style change that
   // replaces the series does not strand it.
   // Range bars do not close on the clock, so there is nothing to count down.
@@ -729,7 +732,8 @@ function renderLegend(
     '%)</b>' +
     (v != null ? '<span class="leg-k">Vol</span><b>' + nfmt(v) + '</b>' : '') +
     '</span></div>' +
-    indicatorLegendHtml()
+    indicatorLegendHtml() +
+    compareLegendHtml()
   // The crosshair and every trade print land here; most of the time nothing
   // in the legend changed (same bar, same price). Rewriting it anyway rebuilt
   // the DOM and forced a layout for the overlays read straight after.
