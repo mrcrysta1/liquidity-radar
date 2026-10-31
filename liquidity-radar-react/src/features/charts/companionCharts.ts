@@ -20,6 +20,7 @@
 // 'c<cell position>'), drawn by its own renderer over its own candles. The
 // active cell's set lives in the main chart's store; the two swap with it.
 import * as LightweightCharts from 'lightweight-charts'
+import { createZonedChart } from './zonedTimeScale'
 import { isInstrument } from '../../constants/instruments'
 import { baseOf, coinMeta } from '../../utils/coins'
 import { fmt, pfmt, priceDecimals } from '../../utils/format'
@@ -528,7 +529,7 @@ function initChart(p: Panel): void {
   if (!body) return
   // The main chart's TradingView look (./chartPalette), a size smaller.
   const tv: Any = tvChartOptions(undefined, () => isDailyTf(p.tf))
-  const chart: Any = LightweightCharts.createChart(body, {
+  const chart: Any = createZonedChart(LightweightCharts, body, () => isDailyTf(p.tf), {
     // Same reason as the main chart: let the library measure its own box so it
     // never writes inline sizes that outlive the layout that caused them.
     autoSize: true,
