@@ -16,6 +16,7 @@ import {
 import { allBinanceSymbols } from '../../services/symbolIndex'
 import type { YahooHit } from '../../services/yahoo'
 import { baseOf } from '../../utils/coins'
+import { parseSynthetic } from '../../services/syntheticSymbol'
 
 /** One market, ready to show and to pick. */
 export interface MarketRow {
@@ -55,6 +56,21 @@ function instrumentFor(sym: string) {
 
 /** Display data for any symbol the app can hold. */
 export function marketRow(sym: string): MarketRow {
+  // A ratio / spread expression (BTCUSDT/ETHUSDT) is shown as typed; it has no
+  // ticker price of its own and nothing to star.
+  const synth = parseSynthetic(sym, (x) => instrumentFor(x) != null)
+  if (synth)
+    return {
+      kind: 'crypto',
+      sym: synth.expr,
+      priceSym: synth.expr,
+      ticker: synth.expr,
+      quote: '',
+      name: synth.op === '/' ? 'Ratio' : synth.op === '-' ? 'Spread' : 'Expression',
+      icon: synth.op === '/' ? '÷' : synth.op === '-' ? '−' : synth.op === '+' ? '+' : '×',
+      color: '#9575CD',
+      fav: null,
+    }
   const inst = instrumentFor(sym)
   if (inst)
     return {

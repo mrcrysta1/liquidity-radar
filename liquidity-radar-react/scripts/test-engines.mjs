@@ -3629,6 +3629,52 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   // Round trip across a weekend gap stays on the same bars.
   const gap = [t0, t0 + H, t0 + 50 * H, t0 + 51 * H]
   eq('link: gap round trip', L.timeToLogical(gap, L.logicalToTime(gap, 1.5)), 1.5)
+
+// ---- r3-compare: ratio / spread symbols, compare lines, volume-profile modes ----
+{
+  const S = await import(src('services/syntheticSymbol.ts'))
+  eq('synth: ratio parses', S.parseSynthetic('btcusdt/ethusdt'), { expr: 'BTCUSDT/ETHUSDT', a: 'BTCUSDT', op: '/', b: 'ETHUSDT', k: 0 })
+  eq('synth: spread with spaces', S.parseSynthetic(' BTCUSDT - ETHUSDT ')?.expr, 'BTCUSDT-ETHUSDT')
+  eq('synth: bare tickers get USDT', S.parseSynthetic('BTC/ETH')?.expr, 'BTCUSDT/ETHUSDT')
+  eq('synth: constant', S.parseSynthetic('BTCUSDT*2'), { expr: 'BTCUSDT*2', a: 'BTCUSDT', op: '*', b: null, k: 2 })
+  eq('synth: a pair written BTC/USDT is not a ratio', S.parseSynthetic('BTC/USDT'), null)
+  eq('synth: a pair written BTC-USDT is not a spread', S.parseSynthetic('BTC-USDT'), null)
+  eq('synth: plain symbol', S.parseSynthetic('BTCUSDT'), null)
+  eq('synth: divide by zero rejected', S.parseSynthetic('BTCUSDT/0'), null)
+  eq('synth: two operators rejected', S.parseSynthetic('A1/B1/C1'), null)
+  eq('synth: whole symbols kept', S.parseSynthetic('XAUUSD/BTC', (x) => x === 'XAUUSD')?.expr, 'XAUUSD/BTCUSDT')
+  const bar = (t, o, h, l, c, v = 1) => ({ t, o, h, l, c, v })
+  const A = [bar(3, 30, 33, 29, 32, 5), bar(1, 10, 12, 9, 11, 7), bar(2, 20, 22, 19, 21, 6)]
+  const B = [bar(1, 5, 6, 4, 5), bar(3, 10, 10, 10, 8)]
+  const r = S.combineSeries(A, B, '/')
+  eq('synth: joined on time only, sorted', r.map((x) => x.t), [1, 3])
+  eq('synth: ratio o/c per field', [r[0].o, r[0].c], [2, 2.2])
+  eq('synth: high/low widened to contain o/c', [r[1].h, r[1].l, r[1].c], [4, 2.9, 4])
+  eq('synth: volume is the first leg', r[1].v, 5)
+  const d = S.combineSeries(A, B, '-')
+  eq('synth: spread', [d[0].o, d[0].c, d[0].h, d[0].l], [5, 6, 6, 5])
+  eq('synth: scalar', S.scaleSeries([bar(1, 1, 2, 0.5, 1.5)], '*', 2)[0], bar(1, 2, 4, 1, 3))
+  eq('synth: zero denominator bar dropped', S.combineSeries([bar(1, 1, 1, 1, 1)], [bar(1, 0, 0, 0, 0)], '/'), [])
+
+  const C = await import(src('features/charts/compareMath.ts'))
+  const rows = [bar(100, 0, 0, 0, 10), bar(300, 0, 0, 0, 12)]
+  eq('compare: as-of join', C.asOfJoin([50, 100, 200, 300, 400], rows), [{ t: 100, v: 10 }, { t: 200, v: 10 }, { t: 300, v: 12 }, { t: 400, v: 12 }])
+  near('compare: pct from first visible', C.pctFrom([{ t: 1, v: 10 }, { t: 2, v: 20 }, { t: 3, v: 25 }], 2), 25)
+  eq('compare: pct with no points', C.pctFrom([], 0), null)
+  eq('compare: pct format', [C.fmtPct(1.234), C.fmtPct(-0.4), C.fmtPct(null)], ['+1.23%', '−0.40%', '—'])
+  eq('compare: depth stepped', [C.compareDepth(10), C.compareDepth(501), C.compareDepth(99999)], [500, 1000, 5000])
+  eq('compare: merge tail', C.mergeTail([bar(1, 0, 0, 0, 1), bar(2, 0, 0, 0, 2)], [bar(2, 0, 0, 0, 3), bar(3, 0, 0, 0, 4)]).map((x) => x.c), [1, 3, 4])
+
+  const V = await import(src('features/charts/volumeProfile.ts'))
+  const H = 3600_000
+  const day = Date.UTC(2026, 9, 30)
+  const cs = Array.from({ length: 48 }, (_, i) => bar(day - 24 * H + i * H, 1, 2, 0.5, 1.5, 1))
+  eq('vp mode: session starts at the current UTC day', V.profileCandles('session', cs)[0].t, day)
+  eq('vp mode: session bar count', V.profileCandles('session', cs).length, 24)
+  eq('vp mode: visible range', V.profileCandles('visible', cs, { from: day, to: day + 2 * H }).length, 3)
+  eq('vp mode: visible without a range falls back', V.profileCandles('visible', cs).length, V.profileWindow(cs).length)
+  eq('vp mode: all is the loaded window', V.profileCandles('all', cs).length, V.profileWindow(cs).length)
+  eq('vp mode: guard', [V.isVpMode('session'), V.isVpMode('x')], [true, false])
 }
 
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')

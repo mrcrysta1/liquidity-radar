@@ -8,6 +8,7 @@ import { LayoutPicker } from './chart/LayoutPicker'
 import { IndicatorPicker } from './chart/IndicatorPicker'
 import { ReplayBar, ReplayButton } from './chart/ReplayBar'
 import { CoinPicker } from './chart/CoinPicker'
+import { CompareButton } from './chart/CompareButton'
 import { LogoMark } from './Logo'
 import { BellIcon, MoonIcon, PaletteIcon, SunIcon } from './icons'
 import { WhaleLegend } from './chart/WhaleLegend'
@@ -188,6 +189,7 @@ export function Shell() {
                 indicators and layout, then replay / snapshot / full screen. */}
             <div className="chart-toolbar tvb" role="toolbar" aria-label="Chart toolbar">
               <CoinPicker keepTab />
+              <CompareButton />
               {/* Filled and kept in sync by the engine; the picker above is its face. */}
               <select id="symSelect" hidden aria-hidden="true" tabIndex={-1}></select>
               <span className="tvb-sep" aria-hidden="true" />

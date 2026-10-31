@@ -6275,3 +6275,29 @@ dialog.cset-dialog[open],dialog.kbd-dialog[open]{position:fixed;inset:0;margin:a
 .lk-opt{padding:2px 7px;border-radius:7px;border:1px solid transparent;background:none;color:var(--dim);font-size:11px;cursor:pointer}
 .lk-opt.on{color:var(--txt);border-color:var(--border2);background:var(--card)}
 .lk-opt:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
+
+/* r3-compare: "+ Compare" toolbar button, compare rows in the chart legend
+   (features/charts/compare.ts, components/chart/CompareButton.tsx). */
+#radarChartCard .tvb .cmp-picker .cp-trigger::before,.cmp-picker .cp-caret{display:none}
+.cmp-picker .cp-trigger,.cmp-btn{position:relative}
+.cmp-btn-face{display:inline-flex;align-items:center;gap:4px;font-size:13px;color:var(--txt);white-space:nowrap}
+.cmp-btn-face>span[aria-hidden]{font-size:15px;line-height:1;color:var(--tv-ico,var(--muted))}
+.cmp-btn{display:inline-flex;align-items:center;gap:4px;height:30px;padding:0 8px;font-size:13px}
+.cmp-btn:disabled{opacity:.55;cursor:not-allowed}
+.cmp-picker .rail-count,.cmp-btn .rail-count{position:static;margin-left:2px}
+.legend .leg-cmp-list{display:flex;flex-direction:column;gap:1px;margin-top:2px}
+.legend .leg-cmp{display:inline-flex;align-items:center;gap:6px;font-size:12px;pointer-events:auto;border-radius:3px;padding:0 2px}
+.legend .leg-cmp-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;font-style:normal}
+.legend .leg-cmp-sym{color:var(--txt)}
+.legend .leg-cmp b{font-variant-numeric:tabular-nums;color:var(--txt)}
+.legend .leg-cmp small{color:var(--muted);font-size:11px}
+.legend .leg-cmp-main{pointer-events:none}
+.legend .leg-cmp-main .leg-cmp-dot{background:none!important;border:1px dashed var(--muted)}
+.legend .leg-cmp-x{
+  display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;padding:0;
+  background:none;border:0;border-radius:3px;color:var(--muted);font-size:14px;line-height:1;cursor:pointer;
+  opacity:0;transition:opacity .12s;
+}
+.legend .leg-cmp:hover .leg-cmp-x,.legend .leg-cmp-x:focus-visible{opacity:1}
+.legend .leg-cmp-x:hover{color:var(--txt);background:var(--tv-hover,rgba(128,128,128,.15))}
+@media(hover:none){.legend .leg-cmp-x{opacity:1}}
