@@ -19,7 +19,7 @@ export const SYNC_KEYS = [
   'lr-showRLPolicy', 'lr-showVolumeProfile', 'lr-vpSettings', 'lr-showWhaleBubbles', 'lr-whaleMult', 'lr-mc-cols',
   'lr-drawings-v1', 'lr-pineScripts', 'lr-panelIndicators-v1', 'lr-savedLayouts-v1', 'lr-mc-panels-v1',
   'lr-linkGroups-v1', 'lr-compare-v1', 'lr-showDepthHeatmap', 'lr-drawFavs', 'lr-drawStay', 'lr-drawTemplates',
-  'lr-indFavourites', 'lr-indTemplates',
+  'lr-indFavourites', 'lr-indTemplates', 'lr-wl-cols', 'lr-chartSettings',
   // lists and alerts
   'lr-favCoins', 'lr-pinCoin', 'lr-watchlists', 'lr_alerts_v1',
   // paper trading and the self-learning engine
