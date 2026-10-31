@@ -130,6 +130,10 @@ export function createIndicatorRenderer(
   const held = new Map<string, Held>()
   /** Price-scale margins recomputed whenever the set of panes changes. */
   let paneOrder: string[] = []
+  /** Indicator panes (by scale id) that have had their default size. */
+  const sizedPanes = new Set<string>()
+  /** The price pane's factor as layoutScales last set it; null before the first. */
+  let mainFactor: number | null = null
 
   /** How many indicator panes currently occupy the bottom of the chart — used
    * by the Delta pane to stack under them instead of overlapping. */
@@ -141,6 +145,8 @@ export function createIndicatorRenderer(
     chart = c
     held.clear()
     paneOrder = []
+    sizedPanes.clear()
+    mainFactor = null
   }
 
   const keyOf = (inst: IndicatorInstance, out: string) => inst.uid + '.' + out
@@ -266,10 +272,24 @@ export function createIndicatorRenderer(
       /* scale not mounted yet */
     }
     // The candles keep most of the height (about 70% with one pane, 60% with
-    // several); every pane can be dragged to another size.
+    // several); every pane can be dragged to another size. Adding a pane used
+    // to reset every pane to these defaults, undoing earlier divider drags
+    // (audit U6): a pane now gets its size once, when it is created, and the
+    // price pane is resized only while it still has the size set here — a
+    // drag of its own divider changes its factor, and from then on it stays.
     try {
-      chart.panes()[0]?.setStretchFactor(n <= 1 ? 2.4 : 1.5 * n)
-      for (const h of held.values()) if (h.scaleId !== 'right') h.series.getPane().setStretchFactor(1)
+      const main = chart.panes()[0]
+      const want = n <= 1 ? 2.4 : 1.5 * n
+      if (main && (mainFactor == null || Math.abs(main.getStretchFactor() - mainFactor) < 1e-6)) {
+        main.setStretchFactor(want)
+        mainFactor = want
+      }
+      for (const id of [...sizedPanes]) if (!paneOrder.includes(id)) sizedPanes.delete(id)
+      for (const h of held.values()) {
+        if (h.scaleId === 'right' || sizedPanes.has(h.scaleId)) continue
+        h.series.getPane().setStretchFactor(1)
+        sizedPanes.add(h.scaleId)
+      }
     } catch (e) {
       /* pane removed between frames */
     }
