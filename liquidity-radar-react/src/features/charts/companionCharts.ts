@@ -793,6 +793,9 @@ const isRangeCell = (p: Panel): boolean => !!styleDef(p.style).rangeBars
 function barsFor(p: Panel): CandleFlat[] {
   const src = p.candles
   if (!isRangeCell(p) || !src.length) return src
+  // Tick bars come from the focused symbol's trade stream only; a cell has
+  // none, so it shows its time candles rather than an empty chart.
+  if (p.style === 'tick') return src
   const n = src.length
   const manual = manualRangeFor(p.sym, p.style)
   const key = [p.style, p.sym, n, src[0].t, n > 1 ? src[n - 2].t : 0, manual ?? 'a'].join('|')
