@@ -7,13 +7,17 @@
 // `ta.ema(close, 9)` calls in different places do not share a buffer).
 //
 // Output: plots (per-bar values + optional per-bar colours), hlines,
-// plotshape/plotchar/plotarrow markers and the declared inputs. Drawing
-// objects (label/line/box/table), fill/bgcolor/barcolor and strategy orders
-// are accepted and ignored, and reported back as warnings.
+// plotshape/plotchar/plotarrow markers, fill() between two plots/hlines,
+// bgcolor/barcolor per bar, alertcondition() series, the declared inputs
+// and — for a strategy() script — the broker emulator's trades and equity
+// (./strategy). Drawing objects (label/line/box/table) are accepted and
+// ignored, and reported back as warnings.
 //
 // Kept free of app imports (Node runs it directly in the engine tests).
 import { parse, PineError } from './parser.ts'
 import type { Expr, Stmt } from './parser.ts'
+import { createBroker, DEFAULT_STRATEGY, STRATEGY_VARS } from './strategy.ts'
+import type { Broker, StrategyConfig, StrategyReport } from './strategy.ts'
 
 /** One bar — the same shape as the app's CandleFlat (time in ms). */
 export interface PineBar {
@@ -70,7 +74,24 @@ export interface PineResult {
   inputs: PineInput[]
   /** Functions the script calls that this engine accepts but ignores. */
   warnings: string[]
+  /** fill(): shade between two plots (keys of `plots`) or two hlines ('hline:<index>'). */
+  fills?: PineFill[]
+  /** bgcolor() per bar (undefined = none). */
+  bgcolors?: Array<string | undefined>
+  /** barcolor() per bar (undefined = the chart's own colour). */
+  barcolors?: Array<string | undefined>
+  /** alertcondition(): one entry per call, its condition on every bar (null = na). */
+  alertconditions?: Array<{ title: string; message: string; values: (boolean | null)[] }>
+  /** A strategy() script: what the broker emulator did. */
+  strategy?: StrategyReport
 }
+export interface PineFill {
+  plot1: string
+  plot2: string
+  color: string
+  title: string
+}
+export type { StrategyReport, StrategyTrade, StrategySummary } from './strategy.ts'
 export interface RunOptions {
   /** Wall-clock budget; a script over it stops with an error. */
   maxMs?: number
@@ -81,7 +102,20 @@ export interface RunOptions {
   mintick?: number
 }
 
-type Val = number | boolean | string | Val[] | FnRef | null | undefined
+type Val = number | boolean | string | Val[] | FnRef | PineArray | null | undefined
+/**
+ * A Pine array — a reference type: `var a = array.new_float()` is one array
+ * for the whole run, mutated in place. (Plain JS arrays are tuples here.)
+ */
+class PineArray {
+  items: Val[]
+  constructor(items: Val[]) {
+    this.items = items
+  }
+}
+/** Ids plot()/hline() return, so fill() can name what it shades between. */
+const PLOT_REF = '\u0001plot:'
+const HLINE_REF = '\u0001hline:'
 interface FnRef {
   fn: true
   name: string
@@ -182,16 +216,27 @@ const CONSTS: Record<string, Val> = {
   'yloc.price': 0,
   'strategy.long': 'long',
   'strategy.short': 'short',
+  'strategy.direction.long': 'long',
+  'strategy.direction.short': 'short',
+  'strategy.direction.all': 'all',
+  'strategy.fixed': 'fixed',
+  'strategy.cash': 'cash',
+  'strategy.percent_of_equity': 'percent_of_equity',
+  'strategy.commission.percent': 'percent',
+  'strategy.commission.cash_per_contract': 'cash_per_contract',
+  'strategy.commission.cash_per_order': 'cash_per_order',
+  'strategy.oca.none': 'none',
+  'strategy.oca.cancel': 'cancel',
+  'strategy.oca.reduce': 'reduce',
+  'currency.USD': 'USD',
+  'currency.USDT': 'USDT',
+  'currency.NONE': '',
   ...COLORS,
 }
 /** Accepted and ignored — the script still runs, the user is told. */
 const IGNORED = new Set([
-  'fill',
-  'bgcolor',
-  'barcolor',
   'plotcandle',
   'plotbar',
-  'alertcondition',
   'alert',
   'label.new',
   'label.set_text',
@@ -206,10 +251,6 @@ const IGNORED = new Set([
   'box.delete',
   'table.new',
   'table.cell',
-  'strategy.entry',
-  'strategy.exit',
-  'strategy.close',
-  'strategy.close_all',
   'max_bars_back',
   'runtime.error',
 ])
@@ -279,6 +320,147 @@ export function gradientColor(v: number, lo: number, hi: number, c0: string, c1:
 }
 const isColor = (v: Val): v is string => typeof v === 'string' && /^(#|rgba?\()/.test(v)
 
+/** Built-in series names (for "did you mean"; values come from seriesAt). */
+const SERIES_NAMES = [
+  'open',
+  'high',
+  'low',
+  'close',
+  'volume',
+  'time',
+  'time_close',
+  'hl2',
+  'hlc3',
+  'ohlc4',
+  'hlcc4',
+  'bar_index',
+  'last_bar_index',
+  'barstate.islast',
+  'barstate.isrealtime',
+  'barstate.isfirst',
+  'barstate.ishistory',
+  'barstate.isconfirmed',
+  'barstate.isnew',
+  'year',
+  'month',
+  'dayofmonth',
+  'dayofweek',
+  'hour',
+  'minute',
+]
+/** Functions handled outside the ta./math. tables (for "did you mean"). */
+const OTHER_FNS = [
+  'indicator',
+  'study',
+  'strategy',
+  'plot',
+  'hline',
+  'plotshape',
+  'plotchar',
+  'plotarrow',
+  'fill',
+  'bgcolor',
+  'barcolor',
+  'alertcondition',
+  'input',
+  'input.int',
+  'input.float',
+  'input.bool',
+  'input.string',
+  'input.source',
+  'input.color',
+  'input.timeframe',
+  'na',
+  'nz',
+  'fixnan',
+  'color.new',
+  'color.rgb',
+  'color.from_gradient',
+  'str.tostring',
+  'str.format',
+  'str.contains',
+  'str.length',
+  'int',
+  'float',
+  'bool',
+  'math.sum',
+  'strategy.entry',
+  'strategy.order',
+  'strategy.exit',
+  'strategy.close',
+  'strategy.close_all',
+  'strategy.cancel',
+  'strategy.cancel_all',
+]
+const ARRAY_FNS = [
+  'new_float',
+  'new_int',
+  'new_bool',
+  'new_string',
+  'new_color',
+  'from',
+  'push',
+  'pop',
+  'get',
+  'set',
+  'size',
+  'sum',
+  'avg',
+  'min',
+  'max',
+  'shift',
+  'unshift',
+  'clear',
+  'includes',
+  'slice',
+  'first',
+  'last',
+  'indexof',
+  'insert',
+  'remove',
+  'reverse',
+  'sort',
+  'copy',
+  'concat',
+  'fill',
+  'join',
+  'stdev',
+  'median',
+].map((f) => 'array.' + f)
+
+/** Edit distance with adjacent swaps counted as one edit ("clsoe" → "close"). */
+/** Edit distance with adjacent swaps counted as one edit ("clsoe" -> "close"). */
+function editDistance(a: string, b: string): number {
+  const d: number[][] = Array.from({ length: a.length + 1 }, (_, i) =>
+    Array.from({ length: b.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)),
+  )
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost)
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1])
+        d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1)
+    }
+  return d[a.length][b.length]
+}
+/** The closest known name — a typo's likely meaning — or '' when none is close. */
+export function didYouMean(name: string, known: Iterable<string>): string {
+  const lower = name.toLowerCase()
+  let best = ''
+  let bestD = Math.max(1, Math.floor(name.length / 3)) + 1
+  for (const k of known) {
+    if (k === name) continue
+    // A missing namespace ("sma" for "ta.sma") is the commonest slip.
+    const d = k.endsWith('.' + name) ? 1 : editDistance(lower, k.toLowerCase())
+    if (d < bestD) {
+      best = k
+      bestD = d
+    }
+  }
+  return best
+}
+const hint = (s: string) => (s ? ` — did you mean '${s}'?` : '')
+
 export function runPine(
   source: string,
   candles: PineBar[],
@@ -298,7 +480,13 @@ export function runPine(
     warnings: [],
   }
   const plotsByKey = new Map<string, PinePlot & { offset: number }>()
-  const hlineKeys = new Set<string>()
+  const hlineKeys = new Map<string, number>()
+  const fillsByKey = new Map<string, PineFill>()
+  const alertsByKey = new Map<string, NonNullable<PineResult['alertconditions']>[number]>()
+  let bgcolors: Array<string | undefined> | null = null
+  let barcolors: Array<string | undefined> | null = null
+  // Created by strategy() on the first bar (the cast keeps TS from narrowing it to null).
+  let broker = null as Broker | null
   const inputKeys = new Map<string, PineInput>()
   let inputOrdinal = 0
   const fns = new Map<string, FnRef>()
@@ -421,7 +609,21 @@ export function runPine(
       if (back) return NA
       return taVar(name)
     }
-    throw new PineError(`Undeclared identifier '${name}'`, line ?? curLine, col)
+    if (broker && STRATEGY_VARS.includes(name)) return broker.get(name, back) ?? NA
+    const known = [
+      ...(localScope ? localScope.keys() : []),
+      ...globals.keys(),
+      ...fns.keys(),
+      ...SERIES_NAMES,
+      ...Object.keys(CONSTS),
+      ...TA_VARS,
+      ...(broker ? STRATEGY_VARS : []),
+    ]
+    throw new PineError(
+      `Undeclared identifier '${name}'` + hint(didYouMean(name, known)),
+      line ?? curLine,
+      col,
+    )
   }
 
   // ---------- ta.* built-ins: all per call-site, incremental where it matters ----------
@@ -984,6 +1186,140 @@ export function runPine(
     }
   }
 
+  // ---------- array.* ----------
+  // Pine's array API over PineArray. Indexes may be negative (from the end),
+  // as in current Pine; out of range is a runtime error, as in Pine. slice()
+  // returns a copy rather than Pine's live view (writes through a slice do
+  // not reach the source array).
+  function arrayCall(
+    node: Extract<Expr, { k: 'call' }>,
+    fn: string,
+    args: Val[],
+    named: Record<string, Val>,
+  ): Val {
+    const fail = (msg: string): never => {
+      throw new PineError(msg, node.line, node.col)
+    }
+    if (fn === 'from') return new PineArray(args.slice())
+    if (fn.startsWith('new')) {
+      // new_float / new_int / … and the generic new<float>.
+      const size = Math.max(0, Math.floor(num(args[0] ?? named.size ?? 0)) || 0)
+      if (size > 100000) fail('Array size ' + size + ' is over the 100000 limit')
+      const init = args[1] !== undefined ? args[1] : (named.initial_value ?? NA)
+      return new PineArray(new Array(size).fill(init))
+    }
+    const arr = args[0] ?? named.id
+    if (!(arr instanceof PineArray)) {
+      if (isNa(arr)) fail(`array.${fn}: the array is na (was it created with array.new?)`)
+      fail(`array.${fn} expects an array as its first argument`)
+    }
+    const it = (arr as PineArray).items
+    const idx = (v: Val, size = it.length): number => {
+      let i = Math.trunc(num(v))
+      if (i < 0) i += size
+      if (!(i >= 0 && i < size))
+        fail(`Index ${num(v)} is out of bounds. Array size is ${it.length}`)
+      return i
+    }
+    const nums = () => it.map(num).filter((x) => !Number.isNaN(x))
+    switch (fn) {
+      case 'size':
+        return it.length
+      case 'push':
+        if (it.length >= 100000) fail('Array size is over the 100000 limit')
+        it.push(args[1])
+        return null
+      case 'unshift':
+        it.unshift(args[1])
+        return null
+      case 'pop':
+        if (!it.length) fail('Cannot call array.pop() on an empty array')
+        return it.pop()
+      case 'shift':
+        if (!it.length) fail('Cannot call array.shift() on an empty array')
+        return it.shift()
+      case 'get':
+        return it[idx(args[1] ?? named.index)]
+      case 'set':
+        it[idx(args[1] ?? named.index)] = args[2] ?? named.value
+        return null
+      case 'first':
+        if (!it.length) fail('Cannot call array.first() on an empty array')
+        return it[0]
+      case 'last':
+        if (!it.length) fail('Cannot call array.last() on an empty array')
+        return it[it.length - 1]
+      case 'clear':
+        it.length = 0
+        return null
+      case 'insert':
+        it.splice(idx(args[1], it.length + 1), 0, args[2])
+        return null
+      case 'remove':
+        return it.splice(idx(args[1]), 1)[0]
+      case 'includes':
+        return it.some((x) => x === args[1] || (typeof x === 'number' && num(x) === num(args[1] ?? NA)))
+      case 'indexof':
+        return it.findIndex((x) => x === args[1] || (typeof x === 'number' && num(x) === num(args[1] ?? NA)))
+      case 'slice': {
+        const from = idx(args[1], it.length + 1)
+        const to = idx(args[2] ?? it.length, it.length + 1)
+        return new PineArray(it.slice(from, Math.max(from, to)))
+      }
+      case 'copy':
+        return new PineArray(it.slice())
+      case 'concat': {
+        const b = args[1]
+        if (b instanceof PineArray) it.push(...b.items)
+        return arr
+      }
+      case 'reverse':
+        it.reverse()
+        return null
+      case 'sort': {
+        const desc = String(args[1] ?? named.order ?? '') === 'descending'
+        it.sort((x, y) => (desc ? num(y) - num(x) : num(x) - num(y)))
+        return null
+      }
+      case 'fill': {
+        const from = args[2] !== undefined ? idx(args[2], it.length + 1) : 0
+        const to = args[3] !== undefined ? idx(args[3], it.length + 1) : it.length
+        it.fill(args[1], from, to)
+        return null
+      }
+      case 'join':
+        return it.map((x) => (typeof x === 'number' ? String(Math.round(x * 1e4) / 1e4) : String(x))).join(String(args[1] ?? ''))
+      case 'sum': {
+        const v = nums()
+        return v.reduce((s, x) => s + x, 0)
+      }
+      case 'avg': {
+        const v = nums()
+        return v.length ? v.reduce((s, x) => s + x, 0) / v.length : NA
+      }
+      case 'min':
+      case 'max': {
+        const v = nums().sort((x, y) => x - y)
+        if (!v.length) return NA
+        const nth = Math.max(0, Math.floor(num(args[1] ?? 0)) || 0)
+        return fn === 'min' ? (v[nth] ?? NA) : (v[v.length - 1 - nth] ?? NA)
+      }
+      case 'stdev': {
+        const v = nums()
+        if (!v.length) return NA
+        const m = mean(v)
+        return Math.sqrt(v.reduce((s, x) => s + (x - m) ** 2, 0) / v.length)
+      }
+      case 'median': {
+        const v = nums().sort((x, y) => x - y)
+        const m = v.length
+        if (!m) return NA
+        return m % 2 ? v[(m - 1) / 2] : (v[m / 2 - 1] + v[m / 2]) / 2
+      }
+    }
+    return fail(`Unsupported function 'array.${fn}'` + hint(didYouMean('array.' + fn, ARRAY_FNS)))
+  }
+
   const UNHANDLED = Symbol('unhandled')
   function callBuiltin(
     node: Extract<Expr, { k: 'call' }>,
@@ -1003,7 +1339,147 @@ export function runPine(
         res.title = String(a(0, 'title', res.title))
         res.shortTitle = String(a(1, 'shorttitle', ''))
         res.overlay = truthy(a(2, 'overlay', false))
+        if (f === 'strategy' && !broker) {
+          const pick = <T extends string>(v: Val, ok: readonly T[], def: T): T =>
+            ok.includes(v as T) ? (v as T) : def
+          const D = DEFAULT_STRATEGY
+          const numOr = (v: Val, def: number) => (isNa(v) || !isFinite(num(v)) ? def : num(v))
+          const cfg: StrategyConfig = {
+            initialCapital: numOr(named.initial_capital, D.initialCapital),
+            qtyType: pick(named.default_qty_type, ['fixed', 'cash', 'percent_of_equity'], D.qtyType),
+            qtyValue: numOr(named.default_qty_value, D.qtyValue),
+            commissionType: pick(
+              named.commission_type,
+              ['percent', 'cash_per_contract', 'cash_per_order'],
+              D.commissionType,
+            ),
+            commissionValue: numOr(named.commission_value, D.commissionValue),
+            pyramiding: numOr(a(6, 'pyramiding'), D.pyramiding),
+            slippage: numOr(named.slippage, D.slippage),
+            mintick,
+            processOnClose: truthy(named.process_orders_on_close ?? false),
+          }
+          broker = createBroker(cfg, candles)
+        }
       }
+      return null
+    }
+    if (f.startsWith('strategy.')) {
+      if (!broker) {
+        // Order calls in an indicator(): TradingView rejects them; here the
+        // script still runs and the user is told they did nothing.
+        if (!res.warnings.includes(f)) res.warnings.push(f)
+        return null
+      }
+      // Pine v4's `when=` argument: the call only counts when it is true.
+      if (named.when !== undefined && !truthy(named.when)) return null
+      const optNum = (i: number, nm: string) => {
+        const v = a(i, nm)
+        return isNa(v) || typeof v === 'string' ? undefined : num(v)
+      }
+      const optStr = (i: number, nm: string) => {
+        const v = a(i, nm)
+        return typeof v === 'string' && v ? v : undefined
+      }
+      const side = () => (String(a(1, 'direction', 'long')) === 'short' ? -1 : 1)
+      switch (f) {
+        case 'strategy.entry':
+        case 'strategy.order':
+          broker[f === 'strategy.entry' ? 'entry' : 'order'](
+            String(a(0, 'id', '')),
+            side(),
+            optNum(2, 'qty'),
+            optNum(3, 'limit'),
+            optNum(4, 'stop'),
+            optStr(7, 'comment'),
+          )
+          return null
+        case 'strategy.exit':
+          broker.exit({
+            id: String(a(0, 'id', '')),
+            from: optStr(1, 'from_entry') ?? '',
+            profit: optNum(4, 'profit'),
+            limit: optNum(5, 'limit'),
+            loss: optNum(6, 'loss'),
+            stop: optNum(7, 'stop'),
+            trailPrice: optNum(8, 'trail_price'),
+            trailPoints: optNum(9, 'trail_points'),
+            trailOffset: optNum(10, 'trail_offset'),
+            comment: optStr(12, 'comment'),
+          })
+          return null
+        case 'strategy.close':
+          broker.close(
+            String(a(0, 'id', '')),
+            optStr(1, 'comment'),
+            optNum(2, 'qty'),
+            optNum(3, 'qty_percent'),
+            truthy(a(5, 'immediately', false)),
+          )
+          return null
+        case 'strategy.close_all':
+          broker.closeAll(optStr(0, 'comment'), truthy(a(2, 'immediately', false)))
+          return null
+        case 'strategy.cancel':
+          broker.cancel(String(a(0, 'id', '')))
+          return null
+        case 'strategy.cancel_all':
+          broker.cancelAll()
+          return null
+      }
+      if (!res.warnings.includes(f)) res.warnings.push(f)
+      return null
+    }
+    if (f.startsWith('array.')) return arrayCall(node, f.slice(6), args, named)
+    if (f === 'fill') {
+      const p1 = a(0, 'plot1') ?? a(0, 'hline1')
+      const p2 = a(1, 'plot2') ?? a(1, 'hline2')
+      const ref = (v: Val) =>
+        typeof v === 'string' && v.startsWith(PLOT_REF)
+          ? v.slice(PLOT_REF.length)
+          : typeof v === 'string' && v.startsWith(HLINE_REF)
+            ? 'hline:' + v.slice(HLINE_REF.length)
+            : null
+      const r1 = ref(p1)
+      const r2 = ref(p2)
+      if (!r1 || !r2) {
+        if (!res.warnings.includes('fill')) res.warnings.push('fill')
+        return null
+      }
+      const key = `${scopePath}/${node.id}`
+      const col = a(2, 'color')
+      let fl = fillsByKey.get(key)
+      if (!fl) {
+        fl = { plot1: r1, plot2: r2, color: '', title: String(a(3, 'title', '')) }
+        fillsByKey.set(key, fl)
+      }
+      // The renderer shades a fill in one colour: the first one the script gives.
+      if (!fl.color && isColor(col)) fl.color = normColor(col)
+      return null
+    }
+    if (f === 'bgcolor' || f === 'barcolor') {
+      const col = a(0, 'color')
+      const arr = f === 'bgcolor' ? (bgcolors ??= []) : (barcolors ??= [])
+      if (isColor(col)) arr[bar] = normColor(col)
+      if (f === 'bgcolor' && !res.warnings.includes('bgcolor (not drawn)'))
+        res.warnings.push('bgcolor (not drawn)')
+      if (f === 'barcolor' && !res.warnings.includes('barcolor (not drawn)'))
+        res.warnings.push('barcolor (not drawn)')
+      return null
+    }
+    if (f === 'alertcondition') {
+      const key = `${scopePath}/${node.id}`
+      let al = alertsByKey.get(key)
+      if (!al) {
+        al = {
+          title: String(a(1, 'title', `Alert ${alertsByKey.size + 1}`)),
+          message: String(a(2, 'message', '')),
+          values: new Array(n).fill(null),
+        }
+        alertsByKey.set(key, al)
+      }
+      const cond = a(0, 'condition')
+      al.values[bar] = isNa(cond) ? null : truthy(cond)
       return null
     }
     if (f === 'input' || f.startsWith('input.')) {
@@ -1087,12 +1563,12 @@ export function runPine(
         p.colors ??= []
         p.colors[bar] = cv
       } else if (p.colors) p.colors[bar] = cv
-      return null
+      return PLOT_REF + key
     }
     if (f === 'hline') {
       const key = `${scopePath}/${node.id}`
       if (!hlineKeys.has(key)) {
-        hlineKeys.add(key)
+        hlineKeys.set(key, res.hlines.length)
         const st = String(a(3, 'linestyle', 'dashed'))
         res.hlines.push({
           title: String(a(1, 'title', '')),
@@ -1101,7 +1577,7 @@ export function runPine(
           style: st === 'solid' || st === 'dotted' ? st : 'dashed',
         })
       }
-      return null
+      return HLINE_REF + hlineKeys.get(key)
     }
     if (f === 'plotshape' || f === 'plotchar' || f === 'plotarrow') {
       const cond = a(0, 'series')
@@ -1147,14 +1623,8 @@ export function runPine(
       f.startsWith('label.') ||
       f.startsWith('line.') ||
       f.startsWith('box.') ||
-      f.startsWith('table.') ||
-      f.startsWith('array.') ||
-      f.startsWith('strategy.')
+      f.startsWith('table.')
     ) {
-      // Arrays are not implemented: a script built on them would plot wrong
-      // values with only a warning to show for it. Stop it with a clear error.
-      if (f.startsWith('array.'))
-        throw new PineError('Unsupported function ' + f + ': arrays are not available yet', curLine)
       if (!res.warnings.includes(f)) res.warnings.push(f)
       return null
     }
@@ -1351,11 +1821,41 @@ export function runPine(
       }
       case 'call': {
         if (fns.has(e.f)) return callUser(fns.get(e.f)!, e)
+        let f = e.f
         const args = e.args.map(evalExpr)
+        // Method syntax on an array variable: `a.push(x)` is array.push(a, x).
+        const dot = f.indexOf('.')
+        if (dot > 0) {
+          const head = f.slice(0, dot)
+          const own = localScope?.get(head) ?? globals.get(head)
+          if (own) {
+            const v = own[bar] ?? NA
+            if (v instanceof PineArray) {
+              args.unshift(v)
+              f = 'array.' + f.slice(dot + 1)
+            }
+          }
+        }
         const named: Record<string, Val> = {}
         for (const k in e.named) named[k] = evalExpr(e.named[k])
-        const r = callBuiltin(e, args, named)
-        if (r === UNHANDLED) throw new PineError(`Unsupported function '${e.f}'`, e.line, e.col)
+        let r: Val | typeof UNHANDLED
+        try {
+          r = callBuiltin(f === e.f ? e : { ...e, f }, args, named)
+        } catch (err) {
+          // A slip inside a built-in (bad argument types) still names the call.
+          if (err instanceof PineError) throw err
+          throw new PineError(`${e.f}: ${err instanceof Error ? err.message : String(err)}`, e.line, e.col)
+        }
+        if (r === UNHANDLED) {
+          const known = [
+            ...OTHER_FNS,
+            ...ARRAY_FNS,
+            ...Object.keys(T).map((k) => 'ta.' + k),
+            ...Object.keys(M).map((k) => 'math.' + k),
+            ...fns.keys(),
+          ]
+          throw new PineError(`Unsupported function '${e.f}'` + hint(didYouMean(e.f, known)), e.line, e.col)
+        }
         return r
       }
     }
@@ -1389,6 +1889,10 @@ export function runPine(
     curLine = s.line
     try {
       return execInner(s)
+    } catch (err) {
+      // An engine slip (a JS TypeError, say) still points at the statement.
+      if (err instanceof PineError) throw err
+      throw new PineError(err instanceof Error ? err.message : String(err), s.line)
     } finally {
       curLine = saveLine
     }
@@ -1487,8 +1991,16 @@ export function runPine(
   }
   for (bar = 0; bar < n; bar++) {
     carry()
+    // Orders placed on the previous bar fill before this bar's script runs.
+    broker?.beginBar(bar)
     for (const s of prog) exec(s)
+    broker?.endBar(bar)
   }
+  if (broker) res.strategy = broker.report()
+  if (fillsByKey.size) res.fills = [...fillsByKey.values()]
+  if (bgcolors) res.bgcolors = Array.from({ length: n }, (_, i) => bgcolors![i])
+  if (barcolors) res.barcolors = Array.from({ length: n }, (_, i) => barcolors![i])
+  if (alertsByKey.size) res.alertconditions = [...alertsByKey.values()]
   res.plots = [...plotsByKey.values()].map(({ offset, ...p }) => {
     const values: Array<number | null> = new Array(n).fill(null)
     const colors = p.colors ? new Array<string | undefined>(n).fill(undefined) : undefined

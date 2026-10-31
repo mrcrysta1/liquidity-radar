@@ -21,7 +21,7 @@ import type { CandleFlat } from '../../../services/market'
 import type { IndicatorDef, OutputDef } from '../indicators/registry'
 import type { Series } from '../indicators/math'
 import { runPine } from './runtime.ts'
-import type { InputValue, PineInput, PineResult } from './runtime.ts'
+import type { InputValue, PineInput, PineResult, PineShape, StrategyReport } from './runtime.ts'
 
 export const PINE_TYPE = 'pine'
 /** Longest script kept (characters) — it is persisted with the chart. */
@@ -41,6 +41,13 @@ export interface PineStatus {
   inputs: PineInput[]
   warnings: string[]
   error?: string
+  /** Where the error is, when known (1-based). */
+  errorLine?: number
+  errorCol?: number
+  /** A strategy() script: trades, equity and summary (Strategy Tester). */
+  strategy?: StrategyReport
+  /** alertcondition() series of the last run. */
+  alertconditions?: PineResult['alertconditions']
   /** Time of the last full run, ms. */
   ms?: number
 }
@@ -112,11 +119,61 @@ export function alignByTime(
   return out
 }
 
+const plotKey = (k: string) => 'p' + k.replace(/\W+/g, '_')
+
+/**
+ * Strategy fills as chart markers: an arrow at each entry (up below the bar
+ * for a long, down above it for a short) and at each exit, labelled with
+ * the order id as TradingView labels them.
+ */
+export function tradeShapes(rep: StrategyReport): PineShape[] {
+  const out: PineShape[] = []
+  for (const t of rep.trades) {
+    const long = t.dir === 'long'
+    out.push({
+      bar: t.entryBar,
+      text: t.entryId,
+      color: long ? '#2962ff' : '#f23645',
+      position: long ? 'below' : 'above',
+      shape: long ? 'arrowUp' : 'arrowDown',
+    })
+    if (t.exitBar != null)
+      out.push({
+        bar: t.exitBar,
+        text: t.exitId,
+        color: '#9c27b0',
+        position: long ? 'above' : 'below',
+        shape: long ? 'arrowDown' : 'arrowUp',
+      })
+  }
+  return out
+}
+
 function build(inst: PineInstance, r: PineResult, candles: CandleFlat[], ms?: number): Built {
   const outputs: OutputDef[] = []
   const series: Record<string, Series> = {}
+  // fill(): a cloud between the two plots (or two hlines, as flat series).
+  // First, so the lines draw over the shading.
+  r.fills?.forEach((f, i) => {
+    const side = (ref: string, tag: string) => {
+      if (!ref.startsWith('hline:')) return plotKey(ref)
+      const h = r.hlines[Number(ref.slice(6))]
+      const k = 'fill' + i + tag
+      series[k] = new Array(candles.length).fill(h ? h.price : null)
+      return k
+    }
+    const color = f.color || 'rgba(41,98,255,0.15)'
+    outputs.push({
+      key: 'fill' + i,
+      label: cleanTitle(f.title || 'Fill'),
+      color,
+      colorDown: color,
+      kind: 'cloud',
+      between: [side(f.plot1, 'a'), side(f.plot2, 'b')],
+    })
+  })
   r.plots.forEach((p) => {
-    const key = 'p' + p.key.replace(/\W+/g, '_')
+    const key = plotKey(p.key)
     outputs.push({
       key,
       label: cleanTitle(p.title),
@@ -127,7 +184,8 @@ function build(inst: PineInstance, r: PineResult, candles: CandleFlat[], ms?: nu
     })
     series[key] = p.values
   })
-  if (r.shapes.length) {
+  const shapes = r.strategy ? r.shapes.concat(tradeShapes(r.strategy)) : r.shapes
+  if (shapes.length) {
     // Markers need a value to sit against: the bar's high/low on the price
     // pane; in a pane of its own, the script's first plot (so the hidden
     // carrier series never stretches the pane's scale).
@@ -135,7 +193,7 @@ function build(inst: PineInstance, r: PineResult, candles: CandleFlat[], ms?: nu
     const guide = r.hlines[0]?.price ?? 0
     const vals: Series = new Array(candles.length).fill(null)
     const markers: NonNullable<OutputDef['markers']> = []
-    r.shapes.forEach((s) => {
+    shapes.forEach((s) => {
       const c = candles[s.bar]
       if (!c) return
       const v = r.overlay ? (s.position === 'above' ? c.h : c.l) : (first?.[s.bar] ?? guide)
@@ -170,7 +228,15 @@ function build(inst: PineInstance, r: PineResult, candles: CandleFlat[], ms?: nu
   }
   return {
     def,
-    status: { title, overlay: r.overlay, inputs: r.inputs, warnings: r.warnings, ms },
+    status: {
+      title,
+      overlay: r.overlay,
+      inputs: r.inputs,
+      warnings: r.warnings,
+      strategy: r.strategy,
+      alertconditions: r.alertconditions,
+      ms,
+    },
   }
 }
 
@@ -187,7 +253,10 @@ function failed(inst: PineInstance, e: unknown, overlay: boolean, inputs: PineIn
     compute: () => ({}),
   }
   const error = e instanceof Error ? e.message : String(e)
-  return { def, status: { title, overlay, inputs, warnings: [], error } }
+  const at = e as { line?: unknown; col?: unknown } | null
+  const errorLine = typeof at?.line === 'number' ? at.line : undefined
+  const errorCol = typeof at?.col === 'number' ? at.col : undefined
+  return { def, status: { title, overlay, inputs, warnings: [], error, errorLine, errorCol } }
 }
 
 // ---- probe runs (no chart needed) ----
@@ -257,7 +326,13 @@ export function subscribePine(fn: () => void): () => void {
   }
 }
 const statusKey = (s: PineStatus) =>
-  (s.error || '') + '|' + s.warnings.join(',') + '|' + s.inputs.map((i) => i.key).join(',')
+  (s.error || '') +
+  '|' +
+  s.warnings.join(',') +
+  '|' +
+  s.inputs.map((i) => i.key).join(',') +
+  // A strategy's results change with the bars: the tester listens here too.
+  (s.strategy ? '|' + s.strategy.trades.length + ':' + s.strategy.summary.netProfit : '')
 
 // ---- the chart a script runs on (syminfo / timeframe) ----
 let chartSym = ''
@@ -367,7 +442,14 @@ function store(inst: PineInstance, b: Built, ms: number, job: Omit<Job, 'inst' |
   }
 }
 
-function onWorkerResult(msg: { id: number; result?: PineResult; error?: string; ms: number }): void {
+function onWorkerResult(msg: {
+  id: number
+  result?: PineResult
+  error?: string
+  line?: number
+  col?: number
+  ms: number
+}): void {
   const job = jobs.get(msg.id)
   jobs.delete(msg.id)
   if (!job) return
@@ -378,7 +460,8 @@ function onWorkerResult(msg: { id: number; result?: PineResult; error?: string; 
   let b: Built
   if (msg.error != null || !msg.result) {
     const m = pineMeta(job.inst)
-    b = failed(job.inst, new Error(msg.error || 'Script failed'), m.status.overlay, m.status.inputs)
+    const err = Object.assign(new Error(msg.error || 'Script failed'), { line: msg.line, col: msg.col })
+    b = failed(job.inst, err, m.status.overlay, m.status.inputs)
   } else {
     try {
       b = build(job.inst, msg.result, job.candles)
