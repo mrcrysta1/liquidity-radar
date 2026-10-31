@@ -6536,3 +6536,18 @@ dialog.cset-dialog[open],dialog.kbd-dialog[open]{position:fixed;inset:0;margin:a
 #radarChartCard .tvb .cp-id{min-width:0;overflow:hidden}
 #radarChartCard .tvb .cp-id b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @container (max-width:1040px){#radarChartCard .tvb .cp-quote .cp-chg{display:none}}
+
+/* U11 — Chart intelligence opens as a drawer over the chart's right side,
+   leaving the chart its full width (ChartSidePanel DRAWER_TABS). Stacked on a
+   portrait screen it stays in the flow under the chart. */
+.chart-side{position:relative}
+@media not all and (max-width:900px) and (orientation:portrait){
+  .chart-stage.side-drawer .cs-panel.cs-drawer{
+    position:absolute;top:0;right:calc(100% + 6px);z-index:30;
+    width:320px;max-width:calc(100vw - 140px);max-height:100%;
+    box-shadow:var(--shade-3);
+  }
+}
+@media(max-width:900px) and (orientation:portrait){
+  .chart-stage.side-drawer .cs-panel{max-height:52vh}
+}

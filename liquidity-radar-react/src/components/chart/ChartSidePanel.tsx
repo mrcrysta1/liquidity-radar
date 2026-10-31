@@ -106,6 +106,14 @@ const TABS: Array<{ id: TabId; label: string }> = [
   { id: 'objects', label: 'Objects' },
 ]
 
+/**
+ * Tabs that open as a drawer over the chart's right side instead of beside it.
+ * Chart intelligence is a read you glance at: as a column it squeezed the
+ * chart to ~340px (audit U11). Stacked on a portrait phone it is in the flow
+ * like the rest (index.css r4-ux).
+ */
+const DRAWER_TABS = new Set<TabId>(['intel'])
+
 const OPEN_KEY = 'lr-chartSide'
 const TAB_KEY = 'lr-chartSideTab'
 
@@ -128,16 +136,19 @@ export function ChartSidePanel({ tools }: { tools?: ReactNode }) {
 
   // The stage sizes itself differently with the panel out, and it is a plain
   // element in the shell rather than part of this component's tree.
+  // A drawer floats over the chart, so the stage keeps its size for it.
+  const drawer = open && DRAWER_TABS.has(tab)
   useEffect(() => {
     const stage = rootRef.current?.parentElement
     if (!stage) return
-    stage.classList.toggle('side-open', open)
+    stage.classList.toggle('side-open', open && !drawer)
+    stage.classList.toggle('side-drawer', drawer)
     syncStageHeight()
     return () => {
-      stage.classList.remove('side-open')
+      stage.classList.remove('side-open', 'side-drawer')
       syncStageHeight()
     }
-  }, [open])
+  }, [open, drawer])
 
   const pick = (id: TabId) => {
     if (open && tab === id) {
@@ -185,7 +196,7 @@ export function ChartSidePanel({ tools }: { tools?: ReactNode }) {
       </div>
       {open && (
         <div
-          className="cs-panel"
+          className={'cs-panel' + (drawer ? ' cs-drawer' : '')}
           id="cs-panel"
           role="region"
           aria-label={TABS.find((t) => t.id === tab)?.label}
