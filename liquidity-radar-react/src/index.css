@@ -6509,3 +6509,29 @@ dialog.cset-dialog[open],dialog.kbd-dialog[open]{position:fixed;inset:0;margin:a
 .st-id{color:var(--primary)}
 @media (max-width:900px){.st-panel{left:8px;right:8px;bottom:8px;max-height:60vh}}
 @media (max-width:640px){.st-title{display:none}}
+
+/* r4-replay2: update interval, order ticket (limit/stop, trade from chart), working orders */
+.replay-upd{max-width:110px}
+.replay-loading{font-size:11px;color:var(--muted);font-family:var(--mono)}
+.replay-otype{
+  background:var(--bg);border:1px solid var(--border2);color:var(--txt);border-radius:7px;
+  padding:3px 5px;font-size:11px;font-family:var(--mono);outline:none;
+}
+[data-theme="light"] .replay-otype{background:var(--card);border-color:var(--border)}
+.replay-orders .replay-px{width:92px}
+.replay-orders .replay-pickpx{
+  display:inline-flex;align-items:center;padding:4px 6px;background:transparent;
+  border-color:var(--border2);color:var(--muted);
+}
+.replay-orders .replay-pickpx.on{color:var(--txt);border-color:var(--purple);background:rgb(var(--pRGB)/.15)}
+#chartWrap.replay-picking-price{cursor:crosshair}
+.replay-working{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-family:var(--mono)}
+.replay-order{
+  display:inline-flex;align-items:center;gap:4px;border:1px dotted currentColor;border-radius:7px;
+  padding:1px 3px 1px 7px;font-variant-numeric:tabular-nums;
+}
+.replay-order button{
+  background:transparent;border:0;color:var(--dim);cursor:pointer;font-size:13px;line-height:1;padding:0 3px;
+}
+.replay-order button:hover{color:var(--red)}
+@media (max-width:640px){.replay-orders{flex-wrap:wrap}}

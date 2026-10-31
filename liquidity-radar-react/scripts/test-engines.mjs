@@ -4256,6 +4256,44 @@ alertcondition(close > 12, "Up", "close above 12")`, k)
   eq('depth: empty grid has no cap', DH.intensityCap([0, 0]), 0)
 }
 
+// ---- r4-replay2: update-interval forming bar, working orders, fill markers ----
+{
+  const RM = await import(src('features/charts/replayMath.ts'))
+  const subs = [
+    { t: 0, o: 10, h: 12, l: 9, c: 11, v: 1 },
+    { t: 60, o: 11, h: 15, l: 10, c: 14, v: 2 },
+    { t: 120, o: 14, h: 14, l: 7, c: 8, v: 3 },
+  ]
+  eq('replay2: forming bar folds sub-bars up to the cursor', RM.formingBar(subs, 0, 60), { t: 0, o: 10, h: 15, l: 9, c: 14, v: 3 })
+  eq('replay2: forming bar of every sub-bar is the whole bar', RM.formingBar(subs, 0, 120), { t: 0, o: 10, h: 15, l: 7, c: 8, v: 6 })
+  eq('replay2: forming bar keeps the main bar open time', RM.formingBar(subs.slice(1), 0, 60).t, 0)
+  eq('replay2: nothing formed before the first sub-bar', RM.formingBar(subs, 0, -1), null)
+  eq('replay2: next / previous sub-bar', [RM.nextSubTime(subs, 0), RM.nextSubTime(subs, 120), RM.prevSubTime(subs, 120), RM.prevSubTime(subs, 0)], [60, null, 60, null])
+  const opts = [{ id: '1s', ms: 1000 }, { id: '1m', ms: 60000 }, { id: '1h', ms: 3600000 }, { id: '1d', ms: 86400000 }]
+  eq('replay2: update intervals for 1h bars', RM.updateIntervalsFor(3600000, opts).map((o) => o.id), ['1s', '1m'])
+  eq('replay2: 1s steps stop past 1h bars', RM.updateIntervalsFor(86400000, opts).map((o) => o.id), ['1m', '1h'])
+
+  const PT = await import(src('features/charts/paperTrading.ts'))
+  const b = { o: 100, h: 105, l: 95 }
+  eq('replay2: buy limit fills at its price', PT.orderFill({ side: 'buy', type: 'limit', price: 97 }, b), 97)
+  eq('replay2: buy limit below the bar waits', PT.orderFill({ side: 'buy', type: 'limit', price: 90 }, b), null)
+  eq('replay2: gap through a buy limit fills at the open', PT.orderFill({ side: 'buy', type: 'limit', price: 101 }, b), 100)
+  eq('replay2: buy stop fills at its price', PT.orderFill({ side: 'buy', type: 'stop', price: 104 }, b), 104)
+  eq('replay2: gap through a buy stop fills at the open', PT.orderFill({ side: 'buy', type: 'stop', price: 99 }, b), 100)
+  eq('replay2: sell limit / sell stop', [PT.orderFill({ side: 'sell', type: 'limit', price: 103 }, b), PT.orderFill({ side: 'sell', type: 'stop', price: 96 }, b), PT.orderFill({ side: 'sell', type: 'stop', price: 94 }, b)], [103, 96, null])
+  eq('replay2: order type from the picked price', [PT.orderTypeFor('buy', 90, 100), PT.orderTypeFor('buy', 110, 100), PT.orderTypeFor('sell', 110, 100), PT.orderTypeFor('sell', 90, 100)], ['limit', 'stop', 'limit', 'stop'])
+
+  let bk = PT.buy(PT.emptyBook(), 1, 100, 120000)
+  bk = PT.sell(bk, 1, 110, 60000)
+  bk = PT.sell(bk, 2, 120, 300000)
+  const bars = [{ t: 0 }, { t: 60000 }, { t: 120000 }, { t: 180000 }]
+  const mk = PT.fillMarkers(bk.fills, bars, 180000, { up: 'g', dn: 'r' })
+  eq('replay2: fill markers sorted, future fills hidden', mk.map((m) => [m.time, m.shape, m.color]), [[60, 'arrowDown', 'r'], [120, 'arrowUp', 'g']])
+  eq('replay2: fill marker text', mk[1].text, 'Buy 1 @ 100')
+  eq('replay2: fill snaps to the bar it happened in', PT.fillMarkers([{ side: 'buy', qty: 1, price: 1, t: 150000 }], bars, 1e9, { up: 'g', dn: 'r' })[0].time, 120)
+  eq('replay2: fill before the first bar is not drawn', PT.fillMarkers([{ side: 'buy', qty: 1, price: 1, t: -5 }], bars, 1e9, { up: 'g', dn: 'r' }), [])
+}
+
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')
 if (fails.length) {
   fails.forEach((f) => console.log('  FAIL  ' + f))
