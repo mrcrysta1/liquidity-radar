@@ -3383,6 +3383,31 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('edit: start points are not mutated', pts[0], { time: 200, price: 10 })
 }
 
+// ---- drawings: undo / redo history ------------------------------------------------
+{
+  const { createDrawingHistory } = await import(src('features/charts/drawings/history.ts'))
+  const h = createDrawingHistory(3)
+  h.reset('[]')
+  eq('history: nothing to undo at first', h.undo(), null)
+  eq('history: unchanged save is no step', h.commit('[]'), false)
+  h.commit('[a]')
+  h.commit('[a,b]')
+  eq('history: undo returns the previous state', h.undo(), '[a]')
+  eq('history: redo returns the undone state', h.redo(), '[a,b]')
+  h.undo()
+  h.commit('[a,c]')
+  eq('history: a new change drops the redo branch', h.canRedo(), false)
+  h.commit('[1]')
+  h.commit('[2]')
+  h.commit('[3]')
+  h.undo()
+  h.undo()
+  h.undo()
+  eq('history: capped at the limit', h.undo(), null)
+  h.reset('[x]')
+  eq('history: a coin switch forgets the steps', [h.canUndo(), h.canRedo()], [false, false])
+}
+
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')
 if (fails.length) {
   fails.forEach((f) => console.log('  FAIL  ' + f))

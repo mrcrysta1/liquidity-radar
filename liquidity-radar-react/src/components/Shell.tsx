@@ -36,6 +36,7 @@ import { renderAlerts } from '../features/alerts/alerts'
 import { AlertsModal } from './alerts/AlertsModal'
 import { openModal } from '../utils/dom'
 import { ChartSidePanel } from './chart/ChartSidePanel'
+import { AlertRailButton, DrawHistoryButtons } from './chart/ChartActions'
 import { Footer } from './footer/Footer'
 import { DashHead } from './DashHead'
 import { Sidebar } from './Sidebar'
@@ -214,6 +215,7 @@ export function Shell() {
               <DrawToolPicker />
               <span className="tvd-sep" aria-hidden="true" />
               <DrawEditTools />
+              <DrawHistoryButtons />
               <span className="tvd-sep" aria-hidden="true" />
               <OverlayTogglePicker />
             </div>
@@ -227,7 +229,7 @@ export function Shell() {
               </div>
             </div>
             <Guard name="Chart side panel">
-              <ChartSidePanel />
+              <ChartSidePanel tools={<AlertRailButton />} />
             </Guard>
           </div>
           <Guard name="Chart bottom bar"><ChartBottomBar /></Guard>

@@ -96,3 +96,22 @@ export function onUndoDrawing(fn: () => void): void {
 export function undoDrawing(): void {
   if (onUndo) onUndo()
 }
+
+let onRedo: (() => void) | null = null
+export function onRedoDrawing(fn: () => void): void {
+  onRedo = fn
+}
+export function redoDrawing(): void {
+  if (onRedo) onRedo()
+}
+
+/** Whether there is a drawing change to undo / redo, for the buttons. */
+let history = { undo: false, redo: false }
+export function drawingHistory(): { undo: boolean; redo: boolean } {
+  return history
+}
+export function setDrawingHistory(undo: boolean, redo: boolean): void {
+  if (history.undo === undo && history.redo === redo) return
+  history = { undo, redo }
+  emit()
+}

@@ -53,11 +53,14 @@ import {
   isMagnet,
   onClearAllDrawings,
   onDrawToolChange,
+  onRedoDrawing,
   onUndoDrawing,
   setDrawTool,
   setDrawingCount,
+  setDrawingHistory,
   setPendingPoints,
 } from './drawTools'
+import { createDrawingHistory } from './drawings/history'
 import { shape } from './drawings/geometry'
 import type { Drawing, MapCtx, Shape } from './drawings/geometry'
 import { handleAt, hitShape, shiftPoints } from './drawings/edit'
@@ -934,15 +937,23 @@ function initChartToolbar(): void {
     saveDrawings()
     publishDrawingCount()
     redrawDrawings()
-    showToast('Drawings cleared')
+    showToast('Drawings cleared — Ctrl+Z to undo')
   })
+  // A drawing still being placed is cancelled first; after that, undo steps
+  // back through every saved change (add, delete, move, clear all).
   onUndoDrawing(function () {
-    if (chartState.drawBuf.length) chartState.drawBuf = []
-    else if (currentDrawings().pop()) saveDrawings()
-    chartState._eraseHit = -1
-    chartState._sel = -1
-    publishDrawingCount()
-    redrawDrawings()
+    currentDrawings()
+    if (chartState.drawBuf.length) {
+      chartState.drawBuf = []
+      publishDrawingCount()
+      redrawDrawings()
+      return
+    }
+    restoreDrawings(drawHistory.undo())
+  })
+  onRedoDrawing(function () {
+    currentDrawings()
+    restoreDrawings(drawHistory.redo())
   })
   syncDrawHint()
 }
@@ -977,13 +988,41 @@ function currentDrawings(): Any[] {
     chartState._freeXY = null
     chartState._captionDraft = null
     closeLabelInput()
+    drawHistory.reset(snapshotDrawings())
+    publishHistory()
     publishDrawingCount()
   }
   return chartState.drawings
 }
 
-/** Write the current coin's set back; the most recently edited coins are kept. */
+/** Undo / redo over every saved change to the current coin's drawings. */
+const drawHistory = createDrawingHistory()
+const snapshotDrawings = (): string => JSON.stringify(chartState.drawings)
+function publishHistory(): void {
+  setDrawingHistory(drawHistory.canUndo(), drawHistory.canRedo())
+}
+/** Put back a snapshot from the history and persist it (not as a new step). */
+function restoreDrawings(snap: string | null): void {
+  if (snap == null) return
+  chartState.drawings = JSON.parse(snap)
+  chartState.drawBuf = []
+  chartState._eraseHit = -1
+  chartState._sel = -1
+  writeDrawings()
+  publishDrawingCount()
+  publishHistory()
+  redrawDrawings()
+}
+
+/** Write the current coin's set back and record it as an undo step. */
 function saveDrawings(): void {
+  if (drawingsSym == null) return
+  if (drawHistory.commit(snapshotDrawings())) publishHistory()
+  writeDrawings()
+}
+
+/** Persist the current coin's set; the most recently edited coins are kept. */
+function writeDrawings(): void {
   if (drawingsSym == null) return
   const stored = storageGet<Record<string, Any[]>>(DRAWINGS_KEY, {})
   const all: Record<string, Any[]> = stored && typeof stored === 'object' ? stored : {}
