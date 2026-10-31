@@ -8,6 +8,7 @@ import { state } from '../../services/store'
 import { storageGet, storageSet } from '../../services/storage'
 import {
   attachIndicatorChart,
+  blankIndicators,
   indicatorLegend,
   indicatorPaneCount,
   refreshIndicatorColors,
@@ -61,8 +62,10 @@ import {
 import { shape } from './drawings/geometry'
 import type { Drawing, MapCtx, Shape } from './drawings/geometry'
 import { handleAt, hitShape, shiftPoints } from './drawings/edit'
+import { logicalToTime, timeToLogical } from './drawings/timeMap'
 import { fetchOlderKlines, historyExhausted } from '../../services/marketData'
-import { attachDeltaPane, renderDeltaPane } from './deltaPane'
+import { attachDeltaPane, blankDeltaPane, renderDeltaPane } from './deltaPane'
+import { subscribeSymbol } from '../actions/userActions'
 import { attachWhaleBubbles, renderWhaleBubbles, watchLiveWhales } from './whaleBubbles'
 import { attachVolumeProfile, renderVolumeProfile } from './volumeProfileOverlay'
 import { onDeltaChange } from '../delta/delta'
@@ -465,6 +468,8 @@ export function initChart(): void {
   // a fresh data load, so there is one place where series are built.
   onIndicatorsChange(() => updateChartData(false))
   onReplayChange((modeChanged: boolean) => updateChartData(modeChanged))
+  // A new coin empties state.candles before its bars load; clear the chart with it.
+  subscribeSymbol(() => updateChartData(true))
   // Which derived bars are on screen ('' for time candles): range ↔ renko
   // rebuilds the bars as surely as leaving them does.
   const derivedKind = (): string => (isRangeMode() ? getChartStyle() : '')
@@ -723,10 +728,37 @@ function wireLegendActions(): void {
  * replay) keeps whatever the user has scrolled to; refitting on every redraw
  * would yank the view back to the right edge mid-drag.
  */
+/** The symbol + interval last drawn, to tell a new dataset from a reload of it. */
+let drawnKey = ''
+/**
+ * Whether freshly loaded candles are a different market or interval from what
+ * is on screen. A retry or a gap refill reloads the same series and must keep
+ * the user's zoom; only a genuinely new dataset is refitted.
+ */
+export function isNewDataset(): boolean {
+  return !state.candlesKey || state.candlesKey !== drawnKey
+}
+
 export function updateChartData(fit = false): void {
   if (!chart) return
   const candles = displayCandles()
-  if (!candles.length) return
+  // A new dataset (fit) must not share the time scale with the old one, even
+  // for a moment: lightweight-charts 4.1 misplaces the new bars when, say, 1h
+  // candles land beside a 15m indicator or delta series — the bars render as a
+  // weeks-long gap, then "Value is null" errors blank the plot. So empty the
+  // series that follow the candles first; they are redrawn just below.
+  if (fit || !candles.length) {
+    blankIndicators()
+    blankDeltaPane()
+  }
+  // Symbol or interval changed and the new bars are still loading: clear the
+  // previous market rather than leave it under the new title.
+  if (!candles.length) {
+    candleSeries.setData([])
+    chartState.firstBarTime = undefined
+    syncWatermark()
+    return
+  }
   const ts = chart.timeScale()
   syncSecondsVisible()
   const keep = fit ? null : ts.getVisibleLogicalRange()
@@ -737,7 +769,11 @@ export function updateChartData(fit = false): void {
   renderIndicators(candles)
   renderDeltaPane(timeOnlyCandles(), indicatorPaneCount())
   renderWhaleBubbles()
+  drawnKey = state.candlesKey || ''
   if (fit) {
+    // A fresh fit starts at bar 0 like a pan to the oldest bar would; history
+    // paging must wait for this dataset's own first pan, not a past one.
+    userMovedChart = false
     ts.fitContent()
     afterChartFit()
   } else if (keep) {
@@ -1242,8 +1278,28 @@ function updateDrawHit(): void {
  * the same idea as TradingView's magnet.
  */
 const MAGNET_PX = 14
+
+/** Bar times on screen in seconds, rebuilt only when the displayed bars change. */
+let barTimesOf: Any[] | null = null
+let barTimes: number[] = []
+function shownBarTimes(): number[] {
+  const bars = displayCandles()
+  if (bars !== barTimesOf) {
+    barTimesOf = bars
+    barTimes = bars.map((k) => Math.floor(k.t / 1000))
+  }
+  return barTimes
+}
+
 function snapToCandle(x: Any, y: Any): Any {
-  const time = chart.timeScale().coordinateToTime(x)
+  const ts = chart.timeScale()
+  // Past the last bar the chart has no time; count bars on from the end, so
+  // trend lines and fibs can be projected into the future.
+  let time = ts.coordinateToTime(x)
+  if (time == null) {
+    const logical = ts.coordinateToLogical(x)
+    time = logical == null ? null : logicalToTime(shownBarTimes(), logical)
+  }
   let price: number | null
   try {
     price = candleSeries ? candleSeries.coordinateToPrice(y) : null
@@ -1383,7 +1439,13 @@ function resizeDrawCanvas(): void {
 function mapCtx(cw: number, ch: number): MapCtx {
   const ts = chart.timeScale()
   return {
-    x: (t: number) => ts.timeToCoordinate(snapChartTime(t) as Any),
+    // Through logical space, not timeToCoordinate: that needs a bar at exactly
+    // `t`, so an anchor from another interval (13:15 on 4h) or outside the
+    // loaded bars had no x and the whole drawing vanished.
+    x: (t: number) => {
+      const logical = timeToLogical(shownBarTimes(), snapChartTime(t))
+      return logical == null ? null : ts.logicalToCoordinate(logical as Any)
+    },
     y: (pr: number) => (candleSeries ? candleSeries.priceToCoordinate(pr) : null),
     cw: cw,
     ch: ch,

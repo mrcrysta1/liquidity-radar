@@ -50,6 +50,7 @@ export interface IndicatorRenderer {
   legend(candles: CandleFlat[]): LegendEntry[]
   refreshColors(): void
   clear(): void
+  blank(): void
   paneCount(): number
 }
 
@@ -366,6 +367,11 @@ export function createIndicatorRenderer(
     })
   }
 
+  /** Empty every series but keep it, so a new dataset can land on a clean time scale. */
+  function blankIndicators(): void {
+    held.forEach((h) => h.series.setData([]))
+  }
+
   function clearIndicators(): void {
     held.forEach((h) => {
       try {
@@ -384,6 +390,7 @@ export function createIndicatorRenderer(
     legend: indicatorLegend,
     refreshColors: refreshIndicatorColors,
     clear: clearIndicators,
+    blank: blankIndicators,
     paneCount: indicatorPaneCount,
   }
 }
@@ -409,5 +416,6 @@ export const indicatorLegend = (candles: CandleFlat[]): LegendEntry[] => main.le
 /** Re-tint every series — called when the palette or light/dark mode changes. */
 export const refreshIndicatorColors = (): void => main.refreshColors()
 export const clearIndicators = (): void => main.clear()
+export const blankIndicators = (): void => main.blank()
 /** How many indicator panes currently occupy the bottom of the main chart. */
 export const indicatorPaneCount = (): number => main.paneCount()
