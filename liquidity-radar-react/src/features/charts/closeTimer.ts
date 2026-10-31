@@ -10,6 +10,7 @@ import { bucketEnd, tfDef } from '../../services/timeframe'
 import { getTimeframe } from './timeframes'
 import { isReplayOn } from './replay'
 import { chartPalette } from './chartPalette'
+import { chartSettings } from './chartSettings'
 import { getChartStyle } from './chartStyle'
 import { heikinAshiBar } from './series/heikinAshi'
 
@@ -53,7 +54,7 @@ export function updateCloseTimer(): void {
   const s = deps.series()
   const raw = state.candles[state.candles.length - 1]
   // Nothing to count down to while replaying history, or before data arrives.
-  if (!s || !raw || isReplayOn()) {
+  if (!s || !raw || isReplayOn() || !chartSettings().countdown) {
     el.style.display = 'none'
     return
   }
