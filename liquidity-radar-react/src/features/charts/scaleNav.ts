@@ -425,7 +425,8 @@ function syncFromChart(): void {
   if (changed) emit()
 }
 
-function syncView(): void {
+/** Re-measure the axes and panes the overlays are positioned against. */
+export function syncView(): void {
   if (!deps) return
   const ts = deps.chart.timeScale()
   let a = away
@@ -435,6 +436,11 @@ function syncView(): void {
     a = ts.scrollPosition() < -1
     w = Number(priceScale().width()) || w
     h = Number(ts.height()) || h
+    // Native panes (lightweight-charts v5) sit between the price pane and the
+    // time axis: the overlays anchored above the axis (zoom bar, whale
+    // legend) clear them too, so they stay over the candles.
+    const panes = deps.chart.panes?.() || []
+    for (let i = 1; i < panes.length; i++) h += Number(panes[i].getHeight()) + 1
   } catch {
     /* no data yet */
   }
@@ -463,6 +469,10 @@ export function attachScaleNav(d: ScaleNavDeps): void {
   rebaseLock()
   d.onSeriesChange(() => installProvider())
   chart.timeScale().subscribeVisibleLogicalRangeChange(syncView)
+  // Panes appear, disappear and are dragged to new heights without the range
+  // changing; the mouse is on the chart whenever that happens. syncView only
+  // emits when a size actually changed.
+  chart.subscribeCrosshairMove(syncView)
   // Another interval picked by hand: the range button no longer describes the chart.
   subscribeTimeframe(() => {
     const p = rangeSel ? rangePreset(rangeSel) : null

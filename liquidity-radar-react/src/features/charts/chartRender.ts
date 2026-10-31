@@ -49,7 +49,8 @@ import {
   resetTvLastPrice,
   tvChartOptions,
   tvLastPrice,
-  tvWatermark,
+  syncTvWatermark,
+  mainPaneHeight,
 } from './chartPalette'
 import {
   drawToolDef,
@@ -79,7 +80,7 @@ import { attachWhaleBubbles, renderWhaleBubbles, watchLiveWhales } from './whale
 import { attachVolumeProfile, renderVolumeProfile } from './volumeProfileOverlay'
 import { onDeltaChange } from '../delta/delta'
 import { onOverlayTogglesChange } from './overlayToggles'
-import { afterChartFit, attachScaleNav, subscribeScaleNav } from './scaleNav'
+import { afterChartFit, attachScaleNav, subscribeScaleNav, syncView as syncScaleNavView } from './scaleNav'
 import { registerCrosshairSync } from './crosshairSync'
 
 type Any = any
@@ -138,7 +139,9 @@ export function chartTheme(): Any {
 }
 export function applyChartTheme(): void {
   if (!chart) return
-  chart.applyOptions({ ...tvChartOptions(undefined, mainIsDaily), ...tvWatermark(watermarkText()) })
+  chart.applyOptions(tvChartOptions(undefined, mainIsDaily))
+  watermarkShown = ''
+  syncWatermark()
   applyChartSettings()
   if (candleSeries) {
     themePriceSeries(candleSeries, getChartStyle())
@@ -179,7 +182,7 @@ function syncWatermark(): void {
   const text = watermarkText()
   if (text === watermarkShown) return
   watermarkShown = text
-  chart.applyOptions(tvWatermark(text))
+  syncTvWatermark(chart, text)
 }
 /** Ticker as TradingView prints it: BTCUSDT for a Binance pair, the base otherwise. */
 export function legendSymbol(sym: string): string {
@@ -324,7 +327,7 @@ export function createPriceSeries(c: Any, id: ChartStyleId, baseline = 0): Any {
       priceLineStyle: 2,
     })
   } else if (id === 'hollow') {
-    return c.addCandlestickSeries({
+    return c.addSeries(LightweightCharts.CandlestickSeries, {
       upColor: 'rgba(0,0,0,0)',
       downColor: 'rgba(0,0,0,0)',
       borderVisible: true,
@@ -337,14 +340,14 @@ export function createPriceSeries(c: Any, id: ChartStyleId, baseline = 0): Any {
     })
   } else if (id === 'renko') {
     // Bricks: TradingView's renko colours, boxes with no wicks.
-    return c.addCandlestickSeries({
+    return c.addSeries(LightweightCharts.CandlestickSeries, {
       ...renkoSeriesOptions(),
       priceLineColor: th.pline,
       priceLineStyle: 2,
     })
   } else if (id === 'bar' || id === 'hlc') {
     // HLC bars are bars without the open tick.
-    return c.addBarSeries({
+    return c.addSeries(LightweightCharts.BarSeries, {
       upColor: th.up,
       downColor: th.dn,
       // TradingView's bars are thin OHLC ticks, not body-width blocks.
@@ -359,7 +362,7 @@ export function createPriceSeries(c: Any, id: ChartStyleId, baseline = 0): Any {
   if (line) return line
   // Candles, Heikin Ashi (HA bars, see priceSeriesData), and range bars
   // (OHLC bars built off the clock).
-  return c.addCandlestickSeries({
+  return c.addSeries(LightweightCharts.CandlestickSeries, {
     upColor: th.up,
     downColor: th.dn,
     borderVisible: false,
@@ -460,7 +463,7 @@ export function initChart(): void {
   // TradingView's canvas: palette colours, fonts, dashed grey crosshair and a
   // faint symbol watermark (see ./chartPalette).
   const tv: Any = tvChartOptions(undefined, mainIsDaily)
-  watermarkShown = watermarkText()
+  watermarkShown = '' // the watermark plugin is created by the first syncWatermark()
   chart = createZonedChart(LightweightCharts, el, mainIsDaily, {
     // autoSize lets the library watch the container itself. Passing explicit
     // width/height instead makes it write inline sizes onto the element, which
@@ -468,7 +471,6 @@ export function initChart(): void {
     // whatever height the side panel had stretched it to.
     autoSize: true,
     ...tv,
-    ...tvWatermark(watermarkShown),
     timeScale: {
       ...tv.timeScale,
       timeVisible: true,
@@ -877,6 +879,8 @@ export function updateChartData(fit = false): void {
   rangeShown = isRangeMode() ? candles : []
   renderIndicators(candles)
   renderDeltaPane(timeOnlyCandles(), indicatorPaneCount())
+  // Panes may have come or gone: the overlays above the time axis re-measure.
+  requestAnimationFrame(syncScaleNavView)
   renderWhaleBubbles()
   drawnKey = state.candlesKey || ''
   if (fit) {
@@ -2015,7 +2019,7 @@ function redrawDrawings(includePreview?: Any): void {
   const [px0, px1] = plotSpan(cw)
   ctx.save()
   ctx.beginPath()
-  ctx.rect(px0, 0, px1 - px0, ch)
+  ctx.rect(px0, 0, px1 - px0, mainPaneHeight(chart, ch))
   ctx.clip()
 
   currentDrawings().forEach(function (d: Any, i: number) {

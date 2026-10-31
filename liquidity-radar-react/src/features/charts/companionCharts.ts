@@ -45,7 +45,7 @@ import {
   resetTvLastPrice,
   tvChartOptions,
   tvLastPrice,
-  tvWatermark,
+  syncTvWatermark,
   volumeColor,
 } from './chartPalette'
 import { LAYOUTS, MAX_CHARTS, cells, layoutSpec, rowCount } from './layouts'
@@ -534,7 +534,6 @@ function initChart(p: Panel): void {
     // never writes inline sizes that outlive the layout that caused them.
     autoSize: true,
     ...tv,
-    ...tvWatermark(watermarkOf(p), 32),
     layout: { ...tv.layout, fontSize: 11 },
     // Range bars are spaced by the second (see series/rangeBars), like the main chart.
     timeScale: {
@@ -558,7 +557,7 @@ function initChart(p: Panel): void {
   // The same series the main chart builds for this style, so a cell keeps its
   // look whether or not it is the active one.
   p.candleSeries = createPriceSeries(chart, p.style)
-  p.volSeries = chart.addHistogramSeries({
+  p.volSeries = chart.addSeries(LightweightCharts.HistogramSeries, {
     priceFormat: { type: 'volume' },
     priceScaleId: 'vol',
     lastValueVisible: false,
@@ -746,7 +745,7 @@ function draw(p: Panel, candles: CandleFlat[]): void {
   p.volSeries.setData(p.shown.map(volBar))
   drawIndicators(p)
   p.chart.timeScale().fitContent()
-  p.chart.applyOptions(tvWatermark(watermarkOf(p), 32))
+  syncTvWatermark(p.chart, watermarkOf(p), 32)
   const last = p.shown[p.shown.length - 1]
   if (last) tvLastPrice(p.candleSeries, last.c >= last.o)
   liveLegend(p)
@@ -897,9 +896,9 @@ export function applyCompanionTheme(): void {
     const tv: Any = tvChartOptions(pal, () => isDailyTf(p.tf))
     p.chart.applyOptions({
       ...tv,
-      ...tvWatermark(watermarkOf(p), 32),
       layout: { ...tv.layout, fontSize: 11 },
     })
+    syncTvWatermark(p.chart, watermarkOf(p), 32, pal)
     if (p.candleSeries) {
       themePriceSeries(p.candleSeries, p.style)
       resetTvLastPrice(p.candleSeries)

@@ -2866,10 +2866,9 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('midpoint: no bars at all', closeMidpoint([], 0, 1), null)
 
   // A chart that records what it was asked to add, so the options can be checked.
+  // lightweight-charts v5: addSeries(definition, options); the definition names its type.
   const chart = {
-    addLineSeries: (o) => ({ kind: 'line', o }),
-    addAreaSeries: (o) => ({ kind: 'area', o }),
-    addBaselineSeries: (o) => ({ kind: 'baseline', o }),
+    addSeries: (def, o) => ({ kind: String(def.type).toLowerCase(), o }),
     addCustomSeries: (view, o) => ({ kind: 'custom', view, o }),
   }
   const k = { primary: '#2962FF', up: '#089981', dn: '#F23645', neutral: '#868993', pline: '#999' }

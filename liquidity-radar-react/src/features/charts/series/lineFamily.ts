@@ -8,6 +8,7 @@
 // fading from the line colour to transparent, a baseline green above its base
 // and red below, and an HLC area shaded green between close and high and red
 // between close and low.
+import { AreaSeries, BaselineSeries, LineSeries } from 'lightweight-charts'
 import type { CandleFlat } from '../../../services/market'
 import { hlcAreaView } from './hlcArea.ts'
 
@@ -92,10 +93,10 @@ export function createLineFamilySeries(
   if (!isLineFamily(id)) return null
   const common = { lineWidth: 2, priceLineStyle: 2, ...colorOptions(id, k) }
   if (id === 'hlcarea') return c.addCustomSeries(hlcAreaView(), common)
-  if (id === 'area') return c.addAreaSeries(common)
+  if (id === 'area') return c.addSeries(AreaSeries, common)
   if (id === 'baseline')
-    return c.addBaselineSeries({ ...common, baseValue: { type: 'price', price: baseline } })
-  return c.addLineSeries({
+    return c.addSeries(BaselineSeries, { ...common, baseValue: { type: 'price', price: baseline } })
+  return c.addSeries(LineSeries, {
     ...common,
     // LineType.WithSteps
     lineType: id === 'stepline' ? 1 : 0,

@@ -10,7 +10,10 @@
 //
 // Kept free of chart imports so the close timer and the indicator renderer can
 // read the same colours without an import cycle through chartRender.
+import { createTextWatermark } from 'lightweight-charts'
 import { chartTzOptions } from './timezone'
+
+type Any = any
 
 /** TradingView's scale font stack. */
 export const TV_FONT =
@@ -148,21 +151,41 @@ export function resetTvLastPrice(series: unknown): void {
   if (series) (series as { __tvLast?: string }).__tvLast = undefined
 }
 
-/** TradingView-style watermark: symbol and interval, faint, mid-chart. */
-export function tvWatermark(
+/**
+ * TradingView-style watermark: symbol and interval, faint, mid-chart.
+ * lightweight-charts v5 made the watermark a plugin on a pane, so this keeps
+ * one per chart (on its main pane) and updates it in place.
+ */
+const watermarks = new WeakMap<object, { applyOptions(o: unknown): void }>()
+export function syncTvWatermark(
+  chart: Any,
   text: string,
   fontSize = 52,
   p: ChartPalette = chartPalette(),
-): Record<string, unknown> {
-  return {
-    watermark: {
-      visible: !!text,
-      text,
-      color: p.watermark,
-      fontSize,
-      fontFamily: TV_FONT,
-      horzAlign: 'center',
-      vertAlign: 'center',
-    },
+): void {
+  const pane = chart?.panes?.()[0]
+  if (!pane) return
+  const opts = {
+    visible: !!text,
+    horzAlign: 'center',
+    vertAlign: 'center',
+    lines: [{ text, color: p.watermark, fontSize, fontFamily: TV_FONT }],
+  }
+  const w = watermarks.get(chart)
+  if (w) w.applyOptions(opts)
+  else watermarks.set(chart, createTextWatermark(pane, opts as Any))
+}
+
+/**
+ * Height of the chart's main (price) pane. With native panes (v5) the canvas
+ * overlays — drawings, volume profile, whale bubbles — cover every pane, so
+ * they clip to this rather than the whole chart.
+ */
+export function mainPaneHeight(chart: Any, fallback: number): number {
+  try {
+    const h = chart?.panes?.()[0]?.getHeight()
+    return h > 0 ? Math.min(h, fallback) : fallback
+  } catch {
+    return fallback
   }
 }
