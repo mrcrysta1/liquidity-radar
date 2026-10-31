@@ -46,7 +46,7 @@ const { buildPointFigure, clampPnfReversal, pnfBoxes } = await import(
 const { noteLimitResponse, cooldownLeft, isRateLimited, isBinanceUrl } = await import(
   src('api/rateLimit.ts')
 )
-const { pfmt, nfmt, cfmt } = await import(src('utils/format.ts'))
+const { pfmt, nfmt, cfmt, priceFormatFor } = await import(src('utils/format.ts'))
 const { safeUrl } = await import(src('utils/url.ts'))
 const { newsSimplify } = await import(src('features/news/newsItem.ts'))
 const { mergeNewsFeeds, loadNewsProgressive, hedge, newsDedup } = await import(src('features/news/newsLoad.ts'))
@@ -196,6 +196,14 @@ const bar = (i, h, l, c) => ({ t: i * 60000, o: c, h, l, c, v: 1 })
   const jan = Date.UTC(2026, 0, 1)
   eq('bucketEnd: January rolls to February', bucketEnd(jan, tfDef('1M')), Date.UTC(2026, 1, 1))
   ok('bucketIndex: monotonic', bucketIndex(t0 + 1e6, d) > bucketIndex(t0, d))
+  // 7m does not divide a day: buckets restart at 00:00 UTC, the last one short.
+  const d7 = customTfDef('7m')
+  const day0 = Date.UTC(2026, 9, 23)
+  ok('bucket 7m: a new day starts a new bucket', bucketIndex(day0, d7) !== bucketIndex(day0 - 60000, d7))
+  eq('bucket 7m: same bucket inside 7 minutes', bucketIndex(day0 + 6 * 60000, d7), bucketIndex(day0, d7))
+  eq('bucket 7m: the last bucket ends at midnight', bucketEnd(day0 - 5 * 60000, d7), day0)
+  eq('bucket 7m: a full bucket is 7 minutes', bucketEnd(day0, d7), day0 + 7 * 60000)
+  eq('bucket 15m: dividing intervals are unchanged', bucketEnd(day0, tfDef('15m')), day0 + 900000)
 }
 
 // ------------------------------------------- older-history paging (resampled)
@@ -3426,6 +3434,113 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('timeMap: future bar time', M.logicalToTime(times, 5), 43200 + 14400 * 2)
   eq('timeMap: past bar time', M.logicalToTime(times, -1), -14400)
   eq('timeMap: round trip off-bar', M.logicalToTime(times, M.timeToLogical(times, 57600)), 57600)
+}
+
+// ---- price axis precision: minMove follows the instrument's size ------------------
+{
+  eq('priceFormat: BTC', priceFormatFor(77000), { type: 'price', precision: 2, minMove: 0.01 })
+  eq('priceFormat: PEPE', priceFormatFor(0.00001234), { type: 'price', precision: 8, minMove: 1e-8 })
+  eq('priceFormat: capped at 12', priceFormatFor(1e-15).precision, 12)
+}
+
+// ---- drawings: undo / redo history ------------------------------------------------
+{
+  const { createDrawingHistory } = await import(src('features/charts/drawings/history.ts'))
+  const h = createDrawingHistory(3)
+  h.reset('[]')
+  eq('history: nothing to undo at first', h.undo(), null)
+  eq('history: unchanged save is no step', h.commit('[]'), false)
+  h.commit('[a]')
+  h.commit('[a,b]')
+  eq('history: undo returns the previous state', h.undo(), '[a]')
+  eq('history: redo returns the undone state', h.redo(), '[a,b]')
+  h.undo()
+  h.commit('[a,c]')
+  eq('history: a new change drops the redo branch', h.canRedo(), false)
+  h.commit('[1]')
+  h.commit('[2]')
+  h.commit('[3]')
+  h.undo()
+  h.undo()
+  h.undo()
+  eq('history: capped at the limit', h.undo(), null)
+  h.reset('[x]')
+  eq('history: a coin switch forgets the steps', [h.canUndo(), h.canRedo()], [false, false])
+}
+
+// ---- drawings: what a click hits --------------------------------------------------
+{
+  const E = await import(src('features/charts/drawings/edit.ts'))
+  const base = { segs: [], fills: [], arcs: [], labels: [], handles: [] }
+  eq('hit: soft decoration is not grabbed', E.hitShape({ ...base, segs: [{ x1: 0, y1: 0, x2: 100, y2: 0, soft: true }] }, 50, 0), false)
+  eq('hit: a main line is', E.hitShape({ ...base, segs: [{ x1: 0, y1: 0, x2: 100, y2: 0 }] }, 50, 3), true)
+  const box = { ...base, fills: [{ pts: [10, 10, 90, 10, 90, 60, 10, 60], color: '' }] }
+  eq('hit: inside a filled rectangle', E.hitShape(box, 50, 30), true)
+  eq('hit: outside it', E.hitShape(box, 95, 30), false)
+  const ring = { ...base, arcs: [{ cx: 50, cy: 50, rx: 30, ry: 20 }] }
+  eq('hit: on an ellipse outline', E.hitShape(ring, 80, 50), true)
+  eq('hit: far from it', E.hitShape(ring, 50, 50), false)
+  eq('label: left-aligned spans to the right', E.labelSpan({ x: 100, text: 'abcd', align: 'left' }), [100, 138])
+  eq('label: right-aligned spans to the left', E.labelSpan({ x: 100, text: 'abcd', align: 'right' }), [62, 100])
+  const lbl = { ...base, labels: [{ x: 100, y: 20, text: 'a long caption here', box: true, align: 'left' }] }
+  eq('hit: right end of a long left-aligned label', E.hitShape(lbl, 200, 20), true)
+  eq('hit: empty space left of it', E.hitShape(lbl, 60, 20), false)
+}
+
+// ---- indicator maths: supertrend flip, keltner ATR, gaps, anchored VWAP -----------
+{
+  const M = await import(src('features/charts/indicators/math.ts'))
+  const bar = (t, o, h, l, c, v = 1) => ({ t, o, h, l, c, v })
+  // Flat at 100, then a bar that closes far below the lower band.
+  const flat = Array.from({ length: 15 }, (_, i) => bar(i * 60000, 100, 101, 99, 100))
+  const drop = flat.concat([bar(15 * 60000, 100, 100, 80, 80)])
+  const st = M.supertrend(drop, 3, 1)
+  eq('supertrend: flips on the bar that breaks the band', st.dir[15], -1)
+  // ATR length is its own input: a different ATR length changes the bands.
+  const kA = M.keltner(drop, 5, 2, 3)
+  const kB = M.keltner(drop, 5, 2, 10)
+  ok('keltner: ATR length is separate from the EMA length', kA.upper[15] !== kB.upper[15])
+  // An interior gap carries the last value forward instead of blanking the rest.
+  const gapped = M.onDefined([null, 1, 2, null, 4, 5], (v) => v.map((x) => x * 2))
+  eq('onDefined: a gap does not poison later values', gapped.slice(3), [4, 8, 10])
+  // Weekly anchor: Monday 2026-10-26 restarts; within the week it accumulates.
+  const mon = Date.UTC(2026, 9, 26)
+  const wk = [bar(mon - 86400000, 0, 10, 10, 10), bar(mon, 0, 20, 20, 20), bar(mon + 86400000, 0, 40, 40, 40)]
+  eq('vwap: weekly anchor restarts on Monday', M.vwapBands(wk, 2).v, [10, 20, 30])
+  eq('vwap: daily anchor restarts each day', M.vwapBands(wk, 1).v, [10, 20, 40])
+  const vb = M.vwapBands(wk, 2, 1)
+  eq('vwap: 1σ bands around the weekly VWAP', [vb.u[2], vb.l[2]], [40, 20])
+  eq('vwap: no bands at 0σ', M.vwapBands(wk, 2, 0).u[2], null)
+}
+
+// ---- time axis: day boundaries in the chart zone ---------------------------------
+{
+  const Z = await import(src('features/charts/zonedTimeScale.ts'))
+  const H = 3600
+  // Hourly bars across 2026-10-30 → 31 UTC.
+  const base = Date.UTC(2026, 9, 30, 0) / 1000
+  const pts = () => Array.from({ length: 30 }, (_, i) => ({ time: { t: base + i * H }, timeWeight: 0 }))
+  const dayAt = (p) => p.filter((x) => x.timeWeight === Z.WEIGHT.Day).map((x) => new Date(x.time.t * 1000).toISOString().slice(11, 16))
+  const utc = pts()
+  Z.fillZonedWeights(utc, 0, 'UTC', false)
+  // The first bar sits on midnight too, so the library's first-point guess marks it.
+  eq('zoned ticks: UTC day boundaries at 00:00 UTC', dayAt(utc), ['00:00', '00:00'])
+  // Los Angeles is UTC-7 on 30 Oct 2026: local midnight is 07:00 UTC.
+  const la = pts()
+  Z.fillZonedWeights(la, 0, 'America/Los_Angeles', false)
+  eq('zoned ticks: LA day boundary at local midnight (07:00 UTC)', dayAt(la), ['07:00'])
+  // Daily-and-longer bars keep UTC sessions whatever the zone.
+  const d = pts()
+  Z.fillZonedWeights(d, 0, 'America/Los_Angeles', true)
+  eq('zoned ticks: daily bars keep the UTC day', dayAt(d), ['00:00', '00:00'])
+  // Incremental fill from an index matches a full fill.
+  const part = pts()
+  Z.fillZonedWeights(part, 0, 'Asia/Karachi', false)
+  const inc = pts()
+  Z.fillZonedWeights(inc.slice(0, 10), 0, 'Asia/Karachi', false)
+  Z.fillZonedWeights(inc, 10, 'Asia/Karachi', false)
+  eq('zoned ticks: incremental fill equals a full fill', inc.slice(10).map((x) => x.timeWeight), part.slice(10).map((x) => x.timeWeight))
+  eq('zoned ticks: year beats month beats day', [Z.weightBetween(Date.UTC(2027, 0, 1), Date.UTC(2026, 11, 31)), Z.weightBetween(Date.UTC(2026, 10, 1), Date.UTC(2026, 9, 31))], [70, 60])
 }
 
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')

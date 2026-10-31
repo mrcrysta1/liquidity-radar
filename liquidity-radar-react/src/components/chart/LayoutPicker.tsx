@@ -94,7 +94,16 @@ export function LayoutPicker() {
         aria-label="Chart layout"
         onClick={() => setOpen((o) => !o)}
       >
-        <Glyph spec={currentSpec} />
+        {cells(currentSpec).length > 1 ? (
+          <Glyph spec={currentSpec} />
+        ) : (
+          // One chart: its single-cell glyph read as an empty checkbox, so
+          // the button shows the split-window icon TradingView uses.
+          <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true" className="layout-ico">
+            <rect x="3.5" y="4.5" width="17" height="15" rx="2" fill="none" stroke="currentColor" strokeWidth="1.5" />
+            <path d="M12 4.5v15M12 12h8.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+          </svg>
+        )}
         <span className="layout-tip">Chart layout</span>
       </button>
 

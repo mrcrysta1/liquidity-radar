@@ -119,10 +119,22 @@ function McCell({ panel, slot }: { panel: McPanelView; slot: number }) {
   )
 }
 
+/**
+ * A new cell starts on the coin and interval being charted (the interval
+ * mapped onto the grid's six; 1h when it has no match) — it always added
+ * BTCUSDT 1h.
+ */
+function addCurrent(): void {
+  // Exact ids only: lower-casing would turn the month (1M) into a minute.
+  const tf = String(state.tf || '')
+  const interval = (MC_INTERVALS as readonly string[]).includes(tf) ? tf : '1h'
+  mcAdd(state.symbol || 'BTCUSDT', interval)
+}
+
 function AddTile() {
   return (
     <div className="mc-add">
-      <button className="mc-add-btn" onClick={() => mcAdd('BTCUSDT', '1h')} aria-label="Add chart">
+      <button className="mc-add-btn" onClick={addCurrent} aria-label="Add chart">
         <svg width="30" height="30" viewBox="0 0 24 24">
           <path
             d="M12 5v14M5 12h14"

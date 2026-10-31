@@ -20,9 +20,10 @@
 // 'c<cell position>'), drawn by its own renderer over its own candles. The
 // active cell's set lives in the main chart's store; the two swap with it.
 import * as LightweightCharts from 'lightweight-charts'
+import { createZonedChart } from './zonedTimeScale'
 import { isInstrument } from '../../constants/instruments'
 import { baseOf, coinMeta } from '../../utils/coins'
-import { pfmt } from '../../utils/format'
+import { fmt, pfmt, priceDecimals } from '../../utils/format'
 import { $ } from '../../utils/dom'
 import {
   barBefore,
@@ -33,6 +34,7 @@ import {
   legendSymbol,
   priceSeriesData,
   priceSeriesPoint,
+  syncPricePrecision,
   themePriceSeries,
 } from './chartRender'
 import { syncBaselineBase } from './series/lineFamily'
@@ -527,7 +529,7 @@ function initChart(p: Panel): void {
   if (!body) return
   // The main chart's TradingView look (./chartPalette), a size smaller.
   const tv: Any = tvChartOptions(undefined, () => isDailyTf(p.tf))
-  const chart: Any = LightweightCharts.createChart(body, {
+  const chart: Any = createZonedChart(LightweightCharts, body, () => isDailyTf(p.tf), {
     // Same reason as the main chart: let the library measure its own box so it
     // never writes inline sizes that outlive the layout that caused them.
     autoSize: true,
@@ -542,7 +544,15 @@ function initChart(p: Panel): void {
       rightOffset: 5,
     },
     crosshair: { ...tv.crosshair, mode: 0 },
-    localization: { ...tv.localization, priceFormatter: (v: number) => pfmt(v) },
+    // Capped at the instrument's own precision, as on the main chart, so the
+    // decimals do not flip as a coin crosses 1.00.
+    localization: {
+      ...tv.localization,
+      priceFormatter: (v: number) => {
+        const last = p.shown[p.shown.length - 1]
+        return last && isFinite(v) ? fmt(v, Math.min(priceDecimals(v), priceDecimals(last.c))) : pfmt(v)
+      },
+    },
   } as Any)
   p.chart = chart
   // The same series the main chart builds for this style, so a cell keeps its
@@ -730,6 +740,7 @@ function draw(p: Panel, candles: CandleFlat[]): void {
   p.candles = candles.slice()
   p.shown = barsFor(p)
   p.candleSeries.setData(priceSeriesData(p.style, p.shown))
+  syncPricePrecision(p.candleSeries, p.shown[p.shown.length - 1]?.c)
   // Baseline follows the mid of the visible range, as on the main chart.
   if (p.style === 'baseline') syncBaselineBase(p.chart, p.candleSeries, () => p.shown)
   p.volSeries.setData(p.shown.map(volBar))
@@ -826,9 +837,18 @@ function connect(p: Panel, token: number): void {
   }
 }
 
-/** Companions size themselves via autoSize; kept so callers have one entry point. */
+/**
+ * Companions size themselves via autoSize; kept so callers have one entry
+ * point. Only a panel that has nothing in view yet is fitted (the same rule
+ * as its ResizeObserver): fitting all of them reset every companion's zoom
+ * on each tab switch.
+ */
 export function resizeAll(): void {
-  panels.forEach((p) => p.chart?.timeScale().fitContent())
+  panels.forEach((p) => {
+    const ts = p.chart?.timeScale()
+    const r = ts?.getVisibleLogicalRange()
+    if (ts && (!r || r.from <= 0)) ts.fitContent()
+  })
 }
 
 /**

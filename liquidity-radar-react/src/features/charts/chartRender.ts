@@ -1,7 +1,8 @@
 import * as LightweightCharts from 'lightweight-charts'
+import { createZonedChart } from './zonedTimeScale'
 import { venueOf } from '../../utils/coins'
 import { COINS, TICKER_COINS } from '../../constants/market'
-import { fmt, pfmt, nfmt, cfmt, chgHtml, priceDecimals } from '../../utils/format'
+import { fmt, pfmt, nfmt, cfmt, chgHtml, priceDecimals, priceFormatFor } from '../../utils/format'
 import { baseOf, coinMeta } from '../../utils/coins'
 import { $, showToast } from '../../utils/dom'
 import { state } from '../../services/store'
@@ -54,17 +55,23 @@ import {
   isMagnet,
   onClearAllDrawings,
   onDrawToolChange,
+  onDeleteSelectedDrawing,
+  onEditSelectedDrawing,
+  onRedoDrawing,
   onUndoDrawing,
   setDrawTool,
   setDrawingCount,
+  setDrawingHistory,
+  setSelectedDrawing,
   setPendingPoints,
 } from './drawTools'
+import { createDrawingHistory } from './drawings/history'
 import { shape } from './drawings/geometry'
 import type { Drawing, MapCtx, Shape } from './drawings/geometry'
 import { handleAt, hitShape, shiftPoints } from './drawings/edit'
 import { logicalToTime, timeToLogical } from './drawings/timeMap'
 import { fetchOlderKlines, historyExhausted } from '../../services/marketData'
-import { attachDeltaPane, blankDeltaPane, renderDeltaPane } from './deltaPane'
+import { attachDeltaPane, blankDeltaPane, renderDeltaPane, updateDeltaLast } from './deltaPane'
 import { subscribeSymbol } from '../actions/userActions'
 import { attachWhaleBubbles, renderWhaleBubbles, watchLiveWhales } from './whaleBubbles'
 import { attachVolumeProfile, renderVolumeProfile } from './volumeProfileOverlay'
@@ -373,15 +380,62 @@ function applyChartStyle(): void {
   priceSeriesSubs.forEach((f) => f(candleSeries))
 }
 export { renderWhaleBubbles } from './whaleBubbles'
+/**
+ * Give a price series the precision of the instrument it shows. Only re-applied
+ * when the decimals change, so a live tick costs nothing.
+ */
+export function syncPricePrecision(series: Any, price: number | undefined): void {
+  if (!series || price == null || !isFinite(price)) return
+  const pf = priceFormatFor(price)
+  if (series.__lrPrecision === pf.precision) return
+  series.__lrPrecision = pf.precision
+  series.applyOptions({ priceFormat: pf })
+}
 /** A value on the main chart, in at most the instrument's own price precision. */
 function chartPrice(p: number): string {
   const last = state.candles[state.candles.length - 1]
   if (!last || !isFinite(p)) return pfmt(p)
   return fmt(p, Math.min(priceDecimals(p), priceDecimals(last.c)))
 }
+/**
+ * A message over the plot with an optional Retry, for when there is nothing
+ * to draw (load failed, rate limit, library missing). It used to be a line of
+ * text in the small legend pill, easy to miss and with no way to act on it.
+ */
+export function showChartStatus(msg: string, retry?: () => void): void {
+  const wrap = $('chartWrap')
+  if (!wrap) return
+  let el = $('chartStatus')
+  if (!el) {
+    el = document.createElement('div')
+    el.id = 'chartStatus'
+    el.className = 'chart-status'
+    el.setAttribute('role', 'status')
+    wrap.appendChild(el)
+  }
+  el.innerHTML = ''
+  const p = document.createElement('p')
+  p.textContent = msg
+  el.appendChild(p)
+  if (retry) {
+    const b = document.createElement('button')
+    b.type = 'button'
+    b.textContent = 'Retry'
+    b.addEventListener('click', () => {
+      p.textContent = 'Retrying…'
+      retry()
+    })
+    el.appendChild(b)
+  }
+}
+export function hideChartStatus(): void {
+  $('chartStatus')?.remove()
+}
+
 export function initChart(): void {
   if (!(window as Any).LightweightCharts) {
     $('legendOHLC')!.textContent = 'Chart library failed to load'
+    showChartStatus('The chart library failed to load.', () => location.reload())
     return
   }
   const el = $('chart')!
@@ -389,7 +443,7 @@ export function initChart(): void {
   // faint symbol watermark (see ./chartPalette).
   const tv: Any = tvChartOptions(undefined, mainIsDaily)
   watermarkShown = watermarkText()
-  chart = LightweightCharts.createChart(el, {
+  chart = createZonedChart(LightweightCharts, el, mainIsDaily, {
     // autoSize lets the library watch the container itself. Passing explicit
     // width/height instead makes it write inline sizes onto the element, which
     // then override the CSS — that is what used to leave the chart stuck at
@@ -428,9 +482,11 @@ export function initChart(): void {
   followPriceScale(el)
   // While the cursor is over a bar the legend shows that bar; live ticks must
   // not overwrite it, and leaving the chart hands it back to the live candle.
-  chart.subscribeCrosshairMove((param: Any) =>
-    hoverLegend(param.time && param.point ? param.time : null),
-  )
+  chart.subscribeCrosshairMove((param: Any) => {
+    hoverLegend(param.time && param.point ? param.time : null)
+    // Dragging the price axis rescales without moving the time range.
+    updateCloseTimer()
+  })
   // Crosshair sync with the layout's other cells (./crosshairSync); a synced
   // crosshair drives the legend too.
   registerCrosshairSync({
@@ -439,8 +495,11 @@ export function initChart(): void {
     bars: () => legendCandles(getChartStyle(), displayCandles()),
     onSync: hoverLegend,
   })
+  // The bar countdown hangs under the last-price label; moving the view moves
+  // that label, so the countdown follows at once instead of on its 1s tick.
   chart.timeScale().subscribeVisibleTimeRangeChange(function () {
     redrawDrawings()
+    updateCloseTimer()
   })
   // The chart resizes itself; these only need to follow it. One exception:
   // the chart is built at startup while the Home screen is showing, so its
@@ -449,7 +508,8 @@ export function initChart(): void {
   let fitW = el.clientWidth
   const wrapEl = $('chartWrap')
   new ResizeObserver(() => {
-    if (fitW < 60 && el.clientWidth >= 60 && state.candles.length) chart.timeScale().fitContent()
+    if (fitW < 60 && el.clientWidth >= 60 && state.candles.length)
+      openingView(chart.timeScale(), displayCandles().length)
     fitW = el.clientWidth
     // Size classes for the legend and whale box: in a 4-16 cell layout the
     // full OHLC legend wrapped to three lines over the candles (index.css).
@@ -503,6 +563,7 @@ export function initChart(): void {
     if (isRangeMode()) updateChartData(true)
   })
   watchForOlderHistory()
+  anchorWheelZoomToLiveEdge()
   // Delta bars stream in far faster than the chart should repaint — coalesce
   // to the next frame, same reasoning as the live-tick indicator refresh
   // below (IND_REFRESH_MS): the eye cannot read faster than that anyway.
@@ -512,7 +573,7 @@ export function initChart(): void {
     deltaPending = true
     requestAnimationFrame(() => {
       deltaPending = false
-      renderDeltaPane(timeOnlyCandles(), indicatorPaneCount())
+      updateDeltaLast(timeOnlyCandles(), indicatorPaneCount())
     })
   })
   onOverlayTogglesChange(() => {
@@ -562,11 +623,19 @@ function hoverLegend(time: Any): void {
   if (!shown || !cp) {
     if (hoverTime != null) {
       hoverTime = null
+      hoverIndex = null
+      refreshIndicatorLegend()
       renderLiveLegend()
     }
     return
   }
   hoverTime = time as number
+  // The indicator values follow the crosshair too, as on TradingView (read
+  // from the cached computation, so hovering costs no recompute).
+  if (hoverIndex !== i) {
+    hoverIndex = i
+    refreshIndicatorLegend()
+  }
   renderLegend(cp.o, cp.h, cp.l, cp.c, cp.v, true, shown[i - 1]?.c)
 }
 function renderLiveLegend(): void {
@@ -657,8 +726,10 @@ let legendNode: ChildNode | null = null
  * moving average can meaningfully change anyway.
  */
 let indLegendHtml = ''
+/** Index of the bar under the crosshair, or null on the live bar. */
+let hoverIndex: number | null = null
 export function refreshIndicatorLegend(): void {
-  indLegendHtml = buildIndicatorLegend()
+  indLegendHtml = buildIndicatorLegend(hoverIndex ?? undefined)
 }
 function indicatorLegendHtml(): string {
   return indLegendHtml
@@ -669,8 +740,8 @@ const EYE_OFF =
   '<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4 4 20 20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>'
 const REMOVE =
   '<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M6 6 18 18M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
-function buildIndicatorLegend(): string {
-  const rows = indicatorLegend(displayCandles())
+function buildIndicatorLegend(at?: number): string {
+  const rows = indicatorLegend(displayCandles(), at)
   if (!rows.length) return ''
   return rows
     .map(
@@ -739,6 +810,20 @@ export function isNewDataset(): boolean {
   return !state.candlesKey || state.candlesKey !== drawnKey
 }
 
+/**
+ * A fresh dataset opens on the latest ~120 bars at a readable width, with the
+ * live edge's usual offset — as TradingView does — instead of fitting all
+ * 500+ bars into a few pixels each. Short series are still fitted whole.
+ */
+const OPENING_BARS = 120
+function openingView(ts: Any, n: number): void {
+  if (n <= OPENING_BARS * 1.25) {
+    ts.fitContent()
+    return
+  }
+  ts.setVisibleLogicalRange({ from: n - OPENING_BARS, to: n - 1 + LIVE_EDGE_OFFSET })
+}
+
 export function updateChartData(fit = false): void {
   if (!chart) return
   const candles = displayCandles()
@@ -759,11 +844,13 @@ export function updateChartData(fit = false): void {
     syncWatermark()
     return
   }
+  hideChartStatus()
   const ts = chart.timeScale()
   syncSecondsVisible()
   const keep = fit ? null : ts.getVisibleLogicalRange()
   const prevFirst = chartState.firstBarTime as number | undefined
   candleSeries.setData(priceSeriesData(getChartStyle(), candles))
+  syncPricePrecision(candleSeries, candles[candles.length - 1].c)
   if (getChartStyle() === 'baseline') syncBaselineBase(chart, candleSeries, displayCandles)
   rangeShown = isRangeMode() ? candles : []
   renderIndicators(candles)
@@ -774,7 +861,7 @@ export function updateChartData(fit = false): void {
     // A fresh fit starts at bar 0 like a pan to the oldest bar would; history
     // paging must wait for this dataset's own first pan, not a past one.
     userMovedChart = false
-    ts.fitContent()
+    openingView(ts, candles.length)
     afterChartFit()
   } else if (keep) {
     // Older candles land in front of index 0, so the same bars now sit that
@@ -859,6 +946,38 @@ function pushRangeLive(): void {
   rangeShown = next
 }
 
+// ---- Wheel zoom keeps the live edge, as on TradingView ----
+// lightweight-charts zooms around the cursor, so zooming out while looking at
+// the newest bars opened a wide empty stretch of future on the right. When
+// the latest bar was in view, the zoom is re-anchored to it (same width, the
+// usual right offset); scrolled back into history, the cursor zoom stays.
+// A few bars of breathing room past the live bar. Ten (the scroll offset) left
+// a wide empty band in a small layout cell, where hovering found no bar.
+const LIVE_EDGE_OFFSET = 4
+function anchorWheelZoomToLiveEdge(): void {
+  const el = $('chart')
+  if (!el) return
+  let wasLive = false
+  el.addEventListener(
+    'wheel',
+    (e) => {
+      if (e.ctrlKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return
+      const r = chart.timeScale().getVisibleLogicalRange()
+      const last = displayCandles().length - 1
+      wasLive = !!r && last >= 0 && r.to >= last
+      if (!wasLive) return
+      requestAnimationFrame(() => {
+        const n = chart.timeScale().getVisibleLogicalRange()
+        if (!n) return
+        const width = n.to - n.from
+        const to = last + LIVE_EDGE_OFFSET
+        if (Math.abs(n.to - to) > 0.5) chart.timeScale().setVisibleLogicalRange({ from: to - width, to })
+      })
+    },
+    { passive: true, capture: true },
+  )
+}
+
 // ---- Lazy history on pan ----
 // Dragging towards the left edge pulls in the next page of older candles, so
 // the chart keeps going back instead of ending in empty space.
@@ -926,16 +1045,28 @@ export function updateChartLast(c: Any): void {
   if (hoverTime == null || hoverTime === Math.floor(c.t / 1000))
     renderLegend(c.o, c.h, c.l, c.c, c.v, hoverTime != null, prevBar?.c)
   syncLastPrice(c)
-  const now = Date.now()
-  if (!indPending && now - indLast >= IND_REFRESH_MS) {
-    indPending = true
+  scheduleIndicatorRefresh()
+  scheduleDrawRedraw()
+}
+
+/**
+ * Recompute indicators at most every IND_REFRESH_MS. A tick inside that window
+ * schedules the refresh for when it ends rather than being dropped, so on a
+ * quiet coin the indicators and legend catch up with the last trade instead of
+ * waiting for the next one.
+ */
+function scheduleIndicatorRefresh(): void {
+  if (indPending) return
+  indPending = true
+  const wait = Math.max(0, IND_REFRESH_MS - (Date.now() - indLast))
+  setTimeout(() => {
     requestAnimationFrame(() => {
       indPending = false
       indLast = Date.now()
       if (!isReplayOn()) {
         const shown = displayCandles()
         renderIndicators(shown)
-        renderDeltaPane(timeOnlyCandles(), indicatorPaneCount())
+        updateDeltaLast(timeOnlyCandles(), indicatorPaneCount())
         refreshIndicatorLegend()
         const lcs = legendCandles(getChartStyle(), shown)
         const lc = lcs[lcs.length - 1]
@@ -944,8 +1075,22 @@ export function updateChartLast(c: Any): void {
       }
       updateCloseTimer()
     })
-  }
-  redrawDrawings()
+  }, wait)
+}
+
+/**
+ * Live ticks repaint the drawings at most once per frame: a busy tape could
+ * redraw every drawing (and the volume profile and whale bubbles with them)
+ * dozens of times between two frames.
+ */
+let drawRedrawPending = false
+function scheduleDrawRedraw(): void {
+  if (drawRedrawPending) return
+  drawRedrawPending = true
+  requestAnimationFrame(() => {
+    drawRedrawPending = false
+    redrawDrawings()
+  })
 }
 // ---- Toolbar wiring ----
 
@@ -970,13 +1115,38 @@ function initChartToolbar(): void {
     saveDrawings()
     publishDrawingCount()
     redrawDrawings()
-    showToast('Drawings cleared')
+    showToast('Drawings cleared — Ctrl+Z to undo')
   })
+  // A drawing still being placed is cancelled first; after that, undo steps
+  // back through every saved change (add, delete, move, clear all).
   onUndoDrawing(function () {
-    if (chartState.drawBuf.length) chartState.drawBuf = []
-    else if (currentDrawings().pop()) saveDrawings()
-    chartState._eraseHit = -1
+    currentDrawings()
+    if (chartState.drawBuf.length) {
+      chartState.drawBuf = []
+      publishDrawingCount()
+      redrawDrawings()
+      return
+    }
+    restoreDrawings(drawHistory.undo())
+  })
+  onRedoDrawing(function () {
+    currentDrawings()
+    restoreDrawings(drawHistory.redo())
+  })
+  // The floating toolbar over a selected drawing: restyle it or delete it.
+  onEditSelectedDrawing(function (patch) {
+    const d = currentDrawings()[chartState._sel]
+    if (!d) return
+    Object.assign(d, patch)
+    saveDrawings()
+    redrawDrawings()
+  })
+  onDeleteSelectedDrawing(function () {
+    const list = currentDrawings()
+    if (chartState._sel < 0 || !list[chartState._sel]) return
+    list.splice(chartState._sel, 1)
     chartState._sel = -1
+    saveDrawings()
     publishDrawingCount()
     redrawDrawings()
   })
@@ -1013,13 +1183,41 @@ function currentDrawings(): Any[] {
     chartState._freeXY = null
     chartState._captionDraft = null
     closeLabelInput()
+    drawHistory.reset(snapshotDrawings())
+    publishHistory()
     publishDrawingCount()
   }
   return chartState.drawings
 }
 
-/** Write the current coin's set back; the most recently edited coins are kept. */
+/** Undo / redo over every saved change to the current coin's drawings. */
+const drawHistory = createDrawingHistory()
+const snapshotDrawings = (): string => JSON.stringify(chartState.drawings)
+function publishHistory(): void {
+  setDrawingHistory(drawHistory.canUndo(), drawHistory.canRedo())
+}
+/** Put back a snapshot from the history and persist it (not as a new step). */
+function restoreDrawings(snap: string | null): void {
+  if (snap == null) return
+  chartState.drawings = JSON.parse(snap)
+  chartState.drawBuf = []
+  chartState._eraseHit = -1
+  chartState._sel = -1
+  writeDrawings()
+  publishDrawingCount()
+  publishHistory()
+  redrawDrawings()
+}
+
+/** Write the current coin's set back and record it as an undo step. */
 function saveDrawings(): void {
+  if (drawingsSym == null) return
+  if (drawHistory.commit(snapshotDrawings())) publishHistory()
+  writeDrawings()
+}
+
+/** Persist the current coin's set; the most recently edited coins are kept. */
+function writeDrawings(): void {
   if (drawingsSym == null) return
   const stored = storageGet<Record<string, Any[]>>(DRAWINGS_KEY, {})
   const all: Record<string, Any[]> = stored && typeof stored === 'object' ? stored : {}
@@ -1086,8 +1284,13 @@ function applyFsState(fs: boolean): void {
   document.documentElement.classList.toggle('radar-fs', fs)
   const btn = $('fsBtn')
   if (btn) {
-    btn.textContent = fs ? '✕' : '⛶'
-    btn.title = fs ? 'Exit full screen [F]' : 'Full screen [F]'
+    // The icon is drawn in CSS (a mask that follows html.radar-fs); the label
+    // is the same styled tooltip as the toolbar's other buttons, not a native
+    // title that looked different.
+    const label = fs ? 'Exit full screen' : 'Full screen'
+    btn.innerHTML = '<span class="tvb-tip">' + label + ' <kbd>F</kbd></span>'
+    btn.removeAttribute('title')
+    btn.setAttribute('aria-label', label)
   }
   // The stage-height sync (companionCharts) listens for resize; entering
   // native fullscreen fires one too, but the CSS-only path would not.
@@ -1435,6 +1638,22 @@ function resizeDrawCanvas(): void {
  * and the eraser's hit test both go through this, so what you can click is
  * exactly what you can see.
  */
+/** [first, end) indices of the displayed bars with lo <= t <= hi (ms). */
+function barSpan(lo: number, hi: number): [number, number] {
+  const a = displayCandles()
+  const first = (x: number, incl: boolean) => {
+    let l = 0
+    let h = a.length
+    while (l < h) {
+      const m = (l + h) >> 1
+      if (incl ? a[m].t < x : a[m].t <= x) l = m + 1
+      else h = m
+    }
+    return l
+  }
+  return [first(lo, true), first(hi, false)]
+}
+
 /** Everything the geometry engine needs to turn prices and times into pixels. */
 function mapCtx(cw: number, ch: number): MapCtx {
   const ts = chart.timeScale()
@@ -1450,17 +1669,17 @@ function mapCtx(cw: number, ch: number): MapCtx {
     cw: cw,
     ch: ch,
     fmt: (pr: number) => pfmt(pr),
+    // Binary searches over the bars on screen: these run on every paint of a
+    // measure or regression drawing, and filtering 5000 bars each time added up.
     closesBetween(t1: number, t2: number) {
-      const lo = Math.min(t1, t2) * 1000
-      const hi = Math.max(t1, t2) * 1000
+      const [a, b] = barSpan(Math.min(t1, t2) * 1000, Math.max(t1, t2) * 1000)
       return displayCandles()
-        .filter((k) => k.t >= lo && k.t <= hi)
+        .slice(a, b)
         .map((k) => k.c)
     },
     barsBetween(t1: number, t2: number) {
-      const lo = Math.min(t1, t2) * 1000
-      const hi = Math.max(t1, t2) * 1000
-      return displayCandles().filter((k) => k.t >= lo && k.t <= hi).length
+      const [a, b] = barSpan(Math.min(t1, t2) * 1000, Math.max(t1, t2) * 1000)
+      return b - a
     },
     timeLabel(t: number) {
       return fmtChartDate(t * 1000, {
@@ -1648,7 +1867,17 @@ function setupDrawSelect(wrap: HTMLElement): void {
   )
 }
 
-function paintShape(ctx: Any, sh: Shape, base: string, doomed: boolean, selected = false): void {
+/** Per-drawing line style from the selection toolbar (width in px). */
+const DASHES: Record<string, number[]> = { dashed: [6, 4], dotted: [1.5, 3] }
+
+function paintShape(
+  ctx: Any,
+  sh: Shape,
+  base: string,
+  doomed: boolean,
+  selected = false,
+  style: { width?: number; dash?: string } = {},
+): void {
   const stroke = doomed ? cv('red') || '#FF1744' : base
   sh.fills.forEach((f) => {
     if (f.pts.length < 6) return
@@ -1677,9 +1906,12 @@ function paintShape(ctx: Any, sh: Shape, base: string, doomed: boolean, selected
   sh.segs.forEach((g) => {
     ctx.save()
     ctx.strokeStyle = doomed ? stroke : g.color || base
-    ctx.lineWidth = g.width || (doomed ? 2.2 : 1.7)
+    // The drawing's own width / style apply to its main lines; decoration
+    // (soft) keeps the tool's look.
+    const own = !g.soft
+    ctx.lineWidth = g.width || (doomed ? 2.2 : own && style.width ? style.width : 1.7)
     ctx.lineCap = 'round'
-    ctx.setLineDash(g.dash || [])
+    ctx.setLineDash(g.dash || (own && style.dash ? DASHES[style.dash] || [] : []))
     ctx.beginPath()
     ctx.moveTo(g.x1, g.y1)
     ctx.lineTo(g.x2, g.y2)
@@ -1690,8 +1922,8 @@ function paintShape(ctx: Any, sh: Shape, base: string, doomed: boolean, selected
     if (a.rx <= 0 || a.ry <= 0) return
     ctx.save()
     ctx.strokeStyle = doomed ? stroke : a.color || base
-    ctx.lineWidth = doomed ? 2.2 : 1.7
-    ctx.setLineDash(a.dash || [])
+    ctx.lineWidth = doomed ? 2.2 : style.width || 1.7
+    ctx.setLineDash(a.dash || (style.dash ? DASHES[style.dash] || [] : []))
     ctx.beginPath()
     ctx.ellipse(a.cx, a.cy, a.rx, a.ry, 0, 0, Math.PI * 2)
     ctx.stroke()
@@ -1734,6 +1966,14 @@ function paintShape(ctx: Any, sh: Shape, base: string, doomed: boolean, selected
   })
 }
 
+/** Tell the selection toolbar which drawing is selected and how it looks. */
+function publishSelection(): void {
+  const d = chartState._sel >= 0 ? chartState.drawings[chartState._sel] : null
+  setSelectedDrawing(
+    d ? { color: d.color || '#4FC3F7', width: d.width || 1.7, dash: d.dash || 'solid' } : null,
+  )
+}
+
 function redrawDrawings(includePreview?: Any): void {
   renderVolumeProfile(visibleCandles())
   renderWhaleBubbles()
@@ -1758,8 +1998,13 @@ function redrawDrawings(includePreview?: Any): void {
 
   currentDrawings().forEach(function (d: Any, i: number) {
     const sh = shapeOf(d, cw, ch)
-    if (sh) paintShape(ctx, sh, d.color, i === chartState._eraseHit, i === chartState._sel)
+    if (sh)
+      paintShape(ctx, sh, d.color, i === chartState._eraseHit, i === chartState._sel, {
+        width: d.width,
+        dash: d.dash,
+      })
   })
+  publishSelection()
 
   // A text drawing waiting for its caption stays visible while it is typed.
   if (chartState._captionDraft) {

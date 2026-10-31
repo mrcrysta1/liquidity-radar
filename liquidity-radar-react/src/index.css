@@ -1041,6 +1041,9 @@ html.radar-fs .cs-panel{height:100%;max-height:none}
 .whale-tip b.dn{color:var(--red)}
 .whale-tip small{font-size:var(--text-xs);color:var(--dim)}
 [data-theme="light"] .whale-legend{background:rgb(255 255 255/.8)}
+/* On white, --dim and the pale-grey size dots were close to invisible. */
+[data-theme="light"] .wl-cov{color:var(--muted)}
+[data-theme="light"] .wl-dot circle{fill:rgb(71 85 105/.14);stroke:rgb(71 85 105/.7)}
 @media(max-width:640px){
   .whale-legend{left:4px;bottom:28px;padding:4px 6px;gap:2px;font-size:var(--text-xs);max-width:calc(100% - 76px)}
   .wl-title,.wl-scale{display:none}
@@ -1219,6 +1222,14 @@ html.radar-fs .cs-panel{height:100%;max-height:none}
   }
   #radarChartCard .legend .leg-ind i{font-size:var(--text-xs)}
   [data-theme="light"] #radarChartCard .legend{background:rgb(255 255 255/.7)}
+  /* A 390px phone gave the candles ~210px; the legend took three lines over
+     them. Keep the symbol, close and change, as TradingView's phone legend
+     does (each O/H/L value is a label + number pair, so six children). */
+  #radarChartCard .legend .leg-ohlc>:nth-child(-n+6),
+  #radarChartCard .legend .leg-ohlc>.leg-k:nth-last-child(2),
+  #radarChartCard .legend .leg-ohlc>.leg-k:nth-last-child(2)+b{display:none}
+  /* The assistant button sat over the chart's lower right on the Radar tab. */
+  body:has(#tab-radar.active) .ai-fab{width:40px;height:40px;border-radius:13px;opacity:.85}
 
   /* Full screen on a phone: every pixel the toolbar gives back goes to the
      candles. */
@@ -1722,6 +1733,7 @@ html.radar-fs #radarChartCard #fsBtn::before{
   font-family:var(--tv-font);font-size:13px;font-weight:400;line-height:1.25;letter-spacing:0;
   opacity:0;visibility:hidden;transition:opacity .12s .25s,transform .12s .25s,visibility .12s .25s;
 }
+#radarChartCard .tvb-tip kbd{font-family:var(--tv-font);font-size:11px;opacity:.65;margin-left:4px}
 #radarChartCard .chart-tool-btn:hover>.tvb-tip,#radarChartCard .chart-tool-btn:focus-visible>.tvb-tip,
 #radarChartCard .style-btn:hover .style-tip,#radarChartCard .style-btn:focus-visible .style-tip,
 #radarChartCard .draw-btn:hover .draw-tip,#radarChartCard .draw-btn:focus-visible .draw-tip,
@@ -1783,6 +1795,28 @@ html.radar-fs #radarChartCard #fsBtn::before{
 }
 
 /* Menus: square-ish corners, TradingView's shadow and type, blue selection. */
+/* The bottom bar (ranges, clock, % / log / auto) in the top bar's look: same
+   font and flat 4px buttons, the active one in --tv-blue. It used monospace
+   pills filled with --primary and a purple open state, so the chart card
+   showed three different "active" colours. */
+#radarChartCard .sn-bar,#radarChartCard .sn-btn,#radarChartCard .sn-clock{font-family:var(--tv-font);font-size:13px}
+#radarChartCard .sn-ranges{background:transparent;border:0;padding:0;gap:1px}
+#radarChartCard .sn-btn{color:var(--tv-txt);border-radius:4px;padding:4px 7px}
+#radarChartCard .sn-bar>.sn-btn,#radarChartCard .sn-more>.sn-btn,#radarChartCard .sn-range-menu>.sn-btn{border:0;padding:4px 7px}
+#radarChartCard .sn-btn:hover,#radarChartCard .sn-drop.open{background:var(--tv-hover);color:var(--tv-txt)}
+#radarChartCard .sn-btn.on,#radarChartCard .sn-bar>.sn-btn.on{background:transparent;color:var(--tv-blue);font-weight:700}
+#radarChartCard .sn-menu{border-radius:6px;box-shadow:var(--tv-menu-shadow);font-family:var(--tv-font)}
+#radarChartCard .sn-mi{font-size:13px;border-radius:4px}
+#radarChartCard .sn-mi:hover{background:var(--tv-hover)}
+#radarChartCard .sn-mi.on .sn-check{color:var(--tv-blue)}
+#radarChartCard .sn-btn:focus-visible,#radarChartCard .sn-mi:focus-visible{outline-color:var(--tv-blue)}
+/* The OHLC legend is plain text over the chart, as on TradingView, with
+   fixed-width digits so it does not reflow as the crosshair moves. Phones
+   keep the translucent backing (see the max-width:640px block). */
+#radarChartCard .legend{font-family:var(--tv-font);font-variant-numeric:tabular-nums}
+@media(min-width:641px){
+  #radarChartCard .legend{background:transparent;border:0;padding:2px 4px;font-size:13px}
+}
 #radarChartCard .tf-menu,#radarChartCard .style-menu,#radarChartCard .ind-menu,#radarChartCard .layout-menu,
 #radarChartCard .draw-menu,#radarChartCard .rail-menu,#radarChartCard .tvb .cp-menu{
   border-radius:6px;box-shadow:var(--tv-menu-shadow);font-family:var(--tv-font);
@@ -1819,7 +1853,17 @@ html.radar-fs #radarChartCard #fsBtn::before{
 
 @media(hover:none){
   #radarChartCard .tvb-tip,#radarChartCard .style-tip,#radarChartCard .draw-tip,#radarChartCard .layout-tip{display:none}
+  /* Touch has no hover, so icon-only buttons had no label at all. A long
+     press (held ~0.45s) shows it; a tap is over before the delay. */
+  #radarChartCard .chart-tool-btn,#radarChartCard .style-btn,#radarChartCard .draw-btn,#radarChartCard .layout-btn{
+    -webkit-touch-callout:none;-webkit-user-select:none;user-select:none;
+  }
+  #radarChartCard .chart-tool-btn:active>.tvb-tip,#radarChartCard .style-btn:active .style-tip,
+  #radarChartCard .draw-btn:active .draw-tip,#radarChartCard .layout-btn:active .layout-tip{
+    display:block;animation:lrTipHold .45s steps(1,end) both;
+  }
 }
+@keyframes lrTipHold{from{opacity:0;visibility:hidden}to{opacity:1;visibility:visible}}
 
 /* Tablets and phones: the top-bar and strip menus become sheets pinned to
    the viewport, since a menu hung off a button runs off a small screen. */
@@ -4359,6 +4403,8 @@ td .sk,b .sk{display:inline-block;vertical-align:middle}
 .ws-count{font-weight:700}
 .ws-live{display:inline-flex;align-items:center;gap:7px;padding:6px 12px;border-radius:10px;border:1px solid rgb(var(--gRGB)/.5);background:rgb(var(--gRGB)/.1);color:var(--green);font-weight:800;font-size:12.5px}
 .ws-live i{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)}
+.ws-live.off{border-color:rgb(var(--aRGB)/.5);background:rgb(var(--aRGB)/.1);color:var(--amber)}
+.ws-live.off i{background:var(--amber);box-shadow:none}
 
 .multi-chart-grid{display:grid;gap:12px;grid-template-columns:repeat(var(--mc-cols,4),minmax(0,1fr))}
 .multi-chart-grid[data-cols="2"]{--mc-cols:2}
@@ -6054,3 +6100,81 @@ html[data-palette="glass"] .acct-card{background:linear-gradient(145deg,rgba(255
   .an-tfs button,.an-secs button,.nn-tfs button,.liqhm-views button{min-height:40px}
   .sidenav-collapse{width:40px;height:40px}
 }
+
+/* Keyboard shortcut sheet ("?"), features/keyboard. */
+.kbd-dialog{
+  width:min(560px,calc(100vw - 32px));max-height:min(80dvh,640px);padding:0;overflow:auto;
+  background:var(--card);color:var(--txt);border:1px solid var(--border2);border-radius:12px;
+  box-shadow:var(--shade-3);
+}
+.kbd-dialog::backdrop{background:rgb(0 0 0/.45)}
+.kbd-dialog header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border)}
+.kbd-dialog header button{background:none;border:0;color:var(--muted);font-size:20px;line-height:1;cursor:pointer;padding:2px 6px;border-radius:6px}
+.kbd-dialog header button:hover{color:var(--txt);background:var(--sunk-2)}
+.kbd-dialog section{padding:10px 16px 14px}
+.kbd-dialog h4{margin:0 0 8px;font-size:var(--text-xs);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.kbd-dialog dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:0;align-items:center}
+.kbd-dialog dt{margin:0}
+.kbd-dialog dd{margin:0;font-size:13px}
+.kbd-dialog kbd{
+  display:inline-block;min-width:22px;padding:2px 6px;border:1px solid var(--border2);border-bottom-width:2px;border-radius:5px;
+  background:var(--sunk-2);font-family:var(--mono);font-size:11.5px;text-align:center;white-space:nowrap;
+}
+@media(min-width:560px){.kbd-dialog{display:none}.kbd-dialog[open]{display:grid;grid-template-columns:1fr 1fr}.kbd-dialog[open] header{grid-column:1 / -1}}
+#radarChartCard .tvb-tip kbd{font-family:var(--tv-font);font-size:11px;opacity:.65;margin-left:4px}
+/* Floating toolbar over a selected drawing (components/chart/DrawingPropsBar). */
+#radarChartCard .dp-bar{
+  /* Top right, by the price axis: the OHLC legend's numbers are top left. */
+  position:absolute;top:8px;right:76px;z-index:8;
+  display:flex;align-items:center;gap:2px;padding:4px;max-width:calc(100% - 92px);overflow-x:auto;scrollbar-width:none;
+  background:var(--card);border:1px solid var(--tv-line);border-radius:6px;box-shadow:var(--tv-menu-shadow);
+}
+#radarChartCard .dp-colors,#radarChartCard .dp-group{display:flex;align-items:center;gap:2px}
+#radarChartCard .dp-swatch{width:18px;height:18px;margin:0 1px;border-radius:4px;border:2px solid transparent;cursor:pointer;padding:0;flex-shrink:0}
+#radarChartCard .dp-swatch.on{border-color:var(--tv-txt)}
+#radarChartCard .dp-btn{
+  display:grid;place-items:center;width:28px;height:28px;padding:0;border:0;border-radius:4px;flex-shrink:0;
+  background:transparent;color:var(--tv-ico);cursor:pointer;
+}
+#radarChartCard .dp-btn:hover{background:var(--tv-hover);color:var(--tv-txt)}
+#radarChartCard .dp-btn.on{background:var(--tv-blue-soft);color:var(--tv-blue)}
+#radarChartCard .dp-del:hover{color:var(--red)}
+#radarChartCard .dp-swatch:focus-visible,#radarChartCard .dp-btn:focus-visible{outline:2px solid var(--tv-blue);outline-offset:1px}
+#radarChartCard .dp-sep{width:1px;height:20px;margin:0 3px;background:var(--tv-line);flex-shrink:0}
+
+/* Over the plot when there is nothing to draw (features/charts showChartStatus). */
+.chart-status{
+  position:absolute;inset:0;z-index:7;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;
+  padding:16px;text-align:center;pointer-events:none;
+}
+.chart-status p{margin:0;max-width:360px;font-size:13px;color:var(--muted);background:var(--card);padding:8px 12px;border-radius:8px;border:1px solid var(--border)}
+.chart-status button{
+  pointer-events:auto;padding:6px 16px;border-radius:6px;border:1px solid var(--border2);cursor:pointer;
+  background:var(--card);color:var(--txt);font-weight:600;
+}
+.chart-status button:hover{border-color:var(--primary)}
+.chart-status button:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+
+/* Saved layouts in the layout menu (components/chart/SavedLayouts), in the
+   chart menus' TradingView look. Was a <style> string inside the component. */
+.sl{border-top:1px solid var(--border);padding:6px 8px 8px}
+.sl-head{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:2px 2px 6px;
+  font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.sl-btn{background:transparent;border:1px solid transparent;border-radius:4px;color:var(--dim);cursor:pointer;
+  font:inherit;font-size:var(--text-xs);padding:4px 7px;min-height:26px;line-height:1.2}
+.sl-btn:hover{background:var(--tv-hover,rgb(var(--pRGB)/.1));color:var(--txt)}
+.sl-btn:focus-visible,.sl-input:focus-visible{outline:2px solid var(--tv-blue,var(--primary));outline-offset:-2px}
+.sl-btn.pri{background:var(--tv-blue,var(--primary));border-color:var(--tv-blue,var(--primary));color:#fff}
+.sl-btn.danger{color:var(--red)}
+.sl-btn.danger.pri{background:var(--red);border-color:var(--red);color:#fff}
+.sl-save{color:var(--tv-blue,var(--primary));font-weight:600;text-transform:none;letter-spacing:0}
+.sl-form{display:flex;gap:4px;align-items:center;padding:2px 0 6px}
+.sl-input{flex:1;min-width:0;background:var(--bg,transparent);color:var(--txt);border:1px solid var(--border2);
+  border-radius:4px;padding:4px 7px;font:inherit;font-size:12px;min-height:26px}
+.sl-err{color:var(--red);font-size:var(--text-xs);padding:0 2px 6px}
+.sl-list{list-style:none;margin:0;padding:0;max-height:200px;overflow-y:auto}
+.sl-row{display:flex;align-items:center;gap:2px}
+.sl-name{flex:1;min-width:0;text-align:left;color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sl-meta{color:var(--dim);font-family:var(--mono);font-size:10px;margin-left:6px}
+.sl-confirm{flex:1;min-width:0;font-size:var(--text-xs);color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-left:4px}
+.sl-empty{color:var(--dim);font-size:var(--text-xs);padding:2px 2px 4px}

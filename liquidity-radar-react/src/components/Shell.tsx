@@ -36,6 +36,8 @@ import { renderAlerts } from '../features/alerts/alerts'
 import { AlertsModal } from './alerts/AlertsModal'
 import { openModal } from '../utils/dom'
 import { ChartSidePanel } from './chart/ChartSidePanel'
+import { AlertRailButton, DrawHistoryButtons } from './chart/ChartActions'
+import { DrawingPropsBar } from './chart/DrawingPropsBar'
 import { Footer } from './footer/Footer'
 import { DashHead } from './DashHead'
 import { Sidebar } from './Sidebar'
@@ -200,9 +202,13 @@ export function Shell() {
               <span className="tvb-sep tvb-sep-end" aria-hidden="true" />
               <ReplayButton />
               <ScreenshotButton />
-              {/* The engine swaps this button's glyph and title on toggle; the
-                  icon and tooltip are drawn in CSS so they survive that. */}
-              <button className="chart-tool-btn tvb-icon" id="fsBtn" title="Full screen [F]" aria-label="Full screen">⛶</button>
+              {/* The engine swaps this button's tooltip and label on toggle;
+                  the icon is drawn in CSS so it survives that. */}
+              <button className="chart-tool-btn tvb-icon" id="fsBtn" aria-label="Full screen">
+                <span className="tvb-tip">
+                  Full screen <kbd>F</kbd>
+                </span>
+              </button>
             </div>
           </div>
 
@@ -214,6 +220,7 @@ export function Shell() {
               <DrawToolPicker />
               <span className="tvd-sep" aria-hidden="true" />
               <DrawEditTools />
+              <DrawHistoryButtons />
               <span className="tvd-sep" aria-hidden="true" />
               <OverlayTogglePicker />
             </div>
@@ -223,11 +230,12 @@ export function Shell() {
                 <div id="chart"></div>
                 <span className="chart-draw-hint" id="drawHint"></span>
                 <Guard name="Whale legend"><WhaleLegend /></Guard>
+                <Guard name="Drawing properties"><DrawingPropsBar /></Guard>
                 <Guard name="Chart navigation"><ChartNavOverlay /></Guard>
               </div>
             </div>
             <Guard name="Chart side panel">
-              <ChartSidePanel />
+              <ChartSidePanel tools={<AlertRailButton />} />
             </Guard>
           </div>
           <Guard name="Chart bottom bar"><ChartBottomBar /></Guard>

@@ -11,12 +11,14 @@
 // 'mc<position>'), drawn by its own renderer over its own candles; the
 // header's indicators button is a React portal (PanelIndicatorButtons).
 import * as LightweightCharts from 'lightweight-charts'
+import { createZonedChart } from './zonedTimeScale'
 import { poll } from '../../services/pollScheduler'
 import { pfmt } from '../../utils/format'
 import { state } from '../../services/store'
 import { storageGetRaw, storageSetRaw } from '../../services/storage'
 import { chartTheme, mapCandle } from './chartRender'
 import { chartTzOptions, isDailyTf } from './timezone'
+import { chartPalette, withAlpha } from './chartPalette'
 import {
   mdCacheGet,
   mdCachePut,
@@ -237,12 +239,18 @@ function mcScheduleIndicators(p: McPanel): void {
   p.indTimer = setTimeout(() => mcDrawIndicators(p), wait)
 }
 
+/** Volume bars in the palette's up/down colours, faint, as on the main chart. */
+function mcVolColor(up: boolean): string {
+  const pal = chartPalette()
+  return withAlpha(up ? pal.up : pal.dn, 0.3)
+}
+
 function mcSetAll(p: McPanel): void {
   if (!p.candleSeries) return
   p.candleSeries.setData(p.candles.map(mapCandle))
   p.volSeries.setData(
     p.candles.map(function (c) {
-      return { time: Math.floor(c.t / 1000), value: c.v, color: c.c >= c.o ? 'rgba(0,230,118,.3)' : 'rgba(255,23,68,.3)' }
+      return { time: Math.floor(c.t / 1000), value: c.v, color: mcVolColor(c.c >= c.o) }
     }),
   )
   p.rsiSeries?.setData(rsiPoints(p.candles))
@@ -253,7 +261,7 @@ function mcSetAll(p: McPanel): void {
 function mcUpdateLast(p: McPanel, c: Any): void {
   if (!p.candleSeries) return
   p.candleSeries.update(mapCandle(c))
-  p.volSeries.update({ time: Math.floor(c.t / 1000), value: c.v, color: c.c >= c.o ? 'rgba(0,230,118,.3)' : 'rgba(255,23,68,.3)' })
+  p.volSeries.update({ time: Math.floor(c.t / 1000), value: c.v, color: mcVolColor(c.c >= c.o) })
   const pts = rsiPoints(p.candles.slice(-60))
   if (pts.length) p.rsiSeries?.update(pts[pts.length - 1])
   mcScheduleIndicators(p)
@@ -353,7 +361,7 @@ function mcInitChart(p: McPanel): void {
   const th = chartTheme()
   // Times print in the chart zone (./timezone); the bars stay in UTC.
   const tz = chartTzOptions(() => isDailyTf(p.interval))
-  const c: Any = LightweightCharts.createChart(el, {
+  const c: Any = createZonedChart(LightweightCharts, el, () => isDailyTf(p.interval), {
     width: w,
     height: h,
     localization: tz.localization,

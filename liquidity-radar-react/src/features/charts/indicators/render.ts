@@ -24,7 +24,8 @@ import { computeAll } from './graph'
 import type { Computed } from './graph'
 import { cloudView } from './cloud'
 import { volumeColor } from '../chartPalette'
-import { PINE_TYPE, pineLive, pineStatus } from '../pine/indicator'
+import { PINE_TYPE, pineLive, pineStatus, subscribePine } from '../pine/indicator'
+import { priceFormatFor } from '../../../utils/format'
 
 type Any = any
 
@@ -36,6 +37,25 @@ interface Held {
   /** Price lines (Pine hline) on this series, and what they were built from. */
   lines?: Any[]
   linesSig?: string
+  /** Decimals last given to a pane series' priceFormat. */
+  precision?: number
+}
+
+/**
+ * Pane values get decimals that fit their size: at the default precision 2,
+ * MACD or ATR on PEPE printed 0.00 on the axis, labels and legend. Large
+ * histograms (volume, OBV) keep the abbreviated volume format.
+ */
+function syncPaneFormat(h: Held, data: Any[]): void {
+  if (h.scaleId === 'right' || h.kind === 'signal' || h.kind === 'cloud') return
+  let max = 0
+  for (const d of data) if (isFinite(d.value)) max = Math.max(max, Math.abs(d.value))
+  if (!max) return
+  if (h.kind === 'histogram' && max >= 1000) return
+  const pf = max >= 1 ? { type: 'price' as const, precision: 2, minMove: 0.01 } : priceFormatFor(max)
+  if (h.precision === pf.precision) return
+  h.precision = pf.precision
+  h.series.applyOptions({ priceFormat: pf })
 }
 
 export interface IndicatorRendererOptions {
@@ -47,7 +67,7 @@ export interface IndicatorRendererOptions {
 export interface IndicatorRenderer {
   attach(chart: Any): void
   render(candles: CandleFlat[]): void
-  legend(candles: CandleFlat[]): LegendEntry[]
+  legend(candles: CandleFlat[], at?: number): LegendEntry[]
   refreshColors(): void
   clear(): void
   blank(): void
@@ -95,19 +115,50 @@ export function createIndicatorRenderer(
   }
 
   /** Every visible instance computed, sources resolved in dependency order. */
+  // Drawing the indicators, building their legend and reading it at the
+  // crosshair all want the same result over the same candles: compute once.
+  // A live tick replaces the last candle object and an indicator edit replaces
+  // the item list, so either one misses the cache; a Pine script finishing
+  // its compile clears it.
+  let memo: {
+    items: IndicatorInstance[]
+    candles: CandleFlat[]
+    n: number
+    last: CandleFlat
+    out: Array<Computed<IndicatorInstance>>
+  } | null = null
+  subscribePine(() => (memo = null))
   function computeActive(candles: CandleFlat[]): Array<Computed<IndicatorInstance>> {
-    return computeAll(
-      getItems(),
+    const items = getItems()
+    const n = candles.length
+    const m = memo
+    if (m && m.items === items && m.candles === candles && m.n === n && m.last === candles[n - 1])
+      return m.out
+    const out = computeAll(
+      items,
       candles,
       (inst, c) => (inst.type === PINE_TYPE ? pineLive(inst, c) : indicatorDef(inst.type)),
       sourceSeries,
     )
+    memo = { items, candles, n, last: candles[n - 1], out }
+    return out
   }
 
   const LINE_STYLE = { solid: 0, dotted: 1, dashed: 2 } as const
-  /** Pine hline()s as price lines on the instance's first drawn series. */
+  const GUIDE_COLOR = 'rgba(148,163,184,.5)'
+  /**
+   * Pine hline()s, or a built-in oscillator's guides (RSI 30/70, Stoch 20/80,
+   * MACD 0…), as price lines on the instance's first drawn series.
+   */
+  function guideLines(h: Held, def: IndicatorDef): NonNullable<IndicatorDef['hlines']> {
+    if (def.hlines) return def.hlines
+    // Guides mark levels on the indicator's own scale; on the price pane they
+    // would be meaningless prices.
+    if (!def.guides || h.scaleId === 'right') return []
+    return def.guides.map((price) => ({ price, color: GUIDE_COLOR, title: '', style: 'dashed' as const }))
+  }
   function syncPriceLines(h: Held, def: IndicatorDef): void {
-    const want = def.hlines || []
+    const want = guideLines(h, def)
     const sig = JSON.stringify(want)
     if (h.linesSig === sig) return
     ;(h.lines || []).forEach((l) => {
@@ -130,6 +181,26 @@ export function createIndicatorRenderer(
         }),
       )
     h.linesSig = sig
+    // Price lines do not count towards autoscale: an RSI holding 40–60 left
+    // its 30/70 guides off screen. Stretch the pane's range over them.
+    // Never on the price pane: a Pine hline(0) there would squash the candles.
+    const levels =
+      h.scaleId === 'right' ? [] : want.map((x) => x.price).filter((x) => isFinite(x))
+    h.series.applyOptions({
+      autoscaleInfoProvider: levels.length
+        ? (base: () => Any) => {
+            const r = base()
+            if (!r || !r.priceRange) return r
+            return {
+              ...r,
+              priceRange: {
+                minValue: Math.min(r.priceRange.minValue, ...levels),
+                maxValue: Math.max(r.priceRange.maxValue, ...levels),
+              },
+            }
+          }
+        : undefined,
+    })
   }
 
   /**
@@ -303,11 +374,12 @@ export function createIndicatorRenderer(
             })
           })
         h.series.setData(data)
+        syncPaneFormat(h, data)
         if (out.kind === 'signal') h.series.setMarkers(markers)
       })
       // hline()s ride on the first drawn series; when that series is swapped
       // the new one starts without lines, so its signature starts empty.
-      if (def.hlines && lineHost) syncPriceLines(lineHost, def)
+      if ((def.hlines || def.guides) && lineHost) syncPriceLines(lineHost, def)
     })
 
     held.forEach((h, key) => {
@@ -330,9 +402,10 @@ export function createIndicatorRenderer(
 
   /** Volume-scale indicators; everything else is a price or an oscillator. */
   const BIG_SCALE = ['volume', 'obv']
-  function indicatorLegend(candles: CandleFlat[]): LegendEntry[] {
+  function indicatorLegend(candles: CandleFlat[], at?: number): LegendEntry[] {
     if (!candles.length) return []
-    const i = candles.length - 1
+    // `at`: the bar under the crosshair; the live bar otherwise.
+    const i = at != null && at >= 0 && at < candles.length ? at : candles.length - 1
     const out: LegendEntry[] = []
     computeActive(candles).forEach(({ inst, def, outputs: outs }) => {
       const big = BIG_SCALE.indexOf(def.id) !== -1
@@ -412,7 +485,8 @@ const main = createIndicatorRenderer(getIndicators)
 export const attachIndicatorChart = (c: Any): void => main.attach(c)
 /** Full redraw for the given candles. Cheap enough to run on every data load. */
 export const renderIndicators = (candles: CandleFlat[]): void => main.render(candles)
-export const indicatorLegend = (candles: CandleFlat[]): LegendEntry[] => main.legend(candles)
+export const indicatorLegend = (candles: CandleFlat[], at?: number): LegendEntry[] =>
+  main.legend(candles, at)
 /** Re-tint every series — called when the palette or light/dark mode changes. */
 export const refreshIndicatorColors = (): void => main.refreshColors()
 export const clearIndicators = (): void => main.clear()

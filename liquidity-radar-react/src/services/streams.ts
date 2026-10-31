@@ -46,6 +46,8 @@ let gapRefillAt = 0
 // onto an animation frame so a busy market cannot outrun the renderer.
 let tradeFrame = 0
 let tradePending: { p: number; q: number; T: number } | null = null
+/** The last trade painted onto the live candle (price, trade time). */
+let lastTrade: { p: number; q: number; T: number } | null = null
 const raf: (fn: () => void) => number =
   typeof requestAnimationFrame === 'function'
     ? requestAnimationFrame
@@ -148,6 +150,9 @@ function watchStreams(): void {
 
 export function connectStreams(cb: StreamsCallbacks): void {
   disconnectStreams()
+  // Another symbol or interval: the previous market's last trade must never
+  // be painted onto this one's candle.
+  lastTrade = null
   lastCb = cb
   watchStreams()
   const myGen = gen
@@ -259,6 +264,7 @@ export function connectStreams(cb: StreamsCallbacks): void {
     if (tr.p === last.c && tr.p <= last.h && tr.p >= last.l) return
     // Replaced rather than mutated: the folder may be holding this same object
     // as its in-progress bucket, and it owns the authoritative numbers.
+    lastTrade = tr
     const c = {
       ...last,
       c: tr.p,
@@ -290,8 +296,15 @@ export function connectStreams(cb: StreamsCallbacks): void {
     const base = { t: k.t, o: +k.o + b, h: +k.h + b, l: +k.l + b, c: +k.c + b, v: +k.v }
     if (!mdVal.candle(base)) return
     const folder = mainFolder.key === bufKey ? mainFolder.folder : null
-    const c = def.factor > 1 ? (folder ? folder.push(base) : null) : base
+    let c = def.factor > 1 ? (folder ? folder.push(base) : null) : base
     if (!c) return
+    // A kline frame can be older than the last trade already drawn (frames
+    // come every second or two, trades far more often): keep that trade's
+    // price rather than let the live candle step back until the next print.
+    // On resampled intervals the folded bucket otherwise rewound every frame.
+    const tr = lastTrade
+    if (tr && tr.T > +d.E && tr.T >= c.t && tr.T < bucketEnd(c.t, def))
+      c = { ...c, c: tr.p, h: Math.max(c.h, tr.p), l: Math.min(c.l, tr.p) }
     const arr = state.candles
     cb.onKlineLive()
     if (arr.length && arr[arr.length - 1].t === c.t) {

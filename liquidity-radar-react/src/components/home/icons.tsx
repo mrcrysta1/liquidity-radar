@@ -17,6 +17,7 @@ export type HomeIconId =
   | 'whale'
   | 'bubbles'
   | 'calendar'
+  | 'bell'
 
 const COLOR: Record<HomeIconId, string> = {
   radar: 'var(--primary)',
@@ -34,6 +35,7 @@ const COLOR: Record<HomeIconId, string> = {
   whale: 'var(--cyan)',
   bubbles: 'var(--purple)',
   calendar: 'var(--green)',
+  bell: 'var(--amber)',
 }
 
 export function HomeIcon({ id, size = 20 }: { id: HomeIconId; size?: number }) {
@@ -202,6 +204,14 @@ export function HomeIcon({ id, size = 20 }: { id: HomeIconId; size?: number }) {
           <rect x="3.5" y="5" width="17" height="15" rx="2.5" {...f} />
           <rect x="3.5" y="5" width="17" height="15" rx="2.5" {...s} />
           <path d="M3.5 10h17M8 3v4M16 3v4" {...s} />
+        </>
+      )
+      break
+    case 'bell':
+      body = (
+        <>
+          <path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15L6 16Z" {...f} />
+          <path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15L6 16ZM10 20.5a2 2 0 0 0 4 0" {...s} />
         </>
       )
       break

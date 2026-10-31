@@ -145,13 +145,16 @@ export function ChartSidePanel({ tools }: { tools?: ReactNode }) {
             <span className="cs-rail-sep" aria-hidden="true" />
           </>
         )}
-        <div className="cs-tabs" role="tablist" aria-label="Chart side panels">
+        {/* Each button opens or closes its panel, so they are toggle buttons
+            (aria-pressed), not tabs: a closed rail had every "tab" unselected. */}
+        <div className="cs-tabs" role="group" aria-label="Chart side panels">
           {TABS.map((t) => (
             <button
               key={t.id}
               type="button"
-              role="tab"
-              aria-selected={open && tab === t.id}
+              aria-pressed={open && tab === t.id}
+              aria-controls="cs-panel"
+              aria-expanded={open && tab === t.id}
               className={'cs-rail-btn' + (open && tab === t.id ? ' on' : '')}
               title={t.label}
               aria-label={t.label}
@@ -166,7 +169,8 @@ export function ChartSidePanel({ tools }: { tools?: ReactNode }) {
       {open && (
         <div
           className="cs-panel"
-          role="tabpanel"
+          id="cs-panel"
+          role="region"
           aria-label={TABS.find((t) => t.id === tab)?.label}
         >
           <div className="cs-head">

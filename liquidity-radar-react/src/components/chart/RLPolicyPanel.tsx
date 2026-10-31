@@ -154,8 +154,8 @@ export function RLPolicyPanel() {
             flexWrap: 'wrap',
             padding: '6px 8px',
             borderRadius: 6,
-            background: 'rgba(0,230,118,.08)',
-            border: '1px solid rgba(0,230,118,.25)',
+            background: 'rgb(var(--gRGB) / .08)',
+            border: '1px solid rgb(var(--gRGB) / .25)',
           }}
         >
           <span style={{ fontSize: 'var(--text-xs)', fontWeight: 700, color: 'var(--green)' }}>
