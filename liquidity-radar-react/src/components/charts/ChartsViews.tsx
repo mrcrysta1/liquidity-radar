@@ -29,6 +29,7 @@ import {
   onMcChange,
 } from '../../features/charts/multiCharts'
 import { PanelIndicatorButtons } from '../chart/PanelIndicatorButtons'
+import { LinkSyncOptions } from '../chart/LinkSyncOptions'
 import { renderAlerts } from '../../features/alerts/alerts'
 import { openModal, showToast } from '../../utils/dom'
 
@@ -371,6 +372,7 @@ export function WorkspaceHead() {
         </select>
       </label>
       <span className="ws-ctl ws-count">{mcCount()} Charts</span>
+      <LinkSyncOptions scope="mc" compact />
       <span className={'ws-live' + (live ? '' : ' off')}>
         <i />
         {live ? 'Live' : 'Connecting'}

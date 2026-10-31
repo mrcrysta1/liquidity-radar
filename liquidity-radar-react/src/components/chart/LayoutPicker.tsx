@@ -9,6 +9,7 @@ import type { LayoutSpec } from '../../features/charts/layouts'
 import { getLayout, setLayout, subscribeLayout } from '../../features/charts/companionCharts'
 import { isCrosshairSyncOn, setCrosshairSync } from '../../features/charts/crosshairSync'
 import { SavedLayouts } from './SavedLayouts'
+import { LinkSyncOptions } from './LinkSyncOptions'
 
 const GLYPH = 26
 const GAP = 1.6
@@ -140,6 +141,9 @@ export function LayoutPicker() {
             />
             <span>Sync crosshair</span>
           </label>
+          {/* What charts sharing a link group (the coloured chip on each
+              cell) follow from each other. */}
+          <LinkSyncOptions scope="layout" />
           <SavedLayouts
             cancelRef={cancelEditRef}
             onLoaded={() => {

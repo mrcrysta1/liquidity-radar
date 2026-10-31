@@ -84,11 +84,15 @@ import { onDeltaChange } from '../delta/delta'
 import { onOverlayTogglesChange } from './overlayToggles'
 import { afterChartFit, attachScaleNav, subscribeScaleNav, syncView as syncScaleNavView } from './scaleNav'
 import { registerCrosshairSync } from './crosshairSync'
+import { mainLinkKey, registerTimeSync } from './linkGroups'
+import type { TimeSyncHandle } from './linkGroups'
 
 type Any = any
 ;(window as Any).LightweightCharts = LightweightCharts
 
 let chart: Any = null
+/** The main chart in its link group's time-range sync (./linkGroups). */
+let mainTimeLink: TimeSyncHandle | null = null
 let candleSeries: Any = null
 // Alert price lines (features/alerts/alertLines) hang off the price series,
 // which is rebuilt on every style change — let them follow it.
@@ -520,6 +524,18 @@ export function initChart(): void {
     series: () => candleSeries,
     bars: () => legendCandles(getChartStyle(), displayCandles()),
     onSync: hoverLegend,
+  })
+  // Time-range sync with the cells in its link group (./linkGroups). The
+  // date-range buttons under the chart move it too.
+  const wrapForLink = $('chartWrap')
+  mainTimeLink = registerTimeSync({
+    scope: 'layout',
+    key: mainLinkKey,
+    chart,
+    owns: (t) => !!(wrapForLink?.contains(t) || t.closest('.sn-bar')),
+    times: () => displayCandles().map((c) => Math.floor(c.t / 1000)),
+    syncable: () => !isRangeMode(),
+    primary: true,
   })
   // The bar countdown hangs under the last-price label; moving the view moves
   // that label, so the countdown follows at once instead of on its 1s tick.
@@ -968,6 +984,9 @@ export function updateChartData(fit = false): void {
     userMovedChart = false
     openingView(ts, candles.length)
     afterChartFit()
+    // A new market or interval here leads its link group's time range; the
+    // view settles first (see the range re-claim below).
+    requestAnimationFrame(() => mainTimeLink?.publish())
   } else if (keep) {
     // Older candles land in front of index 0, so the same bars now sit that
     // many indices further along — shift the range to stay put.

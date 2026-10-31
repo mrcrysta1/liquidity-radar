@@ -3583,6 +3583,54 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('pine gradient: clamped at the ends', RT.gradientColor(150, 0, 100, '#000000', '#ffffff'), 'rgba(255,255,255,1.00)')
 }
 
+// ---- r3-sync: link groups (features/charts/linkGroupsMath) ----
+{
+  const L = await import(src('features/charts/linkGroupsMath.ts'))
+  // Stored state: junk falls back to defaults; bad keys and groups are dropped.
+  const d = L.parseLinkState(null)
+  eq('link: default opts', d.opts.layout, { symbol: false, interval: false, time: true })
+  eq('link: default groups empty', d.groups, {})
+  const p = L.parseLinkState({
+    groups: { c1: 'B', mc0: null, mc2: 'Z', foo: 'A', c99x: 'A' },
+    opts: { layout: { symbol: true, time: 'yes' }, mc: 7 },
+  })
+  eq('link: parsed groups', p.groups, { c1: 'B', mc0: null })
+  eq('link: parsed opts keep good bools', p.opts.layout, { symbol: true, interval: false, time: true })
+  eq('link: junk scope opts default', p.opts.mc, { symbol: false, interval: false, time: true })
+  eq('link: unset key is in the default group', L.groupOf(p.groups, 'c3'), 'A')
+  eq('link: explicit none stays none', L.groupOf(p.groups, 'mc0'), null)
+  // Removing grid panel 1 of 4: panels 2 and 3 move up with their groups.
+  eq(
+    'link: shift after removal',
+    L.shiftGroups({ mc0: 'A', mc1: 'B', mc2: null, mc3: 'C' }, 'mc', 1, 4),
+    { mc0: 'A', mc1: null, mc2: 'C' },
+  )
+  eq('link: shift keeps other prefixes', L.shiftGroups({ c1: 'B', mc0: 'C' }, 'mc', 0, 1), { c1: 'B' })
+  // Time <-> index on hourly bars (seconds).
+  const H = 3600
+  const t0 = Date.UTC(2026, 9, 14, 0) / 1000
+  const hourly = Array.from({ length: 10 }, (_, i) => t0 + i * H)
+  eq('link: exact bar', L.timeToLogical(hourly, t0 + 3 * H), 3)
+  eq('link: between bars', L.timeToLogical(hourly, t0 + 3.5 * H), 3.5)
+  eq('link: past the live bar extrapolates', L.timeToLogical(hourly, t0 + 12 * H), 12)
+  eq('link: before the first bar extrapolates', L.timeToLogical(hourly, t0 - 2 * H), -2)
+  eq('link: no bars', L.timeToLogical([], t0), null)
+  eq('link: inverse inside', L.logicalToTime(hourly, 4.25), t0 + 4.25 * H)
+  eq('link: inverse right offset', L.logicalToTime(hourly, 11), t0 + 11 * H)
+  // A 1h view of bars 2..8 (+ 2 bars of right offset) on a 15m chart.
+  const q = Array.from({ length: 60 }, (_, i) => t0 + i * 900)
+  const w = L.rangeToTimes(hourly, { from: 2, to: 11 })
+  eq('link: window in time', w, { from: t0 + 2 * H, to: t0 + 11 * H })
+  eq('link: window on the 15m chart', L.timesToRange(q, w), { from: 8, to: 44 })
+  // A 15m window of one bar on the hourly chart widens to two bars.
+  const narrow = L.timesToRange(hourly, { from: t0 + 3 * H, to: t0 + 3 * H + 900 })
+  eq('link: narrow window widened', narrow, { from: 2.125, to: 4.125 })
+  eq('link: empty window rejected', L.rangeToTimes(hourly, { from: 3, to: 3 }), null)
+  // Round trip across a weekend gap stays on the same bars.
+  const gap = [t0, t0 + H, t0 + 50 * H, t0 + 51 * H]
+  eq('link: gap round trip', L.timeToLogical(gap, L.logicalToTime(gap, 1.5)), 1.5)
+}
+
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')
 if (fails.length) {
   fails.forEach((f) => console.log('  FAIL  ' + f))
