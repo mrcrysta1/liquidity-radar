@@ -217,6 +217,98 @@ export function subscribePine(fn: () => void): () => void {
 const statusKey = (s: PineStatus) =>
   (s.error || '') + '|' + s.warnings.join(',') + '|' + s.inputs.map((i) => i.key).join(',')
 
+// ---- the worker: live runs happen off the main thread ----
+// Each changed candle set posts one run; the chart keeps drawing the last
+// result until the answer arrives, then redraws (onPineResult). Where there
+// is no Worker (tests under Node, old browsers) runs stay synchronous.
+interface Job {
+  inst: PineInstance
+  sig: string
+  shape: string
+  last: string
+  candles: CandleFlat[]
+}
+let worker: Worker | null | undefined
+let jobSeq = 0
+const jobs = new Map<number, Job>()
+/** The newest job per instance; an older answer is dropped. */
+const inFlight = new Map<string, number>()
+/** Instances removed while a run was in flight. */
+const removed = new Set<string>()
+const resultListeners: Array<() => void> = []
+/** Called when a worker run finishes, so the chart can redraw with it. */
+export function onPineResult(fn: () => void): () => void {
+  resultListeners.push(fn)
+  return () => {
+    const i = resultListeners.indexOf(fn)
+    if (i !== -1) resultListeners.splice(i, 1)
+  }
+}
+
+function pineWorker(): Worker | null {
+  if (worker !== undefined) return worker
+  try {
+    worker =
+      typeof Worker === 'function'
+        ? new Worker(new URL('./pine.worker.ts', import.meta.url), { type: 'module' })
+        : null
+  } catch {
+    worker = null
+  }
+  if (worker) {
+    worker.onmessage = (e: MessageEvent) => onWorkerResult(e.data)
+    // A worker that cannot start: fall back to running on the page.
+    worker.onerror = () => {
+      worker?.terminate()
+      worker = null
+      jobs.clear()
+      inFlight.clear()
+    }
+  }
+  return worker
+}
+
+function store(inst: PineInstance, b: Built, ms: number, job: Omit<Job, 'inst' | 'candles'>): void {
+  b.status.ms = ms
+  const prev = live.get(inst.uid)
+  live.set(inst.uid, {
+    ...b,
+    sig: job.sig,
+    shape: job.shape,
+    last: job.last,
+    at: Date.now(),
+    throttle: Math.min(10000, Math.max(1000, ms * 10)),
+  })
+  if (!prev || statusKey(prev.status) !== statusKey(b.status)) {
+    // Told after the draw that found it, not during it.
+    queueMicrotask(() => statusListeners.slice().forEach((fn) => fn()))
+  }
+}
+
+function onWorkerResult(msg: { id: number; result?: PineResult; error?: string; ms: number }): void {
+  const job = jobs.get(msg.id)
+  jobs.delete(msg.id)
+  if (!job) return
+  if (inFlight.get(job.inst.uid) === msg.id) inFlight.delete(job.inst.uid)
+  // Removed meanwhile (forgetPine): nothing to store. A result for an edited
+  // script is stored but not drawn — pineLive checks the signature.
+  if (removed.delete(job.inst.uid)) return
+  let b: Built
+  if (msg.error != null || !msg.result) {
+    const m = pineMeta(job.inst)
+    b = failed(job.inst, new Error(msg.error || 'Script failed'), m.status.overlay, m.status.inputs)
+  } else {
+    try {
+      b = build(job.inst, msg.result, job.candles)
+    } catch (e) {
+      const m = pineMeta(job.inst)
+      b = failed(job.inst, e, m.status.overlay, m.status.inputs)
+    }
+  }
+  store(job.inst, b, Math.round(msg.ms), job)
+  resultListeners.slice().forEach((fn) => fn())
+}
+
 /** The def to draw with, computed over `candles` (cached/throttled). */
 export function pineLive(inst: PineInstance, candles: CandleFlat[]): IndicatorDef {
   const n = candles.length
@@ -232,6 +324,22 @@ export function pineLive(inst: PineInstance, candles: CandleFlat[]): IndicatorDe
     // Only the forming bar moved: a slow script is not re-run on every tick.
     if (now - prev.at < prev.throttle) return prev.def
   }
+  const w = pineWorker()
+  if (w) {
+    // Until the worker answers, draw the last result for this script (or its
+    // declared outputs, empty, for a script never run yet).
+    const shown = prev && prev.sig === sig ? prev.def : pineMeta(inst).def
+    // One run at a time per script: a live chart changes its last bar on
+    // every tick, and re-posting each time superseded every run before it
+    // could land. When this one answers, the next draw sends the latest bars.
+    if (inFlight.has(inst.uid)) return shown
+    const id = ++jobSeq
+    const bars = candles.map((k) => ({ t: k.t, o: k.o, h: k.h, l: k.l, c: k.c, v: k.v }))
+    jobs.set(id, { inst, sig, shape, last, candles })
+    inFlight.set(inst.uid, id)
+    w.postMessage({ id, script: inst.script || '', candles: bars, inputs: inst.pineInputs || {} })
+    return shown
+  }
   const t0 = Date.now()
   let b: Built
   try {
@@ -240,22 +348,8 @@ export function pineLive(inst: PineInstance, candles: CandleFlat[]): IndicatorDe
     const m = pineMeta(inst)
     b = failed(inst, e, m.status.overlay, m.status.inputs)
   }
-  const ms = Date.now() - t0
-  b.status.ms = ms
-  const entry: Live = {
-    ...b,
-    sig,
-    shape,
-    last,
-    at: Date.now(),
-    throttle: Math.min(10000, Math.max(1000, ms * 10)),
-  }
-  live.set(inst.uid, entry)
-  if (!prev || statusKey(prev.status) !== statusKey(b.status)) {
-    // Told after the draw that found it, not during it.
-    queueMicrotask(() => statusListeners.slice().forEach((fn) => fn()))
-  }
-  return entry.def
+  store(inst, b, Date.now() - t0, { sig, shape, last })
+  return live.get(inst.uid)!.def
 }
 
 /** Latest known status for an instance: its live run, else a probe run. */
@@ -268,4 +362,5 @@ export function pineStatus(inst: PineInstance): PineStatus {
 /** Drop the cached run for an instance (it was removed). */
 export function forgetPine(uid: string): void {
   live.delete(uid)
+  if (inFlight.delete(uid)) removed.add(uid)
 }

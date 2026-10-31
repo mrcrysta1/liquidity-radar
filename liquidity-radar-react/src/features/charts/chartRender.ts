@@ -1,6 +1,7 @@
 import * as LightweightCharts from 'lightweight-charts'
 import { createZonedChart } from './zonedTimeScale'
 import { chartSettings, subscribeChartSettings } from './chartSettings'
+import { onPineResult } from './pine/indicator'
 import { venueOf } from '../../utils/coins'
 import { COINS, TICKER_COINS } from '../../constants/market'
 import { fmt, pfmt, nfmt, cfmt, chgHtml, priceDecimals, priceFormatFor } from '../../utils/format'
@@ -540,6 +541,8 @@ export function initChart(): void {
   setupDrawLayer()
   applyChartSettings()
   subscribeChartSettings(applyChartSettings)
+  // Pine scripts run in a worker: draw each result as it arrives.
+  onPineResult(() => (isReplayOn() ? updateChartData(false) : scheduleIndicatorRefresh()))
   wireLegendActions()
   initChartToolbar()
   initFullScreen()
