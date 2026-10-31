@@ -33,6 +33,29 @@ import { CHART_TABS } from '../useTick'
 
 type Edit = null | 'new' | 'rename'
 
+/** Monochrome line icons (currentColor), matching the drawing strip. Emoji
+ *  rendered in full colour, ignored the theme and differed per OS. */
+const ICON_PATHS = {
+  plus: 'M12 5v14M5 12h14',
+  pencil: 'M4 20h4L19 9l-4-4L4 16v4ZM14 6l4 4',
+  trash: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13',
+  pin: 'M9 4h6l-1 6 3 3H7l3-3-1-6ZM12 13v7',
+} as const
+function Glyph({ d }: { d: keyof typeof ICON_PATHS }) {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+      <path
+        d={ICON_PATHS[d]}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
 export function WatchlistPanel() {
   const st = useWatchlists()
   const wl = activeList(st)
@@ -112,10 +135,10 @@ export function WatchlistPanel() {
             ))}
           </select>
           <Btn label="New watchlist" onClick={() => startEdit('new')}>
-            ＋
+            <Glyph d="plus" />
           </Btn>
           <Btn label={'Rename ' + wl.name} onClick={() => startEdit('rename')}>
-            ✎
+            <Glyph d="pencil" />
           </Btn>
           <Btn
             label={canDelete ? 'Delete ' + wl.name : 'The Favourites list cannot be deleted'}
@@ -124,7 +147,7 @@ export function WatchlistPanel() {
               if (window.confirm('Delete the watchlist "' + wl.name + '"?')) deleteWatchlist(wl.id)
             }}
           >
-            🗑
+            <Glyph d="trash" />
           </Btn>
         </div>
       )}
@@ -136,7 +159,9 @@ export function WatchlistPanel() {
         onPick={(_, base) => addToWatchlist(wl.id, base)}
         trigger={
           <>
-            <span className="cp-ico">＋</span>
+            <span className="cp-ico">
+              <Glyph d="plus" />
+            </span>
             <span className="cp-id">
               <b>Add coin</b>
               <small>to {wl.name}</small>
@@ -184,7 +209,7 @@ export function WatchlistPanel() {
                     on={isPin}
                     onClick={() => togglePinInWatchlist(wl.id, b)}
                   >
-                    📌
+                    <Glyph d="pin" />
                   </Btn>
                   <Btn label={'Move ' + b + ' up'} disabled={first} onClick={() => moveInWatchlist(wl.id, b, -1)}>
                     ▲
