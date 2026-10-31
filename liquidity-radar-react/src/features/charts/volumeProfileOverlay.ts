@@ -8,7 +8,13 @@
 // "volume profile" series type, so pixel positions come from the candle
 // series' own priceToCoordinate() on every redraw.
 import type { CandleFlat } from '../../services/market'
-import { computeVolumeProfile, bucketPriceRange, type VolumeProfile } from './volumeProfile'
+import {
+  buildVolumeProfile,
+  bucketPriceRange,
+  profileCandles,
+  type VolumeProfile,
+  type VpMode,
+} from './volumeProfile'
 import { getShowVolumeProfile, getVolumeProfileSettings } from './overlayToggles'
 import { mainPaneHeight } from './chartPalette'
 
@@ -31,6 +37,11 @@ export function attachVolumeProfile(c: Any, series: Any, wrap: HTMLElement): voi
     sizedChart = c
     try {
       c.timeScale().subscribeSizeChange(() => renderVolumeProfile(lastCandles))
+      // A visible-range profile is of the bars on screen: every scroll and
+      // zoom changes which ones. (Coalesced to a frame by renderVolumeProfile.)
+      c.timeScale().subscribeVisibleLogicalRangeChange(() => {
+        if (getVolumeProfileSettings().mode === 'visible') renderVolumeProfile(lastCandles)
+      })
     } catch (e) {
       /* older chart API: the wrap's resize redraw still applies */
     }
@@ -76,21 +87,43 @@ function resizeCanvas(): void {
   }
 }
 
+/**
+ * The visible time span in ms, for a visible-range profile. Read as times
+ * (getVisibleRange) rather than bar indices: the logical range counts the
+ * bars drawn, which on range / Renko / Kagi bars are not these candles.
+ */
+function visibleSpan(): { from: number; to: number } | null {
+  try {
+    const r = chart?.timeScale().getVisibleRange()
+    if (r && r.from != null && r.to != null) return { from: Number(r.from) * 1000, to: Number(r.to) * 1000 }
+  } catch (e) {
+    /* no data yet */
+  }
+  return null
+}
+
 // The chart redraws this layer on every tick and every mouse move, but the
 // profile only changes when the candles it covers or the settings do. The
-// window is anchored to the last candle, so these fields pin it exactly.
+// window is anchored to the last candle, so these fields pin it exactly —
+// plus, for a visible-range profile, the span on screen.
 let memoKey = ''
 let memoVp: VolumeProfile | null = null
-function profileFor(candles: CandleFlat[], rows: number, valueArea: number): VolumeProfile | null {
+function profileFor(
+  candles: CandleFlat[],
+  rows: number,
+  valueArea: number,
+  mode: VpMode,
+): VolumeProfile | null {
   const n = candles.length
   const first = candles[0]
   const last = candles[n - 1]
+  const span = mode === 'visible' ? visibleSpan() : null
   const key = n
-    ? [n, first.t, last.t, last.o, last.h, last.l, last.c, last.v, rows, valueArea].join('|')
+    ? [n, first.t, last.t, last.o, last.h, last.l, last.c, last.v, rows, valueArea, mode, span?.from, span?.to].join('|')
     : ''
   if (key !== memoKey) {
     memoKey = key
-    memoVp = n ? computeVolumeProfile(candles, rows, valueArea / 100) : null
+    memoVp = n ? buildVolumeProfile(profileCandles(mode, candles, span), rows, valueArea / 100) : null
   }
   return memoVp
 }
@@ -122,8 +155,8 @@ function paint(candles: CandleFlat[]): void {
   ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight)
   if (!getShowVolumeProfile()) return
 
-  const { rows, valueArea, split } = getVolumeProfileSettings()
-  const vp = profileFor(candles, rows, valueArea)
+  const { rows, valueArea, split, mode } = getVolumeProfileSettings()
+  const vp = profileFor(candles, rows, valueArea, mode)
   if (!vp) return
   // Everything below is laid out against the plot area, not the canvas: `cw`
   // is where the price axis starts, and nothing is painted past it.
