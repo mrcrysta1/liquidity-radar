@@ -828,6 +828,23 @@ function wireLegendActions(): void {
  * replay) keeps whatever the user has scrolled to; refitting on every redraw
  * would yank the view back to the right edge mid-drag.
  */
+/**
+ * A new chart time zone. lightweight-charts keeps a bar's tick weight while
+ * its time is unchanged, so after a zone change the day labels stayed on the
+ * old zone's midnight. Empty every series so the weights are recomputed, then
+ * redraw the same bars and keep the view.
+ */
+export function reweightTimeScale(): void {
+  if (!chart || !candleSeries) return
+  const ts = chart.timeScale()
+  const keep = ts.getVisibleLogicalRange()
+  candleSeries.setData([])
+  blankIndicators()
+  blankDeltaPane()
+  updateChartData(false)
+  if (keep) ts.setVisibleLogicalRange(keep)
+}
+
 /** The symbol + interval last drawn, to tell a new dataset from a reload of it. */
 let drawnKey = ''
 /**
@@ -1060,6 +1077,9 @@ export function updateChartLast(c: Any): void {
   } else {
     const shown = displayCandles()
     candleSeries.update(priceSeriesPoint(getChartStyle(), c, barBefore(shown, c.t), shown))
+    // A coin crossing a decimal threshold (1.00, 0.01…) gets its new precision
+    // now, not at the next full redraw. Cheap: re-applied only on a change.
+    syncPricePrecision(candleSeries, c.c)
     // Heikin Ashi: the legend reports the HA bar just drawn (memoised, so cheap).
     if (getChartStyle() === 'heikin') c = heikinAshiBar(shown, c)
     if (getChartStyle() === 'baseline') syncBaselineBase(chart, candleSeries, displayCandles)
@@ -1526,6 +1546,9 @@ function shownBarTimes(): number[] {
 }
 
 function snapToCandle(x: Any, y: Any): Any {
+  // Below the price pane (an indicator pane, v5) a price would be
+  // extrapolated and the drawing clipped out of sight: no point there.
+  if (y > mainPaneHeight(chart, Number.MAX_SAFE_INTEGER)) return null
   const ts = chart.timeScale()
   // Past the last bar the chart has no time; count bars on from the end, so
   // trend lines and fibs can be projected into the future.

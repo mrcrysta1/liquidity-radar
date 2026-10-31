@@ -457,8 +457,17 @@ function zoneAt(e: MouseEvent): Zone {
   const r = deps.el.getBoundingClientRect()
   const x = e.clientX - r.left
   const y = e.clientY - r.top
-  if (y > r.height - tsH) return x > r.width - psW ? null : 'time'
-  if (x > r.width - psW) return 'price'
+  // The time axis alone: tsH also counts the indicator panes above it (for
+  // placing overlays), and a double-click in an RSI pane reset the time scale.
+  let axisH = 26
+  try {
+    axisH = Number(deps.chart.timeScale().height()) || axisH
+  } catch {
+    /* not laid out yet */
+  }
+  if (y > r.height - axisH) return x > r.width - psW ? null : 'time'
+  // The price axis of the price pane only; the panes below have their own.
+  if (x > r.width - psW && y < r.height - tsH) return 'price'
   return null
 }
 

@@ -100,6 +100,10 @@ function layout(hasPane: boolean, _otherPanes: number): void {
   // A thin strip: half the height of an indicator pane.
   try {
     series.getPane().setStretchFactor(0.5)
+    // Until an indicator pane has laid things out, the price pane is still at
+    // the default factor 1 and the strip took a third of the chart.
+    const main = chart.panes()[0]
+    if (main && main.getStretchFactor() < 2.4) main.setStretchFactor(2.4)
   } catch (e) {
     /* pane not mounted yet */
   }

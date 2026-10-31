@@ -371,6 +371,7 @@ function mcInitChart(p: McPanel): void {
       textColor: th.txt,
       fontSize: 10,
       fontFamily: "'JetBrains Mono', monospace",
+      panes: { separatorColor: th.grid },
     },
     grid: { vertLines: { color: th.grid }, horzLines: { color: th.grid } },
     rightPriceScale: { borderColor: th.border },
@@ -614,6 +615,21 @@ function mcRefreshAll(): void {
   })
 }
 
+/** A new chart time zone: redraw each grid cell so its day labels move (see reweightTimeScale). */
+export function mcReweight(): void {
+  mcPanels.forEach((p) => {
+    if (!p.chart || !p.candleSeries || !p.candles.length) return
+    const ts = p.chart.timeScale()
+    const keep = ts.getVisibleLogicalRange()
+    p.candleSeries.setData([])
+    p.volSeries?.setData([])
+    p.rsiSeries?.setData([])
+    p.ind?.blank()
+    mcSetAll(p)
+    if (keep) ts.setVisibleLogicalRange(keep)
+  })
+}
+
 export function mcApplyTheme(): void {
   mcPanels.forEach(function (p) {
     if (p.chart) {
@@ -621,7 +637,7 @@ export function mcApplyTheme(): void {
       const tz = chartTzOptions(() => isDailyTf(p.interval))
       p.chart.applyOptions({
         localization: tz.localization,
-        layout: { background: { type: 'solid', color: th.bg }, textColor: th.txt },
+        layout: { background: { type: 'solid', color: th.bg }, textColor: th.txt, panes: { separatorColor: th.grid } },
         grid: { vertLines: { color: th.grid }, horzLines: { color: th.grid } },
         rightPriceScale: { borderColor: th.border },
         timeScale: { ...tz.timeScale, borderColor: th.border },

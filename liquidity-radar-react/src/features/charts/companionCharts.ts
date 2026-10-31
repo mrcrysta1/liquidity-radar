@@ -891,6 +891,20 @@ export function watchStageHeight(): void {
 }
 
 /** Re-theme companions when the palette or light/dark mode changes. */
+/** A new chart time zone: redraw each companion so its day labels move (see reweightTimeScale). */
+export function companionReweight(): void {
+  panels.forEach((p) => {
+    if (!p.chart || !p.candleSeries || !p.candles.length) return
+    const ts = p.chart.timeScale()
+    const keep = ts.getVisibleLogicalRange()
+    p.candleSeries.setData([])
+    p.volSeries?.setData([])
+    p.ind?.blank()
+    draw(p, p.candles)
+    if (keep) ts.setVisibleLogicalRange(keep)
+  })
+}
+
 export function applyCompanionTheme(): void {
   const pal = chartPalette()
   panels.forEach((p) => {

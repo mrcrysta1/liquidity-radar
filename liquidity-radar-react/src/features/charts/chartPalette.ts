@@ -120,6 +120,8 @@ export function tvChartOptions(
       textColor: p.txt,
       fontSize: TV_FONT_SIZE,
       fontFamily: TV_FONT,
+      // v5's pane divider defaults to #E0E3EB: a bright line on the dark theme.
+      panes: { separatorColor: p.border, separatorHoverColor: 'rgba(178,181,189,0.2)' },
     },
     grid: { vertLines: { color: p.grid }, horzLines: { color: p.grid } },
     rightPriceScale: { borderVisible: true, borderColor: p.border },
