@@ -185,6 +185,13 @@ export interface DrawingPatch extends Partial<SelectedDrawing> {
   fontSize?: number
   account?: number
   risk?: number
+  /** Timeframe groups to hide on (drawings/visibility); undefined shows on all. */
+  hideOn?: string[]
+  /** Text box fill / border colour (border 'none' for none); undefined resets. */
+  bg?: string
+  border?: string
+  /** Caption, or the icon tool's emoji. */
+  text?: string
 }
 /** What the toolbar knows about the selection beyond its line style. */
 export interface SelectedInfo extends SelectedDrawing {
@@ -195,6 +202,9 @@ export interface SelectedInfo extends SelectedDrawing {
   text: string | null
   account: number | null
   risk: number | null
+  hideOn: string[]
+  bg: string | null
+  border: string | null
 }
 /** The drawing selected with the cursor tool, or null. */
 let selected: SelectedInfo | null = null

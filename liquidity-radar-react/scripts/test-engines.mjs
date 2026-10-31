@@ -4256,6 +4256,83 @@ alertcondition(close > 12, "Up", "close above 12")`, k)
   eq('depth: empty grid has no cap', DH.intensityCap([0, 0]), 0)
 }
 
+// ---- r4-drawings2: visible-on-intervals + the second batch of drawing tools ----------
+{
+  const V = await import(src('features/charts/drawings/visibility.ts'))
+  eq('r4dr vis: 15s is seconds', V.tfGroup('15s'), 'sec')
+  eq('r4dr vis: 45m is minutes', V.tfGroup('45m'), 'min')
+  eq('r4dr vis: 4h is hours', V.tfGroup('4h'), 'hour')
+  eq('r4dr vis: 1M (month) is days and up', V.tfGroup('1M'), 'day')
+  eq('r4dr vis: 1w is days and up', V.tfGroup('1w'), 'day')
+  ok('r4dr vis: no hideOn shows everywhere', V.visibleOnTf({}, '1m') && V.visibleOnTf({}, '1d'))
+  ok('r4dr vis: hidden on minutes', !V.visibleOnTf({ hideOn: ['min'] }, '15m') && V.visibleOnTf({ hideOn: ['min'] }, '1h'))
+  eq('r4dr vis: junk entries dropped', V.hiddenGroups({ hideOn: ['x', 'day', 3] }), ['day'])
+  eq('r4dr vis: toggle on', V.toggleHidden({}, 'sec'), ['sec'])
+  eq('r4dr vis: toggle last off clears', V.toggleHidden({ hideOn: ['sec'] }, 'sec'), undefined)
+
+  const X = await import(src('features/charts/drawings/shapesExtra.ts'))
+  const c = X.circleThrough({ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 1, y: 1 })
+  eq('r4dr arc: circle through three points', [c.x, c.y, c.r], [1, 0, 1])
+  eq('r4dr arc: collinear has no circle', X.circleThrough({ x: 0, y: 0 }, { x: 1, y: 1 }, { x: 2, y: 2 }), null)
+  const ap = X.arcPoints({ x: 0, y: 0 }, { x: 1, y: -1 }, { x: 2, y: 0 }, 4)
+  ok('r4dr arc: passes through the bulge side', ap[2].y < -0.9 && Math.abs(ap[4].x - 2) < 1e-9)
+  const bz = X.bezierPoints({ x: 0, y: 0 }, { x: 5, y: 10 }, { x: 10, y: 0 }, 2)
+  eq('r4dr curve: bezier midpoint', [bz[1].x, bz[1].y], [5, 5])
+  const rr = X.rotatedRect({ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 3, y: 4 })
+  eq('r4dr rotrect: far side through the third point', [rr[2].x, rr[2].y, rr[3].x, rr[3].y], [10, 4, 0, 4])
+  eq('r4dr ratio: retrace', X.ratio(105, 110, 110, 100), '0.500')
+  eq('r4dr ratio: zero span', X.ratio(1, 2, 3, 3), '')
+  const gb = X.ghostBars(100, 110, 5)
+  ok('r4dr ghost: count and chained opens', gb.length === 5 && gb.every((b, i) => i === 0 || b.o === gb[i - 1].c))
+  ok('r4dr ghost: wicks wrap bodies', gb.every((b) => b.h >= Math.max(b.o, b.c) && b.l <= Math.min(b.o, b.c)))
+  eq('r4dr ghost: starts and ends on the path', [gb[0].o, gb[4].c], [100, 110])
+  // A minimal map: time = x, price = y.
+  const m = {
+    x: (t) => t,
+    y: (p) => p,
+    cw: 500,
+    ch: 500,
+    fmt: (p) => String(p),
+    closesBetween: () => [],
+    barsBetween: () => 4,
+    timeLabel: () => '',
+    candles: () => [
+      { t: 10000, o: 5, h: 8, l: 4, c: 7, v: 1 },
+      { t: 20000, o: 7, h: 9, l: 6, c: 6, v: 1 },
+    ],
+  }
+  const run = (type, points, extra = {}) => {
+    const s = { segs: [], fills: [], arcs: [], labels: [], handles: [] }
+    const P = points.map((p) => ({ x: p.time, y: p.price }))
+    const done = X.extraShape({ type, color: '#4FC3F7', points, ...extra }, P, m, s)
+    return { done, s }
+  }
+  ok('r4dr extra: unknown type falls through', !run('trend', [{ time: 1, price: 1 }]).done)
+  const bp = run('barspattern', [
+    { time: 10, price: 5 },
+    { time: 20, price: 5 },
+    { time: 100, price: 50 },
+  ])
+  // Copy starts at x=100, price shifted so the first open sits on 50.
+  ok('r4dr bars pattern: copy placed at the third point', bp.s.segs.some((g) => g.x1 === 100 && g.y1 === 53 && g.y2 === 49))
+  const ic = run('icon', [{ time: 50, price: 50 }], { text: '🔥' })
+  eq('r4dr icon: glyph label', ic.s.labels[0].text, '🔥')
+  ok('r4dr icon: clickable box', ic.s.fills.length === 1)
+  const cy = run('cypher', [0, 1, 2, 3, 4].map((i) => ({ time: i * 10, price: [100, 200, 150, 250, 180][i] })))
+  ok('r4dr cypher: X..D tagged with ratios', cy.s.labels.filter((l) => l.box).length === 5 && cy.s.labels.some((l) => l.text === '0.500'))
+  const fc = run('forecast', [
+    { time: 0, price: 100 },
+    { time: 40, price: 110 },
+  ])
+  ok('r4dr forecast: % and bars', fc.s.labels[0].text.includes('+10.00%') && fc.s.labels[0].text.includes('4 bars'))
+  const pn = run('pricenote', [
+    { time: 0, price: 100 },
+    { time: 40, price: 80 },
+  ], { bg: '#00000040', border: 'none' })
+  eq('r4dr price note: carries the box style', [pn.s.labels[0].text, pn.s.labels[0].bg, pn.s.labels[0].border], ['100', '#00000040', 'none'])
+  ok('r4dr extra: every new tool id handled', X.EXTRA_TOOL_IDS.every((id) => run(id, [0, 1, 2, 3, 4, 5].map((i) => ({ time: i * 10, price: 100 + i }))).done))
+}
+
 console.log('\n' + pass + ' passed, ' + fails.length + ' failed')
 if (fails.length) {
   fails.forEach((f) => console.log('  FAIL  ' + f))

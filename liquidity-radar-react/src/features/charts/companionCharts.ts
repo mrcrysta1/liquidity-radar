@@ -72,6 +72,8 @@ import { registerCrosshairSync } from './crosshairSync'
 import { getLinkGroup, getSyncOptions, registerTimeSync, setMainLinkKey, subscribeLinks } from './linkGroups'
 import type { TimeSyncHandle } from './linkGroups'
 import { mountLinkChip, unmountLinkChips } from '../../components/chart/mountLinkChip'
+import { createDrawingOverlay } from './drawings/overlay'
+import type { DrawingOverlay } from './drawings/overlay'
 
 type Any = any
 
@@ -118,6 +120,8 @@ interface Panel {
   syncOff: (() => void) | null
   /** Its place in its link group's time-range sync. */
   timeLink: TimeSyncHandle | null
+  /** The main chart's drawings for this coin, read-only (./drawings/overlay). */
+  drawOv: DrawingOverlay | null
 }
 
 /** Live ticks redraw a panel's indicators at most this often. */
@@ -479,6 +483,7 @@ function relink(p: Panel): void {
   p.candles = []
   p.shown = []
   p.hover = false
+  p.drawOv?.redraw()
   p.chart.applyOptions({ timeScale: { secondsVisible: isRangeCell(p) } })
   reload(p)
 }
@@ -520,6 +525,7 @@ function addPanel(pos: number): void {
     hover: false,
     syncOff: null,
     timeLink: null,
+    drawOv: null,
   }
   // No controls of its own: the toolbar drives whichever chart is active,
   // and clicking this one (or Enter/Space on it) makes it the active chart.
@@ -597,6 +603,8 @@ function destroyPanel(i: number): void {
   p.syncOff = null
   p.timeLink?.off()
   p.timeLink = null
+  p.drawOv?.dispose()
+  p.drawOv = null
   if (p.chart) {
     try {
       p.chart.remove()
@@ -674,6 +682,14 @@ function initChart(p: Panel): void {
   })
   p.ind.attach(chart)
   p.indOff = store.subscribe(() => drawIndicators(p))
+  p.drawOv = createDrawingOverlay({
+    host: body,
+    chart,
+    series: () => p.candleSeries,
+    bars: () => p.shown,
+    sym: () => p.sym,
+    tf: () => p.tf,
+  })
   chart.subscribeCrosshairMove((param: Any) =>
     hoverLegend(p, param.time && param.point ? param.time : null),
   )
@@ -862,6 +878,7 @@ function draw(p: Panel, candles: CandleFlat[]): void {
   const last = p.shown[p.shown.length - 1]
   if (last) tvLastPrice(p.candleSeries, last.c >= last.o)
   liveLegend(p)
+  p.drawOv?.redraw()
 }
 
 /** "BTCUSDT, 1h" behind the bars, as on the main chart. */
@@ -943,6 +960,7 @@ function connect(p: Panel, token: number): void {
       const lb = p.shown[p.shown.length - 1]
       if (lb) tvLastPrice(p.candleSeries, lb.c >= lb.o)
       liveLegend(p)
+      p.drawOv?.redraw()
     })
   } catch (e) {
     /* stream cap reached: the panel keeps its REST snapshot */

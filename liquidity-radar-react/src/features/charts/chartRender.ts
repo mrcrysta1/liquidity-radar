@@ -78,6 +78,9 @@ import {
 import type { DrawingCommand } from './drawTools'
 import { createDrawingHistory } from './drawings/history'
 import { shape } from './drawings/geometry'
+import { paintDrawingShape } from './drawings/paint'
+import { DRAWINGS_KEY, publishLiveDrawings, storedDrawingsChanged } from './drawings/shared'
+import { visibleOnTf } from './drawings/visibility'
 import type { Drawing, MapCtx, Shape } from './drawings/geometry'
 import { handleAt, hitShape, shiftPoints } from './drawings/edit'
 import { logicalToTime, timeToLogical } from './drawings/timeMap'
@@ -1312,7 +1315,6 @@ function initChartToolbar(): void {
 // valid across timeframes of the same coin but means nothing on another one.
 // The set on screen follows state.symbol lazily: whatever touches the drawings
 // goes through currentDrawings(), which swaps sets the moment the coin changes.
-const DRAWINGS_KEY = 'lr-drawings-v1'
 const DRAWINGS_MAX_COINS = 50
 const DRAWINGS_MAX_PER_COIN = 200
 let drawingsSym: string | null = null
@@ -1389,6 +1391,7 @@ function writeDrawings(): void {
   const keys = Object.keys(all)
   keys.slice(0, Math.max(0, keys.length - DRAWINGS_MAX_COINS)).forEach((k) => delete all[k])
   storageSet(DRAWINGS_KEY, all)
+  storedDrawingsChanged()
 }
 
 function publishDrawingCount(): void {
@@ -2119,6 +2122,7 @@ function drawingAt(x: Any, y: Any, skipLocked = false): number {
   const drawings = currentDrawings()
   for (let i = drawings.length - 1; i >= 0; i--) {
     if (drawings[i].hidden || (skipLocked && drawings[i].locked)) continue
+    if (!visibleOnTf(drawings[i], getTimeframe())) continue
     const sh = shapeOf(drawings[i], cw, ch)
     if (sh && hitShape(sh, x, y)) return i
   }
@@ -2335,8 +2339,6 @@ function setupDrawSelect(wrap: HTMLElement): void {
 }
 
 /** Per-drawing line style from the selection toolbar (width in px). */
-const DASHES: Record<string, number[]> = { dashed: [6, 4], dotted: [1.5, 3] }
-
 function paintShape(
   ctx: Any,
   sh: Shape,
@@ -2345,93 +2347,7 @@ function paintShape(
   selected = false,
   style: { width?: number; dash?: string } = {},
 ): void {
-  const stroke = doomed ? cv('red') || '#FF1744' : base
-  sh.fills.forEach((f) => {
-    if (f.pts.length < 6) return
-    ctx.save()
-    ctx.fillStyle = doomed ? 'rgba(255,23,68,.14)' : f.color
-    ctx.beginPath()
-    ctx.moveTo(f.pts[0], f.pts[1])
-    for (let i = 2; i < f.pts.length; i += 2) ctx.lineTo(f.pts[i], f.pts[i + 1])
-    ctx.closePath()
-    ctx.fill()
-    ctx.restore()
-  })
-  if (doomed) {
-    ctx.save()
-    ctx.strokeStyle = 'rgba(255,23,68,.32)'
-    ctx.lineWidth = 9
-    ctx.lineCap = 'round'
-    sh.segs.forEach((g) => {
-      ctx.beginPath()
-      ctx.moveTo(g.x1, g.y1)
-      ctx.lineTo(g.x2, g.y2)
-      ctx.stroke()
-    })
-    ctx.restore()
-  }
-  sh.segs.forEach((g) => {
-    ctx.save()
-    ctx.strokeStyle = doomed ? stroke : g.color || base
-    // The drawing's own width / style apply to its main lines; decoration
-    // (soft) keeps the tool's look.
-    const own = !g.soft
-    ctx.lineWidth = g.width || (doomed ? 2.2 : own && style.width ? style.width : 1.7)
-    ctx.lineCap = 'round'
-    ctx.setLineDash(g.dash || (own && style.dash ? DASHES[style.dash] || [] : []))
-    ctx.beginPath()
-    ctx.moveTo(g.x1, g.y1)
-    ctx.lineTo(g.x2, g.y2)
-    ctx.stroke()
-    ctx.restore()
-  })
-  sh.arcs.forEach((a) => {
-    if (a.rx <= 0 || a.ry <= 0) return
-    ctx.save()
-    ctx.strokeStyle = doomed ? stroke : a.color || base
-    ctx.lineWidth = doomed ? 2.2 : style.width || 1.7
-    ctx.setLineDash(a.dash || (style.dash ? DASHES[style.dash] || [] : []))
-    ctx.beginPath()
-    ctx.ellipse(a.cx, a.cy, a.rx, a.ry, 0, 0, Math.PI * 2)
-    ctx.stroke()
-    ctx.restore()
-  })
-  sh.handles.forEach((h) => {
-    ctx.save()
-    ctx.fillStyle = doomed ? stroke : base
-    ctx.beginPath()
-    if (selected) {
-      // Selected: hollow grab handles, as on TradingView.
-      ctx.fillStyle = isLightTheme() ? '#ffffff' : '#0b1220'
-      ctx.strokeStyle = base
-      ctx.lineWidth = 1.6
-      ctx.arc(h.x, h.y, 4.5, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.stroke()
-    } else {
-      ctx.arc(h.x, h.y, 2.6, 0, Math.PI * 2)
-      ctx.fill()
-    }
-    ctx.restore()
-  })
-  sh.labels.forEach((l) => {
-    ctx.save()
-    const fs = l.size || 10
-    ctx.font = fs + 'px JetBrains Mono, monospace'
-    ctx.textAlign = l.align || 'left'
-    const w = ctx.measureText(l.text).width
-    if (l.box) {
-      const bx = l.align === 'center' ? l.x - w / 2 : l.align === 'right' ? l.x - w : l.x
-      ctx.fillStyle = isLightTheme() ? 'rgba(255,255,255,.88)' : 'rgba(6,11,24,.78)'
-      ctx.fillRect(bx - 4, l.y - fs, w + 8, fs + 4)
-      ctx.strokeStyle = doomed ? stroke : l.color || base
-      ctx.lineWidth = 1
-      ctx.strokeRect(bx - 4, l.y - fs, w + 8, fs + 4)
-    }
-    ctx.fillStyle = doomed ? stroke : l.color || base
-    ctx.fillText(l.text, l.x, l.y)
-    ctx.restore()
-  })
+  paintDrawingShape(ctx, sh, base, { doomed, selected, style, light: isLightTheme(), red: cv('red') || '#FF1744' })
 }
 
 /** Tell the selection toolbar which drawing is selected and how it looks. */
@@ -2450,6 +2366,9 @@ function publishSelection(): void {
           text: typeof d.text === 'string' ? d.text : null,
           account: typeof d.account === 'number' ? d.account : null,
           risk: typeof d.risk === 'number' ? d.risk : null,
+          hideOn: Array.isArray(d.hideOn) ? d.hideOn.slice() : [],
+          bg: typeof d.bg === 'string' ? d.bg : null,
+          border: typeof d.border === 'string' ? d.border : null,
         }
       : null,
   )
@@ -2489,8 +2408,14 @@ function redrawDrawings(includePreview?: Any): void {
   ctx.rect(px0, 0, px1 - px0, mainPaneHeight(chart, ch))
   ctx.clip()
 
-  currentDrawings().forEach(function (d: Any, i: number) {
+  const tfNow = getTimeframe()
+  const list = currentDrawings()
+  // Layout cells and grid panels on this coin paint the same set (drawings/overlay).
+  publishLiveDrawings(String(state.symbol || ''), list)
+  list.forEach(function (d: Any, i: number) {
     if (d.hidden) return
+    // "Visible on intervals": hidden on this timeframe's group, unless selected.
+    if (i !== chartState._sel && !visibleOnTf(d, tfNow)) return
     const sh = shapeOf(d, cw, ch)
     if (sh)
       paintShape(ctx, sh, d.color, i === chartState._eraseHit, i === chartState._sel, {
