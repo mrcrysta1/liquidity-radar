@@ -16,8 +16,8 @@ const VERDICT_COLOR: Record<Verdict, string> = {
   neutral: 'var(--muted)',
 }
 const VERDICT_BG: Record<Verdict, string> = {
-  bull: 'rgba(0,230,118,.1)',
-  bear: 'rgba(255,23,68,.1)',
+  bull: 'rgb(var(--gRGB)/.1)',
+  bear: 'rgb(var(--rRGB)/.1)',
   neutral: 'transparent',
 }
 const VERDICT_LABEL: Record<Verdict, string> = { bull: 'BULL', bear: 'BEAR', neutral: 'FLAT' }

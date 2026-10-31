@@ -1119,8 +1119,13 @@ function applyFsState(fs: boolean): void {
   document.documentElement.classList.toggle('radar-fs', fs)
   const btn = $('fsBtn')
   if (btn) {
-    btn.textContent = fs ? '✕' : '⛶'
-    btn.title = fs ? 'Exit full screen [F]' : 'Full screen [F]'
+    // The icon is drawn in CSS (a mask that follows html.radar-fs); the label
+    // is the same styled tooltip as the toolbar's other buttons, not a native
+    // title that looked different.
+    const label = fs ? 'Exit full screen' : 'Full screen'
+    btn.innerHTML = '<span class="tvb-tip">' + label + ' <kbd>F</kbd></span>'
+    btn.removeAttribute('title')
+    btn.setAttribute('aria-label', label)
   }
   // The stage-height sync (companionCharts) listens for resize; entering
   // native fullscreen fires one too, but the CSS-only path would not.

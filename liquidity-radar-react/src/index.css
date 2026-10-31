@@ -1041,6 +1041,9 @@ html.radar-fs .cs-panel{height:100%;max-height:none}
 .whale-tip b.dn{color:var(--red)}
 .whale-tip small{font-size:var(--text-xs);color:var(--dim)}
 [data-theme="light"] .whale-legend{background:rgb(255 255 255/.8)}
+/* On white, --dim and the pale-grey size dots were close to invisible. */
+[data-theme="light"] .wl-cov{color:var(--muted)}
+[data-theme="light"] .wl-dot circle{fill:rgb(71 85 105/.14);stroke:rgb(71 85 105/.7)}
 @media(max-width:640px){
   .whale-legend{left:4px;bottom:28px;padding:4px 6px;gap:2px;font-size:var(--text-xs);max-width:calc(100% - 76px)}
   .wl-title,.wl-scale{display:none}
@@ -1722,6 +1725,7 @@ html.radar-fs #radarChartCard #fsBtn::before{
   font-family:var(--tv-font);font-size:13px;font-weight:400;line-height:1.25;letter-spacing:0;
   opacity:0;visibility:hidden;transition:opacity .12s .25s,transform .12s .25s,visibility .12s .25s;
 }
+#radarChartCard .tvb-tip kbd{font-family:var(--tv-font);font-size:11px;opacity:.65;margin-left:4px}
 #radarChartCard .chart-tool-btn:hover>.tvb-tip,#radarChartCard .chart-tool-btn:focus-visible>.tvb-tip,
 #radarChartCard .style-btn:hover .style-tip,#radarChartCard .style-btn:focus-visible .style-tip,
 #radarChartCard .draw-btn:hover .draw-tip,#radarChartCard .draw-btn:focus-visible .draw-tip,
@@ -1783,6 +1787,28 @@ html.radar-fs #radarChartCard #fsBtn::before{
 }
 
 /* Menus: square-ish corners, TradingView's shadow and type, blue selection. */
+/* The bottom bar (ranges, clock, % / log / auto) in the top bar's look: same
+   font and flat 4px buttons, the active one in --tv-blue. It used monospace
+   pills filled with --primary and a purple open state, so the chart card
+   showed three different "active" colours. */
+#radarChartCard .sn-bar,#radarChartCard .sn-btn,#radarChartCard .sn-clock{font-family:var(--tv-font);font-size:13px}
+#radarChartCard .sn-ranges{background:transparent;border:0;padding:0;gap:1px}
+#radarChartCard .sn-btn{color:var(--tv-txt);border-radius:4px;padding:4px 7px}
+#radarChartCard .sn-bar>.sn-btn,#radarChartCard .sn-more>.sn-btn,#radarChartCard .sn-range-menu>.sn-btn{border:0;padding:4px 7px}
+#radarChartCard .sn-btn:hover,#radarChartCard .sn-drop.open{background:var(--tv-hover);color:var(--tv-txt)}
+#radarChartCard .sn-btn.on,#radarChartCard .sn-bar>.sn-btn.on{background:transparent;color:var(--tv-blue);font-weight:700}
+#radarChartCard .sn-menu{border-radius:6px;box-shadow:var(--tv-menu-shadow);font-family:var(--tv-font)}
+#radarChartCard .sn-mi{font-size:13px;border-radius:4px}
+#radarChartCard .sn-mi:hover{background:var(--tv-hover)}
+#radarChartCard .sn-mi.on .sn-check{color:var(--tv-blue)}
+#radarChartCard .sn-btn:focus-visible,#radarChartCard .sn-mi:focus-visible{outline-color:var(--tv-blue)}
+/* The OHLC legend is plain text over the chart, as on TradingView, with
+   fixed-width digits so it does not reflow as the crosshair moves. Phones
+   keep the translucent backing (see the max-width:640px block). */
+#radarChartCard .legend{font-family:var(--tv-font);font-variant-numeric:tabular-nums}
+@media(min-width:641px){
+  #radarChartCard .legend{background:transparent;border:0;padding:2px 4px;font-size:13px}
+}
 #radarChartCard .tf-menu,#radarChartCard .style-menu,#radarChartCard .ind-menu,#radarChartCard .layout-menu,
 #radarChartCard .draw-menu,#radarChartCard .rail-menu,#radarChartCard .tvb .cp-menu{
   border-radius:6px;box-shadow:var(--tv-menu-shadow);font-family:var(--tv-font);

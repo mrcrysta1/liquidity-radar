@@ -77,7 +77,7 @@ export function OBImbalanceGauge() {
           flex: 1,
           height: 8,
           borderRadius: 5,
-          background: 'linear-gradient(90deg, rgba(255,23,68,.35), var(--sunk-2) 48%, var(--sunk-2) 52%, rgba(0,230,118,.35))',
+          background: 'linear-gradient(90deg, rgb(var(--rRGB) / .35), var(--sunk-2) 48%, var(--sunk-2) 52%, rgb(var(--gRGB) / .35))',
           position: 'relative',
         }}
       >

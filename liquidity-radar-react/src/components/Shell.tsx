@@ -200,9 +200,13 @@ export function Shell() {
               <span className="tvb-sep tvb-sep-end" aria-hidden="true" />
               <ReplayButton />
               <ScreenshotButton />
-              {/* The engine swaps this button's glyph and title on toggle; the
-                  icon and tooltip are drawn in CSS so they survive that. */}
-              <button className="chart-tool-btn tvb-icon" id="fsBtn" title="Full screen [F]" aria-label="Full screen">⛶</button>
+              {/* The engine swaps this button's tooltip and label on toggle;
+                  the icon is drawn in CSS so it survives that. */}
+              <button className="chart-tool-btn tvb-icon" id="fsBtn" aria-label="Full screen">
+                <span className="tvb-tip">
+                  Full screen <kbd>F</kbd>
+                </span>
+              </button>
             </div>
           </div>
 
