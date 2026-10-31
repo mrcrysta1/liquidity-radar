@@ -1,5 +1,6 @@
 import * as LightweightCharts from 'lightweight-charts'
 import { createZonedChart } from './zonedTimeScale'
+import { keepMainPane } from './chartPalette'
 import { chartSettings, subscribeChartSettings } from './chartSettings'
 import { onPineResult } from './pine/indicator'
 import { venueOf } from '../../utils/coins'
@@ -383,19 +384,22 @@ export function createPriceSeries(c: Any, id: ChartStyleId, baseline = 0): Any {
  */
 function applyChartStyle(): void {
   if (!chart) return
-  if (chartState.styleSeries) {
-    stopBaselineBase(chartState.styleSeries)
+  const old = chartState.styleSeries
+  chartState.styleSeries = null
+  candleSeries = null
+
+  // The new series goes in before the old one leaves, so the price pane is
+  // never empty (see keepMainPane).
+  const base = state.candles.length ? state.candles[0].c : 0
+  candleSeries = createPriceSeries(chart, getChartStyle(), base)
+  if (old) {
+    stopBaselineBase(old)
     try {
-      chart.removeSeries(chartState.styleSeries)
+      chart.removeSeries(old)
     } catch (e) {
       /* already detached */
     }
   }
-  chartState.styleSeries = null
-  candleSeries = null
-
-  const base = state.candles.length ? state.candles[0].c : 0
-  candleSeries = createPriceSeries(chart, getChartStyle(), base)
   candleSeries.applyOptions({ priceLineVisible: chartSettings().priceLine })
   chartState.styleSeries = candleSeries
   priceSeriesSubs.forEach((f) => f(candleSeries))
@@ -507,6 +511,7 @@ export function initChart(): void {
     // Dragging the price axis rescales without moving the time range.
     updateCloseTimer()
   })
+  keepMainPane(chart)
   // Crosshair sync with the layout's other cells (./crosshairSync); a synced
   // crosshair drives the legend too.
   registerCrosshairSync({

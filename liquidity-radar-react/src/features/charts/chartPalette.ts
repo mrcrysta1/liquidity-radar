@@ -189,3 +189,17 @@ export function mainPaneHeight(chart: Any, fallback: number): number {
     return fallback
   }
 }
+
+/**
+ * Keep a chart's main (price) pane even while it is empty. lightweight-charts
+ * v5 drops an empty pane: rebuilding the price series for a new style emptied
+ * it for a moment, the delta pane moved up into its place, and the new candles
+ * landed there, sharing the delta's scale (0…100k) — a flat line.
+ */
+export function keepMainPane(chart: Any): void {
+  try {
+    chart?.panes?.()[0]?.setPreserveEmptyPane(true)
+  } catch {
+    /* not laid out yet */
+  }
+}

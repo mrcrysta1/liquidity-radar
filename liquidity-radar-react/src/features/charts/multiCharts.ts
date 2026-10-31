@@ -12,6 +12,7 @@
 // header's indicators button is a React portal (PanelIndicatorButtons).
 import * as LightweightCharts from 'lightweight-charts'
 import { createZonedChart } from './zonedTimeScale'
+import { keepMainPane } from './chartPalette'
 import { poll } from '../../services/pollScheduler'
 import { pfmt } from '../../utils/format'
 import { state } from '../../services/store'
@@ -386,6 +387,7 @@ function mcInitChart(p: McPanel): void {
       horzLine: { color: th.pline, labelBackgroundColor: th.pline },
     },
   } as Any)
+  keepMainPane(c)
   const cs = c.addSeries(LightweightCharts.CandlestickSeries, {
     upColor: th.up,
     downColor: th.dn,

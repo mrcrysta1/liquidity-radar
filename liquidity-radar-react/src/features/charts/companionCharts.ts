@@ -21,6 +21,7 @@
 // active cell's set lives in the main chart's store; the two swap with it.
 import * as LightweightCharts from 'lightweight-charts'
 import { createZonedChart } from './zonedTimeScale'
+import { keepMainPane } from './chartPalette'
 import { isInstrument } from '../../constants/instruments'
 import { baseOf, coinMeta } from '../../utils/coins'
 import { fmt, pfmt, priceDecimals } from '../../utils/format'
@@ -553,6 +554,7 @@ function initChart(p: Panel): void {
       },
     },
   } as Any)
+  keepMainPane(chart)
   p.chart = chart
   // The same series the main chart builds for this style, so a cell keeps its
   // look whether or not it is the active one.
