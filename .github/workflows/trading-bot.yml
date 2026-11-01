@@ -7,12 +7,14 @@
 #
 # The bot ticks every 15 s: mirrors the Binance Demo account for the website,
 # manages any open trade, and decides on each newly closed 4-hour candle
-# (BOT_INTERVAL) for five markets. EXPLORE: it takes a demo trade whenever the
-# model's EV is >= 0.1R after fees and the setup rules pass, without waiting
-# for the walk-forward gate (expectancy >= 0.05R, PF >= 1.15, recent blocks
-# positive). In gated mode (2026-10-31 to 11-01) no market passed, so the bot
-# placed no real trades at all; real fills teach it more than shadow trades.
-# The gate verdict is still computed and shown. Bracket 1.5 / 2.25 ATR (1:1.5) with a
+# (BOT_INTERVAL) for five markets. HYBRID: a demo trade only on a market whose
+# walk-forward gate passes (expectancy >= 0.05R, PF >= 1.15, recent blocks
+# positive), at EV >= 0.1R after fees with the setup rules passing, and only
+# while open risk stays under the portfolio heat cap (1.5% of equity per
+# direction, 2% in total: BTC/ETH/SOL/BNB move ~0.9 together, so same-side
+# trades on one bar are one big bet). Every other signal is a shadow trade, so
+# it learns from all of them at no cost. (Explore mode, 2026-11-01, traded
+# without a proven edge; gated mode before it placed no trades at all.) Bracket 1.5 / 2.25 ATR (1:1.5) with a
 # 2-day time exit, entries only at EV >= 0.1R after fees. Chosen by a sweep
 # (2026-10-28) of 15m/1h/4h × six brackets × EV bars: 15m had no
 # profitable setting and 1h one marginal one; on 4h this setting was positive
@@ -107,7 +109,7 @@ jobs:
         run: node src/bot.ts
         env:
           BOT_RUN_MINUTES: '330'
-          BOT_MODE: explore
+          BOT_MODE: hybrid
           BOT_SYMBOLS: BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XAUUSDT
           BOT_INTERVAL: 4h
           BOT_MIN_EV: '0.1'
@@ -122,7 +124,9 @@ jobs:
           BOT_MAX_OPEN: '4'
           BOT_MAX_TRADES_DAY: '10'
           BOT_SHADOW: '1'
-          BOT_SHADOW_MAX_OPEN: '1'
+          # One decision per bar, each shadow open at most BOT_HORIZON bars:
+          # 13 per market leaves room to shadow every signal.
+          BOT_SHADOW_MAX_OPEN: '13'
           BOT_LEARN_EVERY_MIN: '240'
           BOT_LEARN_EVERY_TRADES: '20'
           FUTURES_BASE: https://testnet.binancefuture.com

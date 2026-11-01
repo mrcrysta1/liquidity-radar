@@ -116,7 +116,7 @@ bot refuses to start. There is no mainnet override.
 - Calibrated model expected value > 0 (and ≥ `BOT_MIN_EV`), plus the hard limits below.
 
 **Learning from every trade** (`src/bot/learning.ts`, `sql/005_bot_learning.sql`)
-- A setup turned down only by the model's verdict (EV, or the gate in gated mode)
+- A setup turned down only by the model's verdict (EV, or the gate in gated / hybrid mode)
   becomes a **shadow trade**: no order, resolved on market bars (target or stop first).
 - Every closed real or shadow trade updates an online win-probability
   **calibration** per symbol, side and regime (`bot_calibration`), which outlives retrains.
@@ -147,6 +147,13 @@ bot refuses to start. There is no mainnet override.
 - `npm run train` prints the same report without keys or a database.
 - `BOT_MODE=explore` trades the model's best idea anyway (testnet only), to
   gather real trade records.
+- `BOT_MODE=hybrid` places a real order only on a symbol whose gate passes, that
+  is in `BOT_REAL_SYMBOLS` (default all), and only while open risk across all
+  symbols stays ≤ `BOT_MAX_SIDE_RISK` per direction (1.5%) and ≤
+  `BOT_MAX_TOTAL_RISK` in total (2%) — the majors move together, so same-side
+  trades are one bet. Every other signal that passes the hard rules is a shadow
+  trade whose reject reason says why (gate, EV, heat, not listed); up to
+  horizon + 1 shadows per symbol are open at once, so none is dropped.
 
 **How it trades**
 1. A market entry.
@@ -174,8 +181,9 @@ the database doesn't know about are closed.
 **Setup**
 1. Run `sql/002_bot.sql`, then `sql/005_bot_learning.sql` and `sql/006_bot_journal.sql` (trade journal), in Supabase.
 2. Put your testnet keys in `.env` (Binance → Demo Trading → API Management).
-3. Choose the mode: `BOT_MODE=gated` (default, trades only a proven model) or
-   `BOT_MODE=explore` (trades its best idea anyway, to gather real testnet fills).
+3. Choose the mode: `BOT_MODE=gated` (default, trades only a proven model),
+   `BOT_MODE=explore` (trades its best idea anyway, to gather real testnet fills) or
+   `BOT_MODE=hybrid` (real only where proven and under the heat cap, shadow the rest).
 4. **Free, no server:** the repo's GitHub Actions workflow `.github/workflows/trading-bot.yml`
    runs the bot non-stop: each run lasts 5 h 30 min (`BOT_RUN_MINUTES=330`, a GitHub job may
    last 6 h) and then starts the next run itself; an hourly cron only restarts the chain if it

@@ -130,7 +130,7 @@ function bars(n: number, seed = 5): Bar[] {
   return out
 }
 
-function setup(mode: 'gated' | 'explore') {
+function setup(mode: TraderConfig['mode']) {
   const hist = bars(1500)
   const state = { idx: 1400 }
   const cfg: TraderConfig = {
@@ -139,7 +139,7 @@ function setup(mode: 'gated' | 'explore') {
     historyBars: 1400,
     // These replays treat old simulated bars as "now".
     maxLateMs: Infinity,
-    wf: { ...DEFAULT_WF, trainBars: 600, testBars: 200, minEvR: mode === 'explore' ? -99 : DEFAULT_WF.minEvR, mlp: { ...DEFAULT_WF.mlp, epochs: 6 } },
+    wf: { ...DEFAULT_WF, trainBars: 600, testBars: 200, minEvR: mode === 'gated' ? DEFAULT_WF.minEvR : -99, mlp: { ...DEFAULT_WF.mlp, epochs: 6 } },
     // These replays exercise the order flow, so the EV rule and the cooldown are
     // relaxed here; they have their own tests (bot-setup, and below).
     setup: { ...DEFAULT_SETUP, minEvR: -1e9, cooldownMs: 0 },
@@ -520,4 +520,127 @@ test('an unreadable balance means no entry this bar, not a zero-equity order', a
   assert.equal(await store.openTrade('BTCUSDT'), null)
   assert.equal(ex.pos.amt, 0, 'no order sent')
   assert.equal((await pg.query("select msg from bot_events where msg like '%USDT balance unavailable%'")).rows.length, 1)
+})
+
+// ---- hybrid mode: real only with a passed gate, a listed symbol and room under the heat cap ----
+
+/** A hybrid trader whose walk-forward gate is forced to `pass` (a random walk never passes it). */
+async function hybrid(pass: boolean, over: Partial<TraderConfig> = {}) {
+  const { db, pg } = await freshDb()
+  const store = new BotStore(db)
+  const ex = new FakeExchange()
+  const { hist, state, cfg } = setup('hybrid')
+  const c: TraderConfig = { ...cfg, learn: { ...cfg.learn, shadowMaxOpen: cfg.wf.bracket.horizon + 1 }, ...over }
+  const t = new SymbolTrader(ex, store, 'BTCUSDT', c)
+  await t.init()
+  t.gate = { ...t.gate!, pass }
+  ex.price = hist[state.idx - 1].c
+  const shadows = async () => (await pg.query<{ reject_reason: string; status: string }>('select reject_reason, status from bot_shadow_trades order by id')).rows
+  return { store, ex, hist, state, t, pg, shadows }
+}
+
+/** Open real trades on other symbols, `n` per side, each risking `riskUsd`. */
+async function openElsewhere(store: BotStore, modelId: number, n: number, riskUsd: number) {
+  const syms = ['ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XAUUSDT', 'ADAUSDT', 'XRPUSDT', 'DOGEUSDT', 'LTCUSDT']
+  let k = 0
+  for (const side of [1, -1] as const)
+    for (let i = 0; i < n; i++)
+      await store.insertTrade({
+        symbol: syms[k++], modelId, mode: 'gated', venue: 'fake', side, openedAt: Date.now(), barTime: Date.now(), entry: 1, qty: 1,
+        sl: 0.9, tp: 1.2, atr: 0.05, riskUsd, pWin: 0.5, evR: 0.1, features: {}, entryOrderId: 1,
+      })
+}
+
+test('hybrid: gate passed → a real order (recorded as gated), no shadow', async () => {
+  const { store, ex, t, pg, shadows } = await hybrid(true)
+  await t.tick(true, Date.now())
+  const open = await store.openTrade('BTCUSDT')
+  assert.ok(open, 'real trade opened')
+  assert.notEqual(ex.pos.amt, 0)
+  assert.equal((await pg.query<{ mode: string }>('select mode from bot_trades')).rows[0].mode, 'gated')
+  assert.equal((await shadows()).length, 0)
+})
+
+test('hybrid: gate failed → a shadow trade on every bar (several open at once), never an order', async () => {
+  const { store, ex, hist, state, t, shadows } = await hybrid(false)
+  for (let j = 0; j < 3; j++) {
+    await t.tick(true, Date.now())
+    state.idx++
+    ex.price = hist[state.idx - 1].c
+  }
+  assert.equal(await store.openTrade('BTCUSDT'), null)
+  assert.equal(ex.pos.amt, 0, 'no order sent')
+  const sh = await shadows()
+  assert.equal(sh.length, 3, 'one shadow per bar')
+  assert.ok(sh.every((s) => /no proven edge/.test(s.reject_reason)), sh.map((s) => s.reject_reason).join(' | '))
+  const plan = await store.getState<TradePlan | null>('plan:BTCUSDT', null)
+  assert.equal(plan?.status, 'paper')
+})
+
+test('hybrid: the portfolio heat cap turns the 4th same-side trade into a shadow', async () => {
+  const setupCfg = { ...DEFAULT_SETUP, minEvR: -1e9, cooldownMs: 0, maxOpen: 10 }
+  // Total cap off here, so only the per-side cap (1.5%) can bind. 0.5% each at $10,000.
+  const risk = { ...DEFAULT_TRADER.risk, maxSideRisk: 0.015, maxTotalRisk: 1 }
+  // Two open per side: the third on either side fits.
+  {
+    const { store, t, shadows } = await hybrid(true, { setup: setupCfg, risk })
+    await openElsewhere(store, t.model!.id, 2, 50)
+    await t.tick(true, Date.now())
+    assert.ok(await store.openTrade('BTCUSDT'), 'third same-side trade opened')
+    assert.equal((await shadows()).length, 0)
+  }
+  // Three open per side: the fourth on either side is over the cap.
+  {
+    const { store, ex, t, pg, shadows } = await hybrid(true, { setup: setupCfg, risk })
+    await openElsewhere(store, t.model!.id, 3, 50)
+    await t.tick(true, Date.now())
+    assert.equal(await store.openTrade('BTCUSDT'), null)
+    assert.equal(ex.pos.amt, 0, 'no order sent')
+    const sh = await shadows()
+    assert.equal(sh.length, 1)
+    assert.match(sh[0].reject_reason, /^portfolio heat: (long|short) risk 1\.50% open/)
+    assert.equal((await pg.query("select msg from bot_events where msg like '%no trade: portfolio heat%'")).rows.length, 1)
+    const plan = await store.getState<TradePlan | null>('plan:BTCUSDT', null)
+    assert.equal(plan?.status, 'paper')
+    assert.match(plan!.reasons[0], /portfolio heat/)
+  }
+})
+
+test('hybrid: a symbol outside BOT_REAL_SYMBOLS only shadow trades, even with a passed gate', async () => {
+  const { store, ex, t, shadows } = await hybrid(true, { realSymbols: ['ETHUSDT'] })
+  await t.tick(true, Date.now())
+  assert.equal(await store.openTrade('BTCUSDT'), null)
+  assert.equal(ex.pos.amt, 0)
+  const sh = await shadows()
+  assert.equal(sh.length, 1)
+  assert.match(sh[0].reject_reason, /not in the real-trade list/)
+  // Listed → real.
+  const listed = await hybrid(true, { realSymbols: ['ETHUSDT', 'BTCUSDT'] })
+  await listed.t.tick(true, Date.now())
+  assert.ok(await listed.store.openTrade('BTCUSDT'))
+})
+
+test('explore and gated ignore the heat cap and the real-symbol list (hybrid only)', async () => {
+  for (const mode of ['explore', 'gated'] as const) {
+    const { db } = await freshDb()
+    const store = new BotStore(db)
+    const ex = new FakeExchange()
+    const { hist, state, cfg } = setup(mode)
+    const t = new SymbolTrader(ex, store, 'BTCUSDT', {
+      ...cfg,
+      wf: { ...cfg.wf, minEvR: -99 },
+      setup: { ...cfg.setup, maxOpen: 10 },
+      risk: { ...cfg.risk, maxSideRisk: 0.001, maxTotalRisk: 0.001 },
+      realSymbols: ['ETHUSDT'],
+    })
+    await t.init()
+    if (mode === 'gated') t.gate = { ...t.gate!, pass: true }
+    await openElsewhere(store, t.model!.id, 3, 50)
+    ex.price = hist[state.idx - 1].c
+    await t.tick(true, Date.now())
+    const open = await store.openTrade('BTCUSDT')
+    assert.ok(open, mode + ' opened despite heat and list')
+    const row = (await db.query('select mode from bot_trades where id = $1', [open!.id])).rows[0] as { mode: string }
+    assert.equal(row.mode, mode)
+  }
 })

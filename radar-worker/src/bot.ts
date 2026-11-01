@@ -35,6 +35,12 @@ const num = (v: string | undefined, d: number) => (v !== undefined && v !== '' &
 // BOT_ONCE=1: run one tick and exit (for a scheduler such as GitHub Actions).
 const ONCE = env.BOT_ONCE === '1'
 const SYMBOLS = (env.BOT_SYMBOLS || 'BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XAUUSDT').split(',').map((s) => s.trim().toUpperCase()).filter(Boolean)
+// BOT_MODE: gated (default) | explore | hybrid. Hybrid: real orders only on
+// symbols whose walk-forward gate passes, that are in BOT_REAL_SYMBOLS and fit
+// under the portfolio heat cap; every other signal is a shadow trade.
+const MODE: TraderConfig['mode'] = env.BOT_MODE === 'explore' || env.BOT_MODE === 'hybrid' ? env.BOT_MODE : 'gated'
+// BOT_REAL_SYMBOLS (hybrid): symbols allowed to place real orders; default all of BOT_SYMBOLS.
+const REAL_SYMBOLS = env.BOT_REAL_SYMBOLS ? env.BOT_REAL_SYMBOLS.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean) : SYMBOLS
 const TICK_MS = num(env.BOT_TICK_MS, 15_000)
 // BOT_RUN_MINUTES: run continuously for this long, then exit cleanly so a
 // hosted runner (GitHub Actions, 6 h per job) can hand over to the next run.
@@ -74,9 +80,11 @@ const cfg: TraderConfig = {
     everyMs: num(env.BOT_LEARN_EVERY_MIN, DEFAULT_LEARN.everyMs / 60_000) * 60_000,
     everyTrades: num(env.BOT_LEARN_EVERY_TRADES, DEFAULT_LEARN.everyTrades),
     shadow: env.BOT_SHADOW !== '0',
-    shadowMaxOpen: num(env.BOT_SHADOW_MAX_OPEN, DEFAULT_LEARN.shadowMaxOpen),
+    // Hybrid shadows every signal: one decision per bar, each open at most horizon bars.
+    shadowMaxOpen: num(env.BOT_SHADOW_MAX_OPEN, MODE === 'hybrid' ? BRACKET.horizon + 1 : DEFAULT_LEARN.shadowMaxOpen),
   },
-  mode: env.BOT_MODE === 'explore' ? 'explore' : 'gated',
+  mode: MODE,
+  realSymbols: REAL_SYMBOLS,
   // Each plan also shows how it would be sized on a small real-money account.
   previewEquity: num(env.BOT_PREVIEW_EQUITY, 100),
   risk: {
@@ -86,6 +94,9 @@ const cfg: TraderConfig = {
     minMarginUsd: num(env.BOT_MIN_MARGIN, DEFAULT_TRADER.risk.minMarginUsd ?? 100),
     maxDailyLoss: num(env.MAX_DAILY_LOSS, DEFAULT_TRADER.risk.maxDailyLoss),
     maxDrawdown: num(env.MAX_DRAWDOWN, DEFAULT_TRADER.risk.maxDrawdown),
+    // Portfolio heat caps (hybrid): open risk per direction and in total, fractions of equity.
+    maxSideRisk: num(env.BOT_MAX_SIDE_RISK, DEFAULT_TRADER.risk.maxSideRisk ?? 0.015),
+    maxTotalRisk: num(env.BOT_MAX_TOTAL_RISK, DEFAULT_TRADER.risk.maxTotalRisk ?? 0.02),
   },
 }
 
@@ -104,7 +115,7 @@ for (let attempt = 1; ; attempt++) {
   }
 }
 if (HANDOFF) console.log(new Date().toISOString(), `bot run started · until ${new Date(DEADLINE).toISOString()}`)
-else if (!ONCE) await store.event('info', null, `bot starting on ${ex.base} (${ex.isTestnet ? 'TESTNET' : 'MAINNET'}) · mode ${cfg.mode} · ${SYMBOLS.join(', ')} · ${cfg.interval} bars · risk ${(cfg.risk.riskPerTrade * 100).toFixed(2)}%/trade · bracket ${BRACKET.slAtr}/${BRACKET.tpAtr} ATR over ${BRACKET.horizon} bars · max ${cfg.setup.maxOpen} open, ${cfg.setup.maxTradesPerDay}/day`)
+else if (!ONCE) await store.event('info', null, `bot starting on ${ex.base} (${ex.isTestnet ? 'TESTNET' : 'MAINNET'}) · mode ${cfg.mode} · ${SYMBOLS.join(', ')} · ${cfg.interval} bars · risk ${(cfg.risk.riskPerTrade * 100).toFixed(2)}%/trade · bracket ${BRACKET.slAtr}/${BRACKET.tpAtr} ATR over ${BRACKET.horizon} bars · max ${cfg.setup.maxOpen} open, ${cfg.setup.maxTradesPerDay}/day${cfg.mode === 'hybrid' ? ` · real: ${REAL_SYMBOLS.join(', ')} · heat ≤ ${(cfg.risk.maxSideRisk! * 100).toFixed(1)}%/side, ${(cfg.risk.maxTotalRisk! * 100).toFixed(1)}% total` : ''}`)
 
 // Each market starts on its own: one whose setup fails (a slow link, or a
 // rejection such as -4067) is skipped and retried with a bounded backoff from

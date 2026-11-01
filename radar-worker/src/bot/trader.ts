@@ -13,12 +13,17 @@
 // hour (or 20 closed trades) a challenger model is trained on bars plus stored
 // trade outcomes and replaces the champion only if it does better on a
 // held-out recent slice. The walk-forward gate is refreshed every retrainMs.
+//
+// Hybrid mode: a real order only on a symbol that passed its walk-forward gate,
+// is in the real-trade list, and fits under the portfolio heat cap; every other
+// signal that passes the hard rules is a shadow trade, so the bot still learns
+// from all of them at no cost.
 import { closedBars, INTERVAL_MS } from './data.ts'
 import { lastPrice } from '../binance.ts'
 import { FEATURES, WARMUP, costR, featureAt, indicators } from './features.ts'
 import { roundStep, roundTick } from './futures.ts'
 import type { Fill, Position, SymbolRules } from './futures.ts'
-import { size } from './risk.ts'
+import { heatCheck, size } from './risk.ts'
 import type { RiskConfig } from './risk.ts'
 import type { BotStore, ModelRow, OpenTrade } from './store.ts'
 import { DEFAULT_GATE, DEFAULT_WF, decide, fitModel, gate, walkForward } from './walkforward.ts'
@@ -50,8 +55,10 @@ export interface Exchange {
 
 export interface TraderConfig {
   interval: string
-  mode: 'gated' | 'explore'
+  mode: 'gated' | 'explore' | 'hybrid'
   risk: RiskConfig
+  /** Hybrid mode: the only symbols that may place real orders (unset = all); the rest only shadow trade. */
+  realSymbols?: string[]
   wf: WfConfig
   /** Bars of history for training + walk-forward. */
   historyBars: number
@@ -80,7 +87,14 @@ export interface LearnConfig {
   minHoldout: number
   /** Record and resolve shadow trades. */
   shadow: boolean
-  /** Shadow trades open at once per symbol (1 = like a real position). */
+  /**
+   * Shadow trades open at once per symbol (1 = like a real position). Decisions
+   * are made once per bar, so horizon + 1 is enough to shadow every signal.
+   * Overlapping shadows have correlated outcomes, like the overlapping bar
+   * labels the model trains on; learning.ts needs no change for that (each is
+   * purged / held out on its own, both models are scored on the same rows), but
+   * the calibration's n then counts more trades than independent bets.
+   */
   shadowMaxOpen: number
 }
 
@@ -96,7 +110,8 @@ export const DEFAULT_LEARN: LearnConfig = {
 export const DEFAULT_TRADER: TraderConfig = {
   interval: '4h',
   mode: 'gated',
-  risk: { riskPerTrade: 0.005, maxNotionalX: 2, leverage: 3, minMarginUsd: 100, maxDailyLoss: 0.03, maxDrawdown: 0.15 },
+  // The heat caps apply in hybrid mode only.
+  risk: { riskPerTrade: 0.005, maxNotionalX: 2, leverage: 3, minMarginUsd: 100, maxDailyLoss: 0.03, maxDrawdown: 0.15, maxSideRisk: 0.015, maxTotalRisk: 0.02 },
   wf: DEFAULT_WF,
   historyBars: 4380, // ~2 years of 4h bars
   retrainMs: 24 * 3_600_000,
@@ -562,7 +577,7 @@ export class SymbolTrader {
         costs: this.cfg.wf.costs,
         evR: ev,
         evFloor: this.cfg.wf.minEvR,
-        gated: this.cfg.mode === 'gated',
+        gated: this.cfg.mode !== 'explore',
         gatePass: this.gate?.pass ?? this.model.gatePass,
         gateReason: this.gate?.reasons[0] ?? this.model.gateReasons[0],
         modelId: this.model.id,
@@ -572,6 +587,12 @@ export class SymbolTrader {
       },
       this.cfg.setup,
     )
+    const hybrid = this.cfg.mode === 'hybrid'
+    // Not cleared for real money: like the gate, a model-side "no" — it is shadowed.
+    if (hybrid && this.cfg.realSymbols && !this.cfg.realSymbols.includes(this.symbol)) {
+      chk.model.push('not in the real-trade list (BOT_REAL_SYMBOLS)')
+      chk.ok = false
+    }
     const summary =
       `P(long) ${pct(pL)} EV ${evL.toFixed(3)}R · P(short) ${pct(pS)} EV ${evS.toFixed(3)}R` +
       ` (raw ${pct(d.pLong)}/${pct(d.pShort)}, ${regime}) · R:R ${chk.rr.toFixed(2)} · cost ${chk.costR.toFixed(3)}R`
@@ -599,33 +620,35 @@ export class SymbolTrader {
     }
     // Shown on the website; never allowed to stop a decision.
     const savePlan = () => this.store.setState('plan:' + this.symbol, plan).catch((e) => console.error('plan', (e as Error).message))
+    // Record the idea as a shadow trade (if shadowing is on and there is room); returns the note for the event.
+    const shadow = async (reasons: string[]): Promise<string> => {
+      if (!this.cfg.learn.shadow || (await this.store.openShadows(this.symbol)).length >= this.cfg.learn.shadowMaxOpen) return ''
+      const sid = await this.store.insertShadow({
+        symbol: this.symbol,
+        modelId: this.model!.id,
+        side,
+        barTime: last.t,
+        entry: last.c,
+        sl: last.c - side * slDist,
+        tp: last.c + side * tpDist,
+        atr,
+        horizon: k.horizon,
+        pRaw,
+        pCal,
+        evR: ev,
+        costR: chk.costR,
+        rrNet: chk.rr,
+        regime,
+        rejectReason: reasons.join('; '),
+        features: x,
+        journal: { interval: this.cfg.interval, modelVersion: this.model!.version, decision: summary },
+      })
+      plan.status = 'paper'
+      plan.shadowId = sid
+      return ` · shadow #${sid} ${buy ? 'LONG' : 'SHORT'}`
+    }
     if (!chk.ok) {
-      let note = ''
-      if (this.cfg.learn.shadow && shadowWorthy(chk) && (await this.store.openShadows(this.symbol)).length < this.cfg.learn.shadowMaxOpen) {
-        const sid = await this.store.insertShadow({
-          symbol: this.symbol,
-          modelId: this.model.id,
-          side,
-          barTime: last.t,
-          entry: last.c,
-          sl: last.c - side * slDist,
-          tp: last.c + side * tpDist,
-          atr,
-          horizon: k.horizon,
-          pRaw,
-          pCal,
-          evR: ev,
-          costR: chk.costR,
-          rrNet: chk.rr,
-          regime,
-          rejectReason: chk.model.join('; '),
-          features: x,
-          journal: { interval: this.cfg.interval, modelVersion: this.model.version, decision: summary },
-        })
-        note = ` · shadow #${sid} ${buy ? 'LONG' : 'SHORT'}`
-        plan.status = 'paper'
-        plan.shadowId = sid
-      }
+      const note = shadowWorthy(chk) ? await shadow(chk.model) : ''
       await savePlan()
       await this.store.event('info', this.symbol, `${summary} — no trade: ${[...chk.hard, ...chk.model].join('; ')}${note}`)
       return
@@ -644,6 +667,20 @@ export class SymbolTrader {
       await this.store.event('warn', this.symbol, `${summary} — no trade: ${sz.reason}`)
       return
     }
+    // Portfolio heat (hybrid): open risk across all symbols, read from the
+    // database. bot.ts runs the traders one after another and each awaits its
+    // trade row before the next decides, so trades opened earlier in the same
+    // tick are counted.
+    if (hybrid) {
+      const hot = heatCheck(await this.store.openRisk(), side, sz.riskUsd, equity, this.cfg.risk)
+      if (hot) {
+        plan.reasons = [hot]
+        const note = await shadow([hot])
+        await savePlan()
+        await this.store.event('info', this.symbol, `${summary} — no trade: ${hot}${note}`)
+        return
+      }
+    }
     const o = await this.ex.marketOrder(this.symbol, buy ? 'BUY' : 'SELL', sz.qty, false, `rb-in-${now}`)
     const fill = Number(o.avgPrice) || last.c
     const qty = Number(o.executedQty) || Number(sz.qty)
@@ -652,7 +689,8 @@ export class SymbolTrader {
     const id = await this.store.insertTrade({
       symbol: this.symbol,
       modelId: this.model.id,
-      mode: this.cfg.mode,
+      // A hybrid real trade passed its gate: recorded as gated (the schema and the site know two modes).
+      mode: this.cfg.mode === 'explore' ? 'explore' : 'gated',
       venue: this.ex.base,
       side,
       openedAt: now,

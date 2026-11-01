@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { Futures, SETUP_NON_FATAL, TESTNET, TESTNET_BASES, assertTestnetBase, roundStep, roundTick, sign } from '../src/bot/futures.ts'
-import { DEFAULT_RISK, checkLimits, size } from '../src/bot/risk.ts'
+import { DEFAULT_RISK, checkLimits, heatCheck, size } from '../src/bot/risk.ts'
 
 test('request signing matches Binance’s published example', () => {
   const q = 'symbol=BTCUSDT&side=BUY&type=LIMIT&quantity=1&price=9000&timeInForce=GTC&recvWindow=5000&timestamp=1591702613943'
@@ -255,4 +255,15 @@ test('daily loss halts until the next UTC day; drawdown halts for good', () => {
   assert.match(state.haltReason, /drawdown/)
   ;({ state, canEnter } = checkLimits(state, 8_400, day1 + 3 * 86_400_000, DEFAULT_RISK))
   assert.equal(canEnter, false, 'drawdown halt does not lift by itself')
+})
+
+test('portfolio heat: three 0.5% trades fit one side, the fourth does not; the total cap counts both sides', () => {
+  const r = { ...DEFAULT_RISK, maxSideRisk: 0.015, maxTotalRisk: 0.02 }
+  const eq = 10_000
+  assert.equal(heatCheck({ long: 100, short: 0 }, 1, 50, eq, r), null, 'third long fits exactly')
+  assert.match(heatCheck({ long: 150, short: 0 }, 1, 50, eq, r)!, /^portfolio heat: long risk 1\.50% open \+ 0\.50% > 1\.50% cap/)
+  assert.equal(heatCheck({ long: 150, short: 0 }, -1, 50, eq, r), null, 'the other side is separate')
+  assert.match(heatCheck({ long: 100, short: 100 }, -1, 50, eq, r)!, /^portfolio heat: total risk 2\.00% open/)
+  assert.equal(heatCheck({ long: 0, short: 0 }, 1, 1e9, eq, DEFAULT_RISK), null, 'no caps set → never blocks')
+  assert.match(heatCheck({ long: 0, short: 0 }, 1, 50, 0, r)!, /equity unknown/)
 })

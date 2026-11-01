@@ -1,7 +1,7 @@
 // Postgres persistence for the bot (schema in sql/002_bot.sql, sql/005_bot_learning.sql and sql/006_bot_journal.sql).
 import type { Db } from '../db.ts'
 import type { Model, Metrics } from './walkforward.ts'
-import type { RiskState } from './risk.ts'
+import type { OpenRisk, RiskState } from './risk.ts'
 import { CAL_PRIOR, featureVector } from './learning.ts'
 import type { Calib, Experience } from './learning.ts'
 
@@ -314,6 +314,14 @@ export class BotStore {
     )
     const x = r.rows[0]
     return { openPositions: Number(x.open), tradesToday: Number(x.today), lastStopAt: x.last_stop == null ? null : Math.round(Number(x.last_stop)) }
+  }
+
+  /** Risk (USDT at the stop) of all open real trades, by direction, across symbols. */
+  async openRisk(): Promise<OpenRisk> {
+    const r = await this.db.query(`select side, coalesce(sum(risk_usd), 0) as risk from bot_trades where status = 'open' group by side`)
+    const out: OpenRisk = { long: 0, short: 0 }
+    for (const x of r.rows) out[Number(x.side) > 0 ? 'long' : 'short'] += Number(x.risk) || 0
+    return out
   }
 
   // ---- shadow trades ----
