@@ -96,7 +96,7 @@ export const RISK: LearnSection = {
       body: [
         { formula: 'position size = (account × risk %) ÷ |entry − stop|\nATR stop: stop = entry ∓ 1.5 × ATR(14)' },
         { p: 'ATR (average true range) measures how much the market normally moves, so an ATR-based stop is wide in wild markets and tight in calm ones. The app\'s plans and bots use 1.5 ATR stops.' },
-        { tip: 'Many traders risk 0.5–1% per trade. The server bot risks 0.5%.' },
+        { tip: 'Many traders risk 0.5–1% per trade. The server bot risks 0.75%.' },
       ],
     },
     {

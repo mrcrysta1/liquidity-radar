@@ -8,7 +8,7 @@ import type { Bar } from '../src/bot/features.ts'
 import { PositionBook } from '../src/bot/futures.ts'
 import type { Fill, Position, SymbolRules } from '../src/bot/futures.ts'
 import { BotStore } from '../src/bot/store.ts'
-import { DEFAULT_TRADER, SymbolTrader } from '../src/bot/trader.ts'
+import { DEFAULT_TRADER, SymbolTrader, heavyJobs } from '../src/bot/trader.ts'
 import type { Exchange, TraderConfig } from '../src/bot/trader.ts'
 import { DEFAULT_WF } from '../src/bot/walkforward.ts'
 import { DEFAULT_SETUP } from '../src/bot/setup.ts'
@@ -278,6 +278,38 @@ test('journal: MAE / MFE of a real trade include the mark prices seen while it w
   assert.equal(row.exit_reason, 'sl')
   assert.ok(Math.abs(Number(row.mae_r) + 1) < 0.02, 'mae ' + row.mae_r)
   assert.ok(Math.abs(Number(row.mfe_r) - 1.2) < 0.02, 'mfe ' + row.mfe_r)
+})
+
+test('background learning: init trains nothing; walk-forward and training run one per heavy-job slot', async () => {
+  const { db, pg } = await freshDb()
+  const store = new BotStore(db)
+  const ex = new FakeExchange()
+  const { hist, state, cfg } = setup('explore')
+  const t = new SymbolTrader(ex, store, 'BTCUSDT', { ...cfg, learn: { ...cfg.learn, background: true } })
+  const saved = { ...heavyJobs }
+  try {
+    await t.init()
+    assert.equal(t.model, null, 'no synchronous training at startup')
+    assert.equal(t.gate, null, 'no synchronous walk-forward at startup')
+    ex.price = hist[state.idx - 1].c
+    // Another market's heavy job just ran: this one waits.
+    heavyJobs.at = Date.now()
+    await t.tick(true, Date.now())
+    assert.equal(t.gate, null)
+    assert.equal(t.model, null)
+    // Its turn: the walk-forward only, the training waits for the next slot.
+    heavyJobs.at = 0
+    await t.tick(true, Date.now())
+    assert.ok(t.gate, 'walk-forward ran')
+    assert.equal(t.model, null, 'training waits for the next slot')
+    heavyJobs.at = 0
+    await t.tick(true, Date.now())
+    assert.ok(t.model, 'initial training ran on its own slot')
+    const ev = (await pg.query<{ msg: string }>("select msg from bot_events where msg like '%initial training%'")).rows
+    assert.equal(ev.length, 1)
+  } finally {
+    Object.assign(heavyJobs, saved)
+  }
 })
 
 test('gated mode: a model without a proven edge never trades', async () => {
