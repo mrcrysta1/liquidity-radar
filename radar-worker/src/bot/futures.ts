@@ -226,13 +226,18 @@ export class Futures {
   async position(symbol: string): Promise<Position> {
     const rows = (await this.request('GET', '/fapi/v2/positionRisk', { symbol })) as Array<Record<string, string>>
     const p = rows.find((x) => x.symbol === symbol && (x.positionSide || 'BOTH') === 'BOTH') || rows[0] || {}
-    return {
-      symbol,
-      amt: Number(p.positionAmt || 0),
-      entry: Number(p.entryPrice || 0),
-      mark: Number(p.markPrice || 0),
-      unrealized: Number(p.unRealizedProfit || 0),
-    }
+    return toPosition(symbol, p)
+  }
+
+  /**
+   * Every symbol's one-way position in one request: /fapi/v2/positionRisk
+   * without a symbol costs the same weight (5) as with one. Shared by all
+   * traders through a PositionBook.
+   */
+  async positions(): Promise<Position[]> {
+    const rows = (await this.request('GET', '/fapi/v2/positionRisk')) as unknown
+    if (!Array.isArray(rows)) throw new Error('positionRisk: unexpected response')
+    return (rows as Array<Record<string, string>>).filter((x) => x?.symbol && (x.positionSide || 'BOTH') === 'BOTH').map((x) => toPosition(x.symbol, x))
   }
 
   /**
@@ -355,6 +360,62 @@ export class Futures {
       commission: Number(x.commission),
       commissionAsset: String(x.commissionAsset),
     }))
+  }
+}
+
+function toPosition(symbol: string, p: Record<string, string>): Position {
+  return {
+    symbol,
+    amt: Number(p.positionAmt || 0),
+    entry: Number(p.entryPrice || 0),
+    mark: Number(p.markPrice || 0),
+    unrealized: Number(p.unRealizedProfit || 0),
+  }
+}
+
+/**
+ * The positions of every market, read with ONE request and shared by all
+ * traders in a tick, instead of one positionRisk request per market.
+ *
+ * Safety: the book is cleared at the start of every tick (bot.ts), so a read
+ * never crosses ticks, and within a tick it is refreshed once it is older than
+ * maxAgeMs. Traders use it only for their first read of the tick, before they
+ * act; every read after one of their own orders asks the exchange for that
+ * market alone. A market missing from the read, or a failed read, gives null:
+ * the trader then reads its own market as before — never an assumed "flat".
+ */
+export class PositionBook {
+  /** Requests sent (for tests and the run log). */
+  reads = 0
+  private readAll: () => Promise<Position[]>
+  private maxAgeMs: number
+  private clock: () => number
+  private at = -Infinity
+  private p: Promise<Map<string, Position>> | null = null
+
+  constructor(readAll: () => Promise<Position[]>, o: { maxAgeMs?: number; now?: () => number } = {}) {
+    this.readAll = readAll
+    this.maxAgeMs = o.maxAgeMs ?? 5_000
+    this.clock = o.now ?? Date.now
+  }
+
+  /** Drop what is held: the next get() reads again. */
+  clear(): void {
+    this.p = null
+  }
+
+  async get(symbol: string): Promise<Position | null> {
+    const now = this.clock()
+    if (!this.p || now - this.at > this.maxAgeMs) {
+      this.at = now
+      this.reads++
+      this.p = this.readAll().then((rows) => new Map(rows.map((r) => [r.symbol, r])))
+    }
+    try {
+      return (await this.p).get(symbol) ?? null
+    } catch {
+      return null
+    }
   }
 }
 

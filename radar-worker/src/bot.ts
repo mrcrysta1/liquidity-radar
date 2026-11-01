@@ -10,7 +10,7 @@
 // TESTNET ONLY: FUTURES_BASE must be an allowed testnet URL (bot/futures.ts).
 import { existsSync } from 'node:fs'
 import { connect } from './db.ts'
-import { Futures, TESTNET } from './bot/futures.ts'
+import { Futures, PositionBook, TESTNET } from './bot/futures.ts'
 import { checkLimits } from './bot/risk.ts'
 import { readAccount } from './bot/account.ts'
 import type { AccountFill } from './bot/account.ts'
@@ -136,6 +136,10 @@ const store = new BotStore(db)
 const alerts = new Alerts(env.BOT_ALERT_WEBHOOK)
 if (alerts.enabled) store.onEvent = (level, symbol, msg) => alerts.onEvent(level, symbol, msg)
 const ex = new Futures(env.BINANCE_API_KEY!, env.BINANCE_API_SECRET!, env.FUTURES_BASE || TESTNET)
+// One positionRisk request (weight 5) for all markets instead of one per market
+// per tick; cleared at each tick start, so a read never crosses ticks.
+const positions = new PositionBook(() => ex.positions(), { maxAgeMs: Math.min(5_000, TICK_MS) })
+cfg.positions = positions
 for (let attempt = 1; ; attempt++) {
   try {
     await ex.syncTime()
@@ -281,6 +285,9 @@ async function tick(): Promise<void> {
     )
   // Retry any market whose setup failed earlier (each on its own backoff).
   if (!ONCE && setupQueue.pending.length) await setupQueue.run(now)
+  // Due bars for every market at once (6 requests at a time), not one market after another inside the loop.
+  await cfg.barCache?.refreshDue(6).catch((e) => console.error('bars', (e as Error).message))
+  positions.clear()
   // Alphabetical: same-bar entries compete for the heat cap in symbol order (startup.ts tickOrder).
   for (const t of tickOrder(setupQueue.ready)) {
     try {

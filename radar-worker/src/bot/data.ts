@@ -94,9 +94,11 @@ type FetchBars = (symbol: string, interval: string, count: number) => Promise<Ba
  * bar is not published yet (or the request fails), the held bars are served and
  * the next try waits retryMs. With 24 markets on 4h bars: ~1 request per market
  * per bar, a few more while a bar is late, instead of one per market per tick.
+ * refreshDue() fetches every due market at once (a few at a time), so a bar
+ * close does not wait on the markets one after another.
  */
 export class BarCache {
-  private held = new Map<string, { bars: Bar[]; n: number; triedAt: number }>()
+  private held = new Map<string, Held>()
   /** Requests sent to the data host (for tests and the run log). */
   requests = 0
   private fetchBars: FetchBars
@@ -109,23 +111,28 @@ export class BarCache {
     this.clock = o.now ?? Date.now
   }
 
-  /** The last `count` closed bars, oldest first. The same array is returned until it changes. */
-  async get(symbol: string, interval: string, count: number): Promise<Bar[]> {
+  /** Open time of the latest bar that should have closed by now. */
+  private dueAt(interval: string, now: number): number {
     const step = INTERVAL_MS[interval]
-    const now = this.clock()
-    // Open time of the latest bar that should have closed by now.
-    const due = Math.floor(now / step) * step - step
-    const key = symbol + '|' + interval
-    const h = this.held.get(key)
-    const cut = (b: Bar[]) => (b.length > count ? b.slice(-count) : b)
-    if (h && h.n >= count) {
+    return Math.floor(now / step) * step - step
+  }
+
+  /** Is a newer bar due for what is held, and the last try outside the retry wait? */
+  private isDue(h: Held, now: number): boolean {
+    const last = h.bars[h.bars.length - 1]?.t ?? -Infinity
+    return last < this.dueAt(h.interval, now) && now - h.triedAt >= this.retryMs
+  }
+
+  /** Fetch the missing bars for one held market, merge them; at most one request in flight per market. */
+  private refresh(h: Held, now: number): Promise<void> {
+    h.pending ??= (async () => {
+      const step = INTERVAL_MS[h.interval]
       const last = h.bars[h.bars.length - 1]?.t ?? -Infinity
-      if (last >= due || now - h.triedAt < this.retryMs) return cut(h.bars)
       // Only the bars since the last one held (plus one for overlap), if that is fewer.
-      const missing = Math.ceil((due - last) / step) + 1
+      const missing = Math.ceil((this.dueAt(h.interval, now) - last) / step) + 1
       try {
         this.requests++
-        const fresh = await this.fetchBars(symbol, interval, Math.min(h.n, Math.max(2, missing)))
+        const fresh = await this.fetchBars(h.symbol, h.interval, Math.min(h.n, Math.max(2, missing)))
         h.triedAt = now
         if (fresh.length) {
           const first = fresh[0].t
@@ -136,11 +143,53 @@ export class BarCache {
         h.triedAt = now
         if (!h.bars.length) throw e
       }
+    })().finally(() => {
+      h.pending = undefined
+    })
+    return h.pending
+  }
+
+  /**
+   * Bring every held market whose new bar is due up to date, `limit` requests
+   * at a time (bot.ts, before the traders run). The same requests get() would
+   * send one by one; a failure is left for get() to serve or retry as usual.
+   * Returns how many markets were due.
+   */
+  async refreshDue(limit = 6): Promise<number> {
+    const now = this.clock()
+    const due = [...this.held.values()].filter((h) => this.isDue(h, now))
+    let next = 0
+    const worker = async () => {
+      while (next < due.length) await this.refresh(due[next++], now).catch(() => {})
+    }
+    await Promise.all(Array.from({ length: Math.min(Math.max(1, limit), due.length) }, worker))
+    return due.length
+  }
+
+  /** The last `count` closed bars, oldest first. The same array is returned until it changes. */
+  async get(symbol: string, interval: string, count: number): Promise<Bar[]> {
+    const now = this.clock()
+    const key = symbol + '|' + interval
+    const h = this.held.get(key)
+    const cut = (b: Bar[]) => (b.length > count ? b.slice(-count) : b)
+    if (h && h.n >= count) {
+      if (h.pending) await h.pending.catch(() => {})
+      else if (this.isDue(h, now)) await this.refresh(h, now)
       return cut(h.bars)
     }
     this.requests++
     const bars = await this.fetchBars(symbol, interval, count)
-    this.held.set(key, { bars, n: count, triedAt: now })
+    this.held.set(key, { symbol, interval, bars, n: count, triedAt: now })
     return bars
   }
+}
+
+interface Held {
+  symbol: string
+  interval: string
+  bars: Bar[]
+  n: number
+  triedAt: number
+  /** A refresh in flight. */
+  pending?: Promise<void>
 }

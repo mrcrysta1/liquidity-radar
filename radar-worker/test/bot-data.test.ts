@@ -88,3 +88,51 @@ test('a bar that is late (or a failed request) is retried after retryMs, the hel
   h.fail = true
   await assert.rejects(c.get('XRPUSDT', '4h', 100), /network down/)
 })
+
+test('refreshDue: every due market at once, at most `limit` in flight, the same bars as one by one', async () => {
+  const t0 = Date.UTC(2026, 10, 1, 4, 0, 30)
+  const SYMS = Array.from({ length: 24 }, (_, k) => 'S' + k + 'USDT')
+  const make = (delay: number) => {
+    const h = host(t0)
+    let inFlight = 0
+    const stats = { peak: 0 }
+    const c = new BarCache(
+      async (s, i, n) => {
+        inFlight++
+        stats.peak = Math.max(stats.peak, inFlight)
+        await new Promise((r) => setTimeout(r, delay))
+        inFlight--
+        return h.fetch(s, i, n)
+      },
+      { now: () => h.now },
+    )
+    return { h, c, stats }
+  }
+  const one = make(0)
+  const many = make(5)
+  for (const s of SYMS) {
+    await one.c.get(s, '4h', 300)
+    await many.c.get(s, '4h', 300)
+  }
+  // Nothing due inside the bar.
+  assert.equal(await many.c.refreshDue(6), 0)
+  one.h.now = many.h.now = t0 + STEP
+  many.stats.peak = 0
+  assert.equal(await many.c.refreshDue(6), SYMS.length)
+  assert.ok(many.stats.peak > 1 && many.stats.peak <= 6, 'concurrent, within the limit: ' + many.stats.peak)
+  assert.equal(many.c.requests, SYMS.length * 2, 'one request per due market')
+  for (const s of SYMS) {
+    const a = await one.c.get(s, '4h', 300)
+    const b = await many.c.get(s, '4h', 300)
+    assert.deepEqual(b, a, s + ': the same bars')
+    assert.equal(b[299].t, Date.UTC(2026, 10, 1, 4))
+  }
+  assert.equal(many.c.requests, SYMS.length * 2, 'the traders then read the cache: no request')
+  assert.deepEqual(many.h.calls.slice(SYMS.length).map((x) => x[1]), SYMS.map(() => 2), 'only the missing bars')
+  // A failure is served the held bars by get(), and retried after retryMs as before.
+  many.h.now += STEP
+  many.h.fail = true
+  assert.equal(await many.c.refreshDue(6), SYMS.length)
+  assert.equal((await many.c.get('S0USDT', '4h', 300))[299].t, Date.UTC(2026, 10, 1, 4))
+  assert.equal(await many.c.refreshDue(6), 0, 'within the retry wait')
+})
