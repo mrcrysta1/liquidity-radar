@@ -15,6 +15,9 @@ import type { TradePlan } from '../src/bot/plan.ts'
 import { highPrev, trendIndicators, trendSignal } from '../src/bot/strategy.ts'
 import { BarCache } from '../src/bot/data.ts'
 import { tickOrder } from '../src/bot/startup.ts'
+import { FEATURES_V2 } from '../src/bot/features.ts'
+import { c6State, f1FlatAt } from '../src/bot/c6.ts'
+import type { C6Model } from '../src/bot/c6.ts'
 
 async function freshDb() {
   const pg = new PGlite()
@@ -1073,6 +1076,63 @@ test('C2 on BTCUSDT reads its own bars as the BTC filter', async () => {
   await t.tick(true, Date.now())
   assert.ok(await store.openTrade('BTCUSDT'))
   assert.ok(fetched.every((s) => s === 'BTCUSDT'))
+})
+
+// ---- C6: F1's signal through the model's take / skip ----
+
+/** A model whose p is always 0.5 (no trees): base 0.4 takes every candidate, 0.6 none. */
+const c6Stub = (base: number): C6Model => ({ v: 1, createdAt: Date.now(), cutoff: 0, base, n: 100, symbols: ['BTCUSDT'], funding: [], nFeatures: FEATURES_V2.length, gbdt: { base: 0, trees: [] } })
+
+async function c6Trader(model: C6Model | null) {
+  c6State.reset()
+  const r = await trendTrader({ strategies: [{ id: 'f1', state: 'live' }, { id: 'c6', state: 'shadow' }] })
+  // The scenario's uptrend leaves an F1 trade open into the breakout: a 5% drop
+  // 30 bars before it stops that trade out, so the breakout is a C6 candidate.
+  const k0 = r.h.S - 30
+  const prev = r.h.hist[k0 - 1].c
+  for (const x of r.h.hist.slice(k0)) Object.assign(x, { o: x.o * 0.95, h: x.h * 0.95, l: x.l * 0.95, c: x.c * 0.95 })
+  Object.assign(r.h.hist[k0], { o: prev, h: prev * 1.003 })
+  r.ex.price = r.h.hist[r.h.S].c
+  c6State.loaded = true
+  c6State.model = model
+  return r
+}
+
+test('C6 shadow: the model takes the F1 signal → a c6 shadow trade beside the real F1 trade', async () => {
+  const { store, pg, t, h } = await c6Trader(c6Stub(0.4))
+  try {
+    assert.equal(f1FlatAt(h.hist.slice(0, h.S + 1), h.S), true, 'the breakout is a C6 candidate')
+    await t.tick(true, Date.now())
+    assert.equal((await store.openTrade('BTCUSDT'))?.strategy, 'f1', 'F1 trades for real')
+    const rows = (await pg.query<Row>(`select * from bot_shadow_trades where strategy = 'c6'`)).rows
+    assert.equal(rows.length, 1)
+    assert.match(String(rows[0].reject_reason), /strategy c6 is in shadow/)
+    const f = rows[0].features as Record<string, number>
+    assert.equal(f.c6P, 0.5)
+    assert.equal(f.c6Base, 0.4)
+    assert.match(String(rows[0].decision), /^C6 \(F1 entry\)/)
+  } finally {
+    c6State.reset()
+  }
+})
+
+test('C6: a skipped signal is no trade at all, one event line; no model, no decision', async () => {
+  for (const [model, why] of [
+    [c6Stub(0.6), /c6: signal skipped — model p 0\.500 < base rate 0\.600/],
+    [null, /c6: signal skipped — no model yet/],
+  ] as const) {
+    const { store, pg, t } = await c6Trader(model)
+    try {
+      await t.tick(true, Date.now())
+      assert.equal((await store.openTrade('BTCUSDT'))?.strategy, 'f1', 'F1 is not affected')
+      assert.equal((await pg.query(`select id from bot_shadow_trades where strategy = 'c6'`)).rows.length, 0)
+      const ev = (await pg.query<{ msg: string }>(`select msg from bot_events where msg like 'c6:%'`)).rows.map((r) => r.msg)
+      assert.equal(ev.length, 1, ev.join(' | '))
+      assert.match(ev[0], why)
+    } finally {
+      c6State.reset()
+    }
+  }
 })
 
 test('the model runs only on its own markets: none of its pipeline elsewhere', async () => {

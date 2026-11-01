@@ -35,7 +35,9 @@
 // holds this market's one real position, or a risk rule said no — is a shadow
 // trade of that strategy. A rule strategy has at most one shadow open per
 // market, resolved with its own exit logic (resolveRuleShadow); the model's
-// shadows are as before.
+// shadows are as before. A strategy with a gate (C6: the model's take / skip,
+// c6.ts) checks its signal first; a signal the gate turns down is neither a
+// real nor a shadow trade, only an event line.
 import { closedBars, INTERVAL_MS } from './data.ts'
 import type { BarCache } from './data.ts'
 import { lastPrice } from '../binance.ts'
@@ -989,7 +991,8 @@ export class SymbolTrader {
       }
       if (st.interval !== this.cfg.interval || holder === slot.id) continue
       const ref = await refBars(st)
-      const sg = st.signal(b, i, ref)
+      const raw = st.signal(b, i, ref)
+      const sg = raw && st.gate ? await this.ruleGate(st, b, ref, raw) : raw
       if (paper) {
         if (sg) await this.ruleShadow(st, b, sg, [paper], ref)
         continue
@@ -998,6 +1001,18 @@ export class SymbolTrader {
       planned = true
       if (r === 'opened') holder = slot.id
       else if (sg && r.length) await this.ruleShadow(st, b, sg, r, ref)
+    }
+  }
+
+  /** A strategy's async check on its signal (C6: the model's take / skip); a skip is one event line, a failure a skip. */
+  private async ruleGate(st: RuleStrategy, b: Bar[], ref: RefBars, sg: Signal): Promise<Signal | null> {
+    try {
+      const g = await st.gate!({ store: this.store, symbol: this.symbol, b, i: b.length - 1, ref, stepMs: INTERVAL_MS[this.cfg.interval], signal: sg })
+      if (!g.signal && !g.quiet) await this.store.event('info', this.symbol, `${st.id}: signal skipped — ${g.note}`)
+      return g.signal
+    } catch (e) {
+      await this.store.event('warn', this.symbol, `${st.id}: signal check failed (${(e as Error).message}) — skipped`)
+      return null
     }
   }
 

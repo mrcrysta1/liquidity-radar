@@ -138,13 +138,14 @@ export interface TrendTrade {
 /**
  * F1 on one symbol, one position at a time: stops fill at the stop or at a
  * worse open on a gap, rule exits at the next open. Gross of costs and funding.
- * A trade still open at the end of the data is left out.
+ * A trade still open at the end of the data is left out. `from`: no entry
+ * before this open time (the research engine's GenOpts.from).
  */
-export function trendBacktest(b: Bar[], p: TrendParams = F1): TrendTrade[] {
+export function trendBacktest(b: Bar[], p: TrendParams = F1, from = -Infinity): TrendTrade[] {
   const ind = trendIndicators(b, p)
   const out: TrendTrade[] = []
   for (let i = Math.max(p.warm, 1); i < b.length - 1; i++) {
-    if (!trendSignal(b, ind, i, p)) continue
+    if (!trendSignal(b, ind, i, p) || b[i + 1].t < from) continue
     const entry = b[i + 1].o
     const dist = p.slAtr * ind.atr[i]
     if (!(dist > 0)) continue

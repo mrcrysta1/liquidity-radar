@@ -9,6 +9,9 @@
 //                    candle grid. Real trades are placed and managed by
 //                    trader.ts; shadow trades are resolved with the same
 //                    manage() by resolveRuleShadow below.
+//   gate             optional, async, after signal(): may turn a signal down
+//                    (C6: F1's signal, taken only on the model's say-so).
+//                    Not applied by ruleBacktest (it gives the raw signals).
 //   'ml'             the model (walkforward.ts / learning.ts). Its decisions,
 //                    bracket and shadow resolution stay where they are; it is
 //                    listed here so it can be configured, prioritised and
@@ -28,6 +31,7 @@ import type { TrendInd } from './strategy.ts'
 import { evaluateHealth } from './health.ts'
 import type { HealthBands, HealthRecord, StrategyState } from './health.ts'
 import type { BotStore } from './store.ts'
+import { c6Decide } from './c6.ts'
 
 /** An entry on the close of the signal bar. */
 export interface Signal {
@@ -84,7 +88,19 @@ export interface RuleStrategy {
   /** The initial stop distance an entry on bar i has (or would have). */
   stopDist(b: Bar[], i: number): number
   signal(b: Bar[], i: number, ref?: RefBars): Signal | null
+  /** Run on a signal at the latest bar i of `b`: the signal to act on, or null (note: why, for the event log; quiet: not worth a line). */
+  gate?(x: GateInput): Promise<{ signal: Signal | null; note: string; quiet?: boolean }>
   manage(p: ManagedPos, b: Bar[], j: number): ManageResult
+}
+
+export interface GateInput {
+  store: BotStore
+  symbol: string
+  b: Bar[]
+  i: number
+  ref: RefBars
+  stepMs: number
+  signal: Signal
 }
 
 export interface ModelStrategy {
@@ -244,10 +260,37 @@ export const C2_STRATEGY: RuleStrategy = {
   },
 }
 
+// ---- C6 ----------------------------------------------------------------------
+
+/**
+ * Research strategy C6 (round 2, meta2.ts; c6.ts): F1's entries, taken only
+ * when a GBDT model on FEATURES_V2 rates P(net R > 0) at least the training
+ * base rate. Exits identical to F1. Research (purged walk-forward, 2021+):
+ * dev 436 trades, +0.218R, PF 1.62, Sharpe 1.10 (F1 on the same window 0.76).
+ * Starts in shadow. Bands (health_bands_devhold.json): expected +0.12R,
+ * rolling 30 p5 -0.32R / p1 -0.45R, drawdown over 100 trades p95 21.4R / p99 26.7R.
+ */
+export const C6_HEALTH: HealthBands = { expR: 0.12, roll30P5: -0.32, roll30P1: -0.45, ddP95: 21.4, ddP99: 26.7 }
+
+export const C6_STRATEGY: RuleStrategy = {
+  ...F1_STRATEGY,
+  id: 'c6',
+  name: 'C6 F1 + model filter (4h, long)',
+  // The model's features read BTC (alts) and funding.
+  refs: ['BTCUSDT'],
+  health: C6_HEALTH,
+  describe: (b, i) => F1_STRATEGY.describe(b, i).replace(/^F1:/, 'C6 (F1 entry):'),
+  async gate(x) {
+    const d = await c6Decide(x.store, x.symbol, x.b, x.i, x.ref.BTCUSDT, x.stepMs)
+    const signal = d.take ? { ...x.signal, features: { ...x.signal.features, c6P: d.p!, c6Base: d.base! } } : null
+    return { signal, note: d.note, quiet: d.quiet }
+  },
+}
+
 export const ML_STRATEGY: ModelStrategy = { kind: 'model', id: 'ml', name: 'Model (MLP, bracket)' }
 
 /** Every strategy the bot knows, by id. */
-export const STRATEGIES: Record<string, Strategy> = { f1: F1_STRATEGY, c2: C2_STRATEGY, ml: ML_STRATEGY }
+export const STRATEGIES: Record<string, Strategy> = { f1: F1_STRATEGY, c6: C6_STRATEGY, c2: C2_STRATEGY, ml: ML_STRATEGY }
 
 /** The rule strategy behind an open trend-mode trade (rows from before 008_bot_strategies.sql have none: F1). */
 export function ruleStrategy(id: string | null | undefined): RuleStrategy | null {
@@ -277,7 +320,7 @@ export function slotRuns(slot: StrategySlot, symbol: string): boolean {
  * comma list. Strategies are separated by ';' — or by ',' when no market list
  * is given (the older form). Examples:
  *   f1:live,ml:shadow
- *   f1:live@*;c2:shadow@*;ml:shadow@BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT
+ *   f1:live@*;c6:shadow@*;c2:shadow@*;ml:shadow@BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT
  * Unset: BOT_STRATEGY=trend is the alias "f1:live,ml:shadow"; anything else is
  * the model alone (null: the single-strategy path, unchanged).
  */
