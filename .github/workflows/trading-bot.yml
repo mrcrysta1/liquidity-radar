@@ -9,7 +9,14 @@
 # manages any open trade, and decides on each newly closed 4-hour candle
 # (BOT_INTERVAL) for four markets.
 #
-# REAL (demo) TRADES: research strategy F1 (BOT_STRATEGY=trend,
+# STRATEGIES (BOT_STRATEGIES, radar-worker/src/bot/strategies.ts): every
+# strategy decides on every bar; a live one's signal is a real trade if every
+# rule passes (one real position per market, first by priority), any other
+# signal is that strategy's shadow trade. Health (src/bot/health.ts) demotes a
+# live strategy whose rolling 30-trade expectancy or drawdown leaves its
+# research bands, and promotes it back only on 30 new good shadow trades.
+#
+# REAL (demo) TRADES: research strategy F1 (f1:live,
 # radar-worker/src/bot/strategy.ts), long only on BTC/ETH/SOL/BNB:
 #   entry  4h close > EMA(300) and > the highest high of the previous 20 bars
 #          → market buy right after the close
@@ -40,8 +47,9 @@
 # negative for ETH, SOL and BNB. It learns from
 # every closed real and shadow trade and trains a challenger every 4 h or
 # every 20 closed trades. Clear a tripped kill switch with npm run reset-risk.
-# Requires radar-worker/sql/005_bot_learning.sql, 006_bot_journal.sql and
-# 007_bot_trend.sql (all applied by this workflow on every run).
+# Requires radar-worker/sql/005_bot_learning.sql, 006_bot_journal.sql,
+# 007_bot_trend.sql and 008_bot_strategies.sql (all applied by this workflow
+# on every run).
 #
 # GitHub's runners are in the US, where Binance's main API is blocked; the
 # futures testnet host and the public market-data mirror are reachable, and the
@@ -120,6 +128,10 @@ jobs:
         run: node scripts/apply-sql.mjs sql/007_bot_trend.sql
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      - name: Apply the multi-strategy schema
+        run: node scripts/apply-sql.mjs sql/008_bot_strategies.sql
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
       - run: echo "BOT_STARTED=$(date +%s)" >> "$GITHUB_ENV"
       # Time budget: the bot stops its loop 330 min after it starts; this step
       # is killed at 345 min if a last tick or shutdown hangs (a step timeout
@@ -131,9 +143,12 @@ jobs:
         run: node src/bot.ts
         env:
           BOT_RUN_MINUTES: '330'
-          # F1 places the real orders; hybrid keeps the portfolio heat cap
-          # (1.5% per side, 2% total). The model only shadow trades.
-          BOT_STRATEGY: trend
+          # Strategies in priority order, each live or shadow: F1 places the
+          # real orders, the model only shadow trades. A live strategy that
+          # leaves its health bands is demoted to shadow (and promoted back
+          # after 30 good shadow trades); bot_state 'strategy:<id>'.
+          # Hybrid keeps the portfolio heat cap (1.5% per side, 2% total).
+          BOT_STRATEGIES: f1:live,ml:shadow
           BOT_MODE: hybrid
           BOT_SYMBOLS: BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT
           BOT_INTERVAL: 4h

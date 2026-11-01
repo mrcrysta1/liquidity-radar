@@ -17,7 +17,7 @@ import { highPrev, trendIndicators, trendSignal } from '../src/bot/strategy.ts'
 async function freshDb() {
   const pg = new PGlite()
   await pg.exec('create role anon;')
-  for (const f of ['001_whales.sql', '002_bot.sql', '005_bot_learning.sql', '006_bot_journal.sql', '007_bot_trend.sql', '007_bot_trend.sql']) await pg.exec(readFileSync(new URL('../sql/' + f, import.meta.url), 'utf8'))
+  for (const f of ['001_whales.sql', '002_bot.sql', '005_bot_learning.sql', '006_bot_journal.sql', '007_bot_trend.sql', '007_bot_trend.sql', '008_bot_strategies.sql', '008_bot_strategies.sql']) await pg.exec(readFileSync(new URL('../sql/' + f, import.meta.url), 'utf8'))
   const q = (text: string, params?: unknown[]) => pg.query(text, params as never)
   return { db: { query: q, connect: async () => ({ query: q, release() {} }), end: async () => {} } as unknown as Db, pg }
 }
@@ -860,7 +860,7 @@ test('trend: the model keeps deciding on every bar as shadow trades only, beside
   for (let k = 0; k < 3; k++) await nextBar()
   const sh = (await pg.query<{ reject_reason: string }>('select reject_reason from bot_shadow_trades order by id')).rows
   assert.equal(sh.length, 4, 'one shadow per bar, while the F1 trade is open')
-  assert.ok(sh.every((s) => /trend strategy: the model trades on paper only/.test(s.reject_reason)), sh.map((s) => s.reject_reason).join(' | '))
+  assert.ok(sh.every((s) => /strategy ml is in shadow: the model trades on paper only/.test(s.reject_reason)), sh.map((s) => s.reject_reason).join(' | '))
   const real = (await pg.query<{ mode: string }>('select mode from bot_trades')).rows
   assert.deepEqual(real.map((x) => x.mode), ['trend'], 'the model placed no real order')
   assert.equal(ex.limits.length, 0)
@@ -878,6 +878,115 @@ test('strategy ml (the default) is unchanged on the same bars: the model trades,
   assert.equal(ex.limits.length, 1, 'target on the book')
   assert.equal((await pg.query('select id from bot_shadow_trades')).rows.length, 0)
   assert.equal(DEFAULT_TRADER.strategy, undefined, 'the default is the model')
+})
+
+// ---- several strategies (BOT_STRATEGIES) ----
+
+type Row = Record<string, unknown>
+
+test('multi: a strategy in shadow never orders — one F1 shadow at a time, resolved by F1’s own exit rule', async () => {
+  const { store, ex, t, pg, h, state, nextBar } = await trendTrader({ strategies: [{ id: 'f1', state: 'shadow' }, { id: 'ml', state: 'shadow' }] })
+  await t.tick(true, Date.now())
+  assert.equal(await store.openTrade('BTCUSDT'), null)
+  assert.equal(ex.pos.amt, 0, 'no order')
+  const f1 = async () => (await pg.query<Row>(`select * from bot_shadow_trades where strategy = 'f1' order by id`)).rows
+  let sh = await f1()
+  assert.equal(sh.length, 1)
+  assert.equal(sh[0].status, 'open')
+  assert.equal(sh[0].entry, h.hist[h.S].c)
+  assert.equal(sh[0].tp, null)
+  assert.equal(sh[0].horizon, null)
+  assert.equal(sh[0].model_id, null)
+  assert.equal(sh[0].p_raw, null)
+  assert.match(String(sh[0].reject_reason), /strategy f1 is in shadow/)
+  assert.match(String(sh[0].decision), /^F1: close/)
+  const atr = trendIndicators(h.hist.slice(0, h.S + 1)).atr[h.S]
+  assert.ok(Math.abs(Number(sh[0].entry) - Number(sh[0].sl) - 3 * atr) < 1e-9, 'initial stop 3 ATR below')
+  const ml = (await pg.query<Row>(`select reject_reason from bot_shadow_trades where strategy = 'ml'`)).rows
+  assert.ok(ml.length >= 1 && ml.every((s) => /strategy ml is in shadow/.test(String(s.reject_reason))))
+  // The run-up: more breakouts, but one F1 shadow at a time; then the close under the 10-bar low ends it.
+  while (state.idx < h.brk) await nextBar()
+  sh = await f1()
+  assert.equal(sh.length, 1)
+  assert.equal(sh[0].status, 'open', 'trailing, still open')
+  await nextBar()
+  sh = await f1()
+  assert.equal(sh[0].status, 'closed')
+  assert.equal(sh[0].exit_reason, 'signal')
+  assert.equal(sh[0].exit, h.hist[h.brk].c)
+  assert.ok(Number(sh[0].r_net) > 0 && Number(sh[0].r_net) < Number(sh[0].r_gross), 'a winner, after costs: ' + sh[0].r_net)
+  assert.equal(sh[0].bars_held, h.brk - h.S)
+  assert.ok(Number(sh[0].mfe_r) > 1)
+  assert.equal((await pg.query('select id from bot_trades')).rows.length, 0, 'never a real trade')
+  // Rule shadows have no model probability: the calibration does not learn from them.
+  assert.ok((await store.unlearned('BTCUSDT')).every((u) => u.kind !== 'shadow' || !Number.isNaN(u.pRaw)))
+  assert.equal((await pg.query(`select id from bot_shadow_trades where strategy = 'f1' and learned`)).rows.length, 0)
+})
+
+test('multi: one real position per market — the first live strategy by priority takes it, the other shadows', async () => {
+  {
+    const { pg, t, ex } = await trendTrader({ mode: 'explore', strategies: [{ id: 'ml', state: 'live' }, { id: 'f1', state: 'live' }] })
+    await t.tick(true, Date.now())
+    const real = (await pg.query<Row>('select strategy, mode, tp from bot_trades')).rows
+    assert.equal(real.length, 1)
+    assert.equal(real[0].strategy, 'ml')
+    assert.equal(real[0].mode, 'explore')
+    assert.equal(ex.limits.length, 1, 'the model’s bracket')
+    const f1 = (await pg.query<Row>(`select reject_reason from bot_shadow_trades where strategy = 'f1'`)).rows
+    assert.equal(f1.length, 1, 'F1’s breakout became a shadow')
+    assert.match(String(f1[0].reject_reason), /one real position per market: strategy ml holds BTCUSDT/)
+  }
+  {
+    const { pg, t } = await trendTrader({ mode: 'explore', learn: { ...DEFAULT_TRADER.learn, shadowMaxOpen: 20 }, strategies: [{ id: 'f1', state: 'live' }, { id: 'ml', state: 'live' }] })
+    await t.tick(true, Date.now())
+    const real = (await pg.query<Row>('select strategy, mode from bot_trades')).rows
+    assert.deepEqual(real, [{ strategy: 'f1', mode: 'trend' }], 'F1 first: its trade, the model none')
+    const ml = (await pg.query<Row>(`select reject_reason from bot_shadow_trades where strategy = 'ml'`)).rows
+    assert.equal(ml.length, 1)
+    assert.match(String(ml[0].reject_reason), /one real position per market: strategy f1 holds BTCUSDT/)
+    assert.equal((await pg.query(`select id from bot_shadow_trades where strategy = 'f1'`)).rows.length, 0, 'F1 took it for real: no F1 shadow')
+  }
+})
+
+test('multi: a demoted strategy (health in bot_state) shadows its signal; on probation it still trades for real', async () => {
+  const health = (state: string) => ({ id: 'f1', state, configured: 'live', since: 0, segmentStart: 0, hasBands: true, stats: {}, history: [], updated: 0 })
+  {
+    const { store, ex, t, pg } = await trendTrader()
+    await store.setState('strategy:f1', health('shadow'))
+    await t.tick(true, Date.now())
+    assert.equal(await store.openTrade('BTCUSDT'), null)
+    assert.equal(ex.pos.amt, 0)
+    const f1 = (await pg.query<Row>(`select reject_reason from bot_shadow_trades where strategy = 'f1'`)).rows
+    assert.equal(f1.length, 1)
+    assert.match(String(f1[0].reject_reason), /strategy f1 is in shadow/)
+  }
+  {
+    const { store, t, row } = await trendTrader()
+    await store.setState('strategy:f1', health('probation'))
+    await t.tick(true, Date.now())
+    const open = await store.openTrade('BTCUSDT')
+    assert.ok(open, 'probation: still real')
+    assert.equal(open!.strategy, 'f1')
+    assert.equal((await row()).strategy, 'f1', 'the journal row names its strategy')
+  }
+  {
+    // A record from another configuration does not apply: the configured state does.
+    const { store, t } = await trendTrader()
+    await store.setState('strategy:f1', { ...health('shadow'), configured: 'shadow' })
+    await t.tick(true, Date.now())
+    assert.ok(await store.openTrade('BTCUSDT'))
+  }
+})
+
+test('multi: a live strategy blocked by a risk rule records the signal as its shadow', async () => {
+  const { store, ex, t, pg } = await trendTrader()
+  await t.tick(false, Date.now())
+  assert.equal(await store.openTrade('BTCUSDT'), null)
+  assert.equal(ex.pos.amt, 0)
+  const f1 = (await pg.query<Row>(`select reject_reason from bot_shadow_trades where strategy = 'f1'`)).rows
+  assert.equal(f1.length, 1)
+  assert.match(String(f1[0].reject_reason), /risk limits/)
+  assert.equal((await store.getState<TradePlan | null>('plan:BTCUSDT', null))?.strategyId, 'f1')
 })
 
 // ---- never orphan an open trade ----

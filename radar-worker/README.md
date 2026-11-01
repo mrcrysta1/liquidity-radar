@@ -179,6 +179,24 @@ and the challenger cycle go on. Long only, 4h bars, BTC / ETH / SOL / BNB:
   +0.179R/trade, PF 1.48, +4.5%, 63 trades — positive but **not significant** (t = 0.66).
   `test/bot-strategy.test.ts` checks the live code against the research simulation.
 
+**Several strategies** (`BOT_STRATEGIES`, `src/bot/strategies.ts`, `src/bot/health.ts`, `sql/008_bot_strategies.sql`)
+
+`BOT_STRATEGIES=f1:live,ml:shadow` lists the strategies in priority order, each
+starting `live` or `shadow` (`BOT_STRATEGY=trend` is an alias of exactly that).
+Every strategy decides on every bar of its markets. A live strategy's signal is a
+real trade if every rule passes; any other signal (strategy in shadow, the
+market's one real position already held by another strategy, a risk rule said
+no) is that strategy's shadow trade, stored with its `strategy` id. A rule
+strategy's shadow is resolved by its own exit logic (trail, exit rule).
+- **Health** (`bot_state 'strategy:<id>'`, recomputed every minute from all closed
+  real and shadow trades): `live` → `probation` (still real) when the rolling
+  30-trade expectancy is under the strategy's research p5 or the drawdown since
+  its peak over p95; → `shadow` under p1 / over p99. Back to `live` only after
+  ≥ 30 new shadow trades since the demotion with expectancy > 0 and drawdown
+  within p95. A strategy without bands (the model) never moves on its own.
+  Every transition is a `bot_events` line. F1's bands are in `F1_HEALTH`.
+- Changing a strategy's state in `BOT_STRATEGIES` resets it to that state.
+
 **How it trades**
 1. A market entry.
 2. An **exchange-side** STOP_MARKET for the whole position, so the stop works
@@ -203,7 +221,7 @@ the database doesn't know about are closed.
 - Hourly equity, and an event log explaining each decision.
 
 **Setup**
-1. Run `sql/002_bot.sql`, then `sql/005_bot_learning.sql`, `sql/006_bot_journal.sql` (trade journal) and `sql/007_bot_trend.sql` (trend strategy), in Supabase.
+1. Run `sql/002_bot.sql`, then `sql/005_bot_learning.sql`, `sql/006_bot_journal.sql` (trade journal) , `sql/007_bot_trend.sql` (trend strategy) and `sql/008_bot_strategies.sql` (several strategies), in Supabase.
 2. Put your testnet keys in `.env` (Binance → Demo Trading → API Management).
 3. Choose the mode: `BOT_MODE=gated` (default, trades only a proven model),
    `BOT_MODE=explore` (trades its best idea anyway, to gather real testnet fills) or

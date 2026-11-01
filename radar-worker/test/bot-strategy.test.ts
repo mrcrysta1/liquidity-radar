@@ -7,6 +7,8 @@ import { readFileSync } from 'node:fs'
 import type { Bar } from '../src/bot/features.ts'
 import { F1, checkTrendSetup, highPrev, noEntryReason, onClose, trailStop, trendBacktest, trendExit, trendIndicators, trendSignal } from '../src/bot/strategy.ts'
 import type { TrailState } from '../src/bot/strategy.ts'
+import { F1_STRATEGY, STRATEGIES, resolveRuleShadow, ruleBacktest } from '../src/bot/strategies.ts'
+import { DEFAULT_WF } from '../src/bot/walkforward.ts'
 
 /** BTCUSDT 4h, 2023-07-26 .. 2024-05-21, [t, o, h, l, c] (a slice of the research data). */
 const fixture: Bar[] = (JSON.parse(readFileSync(new URL('./fixtures/btc-4h.json', import.meta.url), 'utf8')) as number[][]).map(([t, o, h, l, c]) => ({ t, o, h, l, c, v: 0, tb: 0 }))
@@ -203,4 +205,82 @@ test('F1 setup rules: cost against the 3 ATR stop, list, limits; no R:R rule', (
   assert.match(checkTrendSetup({ ...ok, listed: false }, c).join(), /real-trade list/)
   assert.match(checkTrendSetup({ ...ok, canEnter: false }, c).join(), /risk limits/)
   assert.match(checkTrendSetup({ ...ok, openPositions: 4 }, c).join(), /positions open/)
+})
+
+// ---- F1 as a strategy plugin (src/bot/strategies.ts) ----
+
+for (const [name, bars] of [
+  ['BTC fixture', fixture],
+  ['synthetic A', synth(2600, 37)],
+  ['synthetic B', synth(2600, 33)],
+] as const) {
+  test(`plugin parity (${name}): F1 through the strategy interface makes exactly the trendBacktest trades`, () => {
+    const bt = trendBacktest(bars)
+    const pl = ruleBacktest(F1_STRATEGY, bars)
+    assert.ok(bt.length >= 5)
+    assert.ok(pl.every((t) => t.side === 1))
+    assert.deepEqual(
+      pl.map(({ side: _side, ...t }) => t),
+      bt,
+    )
+  })
+
+  test(`shadow resolver (${name}): an F1 shadow ends where the research trade ends, by the same rule`, () => {
+    const step = 14_400_000
+    let n = 0
+    for (const t of trendBacktest(bars)) {
+      // A shadow enters at the signal close; compare where that is the next open (no gap).
+      if (bars[t.i + 1].o !== bars[t.i].c) continue
+      n++
+      const sh = { side: 1 as const, entry: bars[t.i].c, sl: bars[t.i].c - t.dist, barTime: bars[t.i].t }
+      assert.equal(resolveRuleShadow(F1_STRATEGY, sh, bars.slice(0, t.exitBar), step, DEFAULT_WF.costs), null, 'still open before its exit bar')
+      const r = resolveRuleShadow(F1_STRATEGY, sh, bars, step, DEFAULT_WF.costs)
+      assert.ok(r && r.status === 'closed', 'closed')
+      assert.equal(r.exit, t.why)
+      assert.equal(r.closedAt, bars[t.exitBar].t + step)
+      assert.equal(r.bars, t.exitBar - t.i)
+      // Stops fill like the research; a rule exit at the close (live: a market order right after it), not the next open.
+      assert.equal(r.exitPrice, t.why === 'signal' ? bars[t.exitBar].c : t.exit)
+      assert.ok(Math.abs(r.rGross - (r.exitPrice - sh.entry) / t.dist) < 1e-12)
+      assert.ok(r.rNet < r.rGross, 'costs taken off')
+      assert.ok(r.maeR <= 0 && r.mfeR >= 0)
+    }
+    assert.ok(n >= 3, 'compared ' + n)
+  })
+}
+
+test('shadow resolver: expired when the signal bar has left the history window or bars are missing', () => {
+  const b = synth(2600, 37)
+  const t = trendBacktest(b)[0]
+  const sh = { side: 1 as const, entry: b[t.i].c, sl: b[t.i].c - t.dist, barTime: b[t.i].t }
+  const step = 14_400_000
+  assert.deepEqual(resolveRuleShadow(F1_STRATEGY, sh, b.slice(t.i + 1), step, DEFAULT_WF.costs), { status: 'expired', reason: 'the signal bar is outside the history window' })
+  const gap = [...b.slice(0, t.i + 1), ...b.slice(t.i + 3)]
+  assert.deepEqual(resolveRuleShadow(F1_STRATEGY, sh, gap, step, DEFAULT_WF.costs), { status: 'expired', reason: 'bars after the decision are missing' })
+  assert.equal(resolveRuleShadow(F1_STRATEGY, sh, b.slice(0, t.i + 1), step, DEFAULT_WF.costs), null, 'no bar after it yet')
+})
+
+test('F1 plugin: metadata, signal and manage agree with strategy.ts', () => {
+  assert.equal(F1_STRATEGY.id, 'f1')
+  assert.deepEqual(F1_STRATEGY.sides, [1])
+  assert.equal(F1_STRATEGY.interval, '4h')
+  assert.equal(STRATEGIES.f1, F1_STRATEGY)
+  assert.equal(STRATEGIES.ml.kind, 'model')
+  assert.equal(STRATEGIES.ml.health, undefined, 'the model has no bands: never auto-promoted')
+  assert.deepEqual(F1_STRATEGY.health, { expR: 0.18, roll30P5: -0.2, roll30P1: -0.35, ddP95: 15, ddP99: 22 })
+  const b = synth(2600, 37)
+  const ind = trendIndicators(b)
+  for (let i = F1.warm; i < b.length; i++) {
+    const s = F1_STRATEGY.signal(b, i)
+    assert.equal(!!s, trendSignal(b, ind, i))
+    if (s) {
+      assert.equal(s.dist, F1.slAtr * ind.atr[i])
+      assert.equal(s.stop, b[i].c - s.dist)
+      assert.equal(F1_STRATEGY.noEntry(b, i), '')
+    }
+    const m = F1_STRATEGY.manage({ side: 1, entry: 100, stop: 90, initialStop: 90, best: 95 }, b, i)
+    const r = onClose(b, ind, i, { stop: 90, high: 95 })
+    assert.equal(m.exit, r.exit)
+    if (!r.exit) assert.deepEqual([m.stop, m.best], [r.stop, r.high])
+  }
 })
