@@ -1,0 +1,44 @@
+# Tests for radar-worker (whale tape + the testnet trading bot): the node:test
+# suite runs against an in-process Postgres (pglite) and a fake exchange, so it
+# needs no secrets and no network. Runs on pull requests to master and on pushes
+# to master when the worker (or this workflow, or the bot workflow) changes.
+name: Worker CI
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - 'radar-worker/**'
+      - '.github/workflows/worker-ci.yml'
+      - '.github/workflows/trading-bot.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'radar-worker/**'
+      - '.github/workflows/worker-ci.yml'
+      - '.github/workflows/trading-bot.yml'
+
+concurrency:
+  group: worker-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  worker-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: radar-worker
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          # Node 24: the worker runs .ts files directly with built-in type stripping.
+          node-version: 24
+          cache: npm
+          cache-dependency-path: radar-worker/package-lock.json
+      - run: npm ci
+      - run: npm test
