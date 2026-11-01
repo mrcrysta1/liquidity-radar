@@ -146,6 +146,8 @@ const ts = (ms: number) => new Date(ms).toISOString()
 
 export class BotStore {
   private db: Db
+  /** Called with every event (alerts.ts); fire-and-forget, never awaited or allowed to throw into the bot. */
+  onEvent: ((level: 'info' | 'warn' | 'error', symbol: string | null, msg: string) => unknown) | null = null
   constructor(db: Db) {
     this.db = db
   }
@@ -581,8 +583,46 @@ export class BotStore {
     ])
   }
 
+  /** The daily summary's figures (alerts.ts) for the UTC day starting at `dayStart`. */
+  async daySummary(dayStart: number): Promise<{ startEquity: number | null; endEquity: number | null; realized: number; openPositions: number; perStrategy: Array<{ strategy: string; real: number; shadow: number }> }> {
+    const a = ts(dayStart)
+    const b = ts(dayStart + 86_400_000)
+    const eq = await this.db.query(
+      `select (select equity from bot_equity where t <= $1 order by t desc limit 1) as before,
+              (select equity from bot_equity where t >= $1 and t < $2 order by t limit 1) as first,
+              (select equity from bot_equity where t < $2 order by t desc limit 1) as last,
+              (select coalesce(sum(pnl_usd), 0) from bot_trades where status = 'closed' and closed_at >= $1 and closed_at < $2) as realized,
+              (select count(*) from bot_trades where status = 'open') as open`,
+      [a, b],
+    )
+    const x = eq.rows[0]
+    const per = await this.db.query(
+      `select strategy, sum(real)::int as real, sum(shadow)::int as shadow from (
+         select coalesce(strategy, case when mode = 'trend' then 'f1' else 'ml' end) as strategy, 1 as real, 0 as shadow
+         from bot_trades where opened_at >= $1 and opened_at < $2
+         union all
+         select coalesce(strategy, 'ml'), 0, 1 from bot_shadow_trades where bar_time >= $1 and bar_time < $2
+       ) u group by strategy order by strategy`,
+      [a, b],
+    )
+    const n = (v: unknown) => (v == null ? null : Number(v))
+    return {
+      startEquity: n(x.before) ?? n(x.first),
+      endEquity: n(x.last),
+      realized: Number(x.realized) || 0,
+      openPositions: Number(x.open) || 0,
+      perStrategy: per.rows.map((r) => ({ strategy: String(r.strategy), real: Number(r.real), shadow: Number(r.shadow) })),
+    }
+  }
+
   async event(level: 'info' | 'warn' | 'error', symbol: string | null, msg: string): Promise<void> {
     console.log(new Date().toISOString(), level.toUpperCase().padEnd(5), (symbol || '').padEnd(9), msg)
+    if (this.onEvent)
+      try {
+        void Promise.resolve(this.onEvent(level, symbol, msg)).catch(() => {})
+      } catch {
+        // An alert hook never affects trading.
+      }
     await this.db.query('insert into bot_events (level, symbol, msg) values ($1, $2, $3)', [level, symbol, msg.slice(0, 2000)]).catch(() => {})
   }
 }

@@ -263,6 +263,21 @@ curl -fsSL https://raw.githubusercontent.com/mrcrysta1/liquidity-radar/master/ra
 journalctl -u radar-bot -f      # watch decisions and trades
 ```
 
+**Alerts (optional):** create an incoming webhook (Discord: channel → Edit →
+Integrations → Webhooks → New Webhook → Copy URL; Slack: an app with Incoming
+Webhooks), then add it as the repository secret `BOT_ALERT_WEBHOOK` (Settings →
+Secrets and variables → Actions → New repository secret). Never put the URL in
+the repo or in `.env.example`. The bot then posts when the daily halt or the
+drawdown kill switch trips, when a strategy moves between live, probation and
+shadow, on `error` events (at most one per market per 30 min and 20 per hour)
+and a daily summary after each UTC day (`src/bot/alerts.ts`; the body has both
+`content` and `text`, so Discord and Slack-style hooks both work). A failed or
+slow webhook (5 s timeout) never affects trading. The workflow
+`.github/workflows/bot-watchdog.yml` checks the heartbeat every 30 min with the
+same `DATABASE_URL` secret and posts if it is older than 30 min (the bot cannot
+report its own silence); it never starts or cancels a run. Without the secret
+both do nothing. Disable the watchdog too when you stop the bot on purpose.
+
 The website's Self Learning tab shows the bot's trades and decisions (it reads
 the same Supabase tables) once `VITE_WHALE_DB_URL` / `VITE_WHALE_DB_KEY` are set.
 

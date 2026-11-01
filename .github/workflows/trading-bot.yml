@@ -82,6 +82,9 @@
 #
 # Secrets (Settings → Secrets and variables → Actions):
 #   DATABASE_URL, BINANCE_API_KEY, BINANCE_API_SECRET
+#   BOT_ALERT_WEBHOOK (optional): a Discord or Slack incoming-webhook URL for
+#   halts, strategy state changes, errors and a daily summary (src/bot/alerts.ts);
+#   unset = no alerts. bot-watchdog.yml uses it too, for a stale heartbeat.
 # Stop it: Actions → Trading bot → "…" → Disable workflow, then cancel the
 # running run.
 name: Trading bot (testnet)
@@ -205,6 +208,8 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
           BINANCE_API_SECRET: ${{ secrets.BINANCE_API_SECRET }}
+          # Optional; empty when the secret is not set = alerts off.
+          BOT_ALERT_WEBHOOK: ${{ secrets.BOT_ALERT_WEBHOOK }}
       # Hand over, even if the bot step failed or hit its step timeout — but not
       # if someone cancelled the run, and not after a crash on startup (that
       # would just loop; the hourly safety net retries instead).
