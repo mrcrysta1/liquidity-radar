@@ -13,6 +13,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const mod = (p) => pathToFileURL(resolve(__dirname, '..', p)).href
 
 delete process.env.ALLOWED_ORIGINS
+for (const k of ['GROQ_API_KEY', 'GEMINI_API_KEY', 'OPENROUTER_API_KEY', 'LLM_PROVIDERS', 'GROQ_MODEL', 'GEMINI_MODEL', 'OPENROUTER_MODEL']) delete process.env[k]
 const chat = await import(mod('api/chat.mjs'))
 const feed = await import(mod('api/fetch.mjs'))
 const pro = await import(mod('pro-terminal/server/allowlist.mjs'))
@@ -202,6 +203,108 @@ const chatReq = (headers, body) => ({
   res = mockRes()
   await chat.default(chatReq({ origin: 'http://localhost:5173' }), res)
   ok(res.statusCode === 503, 'chat handler: no key still -> 503 (client falls back)')
+}
+
+// -------------------------------------------------------- chat: providers
+{
+  const ids = (env) => chat.providerChain(env).map((p) => p.id)
+  ok(ids({}).length === 0, 'providers: no key, no provider')
+  ok(ids({ GEMINI_API_KEY: 'g' }).join() === 'gemini', 'providers: only the keyed one')
+  ok(ids({ OPENROUTER_API_KEY: 'o', GROQ_API_KEY: 'q', GEMINI_API_KEY: 'g' }).join() === 'groq,gemini,openrouter', 'providers: default order')
+  ok(
+    ids({ LLM_PROVIDERS: ' OpenRouter, gemini,openrouter,nope', OPENROUTER_API_KEY: 'o', GROQ_API_KEY: 'q', GEMINI_API_KEY: 'g' }).join() === 'openrouter,gemini',
+    'providers: LLM_PROVIDERS order, deduped, unknown ids and unlisted ones dropped',
+  )
+  ok(ids({ LLM_PROVIDERS: 'gemini,groq', GROQ_API_KEY: 'q' }).join() === 'groq', 'providers: a listed provider without a key is skipped')
+  ok(ids({ LLM_PROVIDERS: 'nope', GROQ_API_KEY: 'q' }).join() === 'groq', 'providers: a list of only unknown ids falls back to the default order')
+  ok(ids({ GROQ_API_KEY: '   ' }).length === 0, 'providers: a blank key is no key')
+  const all = chat.providerChain({ GROQ_API_KEY: 'q', GEMINI_API_KEY: 'g', OPENROUTER_API_KEY: 'o', GEMINI_MODEL: 'gemini-x' })
+  ok(all[0].model === 'llama-3.3-70b-versatile', 'providers: groq default model')
+  ok(all[1].model === 'gemini-x', 'providers: *_MODEL overrides the default')
+  ok(all[2].model.endsWith(':free'), 'providers: openrouter default is a free model')
+
+  const msgs = [{ role: 'user', content: 'hi' }]
+  const [rq, rg, ro] = all.map((p) => chat.providerRequest(p, msgs))
+  ok(rq.url === 'https://api.groq.com/openai/v1/chat/completions', 'payload: groq endpoint')
+  ok(rg.url === 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', 'payload: gemini OpenAI-compatible endpoint')
+  ok(ro.url === 'https://openrouter.ai/api/v1/chat/completions', 'payload: openrouter endpoint')
+  ok(rq.headers.authorization === 'Bearer q' && rg.headers.authorization === 'Bearer g' && ro.headers.authorization === 'Bearer o', 'payload: each provider gets its own key')
+  ok([rq, rg, ro].every((r) => r.body.stream === true && r.body.messages === msgs && r.body.temperature === 0.4 && r.body.max_tokens > 0), 'payload: OpenAI chat shape, streaming')
+  ok([rq, rg, ro].every((r) => !JSON.stringify(r.body).includes('Bearer')), 'payload: no key in the body')
+  ok(rg.body.reasoning_effort === 'low' && rq.body.reasoning_effort === undefined, 'payload: gemini thinking effort low, others untouched')
+  ok(rg.body.max_tokens > rq.body.max_tokens, 'payload: gemini budget leaves room for thinking')
+  ok(ro.headers['x-title'] === 'Liquidity Radar' && rq.headers['x-title'] === undefined, 'payload: openrouter attribution headers only there')
+}
+
+// -------------------------------------------------------- chat: SSE normalizer
+{
+  const n = chat.createSseNormalizer()
+  let out = n.push(': OPENROUTER PROCESSING\r\n\r\ndata: {"choices":[{"delta":{"content":"Hi"}}]}\r\n\r\ndata: {"choi')
+  ok(out === 'data: {"choices":[{"delta":{"content":"Hi"}}]}\n\n', 'sse: CRLF frames re-framed, comments dropped')
+  out = n.push('ces":[{"delta":{"content":"!"}}]}\r')
+  ok(out === '', 'sse: a split frame waits for its end')
+  out = n.push('\n\r\ndata:[DONE]')
+  ok(out === 'data: {"choices":[{"delta":{"content":"!"}}]}\n\n', 'sse: split frame completed')
+  ok(n.flush() === 'data: [DONE]\n\n', 'sse: the last frame is flushed')
+}
+
+// -------------------------------------------------------- chat: failover
+{
+  const groq = 'https://api.groq.com/openai/v1/chat/completions'
+  const gemini = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'
+  const router = 'https://openrouter.ai/api/v1/chat/completions'
+  const stream = (text) => () => new Response(text, { status: 200, headers: { 'content-type': 'text/event-stream' } })
+  const status = (s, body = '{"error":"x"}') => () => new Response(body, { status: s })
+  const go = async () => {
+    const res = mockRes()
+    await chat.default(chatReq({ origin: 'http://localhost:5173' }), res)
+    return res
+  }
+  process.env.GROQ_API_KEY = 'gq-SECRET'
+  process.env.GEMINI_API_KEY = 'gm-SECRET'
+  process.env.OPENROUTER_API_KEY = 'or-SECRET'
+
+  mockFetch({ [groq]: status(429), [gemini]: status(503), [router]: stream('data: {"choices":[{"delta":{"content":"ok"}}]}\n\n') })
+  let res = await go()
+  ok(res.statusCode === 200 && calls.map((c) => c.href).join() === [groq, gemini, router].join(), 'failover: 429 then 5xx moves on to the next provider')
+  ok(res.body === 'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n', 'failover: the answer streams through')
+  ok(JSON.parse(calls[2].init.body).model.endsWith(':free'), 'failover: each attempt uses its own model')
+  ok(!res.body.includes('SECRET'), 'failover: no key in the response')
+
+  const timeout = new DOMException('The operation was aborted due to timeout', 'TimeoutError')
+  mockFetch({ [groq]: timeout, [gemini]: stream('data: {"choices":[{"delta":{"content":"g"}}]}\r\n\r\n') })
+  res = await go()
+  ok(res.statusCode === 200 && calls.length === 2 && res.body === 'data: {"choices":[{"delta":{"content":"g"}}]}\n\n', 'failover: a timeout moves on; CRLF frames normalized for the client')
+
+  mockFetch({ [groq]: stream('data: {}\n\n') })
+  res = await go()
+  ok(res.statusCode === 200 && calls.length === 1, 'failover: the first working provider is the only one called')
+
+  process.env.LLM_PROVIDERS = 'openrouter,groq'
+  mockFetch({ [router]: status(500), [groq]: stream('data: {}\n\n') })
+  res = await go()
+  ok(res.statusCode === 200 && calls.map((c) => c.href).join() === [router, groq].join(), 'failover: LLM_PROVIDERS sets the order')
+  delete process.env.LLM_PROVIDERS
+
+  mockFetch({ [groq]: status(429), [gemini]: status(429), [router]: status(429) })
+  res = await go()
+  ok(res.statusCode === 429 && calls.length === 3, 'failover: every provider busy -> 429')
+
+  mockFetch({ [groq]: status(429), [gemini]: new Error('ECONNRESET'), [router]: status(502, 'acct or-SECRET') })
+  res = await go()
+  ok(res.statusCode === 502 && !res.body.includes('SECRET') && JSON.parse(res.body).error === 'upstream', 'failover: all down -> generic 502')
+
+  delete process.env.GROQ_API_KEY
+  delete process.env.GEMINI_API_KEY
+  delete process.env.OPENROUTER_API_KEY
+  mockFetch({})
+  res = await go()
+  ok(res.statusCode === 503 && JSON.parse(res.body).error === 'no_key' && calls.length === 0, 'failover: no provider key -> 503 no_key, no upstream call')
+  process.env.GEMINI_API_KEY = 'gm-SECRET'
+  mockFetch({ [gemini]: stream('data: {}\n\n') })
+  res = await go()
+  ok(res.statusCode === 200 && calls[0].href === gemini, 'failover: a Gemini key alone is enough')
+  delete process.env.GEMINI_API_KEY
 }
 
 // -------------------------------------------------------- fetch: helpers

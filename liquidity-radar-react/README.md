@@ -40,6 +40,26 @@ mounts, window globals are exposed, tab switching works, and no JS errors
 leak to the console. External-feed noise (faireconomy/xoomar CORS or rate
 limits) is non-fatal — those APIs run on their known fallback paths.
 
+## AI assistant setup
+
+Radar AI (the chat panel) calls `/api/chat` (`api/chat.mjs`), which forwards to a
+free LLM provider. Without any key it answers with the built-in rule-based
+analyst. Keys stay on the server and never reach the browser.
+
+1. Get one or more free keys:
+   - Groq: https://console.groq.com/keys
+   - Google Gemini: https://aistudio.google.com/app/apikey
+   - OpenRouter: https://openrouter.ai/settings/keys
+2. In Vercel: **Project → Settings → Environment Variables**, add any of
+   `GROQ_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY` (Production, and Preview
+   if wanted).
+3. Redeploy (**Deployments → ⋯ → Redeploy**); new variables apply only to new deployments.
+
+With several keys the providers are tried in order (Groq, Gemini, OpenRouter) and a
+busy, failing or slow one is skipped. Optional: `LLM_PROVIDERS` (e.g. `gemini,groq`)
+sets the order; `GROQ_MODEL` / `GEMINI_MODEL` / `OPENROUTER_MODEL` override the default
+models (`llama-3.3-70b-versatile`, `gemini-3.8-flash`, `google/gemma-4-31b-it:free`).
+
 ## Regenerating generated files
 
 ```bash
