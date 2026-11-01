@@ -9,6 +9,7 @@ import { buildJournal } from './journal'
 import type { JournalRow } from './journal'
 import { normalizeStrategies } from './botStrategies'
 import type { BotStrategy } from './botStrategies'
+import type { ReadinessBands, ReadinessEvent, ReadinessInput, ReadinessTrade } from './readiness'
 
 const DB_URL = (import.meta.env.VITE_WHALE_DB_URL as string | undefined)?.replace(/\/+$/, '')
 const DB_KEY = import.meta.env.VITE_WHALE_DB_KEY as string | undefined
@@ -177,4 +178,45 @@ export async function loadJournal(limit = 500): Promise<JournalRow[] | null> {
     rest<Array<Record<string, unknown>>>('bot_models?select=id,version&order=id.desc&limit=1000').catch(() => []),
   ])
   return buildJournal(real, shadow, models)
+}
+
+/**
+ * Everything the go-live readiness check (readiness.ts computeReadiness) needs:
+ * real trades with a strategy, error events of the last 7 days and every
+ * failed-stop error, the last 14 days of hourly equity rows, the heartbeat and
+ * the strategy records (with their research bands when the bot stores them).
+ */
+export async function loadReadiness(now = Date.now()): Promise<ReadinessInput | null> {
+  if (!SERVER_BOT) return null
+  const iso = (t: number) => new Date(t).toISOString()
+  const ev = 'bot_events?select=t,symbol,level,msg&level=eq.error'
+  const [trades, errors, stopEvents, equity, state] = await Promise.all([
+    rest<ReadinessTrade[]>('bot_trades?select=strategy,status,opened_at,closed_at,r_multiple,slippage_bps,sl_algo_id&strategy=not.is.null&order=opened_at.asc&limit=5000'),
+    rest<ReadinessEvent[]>(`${ev}&t=gte.${iso(now - 7 * 86_400_000)}&order=t.desc&limit=1000`),
+    rest<ReadinessEvent[]>(`${ev}&msg=ilike.${encodeURIComponent('*stop could not be placed*')}&order=t.desc&limit=1000`),
+    rest<Array<{ t: string }>>(`bot_equity?select=t&t=gte.${iso(now - 15 * 86_400_000)}&order=t.asc&limit=1000`),
+    rest<Array<{ key: string; value: unknown }>>('bot_state?select=key,value&or=(key.eq.heartbeat,key.like.strategy:*)'),
+  ])
+  const hb = state.find((r) => r.key === 'heartbeat')?.value as { t?: number } | null | undefined
+  const parse = (v: unknown): Record<string, unknown> | null => {
+    try {
+      return (typeof v === 'string' ? JSON.parse(v) : v) as Record<string, unknown> | null
+    } catch {
+      return null
+    }
+  }
+  const raw = state.filter((r) => r.key.startsWith('strategy:')).map((r) => parse(r.value))
+  const bandsOf = (id: string): ReadinessBands | null => {
+    const b = raw.find((x) => x?.id === id)?.bands as Partial<ReadinessBands> | null | undefined
+    return b && Number.isFinite(b.roll30P5) && Number.isFinite(b.ddP95) ? { roll30P5: Number(b.roll30P5), ddP95: Number(b.ddP95) } : null
+  }
+  return {
+    now,
+    trades,
+    errors,
+    stopEvents,
+    equityTimes: equity.map((r) => Date.parse(r.t)),
+    heartbeat: hb && Number.isFinite(Number(hb.t)) ? Number(hb.t) : null,
+    strategies: normalizeStrategies(raw).map((s) => ({ id: s.id, state: s.state, configured: s.configured, bands: bandsOf(s.id) })),
+  }
 }

@@ -2782,6 +2782,97 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('strategies: missing fields fall back', [x2.name, x2.real, x2.roll30, x2.priority], ['X2', 0, null, null])
 }
 
+// ---- server bot: go-live readiness --------------------------------------------------
+{
+  const R = await import(src('features/selflearn/readiness.ts'))
+  const DAY = 86_400_000
+  const H = 3_600_000
+  const now = Date.parse('2027-03-01T12:30:00Z')
+  near('readiness: t quantile 80% one-sided, large df ~ normal', R.tQuantile(0.8, 1e6), 0.8416, 1e-3)
+  near('readiness: t quantile 80%, df 10', R.tQuantile(0.8, 10), 0.8791, 3e-3)
+  near('readiness: t quantile 95%, df 30', R.tQuantile(0.95, 30), 1.6973, 3e-3)
+  eq('readiness: lower bound needs 2 trades', R.meanLowerBound([1]), null)
+  near('readiness: lower bound of a constant sample is its mean', R.meanLowerBound([0.5, 0.5, 0.5]), 0.5, 1e-12)
+  ok('readiness: lower bound is under the mean', R.meanLowerBound([1, -1, 2, -0.5]) < 0.375)
+  eq('readiness: max drawdown in R', R.maxDrawdownR([1, 1, -3, 1, -0.5]), 3)
+
+  const hours = (n, from) => Array.from({ length: n }, (_, k) => from + k * H)
+  const end = now - (now % H)
+  const full = hours(15 * 24, end - 15 * 24 * H)
+  eq('readiness: full hourly coverage', R.hourlyCoverage(full, now).share, 1)
+  eq('readiness: under 14 days of record → unknown', R.hourlyCoverage(hours(24, end - 24 * H), now), null)
+  const gappy = full.filter((t) => !(t >= end - 10 * H && t < end))
+  eq('readiness: 10 missing hours of 336', R.hourlyCoverage(gappy, now).covered, 326)
+
+  // A healthy F1 record: 9 weeks, 64 trades (winners 2R, losers -0.6R: 1 in 3 wins).
+  const t0 = now - 63 * DAY
+  const trades = Array.from({ length: 64 }, (_, k) => ({
+    strategy: 'f1', status: 'closed', opened_at: new Date(t0 + k * DAY).toISOString(), closed_at: new Date(t0 + k * DAY + 8 * H).toISOString(),
+    r_multiple: k % 3 === 0 ? 2 : -0.6, slippage_bps: 6, sl_algo_id: 100 + k,
+  }))
+  const base = {
+    now, trades,
+    errors: [{ t: new Date(now - DAY).toISOString(), level: 'error', symbol: 'XAUUSDT', msg: 'retrain failed: not enough history (120 bars)' }],
+    stopEvents: [],
+    equityTimes: full,
+    heartbeat: now - 60_000,
+    strategies: [
+      { id: 'f1', state: 'live', configured: 'live', bands: { roll30P5: -0.33, ddP95: 22.1 } },
+      { id: 'c6', state: 'shadow', configured: 'shadow', bands: null },
+    ],
+  }
+  // An older row without a strategy (a different setup) never counts.
+  const legacy = { strategy: null, status: 'closed', opened_at: new Date(t0 - 30 * DAY).toISOString(), closed_at: null, r_multiple: -5, slippage_bps: 90, sl_algo_id: null }
+  const good = R.computeReadiness({ ...base, trades: [...trades, legacy] })
+  const st = (r) => Object.fromEntries(r.checks.map((c) => [c.id, c.status]))
+  eq('readiness: a healthy record is READY (benign error ignored)', [good.ready, Object.values(st(good)).every((s) => s === 'pass')], [true, true])
+  eq('readiness: only the live set counts', [good.closed, good.liveIds], [64, ['f1']])
+  near('readiness: win rate shown (22 of 64)', good.winRate, 22 / 64, 1e-12)
+  ok('readiness: expectancy row reports the 80% lower bound', /80% lower bound/.test(good.checks.find((c) => c.id === 'expectancy').value))
+  eq('readiness: no days left once time and trades pass', good.daysLeft, 0)
+
+  // Young record: 3 weeks, 21 trades → time, trades, expectancy pending, with estimates.
+  const young = R.computeReadiness({ ...base, trades: trades.slice(43) })
+  const ys = st(young)
+  eq('readiness: young record pending', [young.ready, ys.weeks, ys.trades, ys.expectancy, ys.drawdown], [false, 'insufficient', 'insufficient', 'insufficient', 'insufficient'])
+  const w = young.checks.find((c) => c.id === 'weeks')
+  const tr = young.checks.find((c) => c.id === 'trades')
+  near('readiness: weeks left estimated', w.daysLeft, 56 - (now - Date.parse(trades[43].opened_at)) / DAY, 1e-6)
+  ok('readiness: trade-count days left from the rate so far', tr.daysLeft > 30 && tr.daysLeft < 50, tr.daysLeft)
+  eq('readiness: overall days left is the later of the two', young.daysLeft, Math.max(w.daysLeft, tr.daysLeft))
+
+  // Failures, one at a time.
+  const losing = trades.map((t, k) => ({ ...t, r_multiple: k % 4 === 0 ? 1 : -0.5 }))
+  eq('readiness: negative expectancy fails', st(R.computeReadiness({ ...base, trades: losing })).expectancy, 'fail')
+  const lateSlump = trades.map((t, k) => ({ ...t, r_multiple: k < 34 ? 3 : k % 5 === 0 ? 1 : -1 }))
+  eq('readiness: positive mean but last 30 under p5 fails', st(R.computeReadiness({ ...base, trades: lateSlump })).expectancy, 'fail')
+  const deep = trades.map((t, k) => ({ ...t, r_multiple: k >= 20 && k < 45 ? -1 : 2 }))
+  eq('readiness: drawdown over p95 fails', st(R.computeReadiness({ ...base, trades: deep })).drawdown, 'fail')
+  eq(
+    'readiness: no band → drawdown unknown',
+    st(R.computeReadiness({ ...base, strategies: [{ id: 'zz', state: 'live', configured: 'live' }], trades: trades.map((t) => ({ ...t, strategy: 'zz' })) })).drawdown,
+    'insufficient',
+  )
+  eq('readiness: fallback band for F1 when the record has none', st(R.computeReadiness({ ...base, strategies: [{ id: 'f1', state: 'live', configured: 'live' }] })).drawdown, 'pass')
+  eq('readiness: uptime under 98% fails', st(R.computeReadiness({ ...base, equityTimes: gappy })).uptime, 'fail')
+  eq('readiness: stale heartbeat fails uptime', st(R.computeReadiness({ ...base, heartbeat: now - 45 * 60_000 })).uptime, 'fail')
+  eq('readiness: under 14 days of equity → uptime unknown', st(R.computeReadiness({ ...base, equityTimes: hours(48, end - 48 * H) })).uptime, 'insufficient')
+  const err = (msg, ago = DAY) => ({ t: new Date(now - ago).toISOString(), level: 'error', symbol: 'BTCUSDT', msg })
+  eq('readiness: a real error in 7 days fails', st(R.computeReadiness({ ...base, errors: [err('tick failed: timeout')] })).errors, 'fail')
+  eq('readiness: an error older than 7 days does not count', st(R.computeReadiness({ ...base, errors: [err('tick failed: timeout', 8 * DAY)] })).errors, 'pass')
+  eq('readiness: slippage over 15 bps fails', st(R.computeReadiness({ ...base, trades: trades.map((t) => ({ ...t, slippage_bps: 20 })) })).slippage, 'fail')
+  eq('readiness: no slippage recorded → unknown', st(R.computeReadiness({ ...base, trades: trades.map((t) => ({ ...t, slippage_bps: null })) })).slippage, 'insufficient')
+  eq('readiness: a failed stop since the start fails', st(R.computeReadiness({ ...base, stopEvents: [err('trade #9: stop could not be placed (x) — closing', 5 * DAY)] })).stops, 'fail')
+  eq('readiness: a failed stop before the live record does not count', st(R.computeReadiness({ ...base, stopEvents: [err('trade #9: stop could not be placed (x) — closing', 90 * DAY)] })).stops, 'pass')
+  const openNoStop = { strategy: 'f1', status: 'open', opened_at: new Date(now - H).toISOString(), closed_at: null, r_multiple: null, slippage_bps: 5, sl_algo_id: null }
+  eq('readiness: an open trade without an exchange stop fails', st(R.computeReadiness({ ...base, trades: [...trades, openNoStop] })).stops, 'fail')
+  eq('readiness: a just-opened trade gets a grace period', st(R.computeReadiness({ ...base, trades: [...trades, { ...openNoStop, opened_at: new Date(now - 60_000).toISOString() }] })).stops, 'pass')
+  const prob = R.computeReadiness({ ...base, strategies: [{ ...base.strategies[0], state: 'probation' }] })
+  eq('readiness: live strategy on probation fails, so NOT READY', [st(prob).state, prob.ready], ['fail', false])
+  const none = R.computeReadiness({ ...base, trades: [], strategies: [] })
+  eq('readiness: nothing yet → pending, not ready', [none.ready, st(none).weeks, st(none).state, none.winRate, none.daysLeft], [false, 'insufficient', 'insufficient', null, null])
+}
+
 // ---- server bot on the charts: symbols, markers, Entry / SL / TP --------------------
 {
   const { botSymbol, sameMarket, barAt, botTradeMarkers, botLevels, botOverlayKey, BOT_COLORS } = await import(
