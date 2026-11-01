@@ -18,6 +18,36 @@ export interface RiskConfig {
   maxDailyLoss: number
   /** Halt until manually reset after equity falls this far below its peak. */
   maxDrawdown: number
+  /**
+   * Portfolio heat (hybrid mode): open risk, as a fraction of equity, allowed
+   * in one direction across all symbols, and in total. Majors move together, so
+   * several same-side trades on one bar are one big bet. Unset = no cap.
+   */
+  maxSideRisk?: number
+  maxTotalRisk?: number
+}
+
+/** Open risk (USDT at the stop) by direction, across all symbols. */
+export interface OpenRisk {
+  long: number
+  short: number
+}
+
+/**
+ * Would a new trade of `riskUsd` on `side` push open risk over the caps?
+ * Returns why it would (for the shadow trade's reject reason), or null.
+ */
+export function heatCheck(open: OpenRisk, side: 1 | -1, riskUsd: number, equity: number, r: RiskConfig): string | null {
+  if (!(equity > 0)) return 'portfolio heat: equity unknown'
+  const sideNow = side > 0 ? open.long : open.short
+  const total = open.long + open.short
+  const pctOf = (usd: number) => ((usd / equity) * 100).toFixed(2) + '%'
+  // A hair of tolerance: three trades at exactly 0.5% must fit a 1.5% cap.
+  const over = (usd: number, cap: number | undefined) => cap != null && usd > cap * equity * (1 + 1e-9)
+  if (over(sideNow + riskUsd, r.maxSideRisk))
+    return `portfolio heat: ${side > 0 ? 'long' : 'short'} risk ${pctOf(sideNow)} open + ${pctOf(riskUsd)} > ${pctOf(r.maxSideRisk! * equity)} cap`
+  if (over(total + riskUsd, r.maxTotalRisk)) return `portfolio heat: total risk ${pctOf(total)} open + ${pctOf(riskUsd)} > ${pctOf(r.maxTotalRisk! * equity)} cap`
+  return null
 }
 
 export const DEFAULT_RISK: RiskConfig = {
