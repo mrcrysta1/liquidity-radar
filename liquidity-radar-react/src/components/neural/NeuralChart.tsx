@@ -21,6 +21,10 @@ import { STRATS } from '../../features/selflearn/strategy'
 import type { StratId } from '../../features/selflearn/strategy'
 import { runBt } from '../../features/selflearn/engine'
 import { useSL } from '../../features/selflearn/useSL'
+import { botLevels, botOverlayKey, botTradeMarkers } from '../../features/selflearn/botChart'
+import { BOT_POLL_MS, loadBotChart, planFor, SERVER_BOT } from '../../features/selflearn/botChartData'
+import type { BotChartData } from '../../features/selflearn/botChartData'
+import { storageGet, storageSet } from '../../services/storage'
 import { OrderFlow } from '../analysis/AnalysisViews'
 import { EquityCurve, Ico, SentimentPanel } from './parts'
 import { NI } from './icons'
@@ -40,6 +44,7 @@ const VIEWS: Array<[View, string, string]> = [
 ]
 const sec = (t: number) => Math.floor(t / 1000) as UTCTimestamp
 const pair = (s: string) => (instrumentOf(s) ? s : baseOf(s) + '/USDT')
+const BOT_KEY = 'lr-nnShowBotTrades'
 
 function Tool({ label, icon, on, onClick }: { label: string; icon: string; on?: boolean; onClick: () => void }) {
   return (
@@ -63,8 +68,13 @@ function ChartPane({ view, full, setFull }: { view: View; full: boolean; setFull
     lo: ISeriesApi<'Line'>
     lines: IPriceLine[]
     marks: ISeriesMarkersPluginApi<Time>
+    botLines: IPriceLine[]
+    botMarks: ISeriesMarkersPluginApi<Time>
   } | null>(null)
   const [magnet, setMagnet] = useState(false)
+  // The server bot's trades (radar-worker), beside the in-browser engine's.
+  const [botOn, setBotOn] = useState(() => SERVER_BOT && storageGet<boolean>(BOT_KEY, true))
+  const [bot, setBot] = useState<BotChartData | null>(null)
 
   // Build once.
   useEffect(() => {
@@ -94,7 +104,11 @@ function ChartPane({ view, full, setFull }: { view: View; full: boolean; setFull
     const hi = chart.addSeries(LineSeries, band)
     const lo = chart.addSeries(LineSeries, band)
     // lightweight-charts v5: markers are a plugin on the series.
-    refs.current = { chart, candles, vol, rsi, pred, hi, lo, lines: [], marks: createSeriesMarkers(candles, []) }
+    refs.current = {
+      chart, candles, vol, rsi, pred, hi, lo,
+      lines: [], marks: createSeriesMarkers(candles, []),
+      botLines: [], botMarks: createSeriesMarkers(candles, []),
+    }
     // Follow the light / dark switch.
     const mo = new MutationObserver(() => {
       const t = chartTheme()
@@ -210,6 +224,57 @@ function ChartPane({ view, full, setFull }: { view: View; full: boolean; setFull
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tradeKey, view, feed.dataGen])
 
+  // Poll the bot while its overlay is on.
+  useEffect(() => {
+    if (!botOn) return
+    let live = true
+    const pull = () =>
+      loadBotChart()
+        .then((d) => live && setBot(d))
+        .catch(() => { /* keep the last good read; the next poll retries */ })
+    pull()
+    const id = setInterval(pull, BOT_POLL_MS)
+    return () => {
+      live = false
+      clearInterval(id)
+    }
+  }, [botOn])
+
+  // Bot trades on this market: entry / exit markers, and Entry / SL / TP lines
+  // for its open trade and live or paper plan. Own markers and lines, so the
+  // engine overlay above is untouched.
+  const botPlan = planFor(bot, feed.sym)
+  const botKey = botOn && bot ? botOverlayKey(bot.trades, botPlan, feed.sym) : ''
+  useEffect(() => {
+    const r = refs.current
+    if (!r) return
+    r.botLines.forEach((l) => r.candles.removePriceLine(l))
+    r.botLines = []
+    const cs = getFeed().candles
+    if (!botOn || !bot || !cs.length) {
+      r.botMarks.setMarkers([])
+      return
+    }
+    const sym = getFeed().sym
+    r.botMarks.setMarkers(
+      botTradeMarkers(bot.trades, sym, cs.map((k) => k.t)).map((m) => ({
+        time: sec(m.t) as Time, position: m.position, shape: m.shape, color: m.color, text: m.text,
+      })),
+    )
+    botLevels(bot.trades, planFor(bot, sym), sym).forEach((l) =>
+      r.botLines.push(
+        r.candles.createPriceLine({ price: l.price, color: l.color, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: l.title }),
+      ),
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [botKey, feed.dataGen])
+
+  const toggleBot = () =>
+    setBotOn((on) => {
+      storageSet(BOT_KEY, !on)
+      return !on
+    })
+
   useEffect(() => {
     refs.current?.chart.applyOptions({ crosshair: { mode: magnet ? CrosshairMode.Magnet : CrosshairMode.Normal } })
   }, [magnet])
@@ -255,6 +320,7 @@ function ChartPane({ view, full, setFull }: { view: View; full: boolean; setFull
         <Tool label="Fit all bars" icon={NI.fit} onClick={fit} />
         <Tool label="Back to live" icon={NI.live} onClick={toLive} />
         <Tool label="Save as PNG" icon={NI.camera} onClick={shot} />
+        {SERVER_BOT && <Tool label={(botOn ? 'Hide' : 'Show') + ' server bot trades'} icon={NI.cpu} on={botOn} onClick={toggleBot} />}
       </div>
       <div className="nn-plot">
         <div className="nn-legend">

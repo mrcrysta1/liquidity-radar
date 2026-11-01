@@ -2714,6 +2714,64 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('ontrack: buckets split on 0.5', calibration([mk(0.48, 1), mk(0.52, -1)]).map((x) => x.n), [1, 1])
 }
 
+// ---- server bot on the charts: symbols, markers, Entry / SL / TP --------------------
+{
+  const { botSymbol, sameMarket, barAt, botTradeMarkers, botLevels, botOverlayKey, BOT_COLORS } = await import(
+    src('features/selflearn/botChart.ts')
+  )
+  eq('botchart: plain Binance symbol', botSymbol('BTCUSDT'), 'BTCUSDT')
+  eq('botchart: slash pair, lower case', botSymbol('eth/usdt'), 'ETHUSDT')
+  eq('botchart: exchange prefix and perp suffix', botSymbol('BINANCE:SOLUSDT.P'), 'SOLUSDT')
+  eq('botchart: PERP suffix and dash', botSymbol('BTC-USDTPERP'), 'BTCUSDT')
+  eq('botchart: bare base gets USDT', botSymbol('btc'), 'BTCUSDT')
+  eq('botchart: other quotes kept', botSymbol('XAUUSD'), 'XAUUSD')
+  ok('botchart: same market across spellings', sameMarket('BTC/USDT', 'BTCUSDT'))
+  ok('botchart: different markets differ', !sameMarket('ETHUSDT', 'BTCUSDT'))
+  ok('botchart: empty never matches', !sameMarket('', ''))
+  const H = 3_600_000
+  const bars = [0, 1, 2, 3, 4, 5].map((i) => i * H)
+  eq('botchart: barAt snaps into its bar', barAt(bars, 2.5 * H), 2 * H)
+  eq('botchart: barAt exact open', barAt(bars, 3 * H), 3 * H)
+  eq('botchart: barAt before the first bar', barAt(bars, -1), -1)
+  eq('botchart: barAt after the last bar is the last bar', barAt(bars, 99 * H), 5 * H)
+  const iso = (t) => new Date(t).toISOString()
+  const tr = (o) => ({
+    id: 1, symbol: 'BTCUSDT', side: 1, status: 'closed', opened_at: iso(1.2 * H), closed_at: iso(3.7 * H),
+    entry: 100, exit: 103, sl: 98, tp: 103, exit_reason: 'tp', pnl_usd: 30, r_multiple: 1.5, p_win: 0.55, mode: 'gated', ...o,
+  })
+  const win = tr({})
+  const loss = tr({ id: 2, side: -1, opened_at: iso(0.5 * H), closed_at: iso(2 * H), r_multiple: -1, pnl_usd: -10, exit_reason: 'sl' })
+  const open = tr({ id: 3, status: 'open', opened_at: iso(4.1 * H), closed_at: null, exit: null, r_multiple: null, pnl_usd: null, exit_reason: null, entry: 105, sl: 102, tp: 110 })
+  const other = tr({ id: 4, symbol: 'ETHUSDT' })
+  const err = tr({ id: 5, status: 'error' })
+  const old = tr({ id: 6, opened_at: iso(-5 * H), closed_at: iso(-4 * H) })
+  const m = botTradeMarkers([open, win, loss, other, err, old], 'BTC/USDT', bars)
+  eq('botchart: entry + exit per closed trade, entry only for open, others dropped', m.length, 5)
+  eq('botchart: markers sorted and snapped to bars', m.map((x) => x.t), [0, 1, 2, 3, 4].map((i) => i * H))
+  const winEntry = m.find((x) => x.t === 1 * H)
+  eq('botchart: long entry is an up arrow below the bar', [winEntry.shape, winEntry.position], ['arrowUp', 'belowBar'])
+  eq('botchart: winning trade is green with its R', [winEntry.color, winEntry.text], [BOT_COLORS.win, 'Bot L +1.50R'])
+  const winExit = m.find((x) => x.t === 3 * H)
+  eq('botchart: long exit is a down arrow above the bar', [winExit.shape, winExit.position, winExit.text], ['arrowDown', 'aboveBar', 'Exit +1.50R'])
+  const lossEntry = m.find((x) => x.t === 0)
+  eq('botchart: losing short is a red down arrow', [lossEntry.shape, lossEntry.color, lossEntry.text], ['arrowDown', BOT_COLORS.loss, 'Bot S -1.00R'])
+  eq('botchart: open trade is cyan, labelled open', [m[4].color, m[4].text], [BOT_COLORS.open, 'Bot L open'])
+  eq('botchart: no bars, no markers', botTradeMarkers([win], 'BTCUSDT', []), [])
+  const L = botLevels([open, win], null, 'BTCUSDT')
+  eq('botchart: open trade gives Entry / SL / TP', L.map((l) => l.title + '@' + l.price), ['Bot L entry@105', 'Bot L SL@102', 'Bot L TP@110'])
+  eq('botchart: SL red, TP green', [L[1].color, L[2].color], [BOT_COLORS.loss, BOT_COLORS.win])
+  const plan = { symbol: 'BTCUSDT', t: 5 * H, status: 'paper', side: 'SHORT', entry: 106, sl: 108, tp: 103 }
+  eq('botchart: paper plan adds its own lines', botLevels([win], plan, 'BTCUSDT').map((l) => l.title), ['Paper entry', 'Paper SL', 'Paper TP'])
+  eq('botchart: plan of the open trade is not drawn twice', botLevels([open], { ...plan, status: 'opened', tradeId: 3 }, 'BTCUSDT').length, 3)
+  eq('botchart: plan whose trade closed is stale', botLevels([win], { ...plan, status: 'opened', tradeId: 1 }, 'BTCUSDT'), [])
+  eq('botchart: skipped plan draws nothing', botLevels([], { ...plan, status: 'skipped' }, 'BTCUSDT'), [])
+  eq('botchart: plan for another market ignored', botLevels([], { ...plan, symbol: 'ETHUSDT' }, 'BTCUSDT'), [])
+  const k1 = botOverlayKey([open, other], plan, 'BTCUSDT')
+  eq('botchart: key ignores other markets', botOverlayKey([open], plan, 'BTCUSDT'), k1)
+  ok('botchart: key changes when a trade closes', botOverlayKey([{ ...open, status: 'closed', closed_at: iso(5 * H) }], plan, 'BTCUSDT') !== k1)
+  ok('botchart: key changes with the symbol', botOverlayKey([open], plan, 'ETHUSDT') !== k1)
+}
+
 // ---- direction models: is holdout accuracy an edge? ---------------------------------
 {
   const { majorityBaseline, provenEdge } = await import(src('features/ml/edge.ts'))

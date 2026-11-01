@@ -5,7 +5,9 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { CvdBadge } from './CvdBadge'
 import { useFitMenu } from './useFitMenu'
+import { SERVER_BOT } from '../../features/selflearn/serverBot'
 import {
+  getShowBotTrades,
   getShowConfluence,
   getShowDelta,
   getShowDepthHeatmap,
@@ -16,6 +18,7 @@ import {
   getShowWhaleBubbles,
   getVolumeProfileSettings,
   onOverlayTogglesChange,
+  setShowBotTrades,
   setShowConfluence,
   setShowDelta,
   setShowDepthHeatmap,
@@ -81,6 +84,20 @@ const PANES: Pane[] = [
     get: getShowDepthHeatmap,
     set: setShowDepthHeatmap,
   },
+  // Only where the server bot's database is configured (serverBot.ts).
+  ...(SERVER_BOT
+    ? [
+        {
+          id: 'bot',
+          glyph: 'BOT',
+          name: 'Bot trades',
+          hint: 'Server bot open trade: entry, SL, TP',
+          group: 'On the chart' as const,
+          get: getShowBotTrades,
+          set: setShowBotTrades,
+        },
+      ]
+    : []),
   {
     id: 'mtf',
     glyph: 'MTF',
