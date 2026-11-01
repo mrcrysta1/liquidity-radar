@@ -15,7 +15,7 @@ import { checkLimits } from './bot/risk.ts'
 import { readAccount } from './bot/account.ts'
 import type { AccountFill } from './bot/account.ts'
 import { BotStore } from './bot/store.ts'
-import { DEFAULT_LEARN, DEFAULT_TRADER, INTERVAL_DEFAULTS, INTERVAL_MAX_NOTIONAL_X, SymbolTrader } from './bot/trader.ts'
+import { DEFAULT_LEARN, DEFAULT_TRADER, INTERVAL_DEFAULTS, INTERVAL_MAX_NOTIONAL_X, SymbolTrader, heavyJobs } from './bot/trader.ts'
 import { DEFAULT_SETUP } from './bot/setup.ts'
 import { InitQueue, listedOnly, tickOrder } from './bot/startup.ts'
 import { buildMetrics } from './bot/learning.ts'
@@ -23,6 +23,7 @@ import { BarCache, INTERVAL_MS } from './bot/data.ts'
 import type { TraderConfig } from './bot/trader.ts'
 import { STRATEGIES, parseStrategies, refreshHealth } from './bot/strategies.ts'
 import type { StrategySlot } from './bot/strategies.ts'
+import { c6Tick } from './bot/c6.ts'
 
 if (existsSync('.env')) process.loadEnvFile('.env')
 const env = process.env
@@ -72,6 +73,8 @@ const DEADLINE = RUN_MS > 0 ? Date.now() + RUN_MS : Infinity
 const HANDOFF = RUN_MS > 0
 // BOT_INTERVAL: candle size the bot decides on (5m, 15m, 1h, 4h; default 4h).
 const INTERVAL = INTERVAL_MS[env.BOT_INTERVAL || ''] ? (env.BOT_INTERVAL as string) : DEFAULT_TRADER.interval
+// C6 (4h) trains its model only when it runs.
+const C6_ON = !!SLOTS?.some((s) => s.id === 'c6') && STRATEGIES.c6.kind === 'rule' && STRATEGIES.c6.interval === INTERVAL
 // BOT_MIN_EV: the expected-value bar (R, after fees) a side must clear. "any"
 // = no extra bar in the walk-forward test. Live entries always also need a
 // calibrated EV > 0 (setup rules); ideas below the bar become shadow trades.
@@ -243,6 +246,11 @@ async function tick(): Promise<void> {
     lastHealthAt = now
     await refreshHealth(store, SLOTS, now).catch((e) => console.error('strategy health', (e as Error).message))
   }
+  // C6's model (bot/c6.ts): trained in the background once per 182 days on every market's history, kept in bot_state.
+  if (C6_ON)
+    await c6Tick(store, SYMBOLS, { costs: cfg.wf.costs, interval: cfg.interval, stepMs: INTERVAL_MS[cfg.interval], heavy: heavyJobs }).catch((e) =>
+      console.error('c6', (e as Error).message),
+    )
   // Retry any market whose setup failed earlier (each on its own backoff).
   if (!ONCE && setupQueue.pending.length) await setupQueue.run(now)
   // Alphabetical: same-bar entries compete for the heat cap in symbol order (startup.ts tickOrder).

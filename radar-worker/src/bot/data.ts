@@ -60,6 +60,30 @@ export async function closedBars(symbol: string, interval: string, count: number
   return closed.filter((b) => !seen.has(b.t) && seen.add(b.t)).slice(-count)
 }
 
+/** A USD-M perpetual funding settlement: time (ms) and rate per 8 h. */
+export interface Funding {
+  t: number
+  rate: number
+}
+
+/**
+ * Funding settlements since `startTime`, oldest first, from the mainnet
+ * futures host only (public; the testnet's rates are not the market's). The
+ * research read the same endpoint. Throws when the host cannot be reached.
+ */
+export async function fundingRates(symbol: string, startTime: number, endTime = Date.now()): Promise<Funding[]> {
+  const out: Funding[] = []
+  let start = startTime
+  while (start < endTime) {
+    const rows = (await get(`/fapi/v1/fundingRate?symbol=${symbol}&limit=1000&startTime=${start}&endTime=${endTime}`, ['https://fapi.binance.com'])) as unknown as Array<{ fundingTime: number; fundingRate: string }>
+    for (const r of rows) out.push({ t: Number(r.fundingTime), rate: Number(r.fundingRate) })
+    if (rows.length < 1000) break
+    start = Number(rows[rows.length - 1].fundingTime) + 1
+  }
+  const seen = new Set<number>()
+  return out.filter((x) => isFinite(x.rate) && !seen.has(x.t) && seen.add(x.t)).sort((a, z) => a.t - z.t)
+}
+
 type FetchBars = (symbol: string, interval: string, count: number) => Promise<Bar[]>
 
 /**

@@ -183,14 +183,20 @@ and the challenger cycle go on. Long only, 4h bars, BTC / ETH / SOL / BNB:
 
 `BOT_STRATEGIES` lists the strategies in priority order as `id[:state][@markets]`,
 each starting `live` or `shadow`, on `*` (all of `BOT_SYMBOLS`) or a comma list,
-separated by `;` — e.g. `f1:live@*;c2:shadow@*;ml:shadow@BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT`
+separated by `;` — e.g. `f1:live@*;c6:shadow@*;c2:shadow@*;ml:shadow@BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT`
 (without market lists `,` also separates: `f1:live,ml:shadow`, which is what
 `BOT_STRATEGY=trend` means). The model's pipeline (training, walk-forward,
 challengers) runs only on the model's markets; elsewhere it is not loaded at all.
 Strategies: `f1` (above), `c2` (the bear-market short: BTC and the market below
 EMA(300), close under the 20-bar low; 3 ATR stop, trailed at the lowest low + 4
 ATR; exit on a close above the 10-bar high or EMA(300) — it reads BTC's bars on
-every market) and `ml`.
+every market), `c6` (`src/bot/c6.ts`: F1's entries — on the bars where F1's
+own trade sequence is flat — taken only when a GBDT on `FEATURES_V2` at the
+signal bar rates P(F1 net R > 0) at least the training base rate; exits as F1;
+the model is trained in the background on every market's whole history and
+funding, F1 trades closed ≥ 7 days before, kept in `bot_state 'c6:model'` and
+retrained every 182 days; until it exists C6 decides nothing; a signal it turns
+down is only a `bot_events` line) and `ml`.
 Every strategy decides on every bar of its markets. A live strategy's signal is a
 real trade if every rule passes; any other signal (strategy in shadow, the
 market's one real position already held by another strategy, a risk rule said

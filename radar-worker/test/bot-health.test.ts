@@ -156,13 +156,15 @@ test('BOT_STRATEGIES: parsing, the BOT_STRATEGY=trend alias, and the workflow se
   assert.equal(syms.length, 24, 'the 24-market universe')
   assert.deepEqual(parseStrategies(m![1].replace(/['"]/g, ''), (wf.match(/^\s*BOT_STRATEGY:\s*(\S+)\s*$/m) ?? [])[1]), [
     { id: 'f1', state: 'live' },
+    { id: 'c6', state: 'shadow' },
     { id: 'c2', state: 'shadow' },
     { id: 'ml', state: 'shadow', symbols: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT'] },
   ])
   assert.ok(F1_HEALTH.roll30P1 < F1_HEALTH.roll30P5 && F1_HEALTH.ddP95 < F1_HEALTH.ddP99)
   // Which strategy runs where.
-  const [f1, , ml] = parseStrategies(m![1].replace(/['"]/g, ''))!
+  const [f1, c6, , ml] = parseStrategies(m![1].replace(/['"]/g, ''))!
   assert.equal(slotRuns(f1, 'XRPUSDT'), true)
+  assert.equal(slotRuns(c6, 'XRPUSDT'), true)
   assert.equal(slotRuns(ml, 'XRPUSDT'), false)
   assert.equal(slotRuns(ml, 'SOLUSDT'), true)
 })
