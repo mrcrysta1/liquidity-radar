@@ -30,6 +30,10 @@
 #       retrained every 182 days — not on every run; C6 decides nothing until
 #       it exists. Research 2021+: +0.218R, PF 1.62, Sharpe 1.10 (F1 0.76).
 #       Bands: rolling 30 p5 -0.32R / p1 -0.45R, drawdown p95 21.4R / p99 26.7R.
+#   f1x shadow, all 24 markets: F1 with the rule exit on the prior 15-bar low
+#       instead of 10 (research round 3); everything else as F1. Its shadow
+#       trades are independent of F1's. Bands (exitN 15, dev + HOLD-NEW):
+#       rolling 30 p5 -0.35R / p1 -0.45R, drawdown p95 23.2R / p99 29.3R.
 #   c2  shadow, all 24 markets: research strategy C2, the bear-market mirror of
 #       F1 (short when BTC and the market are below EMA(300) and the close
 #       breaks the 20-bar low; 3 ATR stop, 4 ATR trail; exit above the 10-bar
@@ -178,7 +182,7 @@ jobs:
           # that leaves its health bands is demoted to shadow (and promoted
           # back after 30 good shadow trades); bot_state 'strategy:<id>'.
           # Hybrid keeps the portfolio heat cap (1.5% per side, 2% total).
-          BOT_STRATEGIES: 'f1:live@*;c6:shadow@*;c2:shadow@*;ml:shadow@BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT'
+          BOT_STRATEGIES: 'f1:live@*;c6:shadow@*;f1x:shadow@*;c2:shadow@*;ml:shadow@BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT'
           BOT_MODE: hybrid
           BOT_SYMBOLS: BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,AAVEUSDT,ADAUSDT,ARBUSDT,AVAXUSDT,BCHUSDT,DOTUSDT,ETCUSDT,INJUSDT,NEARUSDT,UNIUSDT,APTUSDT,ATOMUSDT,DOGEUSDT,FILUSDT,LINKUSDT,LTCUSDT,OPUSDT,SUIUSDT,TRXUSDT,XRPUSDT
           BOT_INTERVAL: 4h

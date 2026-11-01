@@ -27,7 +27,7 @@ import type { Bar, Costs } from './features.ts'
 import { costR } from './features.ts'
 import { excursion } from './journal.ts'
 import { F1, TREND_BARS, highPrev, lowPrev, noEntryReason, onClose, trendIndicators, trendSignal } from './strategy.ts'
-import type { TrendInd } from './strategy.ts'
+import type { TrendInd, TrendParams } from './strategy.ts'
 import { evaluateHealth } from './health.ts'
 import type { HealthBands, HealthRecord, StrategyState } from './health.ts'
 import type { BotStore } from './store.ts'
@@ -171,6 +171,65 @@ export const F1_STRATEGY: RuleStrategy = {
   },
 }
 
+// ---- F1X ---------------------------------------------------------------------
+
+/**
+ * Research strategy F1X (round 3, lib3.ts f1g exitN 15): F1 with the rule exit
+ * on the prior 15-bar low instead of 10. Entry, initial stop, trail and the
+ * EMA(300) exit are F1's. Its own parameter set: F1 itself (and C2's / C6's use
+ * of it) is unchanged. Starts in shadow.
+ */
+export const F1X: TrendParams = { ...F1, exitLen: 15 }
+
+/**
+ * Health bands of F1X, research round 3 (rd3/f1x_bands.ts: health.ts's method
+ * and seed — moving-block bootstrap, block 10, 20000 sims — on the dev +
+ * HOLD-NEW trades with exitN 15, net R; 1570 trades, mean +0.243R; exitN 10
+ * reproduces F1_HEALTH exactly): expected +0.12R (median rolling 30-trade
+ * expectancy), rolling 30 p5 -0.35R / p1 -0.45R, drawdown over 100 trades
+ * p95 23.2R / p99 29.3R.
+ */
+export const F1X_HEALTH: HealthBands = { expR: 0.12, roll30P5: -0.35, roll30P1: -0.45, ddP95: 23.2, ddP99: 29.3 }
+
+export const F1X_STRATEGY: RuleStrategy = {
+  kind: 'rule',
+  id: 'f1x',
+  name: 'F1X trend breakout, 15-bar exit (4h, long)',
+  interval: '4h',
+  sides: [1],
+  bars: TREND_BARS,
+  health: F1X_HEALTH,
+  describe(b, i) {
+    const x = ind(b)
+    return `F1X: close ${b[i].c} · EMA(${F1X.emaLen}) ${sig6(x.ema[i])} · ${F1X.entryLen}-bar high ${highPrev(b, i, F1X.entryLen)} · ATR ${sig6(x.atr[i])}`
+  },
+  noEntry: (b, i) => noEntryReason(b, ind(b), i, F1X).replace(/F1/g, 'F1X'),
+  stopDist: (b, i) => F1X.slAtr * ind(b).atr[i],
+  signal(b, i) {
+    const x = ind(b)
+    if (!trendSignal(b, x, i, F1X)) return null
+    const atr = x.atr[i]
+    const dist = F1X.slAtr * atr
+    return {
+      side: 1,
+      stop: b[i].c - dist,
+      dist,
+      atr,
+      features: { close: b[i].c, ema300: x.ema[i], high20: highPrev(b, i, F1X.entryLen), low15: lowPrev(b, i, F1X.exitLen), atr14: atr },
+    }
+  },
+  manage(p, b, j) {
+    const x = ind(b)
+    const r = onClose(b, x, j, { stop: p.stop, high: p.best }, F1X)
+    if (r.exit) {
+      const c = b[j].c
+      const note = c <= x.ema[j] ? `close ${c} ≤ EMA(${F1X.emaLen}) ${sig6(x.ema[j])}` : `close ${c} < the ${F1X.exitLen}-bar low ${lowPrev(b, j, F1X.exitLen)}`
+      return { exit: true, stop: p.stop, best: p.best, note }
+    }
+    return { exit: false, stop: r.stop, best: r.high, note: `highest high ${r.high} − ${F1X.trailAtr} ATR ${sig6(x.atr[j])}` }
+  },
+}
+
 // ---- C2 ----------------------------------------------------------------------
 
 /**
@@ -290,7 +349,7 @@ export const C6_STRATEGY: RuleStrategy = {
 export const ML_STRATEGY: ModelStrategy = { kind: 'model', id: 'ml', name: 'Model (MLP, bracket)' }
 
 /** Every strategy the bot knows, by id. */
-export const STRATEGIES: Record<string, Strategy> = { f1: F1_STRATEGY, c6: C6_STRATEGY, c2: C2_STRATEGY, ml: ML_STRATEGY }
+export const STRATEGIES: Record<string, Strategy> = { f1: F1_STRATEGY, c6: C6_STRATEGY, f1x: F1X_STRATEGY, c2: C2_STRATEGY, ml: ML_STRATEGY }
 
 /** The rule strategy behind an open trend-mode trade (rows from before 008_bot_strategies.sql have none: F1). */
 export function ruleStrategy(id: string | null | undefined): RuleStrategy | null {
@@ -320,7 +379,7 @@ export function slotRuns(slot: StrategySlot, symbol: string): boolean {
  * comma list. Strategies are separated by ';' — or by ',' when no market list
  * is given (the older form). Examples:
  *   f1:live,ml:shadow
- *   f1:live@*;c6:shadow@*;c2:shadow@*;ml:shadow@BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT
+ *   f1:live@*;c6:shadow@*;f1x:shadow@*;c2:shadow@*;ml:shadow@BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT
  * Unset: BOT_STRATEGY=trend is the alias "f1:live,ml:shadow"; anything else is
  * the model alone (null: the single-strategy path, unchanged).
  */

@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs'
 import type { Bar } from '../src/bot/features.ts'
 import { F1, checkTrendSetup, highPrev, noEntryReason, onClose, trailStop, trendBacktest, trendExit, trendIndicators, trendSignal } from '../src/bot/strategy.ts'
 import type { TrailState } from '../src/bot/strategy.ts'
-import { C2_STRATEGY, F1_STRATEGY, STRATEGIES, resolveRuleShadow, ruleBacktest } from '../src/bot/strategies.ts'
+import { C2_STRATEGY, F1X, F1X_STRATEGY, F1_STRATEGY, STRATEGIES, resolveRuleShadow, ruleBacktest } from '../src/bot/strategies.ts'
 import { DEFAULT_WF } from '../src/bot/walkforward.ts'
 
 /** BTCUSDT 4h, 2023-07-26 .. 2024-05-21, [t, o, h, l, c] (a slice of the research data). */
@@ -421,4 +421,109 @@ test('F1 plugin: metadata, signal and manage agree with strategy.ts', () => {
     assert.equal(m.exit, r.exit)
     if (!r.exit) assert.deepEqual([m.stop, m.best], [r.stop, r.high])
   }
+})
+
+// ---- F1X (F1 with a 15-bar exit) against a port of the research engine (round 3 lib3.ts f1g, exitN, gross) ----
+
+/** lib3.ts f1g without costs, funding, time stop or pyramid: long at close > EMA300 and > the prior 20-bar high, 3 ATR stop, HH − 4 ATR trail, exit when close < the prior exitN-bar low or not above EMA300. */
+function referenceF1g(b: Bar[], exitN: number) {
+  const n = b.length
+  const c = b.map((x) => x.c)
+  const atr: number[] = []
+  for (let i = 0; i < n; i++) {
+    const tr = i ? Math.max(b[i].h - b[i].l, Math.abs(b[i].h - b[i - 1].c), Math.abs(b[i].l - b[i - 1].c)) : b[i].h - b[i].l
+    atr.push(i < 14 ? (i ? (atr[i - 1] * i + tr) / (i + 1) : tr) : (atr[i - 1] * 13 + tr) / 14)
+  }
+  const a = 2 / 301
+  const e: number[] = []
+  c.forEach((v, i) => e.push(i ? v * a + e[i - 1] * (1 - a) : v))
+  const donch = (len: number, hi: boolean) =>
+    b.map((_, i) => {
+      if (i < len) return NaN
+      let m = hi ? -Infinity : Infinity
+      for (let j = i - len; j < i; j++) m = hi ? Math.max(m, b[j].h) : Math.min(m, b[j].l)
+      return m
+    })
+  const H = donch(20, true), L = donch(exitN, false)
+  const out: Array<{ i: number; exitBar: number; entry: number; exit: number; why: string }> = []
+  for (let i = 900; i < n - 1; i++) {
+    if (!(c[i] > e[i] && c[i] > H[i])) continue
+    const entry = b[i + 1].o, dist = 3 * atr[i]
+    if (!(dist > 0)) continue
+    let stop = entry - dist, ext = -Infinity
+    let exitPx = NaN, why = '', j = i + 1, exitBar = 0
+    for (; j < n; j++) {
+      const bj = b[j]
+      const op = j === i + 1 ? entry : bj.o
+      if (bj.l <= stop) {
+        exitPx = Math.min(op, stop)
+        why = 'stop'
+        exitBar = j
+        break
+      }
+      if (j + 1 >= n) break
+      if (!(c[j] > e[j] && c[j] >= L[j])) {
+        exitPx = b[j + 1].o
+        why = 'signal'
+        exitBar = j
+        break
+      }
+      ext = Math.max(ext, bj.h)
+      stop = Math.max(stop, ext - 4 * atr[j])
+    }
+    if (!why) break
+    out.push({ i, exitBar, entry, exit: exitPx, why })
+    i = exitBar - 1
+  }
+  return out
+}
+
+for (const [name, bars] of [
+  ['BTC fixture', fixture],
+  ['synthetic A', synth(2600, 37)],
+  ['synthetic B', synth(2600, 33)],
+] as const) {
+  test(`F1X parity (${name}): the plugin makes exactly the research exit-15 trades; F1 is still the exit-10 ones`, () => {
+    const ref = referenceF1g(bars, 15)
+    assert.ok(ref.length >= 3, 'enough trades to compare: ' + ref.length)
+    const pl = ruleBacktest(F1X_STRATEGY, bars)
+    assert.equal(pl.length, ref.length)
+    pl.forEach((t, k) => {
+      const r = ref[k]
+      assert.equal(t.side, 1)
+      assert.deepEqual([t.i, t.exitBar, t.entry, t.exit], [r.i, r.exitBar, r.entry, r.exit], 'trade ' + k)
+      assert.equal(t.why === 'signal' ? 'signal' : 'stop', r.why, 'trade ' + k)
+    })
+    // The port with exitN 10 is F1 (checks the port against the F1 parity above).
+    const f1 = referenceF1g(bars, 10)
+    assert.deepEqual(
+      trendBacktest(bars).map((t) => [t.i, t.exitBar, t.entry, t.exit]),
+      f1.map((t) => [t.i, t.exitBar, t.entry, t.exit]),
+    )
+  })
+}
+
+test('F1X: its own parameters and bands; F1, C2 and C6 keep the 10-bar exit', () => {
+  assert.deepEqual(F1X, { ...F1, exitLen: 15 })
+  assert.equal(F1.exitLen, 10)
+  assert.equal(STRATEGIES.f1x, F1X_STRATEGY)
+  assert.deepEqual(F1X_STRATEGY.sides, [1])
+  assert.equal(F1X_STRATEGY.interval, '4h')
+  assert.deepEqual(F1X_STRATEGY.health, { expR: 0.12, roll30P5: -0.35, roll30P1: -0.45, ddP95: 23.2, ddP99: 29.3 })
+  assert.notEqual(F1X_STRATEGY.manage, F1_STRATEGY.manage)
+  assert.equal(STRATEGIES.c6.kind === 'rule' && STRATEGIES.c6.manage, F1_STRATEGY.manage)
+  // The longer exit changes trades somewhere (else the parity above proves nothing new).
+  const runs = [fixture, synth(2600, 37), synth(2600, 33)]
+  assert.ok(runs.some((b) => JSON.stringify(ruleBacktest(F1X_STRATEGY, b)) !== JSON.stringify(ruleBacktest(F1_STRATEGY, b))))
+  for (const b of runs)
+    for (let i = F1.warm; i < b.length; i += 7) {
+      assert.equal(!!F1X_STRATEGY.signal(b, i), !!F1_STRATEGY.signal(b, i), 'same entries as F1')
+      if (!F1X_STRATEGY.signal(b, i)) assert.match(F1X_STRATEGY.noEntry(b, i), /^no F1X entry/)
+    }
+  const b = synth(2600, 37)
+  const i = ruleBacktest(F1X_STRATEGY, b)[0].i
+  const s = F1X_STRATEGY.signal(b, i)!
+  assert.equal(s.features.low15, Math.min(...b.slice(i - 15, i).map((x) => x.l)))
+  assert.equal(s.features.low10, undefined)
+  assert.match(F1X_STRATEGY.describe(b, i), /^F1X: close/)
 })
