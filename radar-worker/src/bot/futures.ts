@@ -33,6 +33,21 @@ export class BinanceError extends Error {
   }
 }
 
+/**
+ * Setup rejections that mean "already so" or "cannot change right now while
+ * orders or a position are open" — the current setting stays and the bot goes on:
+ * -4046 no need to change margin type, -4059 no need to change position side,
+ * -4047 / -4048 margin type cannot change with open orders / a position,
+ * -4067 position side cannot change with open orders (the testnet also answers
+ * it to margin-type changes), -4068 position side cannot change with a position.
+ */
+export const SETUP_NON_FATAL: readonly number[] = Object.freeze([-4046, -4059, -4047, -4048, -4067, -4068])
+
+function tolerate(e: unknown, what: string): void {
+  if (!(e instanceof BinanceError) || !SETUP_NON_FATAL.includes(e.code)) throw e
+  if (e.code !== -4046 && e.code !== -4059) console.warn(`[futures] ${what} (${e.message})`)
+}
+
 type Params = Record<string, string | number | boolean | undefined>
 
 export interface SymbolRules {
@@ -198,20 +213,37 @@ export class Futures {
     }
   }
 
+  /**
+   * One-way mode, isolated margin and the leverage, for one symbol. Reads the
+   * current settings first and only changes what differs, so a symbol that is
+   * already set up never hits the "cannot change while orders/positions are
+   * open" rejections. A change the exchange refuses for that reason, or calls
+   * unnecessary, is not fatal (SETUP_NON_FATAL): the current setting is kept.
+   */
   async setup(symbol: string, leverage: number): Promise<void> {
-    await this.request('POST', '/fapi/v1/marginType', { symbol, marginType: 'ISOLATED' }).catch((e) => {
-      if (!(e instanceof BinanceError)) throw e
-      if (e.code === -4046) return // already isolated
-      // -4047 / -4048: margin type cannot change while orders / a position are
-      // open (the testnet answers -4067 for the same case). Keep the current
-      // margin type rather than retrying startup forever.
-      if (e.code === -4047 || e.code === -4048 || e.code === -4067) {
-        console.warn(`[futures] ${symbol}: margin type left unchanged (${e.message})`)
-        return
-      }
-      throw e
-    })
-    await this.request('POST', '/fapi/v1/leverage', { symbol, leverage })
+    await this.ensureOneWay()
+    let cur: Record<string, string> | undefined
+    try {
+      const rows = (await this.request('GET', '/fapi/v2/positionRisk', { symbol })) as unknown
+      if (Array.isArray(rows)) cur = rows.find((x) => x?.symbol === symbol && (x.positionSide || 'BOTH') === 'BOTH') ?? rows[0]
+    } catch {
+      cur = undefined // unknown: fall back to setting both
+    }
+    if (String(cur?.marginType ?? '').toLowerCase() !== 'isolated')
+      await this.request('POST', '/fapi/v1/marginType', { symbol, marginType: 'ISOLATED' }).catch((e) => tolerate(e, `${symbol}: margin type left unchanged`))
+    if (!(Number(cur?.leverage) === leverage)) await this.request('POST', '/fapi/v1/leverage', { symbol, leverage })
+  }
+
+  private oneWayChecked = false
+
+  /** The bot trades one-way (positionSide BOTH). Account-wide, so checked once per process. */
+  async ensureOneWay(): Promise<void> {
+    if (this.oneWayChecked) return
+    const r = (await this.request('GET', '/fapi/v1/positionSide/dual').catch(() => null)) as { dualSidePosition?: boolean | string } | null
+    if (r && (r.dualSidePosition === true || r.dualSidePosition === 'true'))
+      await this.request('POST', '/fapi/v1/positionSide/dual', { dualSidePosition: 'false' }).catch((e) => tolerate(e, 'position mode left at hedge'))
+    // Only a successful read counts: an unreadable mode is checked again next time.
+    if (r) this.oneWayChecked = true
   }
 
   async marketOrder(symbol: string, side: 'BUY' | 'SELL', quantity: string, reduceOnly = false, clientId?: string) {

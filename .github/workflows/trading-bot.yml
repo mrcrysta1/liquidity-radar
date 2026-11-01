@@ -1,6 +1,6 @@
 # The testnet trading bot, run by GitHub Actions — free for this public repo,
 # no server or PC needed. It runs NON-STOP: each run keeps the bot going for
-# 5 h 40 min (a GitHub job may last 6 h), then starts the next run itself, so
+# 5 h 30 min (a GitHub job may last 6 h), then starts the next run itself, so
 # the bot is always connected. GitHub's own cron is unreliable for short jobs
 # (runs came ~3 h apart instead of every 15 min); here it is only an hourly
 # safety net that restarts the chain if it ever breaks.
@@ -92,10 +92,16 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
       - run: echo "BOT_STARTED=$(date +%s)" >> "$GITHUB_ENV"
-      - name: Run the bot (5 h 40 min)
+      # Time budget: the bot stops its loop 330 min after it starts; this step
+      # is killed at 345 min if a last tick or shutdown hangs (a step timeout
+      # FAILS the step, it does not cancel the job, so the hand-over below still
+      # runs); the job limit of 355 min leaves room for setup and the hand-over.
+      # Never raise BOT_RUN_MINUTES without keeping >= 10 min under the step limit.
+      - name: Run the bot (5 h 30 min)
+        timeout-minutes: 345
         run: node src/bot.ts
         env:
-          BOT_RUN_MINUTES: '340'
+          BOT_RUN_MINUTES: '330'
           BOT_MODE: explore
           BOT_SYMBOLS: BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XAUUSDT
           BOT_INTERVAL: 4h
@@ -118,9 +124,9 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
           BINANCE_API_SECRET: ${{ secrets.BINANCE_API_SECRET }}
-      # Hand over, even if the bot step failed — but not if someone cancelled the
-      # run, and not after a crash on startup (that would just loop; the hourly
-      # safety net retries instead).
+      # Hand over, even if the bot step failed or hit its step timeout — but not
+      # if someone cancelled the run, and not after a crash on startup (that
+      # would just loop; the hourly safety net retries instead).
       - name: Start the next run
         if: ${{ !cancelled() }}
         env:

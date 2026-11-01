@@ -17,6 +17,7 @@ import type { AccountFill } from './bot/account.ts'
 import { BotStore } from './bot/store.ts'
 import { DEFAULT_LEARN, DEFAULT_TRADER, INTERVAL_DEFAULTS, INTERVAL_MAX_NOTIONAL_X, SymbolTrader } from './bot/trader.ts'
 import { DEFAULT_SETUP } from './bot/setup.ts'
+import { InitQueue } from './bot/startup.ts'
 import { buildMetrics } from './bot/learning.ts'
 import { INTERVAL_MS } from './bot/data.ts'
 import type { TraderConfig } from './bot/trader.ts'
@@ -105,29 +106,22 @@ for (let attempt = 1; ; attempt++) {
 if (HANDOFF) console.log(new Date().toISOString(), `bot run started · until ${new Date(DEADLINE).toISOString()}`)
 else if (!ONCE) await store.event('info', null, `bot starting on ${ex.base} (${ex.isTestnet ? 'TESTNET' : 'MAINNET'}) · mode ${cfg.mode} · ${SYMBOLS.join(', ')} · ${cfg.interval} bars · risk ${(cfg.risk.riskPerTrade * 100).toFixed(2)}%/trade · bracket ${BRACKET.slAtr}/${BRACKET.tpAtr} ATR over ${BRACKET.horizon} bars · max ${cfg.setup.maxOpen} open, ${cfg.setup.maxTradesPerDay}/day`)
 
-const traders: SymbolTrader[] = []
-for (const s of SYMBOLS) {
-  const t = new SymbolTrader(ex, store, s, cfg)
-  // A slow or flaky link should delay startup, not kill it.
-  for (let attempt = 1; ; attempt++) {
-    try {
-      await t.init()
-      break
-    } catch (e) {
-      const wait = Math.min(300, 10 * 2 ** (attempt - 1))
-      await store.event('warn', s, `setup failed (attempt ${attempt}): ${(e as Error).message} — retrying in ${wait}s`)
-      if (ONCE && attempt >= 2) process.exit(1)
-      // Out of run time while still retrying: exit cleanly so the next run is
-      // started, instead of being killed by the job timeout and breaking the chain.
-      if (Date.now() + wait * 1000 >= DEADLINE) {
-        console.log(new Date().toISOString(), 'run time over during setup, handing over to the next run')
-        await db.end().catch(() => {})
-        process.exit(0)
-      }
-      await new Promise((r) => setTimeout(r, wait * 1000))
-    }
-  }
-  traders.push(t)
+// Each market starts on its own: one whose setup fails (a slow link, or a
+// rejection such as -4067) is skipped and retried with a bounded backoff from
+// the trading loop, while the others trade. It never stalls the run.
+const setupQueue = new InitQueue(
+  SYMBOLS.map((s) => new SymbolTrader(ex, store, s, cfg)),
+  {
+    onFail: (s, attempt, e, waitMs) =>
+      store.event('warn', s, `setup failed (attempt ${attempt}): ${e.message} — skipped for now, other markets keep trading; retrying in ${Math.round(waitMs / 1000)}s`),
+    onReady: (s, attempts) => (attempts > 1 ? store.event('info', s, `setup succeeded after ${attempts} attempts — trading resumed`) : undefined),
+  },
+)
+await setupQueue.run()
+if (ONCE && setupQueue.ready.length === 0) {
+  console.error('no market could be set up')
+  await db.end().catch(() => {})
+  process.exit(1)
 }
 
 let stopping = false
@@ -160,13 +154,14 @@ async function tick(): Promise<void> {
   const now = Date.now()
   const control = await store.getState<{ enabled?: boolean }>('control', { enabled: true })
   // A missing USDT row or a failed read is "unknown", not 0: reading it as 0
-  // would trip the drawdown kill switch. The limits are skipped this tick.
+  // would trip the drawdown kill switch. The limits cannot be checked, so no
+  // new entry is allowed this tick; open trades are still managed.
   const read = await ex.balanceUsdt().catch((e) => {
     console.warn('balance read failed', (e as Error).message)
     return null
   })
   // One event per outage, not one per tick.
-  if (read == null && !balanceMissing) await store.event('warn', null, 'USDT balance unavailable — risk limits skipped until it can be read')
+  if (read == null && !balanceMissing) await store.event('warn', null, 'USDT balance unavailable — new entries paused until it can be read')
   balanceMissing = read == null
   if (read != null) lastEquity = read
   const equity = lastEquity
@@ -187,7 +182,9 @@ async function tick(): Promise<void> {
     await writeMetrics(now).catch((e) => console.error('metrics', (e as Error).message))
   }
   const canEnter = control.enabled !== false && lim.canEnter
-  for (const t of traders) {
+  // Retry any market whose setup failed earlier (each on its own backoff).
+  if (!ONCE && setupQueue.pending.length) await setupQueue.run(now)
+  for (const t of setupQueue.ready) {
     try {
       await t.tick(canEnter, now)
     } catch (e) {
