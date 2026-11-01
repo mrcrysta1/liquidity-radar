@@ -1135,6 +1135,40 @@ test('C6: a skipped signal is no trade at all, one event line; no model, no deci
   }
 })
 
+// ---- F1X: F1 with a 15-bar exit, in shadow ----
+
+test('F1X shadow: never an order â€” its shadow sits beside the real F1 trade, and its own shadow is independent of F1â€™s', async () => {
+  {
+    const { store, ex, t, pg } = await trendTrader({ strategies: [{ id: 'f1', state: 'live' }, { id: 'f1x', state: 'shadow' }, { id: 'ml', state: 'shadow' }] })
+    await t.tick(true, Date.now())
+    assert.equal((await store.openTrade('BTCUSDT'))?.strategy, 'f1', 'F1 trades for real, as before')
+    assert.equal(ex.algo.length, 1, 'one exchange stop: F1â€™s')
+    const real = (await pg.query<Row>('select strategy from bot_trades')).rows
+    assert.deepEqual(real, [{ strategy: 'f1' }])
+    const rows = (await pg.query<Row>(`select * from bot_shadow_trades where strategy = 'f1x'`)).rows
+    assert.equal(rows.length, 1)
+    assert.match(String(rows[0].reject_reason), /strategy f1x is in shadow/)
+    assert.match(String(rows[0].decision), /^F1X: close/)
+    assert.ok('low15' in (rows[0].features as Record<string, number>))
+  }
+  {
+    const { ex, t, pg, h, state, nextBar } = await trendTrader({ strategies: [{ id: 'f1', state: 'shadow' }, { id: 'f1x', state: 'shadow' }] })
+    await t.tick(true, Date.now())
+    const sh = async (id: string) => (await pg.query<Row>(`select * from bot_shadow_trades where strategy = $1 order by id`, [id])).rows
+    assert.equal((await sh('f1')).length, 1)
+    assert.equal((await sh('f1x')).length, 1, 'both strategies shadow the same breakout')
+    assert.equal((await sh('f1x'))[0].entry, h.hist[h.S].c)
+    while (state.idx <= h.brk) await nextBar()
+    const f1 = (await sh('f1'))[0]
+    const f1x = (await sh('f1x'))[0]
+    assert.equal(f1.status, 'closed')
+    assert.equal(f1.exit_reason, 'signal', 'F1: the close under the 10-bar low')
+    assert.ok(f1x.status === 'open' || f1x.bars_held !== f1.bars_held, 'F1X does not exit on F1â€™s 10-bar low')
+    assert.equal(ex.pos.amt, 0, 'never an order')
+    assert.equal((await pg.query('select id from bot_trades')).rows.length, 0, 'never a real trade')
+  }
+})
+
 test('the model runs only on its own markets: none of its pipeline elsewhere', async () => {
   const strategies = [{ id: 'f1', state: 'live' as const }, { id: 'ml', state: 'shadow' as const, symbols: ['BTCUSDT'] }]
   const { db, pg } = await freshDb()
