@@ -74,8 +74,8 @@ test('labels and regimes', () => {
 test('calibration persists in the database (survives restarts and retrains)', async () => {
   const pg = new PGlite()
   await pg.exec('create role anon;')
-  for (const f of ['001_whales.sql', '002_bot.sql', '005_bot_learning.sql', '005_bot_learning.sql'])
-    await pg.exec(readFileSync(new URL('../sql/' + f, import.meta.url), 'utf8')) // 005 twice: idempotent
+  for (const f of ['001_whales.sql', '002_bot.sql', '005_bot_learning.sql', '005_bot_learning.sql', '006_bot_journal.sql', '006_bot_journal.sql'])
+    await pg.exec(readFileSync(new URL('../sql/' + f, import.meta.url), 'utf8')) // 005 and 006 twice: idempotent
   const q = (text: string, params?: unknown[]) => pg.query(text, params as never)
   const store = new BotStore({ query: q } as unknown as Db)
   assert.deepEqual(await store.calibration('BTCUSDT', 1, 'up-hi'), CAL_PRIOR)

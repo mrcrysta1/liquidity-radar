@@ -68,12 +68,13 @@ export function utcDay(t: number): string {
 
 /**
  * Roll the day, track the peak, and decide whether new entries are allowed.
- * equity null (balance missing or unreadable): the checks are skipped for this
- * tick and the state is kept as it was — an unknown balance is not a loss.
+ * equity null (balance missing or unreadable): the state is kept as it was —
+ * an unknown balance is not a loss, so it never trips a halt — but no new
+ * entry is allowed this tick, since the limits could not be checked.
  */
 export function checkLimits(s: RiskState, equity: number | null, now: number, r: RiskConfig): { state: RiskState; canEnter: boolean; reason: string } {
   const st = { ...s }
-  if (equity == null || !Number.isFinite(equity)) return { state: st, canEnter: !st.halted, reason: st.haltReason }
+  if (equity == null || !Number.isFinite(equity)) return { state: st, canEnter: false, reason: st.haltReason || 'balance unavailable — entries paused this tick' }
   const day = utcDay(now)
   if (st.day !== day) {
     st.day = day

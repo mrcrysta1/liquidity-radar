@@ -50,7 +50,7 @@ export function OnTrackPanel() {
   if (!SERVER_BOT) return null
   const since = new Date(STRATEGY_SINCE).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
   return (
-    <NnCard title="Is it on track?" icon={NI.target} className="ot" right={<small className="ot-since">since {since} · 4h gated</small>}>
+    <NnCard title="Is it on track?" icon={NI.target} className="ot" right={<small className="ot-since">since {since} · 4h, real + shadow</small>}>
       {err && <p className="nn-err">{err}</p>}
       {!rep && !err && <p className="nn-empty">Loading the bot’s record…</p>}
       {rep && (

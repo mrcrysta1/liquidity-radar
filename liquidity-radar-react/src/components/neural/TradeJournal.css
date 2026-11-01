@@ -1,0 +1,40 @@
+/* "Trade journal" card (components/neural/TradeJournal.tsx). Own file so it
+   never collides with edits to index.css. Uses the app's theme tokens; the
+   table itself reuses .nn-tbl / .lab-table / .lab-filters. */
+.tj{display:flex;flex-direction:column;gap:12px}
+.tj-sub{font-size:var(--text-xs);color:var(--dim)}
+.tj .up{color:var(--green)}.tj .dn{color:var(--red)}
+.tj-tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.tj-tiles>div{padding:10px 12px;border-radius:11px;background:var(--sunk-2);border:1px solid var(--hair-2);display:flex;flex-direction:column;gap:2px;min-width:0}
+.tj-tiles small{font-size:var(--text-xs);color:var(--muted)}
+.tj-tiles b{font-family:var(--mono);font-size:var(--text-md, 15px);color:var(--txt)}
+.tj-tiles em{font-style:normal;font-size:var(--text-xs);color:var(--dim)}
+.tj-syms{display:flex;flex-wrap:wrap;gap:6px}
+.tj-syms button{display:flex;flex-direction:column;align-items:flex-start;gap:1px;padding:6px 10px;border-radius:9px;border:1px solid var(--hair-2);background:var(--sunk-2);color:var(--txt);font-size:var(--text-xs);cursor:pointer;min-width:0}
+.tj-syms button.on{border-color:var(--accent, var(--amber))}
+.tj-syms span{font-family:var(--mono);color:var(--muted)}
+.tj-syms i{font-style:normal}
+.tj-row{cursor:pointer}
+.tj-row:hover td,.tj-row.on td{background:var(--sunk-2)}
+.tj-real{color:var(--green)!important}
+.tj-paper{color:var(--amber)!important}
+.tj-x{width:24px;height:24px;border-radius:7px;border:1px solid var(--hair-2);background:var(--card);color:var(--txt);font-size:14px;line-height:1;cursor:pointer}
+.tj-more>td{white-space:normal!important;background:var(--sunk-2);border-top:0!important}
+.tj-detail{display:flex;flex-direction:column;gap:8px;padding:4px 2px 8px;font-family:'Inter',sans-serif;font-size:var(--text-xs);color:var(--muted);line-height:1.45}
+.tj-detail p{margin:0;overflow-wrap:anywhere}
+.tj-detail b{color:var(--txt);margin-right:4px}
+.tj-kv{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:6px 12px;margin:0}
+.tj-kv>div{min-width:0}
+.tj-kv dt{color:var(--dim)}
+.tj-kv dd{margin:0;font-family:var(--mono);color:var(--txt);overflow:hidden;text-overflow:ellipsis}
+.tj-narrow{display:none}
+.tj-feats>div{display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:4px}
+.tj-feats span{font-family:var(--mono);color:var(--txt)}
+.tj-feats small{font-family:'Inter',sans-serif;color:var(--dim);margin-right:4px}
+.tj-dim{color:var(--dim)}
+.tj-more-btn{align-self:center;padding:7px 14px;border-radius:9px;border:1px solid var(--hair-2);background:var(--sunk-2);color:var(--txt);font-size:12px;cursor:pointer}
+@media (max-width:760px){
+  .tj-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .tj-table .tj-opt{display:none}
+  .tj-narrow{display:block}
+}

@@ -5,6 +5,8 @@
 // nothing else). Without those two variables the Neural Net page simply
 // shows the in-browser engine alone.
 import type { Outcome } from './onTrack'
+import { buildJournal } from './journal'
+import type { JournalRow } from './journal'
 
 const DB_URL = (import.meta.env.VITE_WHALE_DB_URL as string | undefined)?.replace(/\/+$/, '')
 const DB_KEY = import.meta.env.VITE_WHALE_DB_KEY as string | undefined
@@ -77,16 +79,20 @@ export async function loadAccount(): Promise<{ account: BinanceAccount | null; h
   return { account: get('account') as BinanceAccount | null, heartbeat: get('heartbeat') as { t: number; mode: string; venue: string } | null }
 }
 
-/** When the current strategy went live: gated, 4-hour candles (PR #126). Older trades were a different setup. */
+/**
+ * When the current strategy went live: 4-hour candles, 1.5 / 2.25 ATR bracket
+ * (PR #126). Older trades were a different setup. It ran gated at first and in
+ * explore mode since PR #142 — same bracket and model, so both modes count.
+ */
 export const STRATEGY_SINCE = Date.parse('2026-10-31T06:12:00Z')
 
-/** Closed real (gated) and shadow trades of the current strategy, for the "Is it on track?" panel. */
+/** Closed real (gated or explore) and shadow trades of the current strategy, for the "Is it on track?" panel. */
 export async function loadOutcomes(): Promise<{ real: Outcome[]; shadow: Outcome[] } | null> {
   if (!SERVER_BOT) return null
   const since = new Date(STRATEGY_SINCE).toISOString()
   const [real, shadow] = await Promise.all([
     rest<Array<{ p_win: number; r_multiple: number | null; opened_at: string; exit_reason: string | null }>>(
-      `bot_trades?select=p_win,r_multiple,opened_at,exit_reason&status=eq.closed&mode=eq.gated&opened_at=gte.${since}&order=opened_at.desc&limit=1000`,
+      `bot_trades?select=p_win,r_multiple,opened_at,exit_reason&status=eq.closed&mode=in.(gated,explore)&opened_at=gte.${since}&order=opened_at.desc&limit=1000`,
     ),
     rest<Array<{ p_cal: number; r_net: number | null; bar_time: string; exit_reason: string | null }>>(
       `bot_shadow_trades?select=p_cal,r_net,bar_time,exit_reason&status=eq.closed&bar_time=gte.${since}&order=bar_time.desc&limit=1000`,
@@ -139,4 +145,19 @@ export async function loadPlans(): Promise<BotPlan[] | null> {
   if (!SERVER_BOT) return null
   const rows = await rest<Array<{ value: BotPlan }>>('bot_state?select=value&key=like.plan:*')
   return rows.map((r) => r.value).filter((p) => p && p.symbol).sort((a, b) => b.t - a.t)
+}
+
+/**
+ * Every real and shadow trade for the trade journal, newest first. select=*
+ * so it works whether or not the journal columns (006_bot_journal.sql) exist
+ * yet; model versions come from bot_models for rows that do not carry one.
+ */
+export async function loadJournal(limit = 500): Promise<JournalRow[] | null> {
+  if (!SERVER_BOT) return null
+  const [real, shadow, models] = await Promise.all([
+    rest<Array<Record<string, unknown>>>(`bot_trades?select=*&order=opened_at.desc&limit=${limit}`),
+    rest<Array<Record<string, unknown>>>(`bot_shadow_trades?select=*&order=bar_time.desc&limit=${limit}`),
+    rest<Array<Record<string, unknown>>>('bot_models?select=id,version&order=id.desc&limit=1000').catch(() => []),
+  ])
+  return buildJournal(real, shadow, models)
 }

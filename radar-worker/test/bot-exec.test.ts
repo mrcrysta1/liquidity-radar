@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { Futures, TESTNET, TESTNET_BASES, assertTestnetBase, roundStep, roundTick, sign } from '../src/bot/futures.ts'
+import { Futures, SETUP_NON_FATAL, TESTNET, TESTNET_BASES, assertTestnetBase, roundStep, roundTick, sign } from '../src/bot/futures.ts'
 import { DEFAULT_RISK, checkLimits, size } from '../src/bot/risk.ts'
 
 test('request signing matches Binance’s published example', () => {
@@ -112,6 +112,62 @@ test('setup: margin type that cannot change (-4048, -4047, -4067) or is already 
   }
 })
 
+test('setup: reads the current mode first and changes only what differs (no -4067 when already set)', async () => {
+  const real = globalThis.fetch
+  const quiet = console.warn
+  console.warn = () => {}
+  const posts: string[] = []
+  let marginType = 'isolated'
+  let lev = '3'
+  let dual = false
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    const u = new URL(url)
+    assert.ok(TESTNET_BASES.includes(u.origin), 'only the testnet is called')
+    const method = init?.method ?? 'GET'
+    if (u.pathname === '/fapi/v1/time') return new Response(JSON.stringify({ serverTime: Date.now() }))
+    if (method === 'POST') {
+      posts.push(u.pathname)
+      // Any mode change is refused the way the testnet refuses it with open orders.
+      if (u.pathname !== '/fapi/v1/leverage')
+        return new Response(JSON.stringify({ code: -4067, msg: 'Position side cannot be changed if there exists open orders.' }), { status: 400 })
+      return new Response(JSON.stringify({ leverage: 3 }))
+    }
+    if (u.pathname === '/fapi/v1/positionSide/dual') return new Response(JSON.stringify({ dualSidePosition: dual }))
+    if (u.pathname === '/fapi/v2/positionRisk')
+      return new Response(JSON.stringify([{ symbol: u.searchParams.get('symbol'), positionSide: 'BOTH', marginType, leverage: lev, positionAmt: '0' }]))
+    return new Response('{}')
+  }) as typeof fetch
+  try {
+    // Already one-way, isolated, 3x: nothing is changed at all.
+    await new Futures('k', 's').setup('BTCUSDT', 3)
+    assert.deepEqual(posts, [], 'no change requests when the account is already set up')
+    // Cross margin and 5x with open orders: -4067 on the margin change is tolerated, leverage still set.
+    marginType = 'cross'
+    lev = '5'
+    posts.length = 0
+    await new Futures('k', 's').setup('BTCUSDT', 3)
+    assert.deepEqual(posts, ['/fapi/v1/marginType', '/fapi/v1/leverage'])
+    // Hedge mode that cannot switch (-4067): not fatal either; checked once per process.
+    dual = true
+    marginType = 'isolated'
+    lev = '3'
+    posts.length = 0
+    const f = new Futures('k', 's')
+    await f.setup('BTCUSDT', 3)
+    await f.setup('ETHUSDT', 3)
+    assert.deepEqual(posts, ['/fapi/v1/positionSide/dual'], 'position mode tried once, nothing else changed')
+  } finally {
+    globalThis.fetch = real
+    console.warn = quiet
+  }
+})
+
+test('setup: the non-fatal codes are exactly the "already so / cannot change now" ones', () => {
+  for (const c of [-4046, -4059, -4047, -4048, -4067, -4068]) assert.ok(SETUP_NON_FATAL.includes(c), String(c))
+  assert.ok(!SETUP_NON_FATAL.includes(-1102))
+  assert.ok(!SETUP_NON_FATAL.includes(-2015))
+})
+
 test('balanceUsdt: a missing USDT row reads as null (unknown), not 0', async () => {
   const real = globalThis.fetch
   let rows: unknown = [{ asset: 'BNB', balance: '2', crossUnPnl: '0' }]
@@ -133,14 +189,18 @@ test('balanceUsdt: a missing USDT row reads as null (unknown), not 0', async () 
   }
 })
 
-test('an unknown balance skips the limits for that tick instead of tripping the drawdown kill switch', () => {
+test('an unknown balance blocks new entries for that tick without tripping the drawdown kill switch', () => {
   const day1 = Date.UTC(2026, 0, 1, 12)
   let { state } = checkLimits({ day: '', dayStartEquity: 0, peakEquity: 0, halted: false, haltReason: '' }, 10_000, day1, DEFAULT_RISK)
   const before = { ...state }
   const r = checkLimits(state, null, day1 + 60_000, DEFAULT_RISK)
-  assert.equal(r.canEnter, true)
-  assert.deepEqual(r.state, before, 'state untouched')
-  assert.equal(checkLimits(state, NaN, day1 + 60_000, DEFAULT_RISK).canEnter, true)
+  assert.equal(r.canEnter, false, 'no entry while the limits cannot be checked')
+  assert.match(r.reason, /balance unavailable/)
+  assert.deepEqual(r.state, before, 'state untouched: not halted, peak and day kept')
+  assert.equal(r.state.halted, false)
+  assert.equal(checkLimits(state, NaN, day1 + 60_000, DEFAULT_RISK).canEnter, false)
+  // Once the balance reads again, entries resume.
+  assert.equal(checkLimits(state, 10_000, day1 + 90_000, DEFAULT_RISK).canEnter, true)
   // A real 0 is still a real loss.
   assert.equal(checkLimits(state, 0, day1 + 60_000, DEFAULT_RISK).canEnter, false)
   // An existing halt stays in force while the balance is unknown.

@@ -163,3 +163,16 @@ export function setShowDepthHeatmap(v: boolean): void {
   storageSet(DEPTH_KEY, v)
   emit()
 }
+
+// The server bot's open trade / plan as Entry / SL / TP lines (botTradeLines).
+// Off by default: only meaningful where the bot's database is configured.
+const BOT_KEY = 'lr-showBotTrades'
+let showBotTrades = storageGet<boolean>(BOT_KEY, false)
+export function getShowBotTrades(): boolean {
+  return showBotTrades
+}
+export function setShowBotTrades(v: boolean): void {
+  showBotTrades = v
+  storageSet(BOT_KEY, v)
+  emit()
+}

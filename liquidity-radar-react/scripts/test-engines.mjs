@@ -2714,6 +2714,102 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('ontrack: buckets split on 0.5', calibration([mk(0.48, 1), mk(0.52, -1)]).map((x) => x.n), [1, 1])
 }
 
+// ---- server bot: trade journal ------------------------------------------------------
+{
+  const J = await import(src('features/selflearn/journal.ts'))
+  // An old real row (no journal columns), a new one, a shadow, an open shadow and junk.
+  const real = [
+    { id: 1, symbol: 'BTCUSDT', side: 1, status: 'closed', opened_at: '2026-10-31T08:00:00Z', closed_at: '2026-10-31T12:00:00Z', entry: 100, sl: 98, tp: 103, exit: 103, exit_reason: 'tp', r_multiple: 1.4, pnl_usd: 14, p_win: 0.5, ev_r: 0.1, mode: 'gated', model_id: 9, features: '{"a":1,"b":"x"}' },
+    { id: 2, symbol: 'ETHUSDT', side: -1, status: 'closed', opened_at: '2026-11-01T08:00:00Z', closed_at: '2026-11-01T09:00:00Z', entry: 10, planned_entry: 10.01, sl: 10.2, tp: 9.7, exit: 10.2, exit_reason: 'sl', r_multiple: -1.05, mae_r: -1.05, mfe_r: 0.3, bars_held: 1, slippage_bps: 10, model_version: 4, model_id: 12, decision: 'P(long) 40%', mode: 'explore' },
+    { id: null, symbol: 'X' },
+  ]
+  const shadow = [
+    { id: 5, symbol: 'BTCUSDT', side: -1, status: 'closed', bar_time: '2026-10-31T20:00:00Z', interval: '4h', entry: 100, sl: 102, tp: 97, exit: 102, exit_reason: 'sl', r_net: -1.03, p_cal: 0.45, model_id: 9, reject_reason: 'EV below the bar' },
+    { id: 6, symbol: 'BTCUSDT', side: 1, status: 'open', bar_time: '2026-11-01T04:00:00Z', created_at: '2026-11-01T08:01:00Z', entry: 101, sl: 99, tp: 104 },
+  ]
+  const rows = J.buildJournal(real, shadow, [{ id: 9, version: 2 }])
+  eq('journal: unusable rows dropped, both tables merged', rows.length, 4)
+  eq('journal: newest first', rows.map((r) => r.key), ['s6', 'r2', 's5', 'r1'])
+  const r1 = rows.find((r) => r.key === 'r1')
+  eq('journal: old rows have null journal fields', [r1.maeR, r1.mfeR, r1.barsHeld, r1.decision, r1.plannedEntry], [null, null, null, null, null])
+  eq('journal: model version from bot_models when the row has none', r1.modelVersion, 2)
+  eq('journal: numeric features kept, junk dropped', r1.features, { a: 1 })
+  eq('journal: a row model_version wins', rows.find((r) => r.key === 'r2').modelVersion, 4)
+  const s5 = rows.find((r) => r.key === 's5')
+  eq('journal: shadow enters at the decision bar close', s5.openedAt, Date.parse('2026-11-01T00:00:00Z'))
+  eq('journal: shadow R is after costs, p is calibrated', [s5.r, s5.pWin, s5.kind, s5.reason], [-1.03, 0.45, 'shadow', 'EV below the bar'])
+  eq('journal: shadow without an interval falls back to created_at', rows.find((r) => r.key === 's6').openedAt, Date.parse('2026-11-01T08:01:00Z'))
+  eq('journal: filter real', J.filterJournal(rows, { ...J.ALL, kind: 'real' }).map((r) => r.key), ['r2', 'r1'])
+  eq('journal: filter wins', J.filterJournal(rows, { ...J.ALL, outcome: 'win' }).map((r) => r.key), ['r1'])
+  eq('journal: filter losses + market', J.filterJournal(rows, { ...J.ALL, outcome: 'loss', symbol: 'BTCUSDT' }).map((r) => r.key), ['s5'])
+  eq('journal: filter open', J.filterJournal(rows, { ...J.ALL, outcome: 'open' }).map((r) => r.key), ['s6'])
+  const st = J.journalStats(rows)
+  eq('journal: stats count decided trades only', [st.count, st.n, st.open, st.wins], [4, 3, 1, 1])
+  near('journal: win rate', st.winRate, 1 / 3)
+  near('journal: total R', st.totalR, 1.4 - 1.05 - 1.03, 1e-9)
+  near('journal: avg R', st.avgR, (1.4 - 1.05 - 1.03) / 3, 1e-9)
+  eq('journal: by market, most trades first', st.bySymbol.map((g) => [g.symbol, g.n, g.wins]), [['BTCUSDT', 2, 1], ['ETHUSDT', 1, 0]])
+  eq('journal: empty stats are zeros', [J.journalStats([]).n, J.journalStats([]).winRate, J.journalStats([]).avgR], [0, 0, 0])
+}
+
+// ---- server bot on the charts: symbols, markers, Entry / SL / TP --------------------
+{
+  const { botSymbol, sameMarket, barAt, botTradeMarkers, botLevels, botOverlayKey, BOT_COLORS } = await import(
+    src('features/selflearn/botChart.ts')
+  )
+  eq('botchart: plain Binance symbol', botSymbol('BTCUSDT'), 'BTCUSDT')
+  eq('botchart: slash pair, lower case', botSymbol('eth/usdt'), 'ETHUSDT')
+  eq('botchart: exchange prefix and perp suffix', botSymbol('BINANCE:SOLUSDT.P'), 'SOLUSDT')
+  eq('botchart: PERP suffix and dash', botSymbol('BTC-USDTPERP'), 'BTCUSDT')
+  eq('botchart: bare base gets USDT', botSymbol('btc'), 'BTCUSDT')
+  eq('botchart: other quotes kept', botSymbol('XAUUSD'), 'XAUUSD')
+  ok('botchart: same market across spellings', sameMarket('BTC/USDT', 'BTCUSDT'))
+  ok('botchart: different markets differ', !sameMarket('ETHUSDT', 'BTCUSDT'))
+  ok('botchart: empty never matches', !sameMarket('', ''))
+  const H = 3_600_000
+  const bars = [0, 1, 2, 3, 4, 5].map((i) => i * H)
+  eq('botchart: barAt snaps into its bar', barAt(bars, 2.5 * H), 2 * H)
+  eq('botchart: barAt exact open', barAt(bars, 3 * H), 3 * H)
+  eq('botchart: barAt before the first bar', barAt(bars, -1), -1)
+  eq('botchart: barAt after the last bar is the last bar', barAt(bars, 99 * H), 5 * H)
+  const iso = (t) => new Date(t).toISOString()
+  const tr = (o) => ({
+    id: 1, symbol: 'BTCUSDT', side: 1, status: 'closed', opened_at: iso(1.2 * H), closed_at: iso(3.7 * H),
+    entry: 100, exit: 103, sl: 98, tp: 103, exit_reason: 'tp', pnl_usd: 30, r_multiple: 1.5, p_win: 0.55, mode: 'gated', ...o,
+  })
+  const win = tr({})
+  const loss = tr({ id: 2, side: -1, opened_at: iso(0.5 * H), closed_at: iso(2 * H), r_multiple: -1, pnl_usd: -10, exit_reason: 'sl' })
+  const open = tr({ id: 3, status: 'open', opened_at: iso(4.1 * H), closed_at: null, exit: null, r_multiple: null, pnl_usd: null, exit_reason: null, entry: 105, sl: 102, tp: 110 })
+  const other = tr({ id: 4, symbol: 'ETHUSDT' })
+  const err = tr({ id: 5, status: 'error' })
+  const old = tr({ id: 6, opened_at: iso(-5 * H), closed_at: iso(-4 * H) })
+  const m = botTradeMarkers([open, win, loss, other, err, old], 'BTC/USDT', bars)
+  eq('botchart: entry + exit per closed trade, entry only for open, others dropped', m.length, 5)
+  eq('botchart: markers sorted and snapped to bars', m.map((x) => x.t), [0, 1, 2, 3, 4].map((i) => i * H))
+  const winEntry = m.find((x) => x.t === 1 * H)
+  eq('botchart: long entry is an up arrow below the bar', [winEntry.shape, winEntry.position], ['arrowUp', 'belowBar'])
+  eq('botchart: winning trade is green with its R', [winEntry.color, winEntry.text], [BOT_COLORS.win, 'Bot L +1.50R'])
+  const winExit = m.find((x) => x.t === 3 * H)
+  eq('botchart: long exit is a down arrow above the bar', [winExit.shape, winExit.position, winExit.text], ['arrowDown', 'aboveBar', 'Exit +1.50R'])
+  const lossEntry = m.find((x) => x.t === 0)
+  eq('botchart: losing short is a red down arrow', [lossEntry.shape, lossEntry.color, lossEntry.text], ['arrowDown', BOT_COLORS.loss, 'Bot S -1.00R'])
+  eq('botchart: open trade is cyan, labelled open', [m[4].color, m[4].text], [BOT_COLORS.open, 'Bot L open'])
+  eq('botchart: no bars, no markers', botTradeMarkers([win], 'BTCUSDT', []), [])
+  const L = botLevels([open, win], null, 'BTCUSDT')
+  eq('botchart: open trade gives Entry / SL / TP', L.map((l) => l.title + '@' + l.price), ['Bot L entry@105', 'Bot L SL@102', 'Bot L TP@110'])
+  eq('botchart: SL red, TP green', [L[1].color, L[2].color], [BOT_COLORS.loss, BOT_COLORS.win])
+  const plan = { symbol: 'BTCUSDT', t: 5 * H, status: 'paper', side: 'SHORT', entry: 106, sl: 108, tp: 103 }
+  eq('botchart: paper plan adds its own lines', botLevels([win], plan, 'BTCUSDT').map((l) => l.title), ['Paper entry', 'Paper SL', 'Paper TP'])
+  eq('botchart: plan of the open trade is not drawn twice', botLevels([open], { ...plan, status: 'opened', tradeId: 3 }, 'BTCUSDT').length, 3)
+  eq('botchart: plan whose trade closed is stale', botLevels([win], { ...plan, status: 'opened', tradeId: 1 }, 'BTCUSDT'), [])
+  eq('botchart: skipped plan draws nothing', botLevels([], { ...plan, status: 'skipped' }, 'BTCUSDT'), [])
+  eq('botchart: plan for another market ignored', botLevels([], { ...plan, symbol: 'ETHUSDT' }, 'BTCUSDT'), [])
+  const k1 = botOverlayKey([open, other], plan, 'BTCUSDT')
+  eq('botchart: key ignores other markets', botOverlayKey([open], plan, 'BTCUSDT'), k1)
+  ok('botchart: key changes when a trade closes', botOverlayKey([{ ...open, status: 'closed', closed_at: iso(5 * H) }], plan, 'BTCUSDT') !== k1)
+  ok('botchart: key changes with the symbol', botOverlayKey([open], plan, 'ETHUSDT') !== k1)
+}
+
 // ---- direction models: is holdout accuracy an edge? ---------------------------------
 {
   const { majorityBaseline, provenEdge } = await import(src('features/ml/edge.ts'))
