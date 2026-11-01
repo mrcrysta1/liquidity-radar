@@ -81,6 +81,7 @@ import { getShowMLPrediction, onOverlayTogglesChange } from '../features/charts/
 import { checkRLPriceTick } from '../features/ml/rlStore'
 import { addAlert, checkAlerts, enableAlerts, removeAlert, renderAlerts, syncAlertLines } from '../features/alerts'
 import { noteAlertTrade } from '../features/alerts/alerts'
+import { syncBotTradeLines } from '../features/charts/botTradeLines'
 // Price alerts see every print of the charted coin, so a wick through a
 // level between two checks still counts as a cross.
 onTradePrint(noteAlertTrade);
@@ -322,8 +323,8 @@ export function initApp(){
     onTickersStale(){
       $('topCoinsUpd').textContent=tickerFeed.freshness+' · '+new Date(tickerFeed.ts).toLocaleTimeString();
     },
-    onKlines(){ updateChartData(isNewDataset());runAnalytics();mlOnCandles(state.symbol, state.tf, state.candles);syncAlertLines(); },
-    onKlineCache(){ syncAlertLines();
+    onKlines(){ updateChartData(isNewDataset());runAnalytics();mlOnCandles(state.symbol, state.tf, state.candles);syncAlertLines();syncBotTradeLines(); },
+    onKlineCache(){ syncAlertLines();syncBotTradeLines();
       updateChartData(isNewDataset());runAnalytics();
       renderKlineBadge();
       showToast('Klines live stream down — showing cached data');
