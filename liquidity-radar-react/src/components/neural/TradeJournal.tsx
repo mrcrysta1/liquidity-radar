@@ -45,6 +45,7 @@ function Detail({ r }: { r: JournalRow }) {
     ['Closed', r.closedAt == null ? dash : when(r.closedAt)],
     ['Model', r.modelId == null ? dash : `#${r.modelId}${r.modelVersion != null ? ' · v' + r.modelVersion : ''}`],
     ['Mode', r.mode ?? dash],
+    ['Strategy', r.strategy ?? dash],
     ['Candle', r.interval ?? dash],
   ]
   return (
@@ -96,6 +97,9 @@ export function TradeJournal() {
   const st = useMemo(() => journalStats(view), [view])
   if (!SERVER_BOT) return null
   const syms = rows ? Array.from(new Set(rows.map((r) => r.symbol))).sort() : []
+  // The strategy column once the bot records strategies (008_bot_strategies.sql).
+  const strat = !!rows?.some((r) => r.strategy)
+  const cols = strat ? 15 : 14
   const set = (k: keyof JournalFilter, v: string) => {
     setF({ ...f, [k]: v } as JournalFilter)
     setShown(PER)
@@ -138,7 +142,7 @@ export function TradeJournal() {
             <table className="lab-table tj-table">
               <thead>
                 <tr>
-                  <th>Opened</th><th>Market</th><th>Side</th><th className="tj-opt">Entry</th><th className="tj-opt">Stop / Target</th><th>Exit</th>
+                  <th>Opened</th><th>Market</th>{strat && <th className="tj-opt">Strategy</th>}<th>Side</th><th className="tj-opt">Entry</th><th className="tj-opt">Stop / Target</th><th>Exit</th>
                   <th>Result</th><th className="tj-opt">P/L</th><th>Chance</th><th className="tj-opt">Regime</th><th className="tj-opt">MAE / MFE</th>
                   <th className="tj-opt">Bars</th><th className="tj-opt">Model</th><th />
                 </tr>
@@ -155,6 +159,7 @@ export function TradeJournal() {
                           <b>{marketLabel(r.symbol)}</b>
                           <small className={r.kind === 'real' ? 'tj-real' : 'tj-paper'}>{r.kind === 'real' ? 'Real' : 'Paper'} #{r.id}</small>
                         </td>
+                        {strat && <td className="tj-opt">{r.strategy ? r.strategy.toUpperCase() : dash}</td>}
                         <td className={r.side === 1 ? 'up' : 'dn'}>{r.side === 1 ? 'Long' : 'Short'}</td>
                         <td className="tj-opt">{px(r.entry)}</td>
                         <td className="tj-opt"><span className="dn">{px(r.sl)}</span><small className="up">{px(r.tp)}</small></td>
@@ -179,14 +184,14 @@ export function TradeJournal() {
                       </tr>
                       {isOpen && (
                         <tr className="tj-more">
-                          <td colSpan={14}><Detail r={r} /></td>
+                          <td colSpan={cols}><Detail r={r} /></td>
                         </tr>
                       )}
                     </Fragment>
                   )
                 })}
                 {!view.length && (
-                  <tr><td colSpan={14} className="nn-empty">No trades match these filters.</td></tr>
+                  <tr><td colSpan={cols} className="nn-empty">No trades match these filters.</td></tr>
                 )}
               </tbody>
             </table>

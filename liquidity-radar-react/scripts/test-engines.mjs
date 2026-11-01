@@ -2753,6 +2753,33 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   // A trend-strategy trade: no target, no model numbers.
   const [tr7] = J.buildJournal([{ id: 7, symbol: 'BTCUSDT', side: 1, status: 'closed', opened_at: '2026-11-01T08:00:00Z', closed_at: '2026-11-02T08:00:00Z', entry: 100, sl: 104, tp: null, exit: 104, exit_reason: 'trail', r_multiple: 0.9, p_win: null, ev_r: null, mode: 'trend', model_id: null }], [], [])
   eq('journal: trend trade keeps no target and no model numbers', [Number.isNaN(tr7.tp), tr7.pWin, tr7.evR, tr7.modelId, tr7.exitReason, tr7.mode], [true, null, null, null, 'trail', 'trend'])
+  eq('journal: no strategy on older rows', [r1.strategy, s5.strategy], [null, null])
+  // A rule strategy's shadow (008_bot_strategies.sql): strategy id, no target, no model numbers.
+  const [sf] = J.buildJournal([], [{ id: 8, symbol: 'ETHUSDT', side: 1, status: 'closed', bar_time: '2026-11-01T04:00:00Z', interval: '4h', entry: 10, sl: 9.4, tp: null, exit: 10.9, exit_reason: 'signal', r_net: 1.4, p_cal: null, strategy: 'f1', reject_reason: 'strategy f1 is in shadow' }], [])
+  eq('journal: a rule strategy shadow carries its strategy', [sf.strategy, sf.kind, Number.isNaN(sf.tp), sf.pWin, sf.exitReason, sf.r], ['f1', 'shadow', true, null, 'signal', 1.4])
+}
+
+// ---- server bot: strategies and their health ------------------------------------------
+{
+  const S = await import(src('features/selflearn/botStrategies.ts'))
+  const rows = S.normalizeStrategies([
+    { id: 'ml', name: 'Model (MLP, bracket)', priority: 2, state: 'shadow', configured: 'shadow', hasBands: false, stats: { real: 3, shadow: 120, roll30: 0.05, ddR: 1.5, maxDdR: 4 }, history: [] },
+    {
+      id: 'f1', name: 'F1 trend breakout (4h, long)', priority: 1, state: 'shadow', configured: 'live', since: 5, hasBands: true,
+      stats: { real: 12, shadow: 31, roll30: -0.41, ddR: 9.2, maxDdR: 11, segN: 4 },
+      history: [{ t: 1, from: 'live', to: 'probation', reason: 'p5' }, { t: 5, from: 'probation', to: 'shadow', reason: 'rolling 30-trade expectancy -0.41R < p1 -0.35R' }],
+    },
+    JSON.stringify({ id: 'x2', state: 'live', configured: 'live', stats: {} }),
+    { id: 'bad', state: 'paused' },
+    null,
+    'not json',
+  ])
+  eq('strategies: in priority order, unusable rows dropped', rows.map((r) => r.id), ['f1', 'ml', 'x2'])
+  const [f1, ml, x2] = rows
+  eq('strategies: state, counts, rolling expectancy, drawdown', [f1.state, f1.real, f1.shadow, f1.roll30, f1.ddR, f1.maxDdR, f1.segN], ['shadow', 12, 31, -0.41, 9.2, 11, 4])
+  eq('strategies: last transition', [f1.last.from, f1.last.to, f1.last.t], ['probation', 'shadow', 5])
+  eq('strategies: no history, no transition; bands flag', [ml.last, ml.hasBands, f1.hasBands], [null, false, true])
+  eq('strategies: missing fields fall back', [x2.name, x2.real, x2.roll30, x2.priority], ['X2', 0, null, null])
 }
 
 // ---- server bot on the charts: symbols, markers, Entry / SL / TP --------------------

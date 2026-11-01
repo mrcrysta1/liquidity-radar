@@ -58,7 +58,7 @@ function Plan({ p }: { p: BotPlan }) {
         )}
       </div>
       <div className="pt-nums">
-        {p.strategy === 'trend' && <span>Strategy <b>F1 trend</b></span>}
+        {p.strategy === 'trend' && <span>Strategy <b>{(p.strategyId ?? 'f1').toUpperCase()} trend</b></span>}
         {p.pWin != null && <span>Win chance <b>{pct(p.pWin)}</b></span>}
         {p.evR != null && <span>Expected <b className={p.evR >= 0 ? 'up' : 'dn'}>{p.evR >= 0 ? '+' : ''}{p.evR.toFixed(2)}R</b></span>}
         {p.rr != null && <span>R:R <b>{p.rr.toFixed(2)}</b></span>}
