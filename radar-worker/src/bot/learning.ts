@@ -18,6 +18,7 @@
 import { FEATURES, WARMUP, costR, featureAt, outcomeAt } from './features.ts'
 import type { Bar, Costs, Ind } from './features.ts'
 import { applyScaler, predict } from './mlp.ts'
+import { excursion } from './journal.ts'
 import type { Model, Sample, WfConfig } from './walkforward.ts'
 
 // ---- regimes ----------------------------------------------------------------
@@ -99,7 +100,18 @@ export interface ShadowSpec {
 }
 
 export type ShadowResult =
-  | { status: 'closed'; exit: 'tp' | 'sl' | 'time'; exitPrice: number; rGross: number; rNet: number; closedAt: number }
+  | {
+      status: 'closed'
+      exit: 'tp' | 'sl' | 'time'
+      exitPrice: number
+      rGross: number
+      rNet: number
+      closedAt: number
+      /** Journal: worst / best unrealised R over the bars it was open in, and how many. */
+      maeR: number
+      mfeR: number
+      bars: number
+    }
   | { status: 'expired'; reason: string }
 
 /**
@@ -113,18 +125,21 @@ export function resolveShadow(s: ShadowSpec, bars: Bar[], stepMs: number, costs:
   if (after[0].t > s.barTime + stepMs) return { status: 'expired', reason: 'bars after the decision are missing' }
   const dist = Math.abs(s.entry - s.sl)
   if (!(dist > 0)) return { status: 'expired', reason: 'bad stop distance' }
-  const done = (exit: 'tp' | 'sl' | 'time', price: number, bar: Bar): ShadowResult => {
+  const done = (exit: 'tp' | 'sl' | 'time', price: number, j: number): ShadowResult => {
     const rGross = (s.side * (price - s.entry)) / dist
-    return { status: 'closed', exit, exitPrice: price, rGross, rNet: rGross - costR(s.entry, dist, costs, exit), closedAt: bar.t + stepMs }
+    const held = after.slice(0, j + 1)
+    // The stop bar's other wick is left out: which came first inside it is unknown (as for the label).
+    const ex = excursion(s, exit === 'sl' ? held.slice(0, -1) : held, [price]) ?? { maeR: 0, mfeR: 0 }
+    return { status: 'closed', exit, exitPrice: price, rGross, rNet: rGross - costR(s.entry, dist, costs, exit), closedAt: after[j].t + stepMs, ...ex, bars: j + 1 }
   }
   for (let j = 0; j < Math.min(s.horizon, after.length); j++) {
     const x = after[j]
     const hitSl = s.side > 0 ? x.l <= s.sl : x.h >= s.sl
     const hitTp = s.side > 0 ? x.h >= s.tp : x.l <= s.tp
-    if (hitSl) return done('sl', s.sl, x)
-    if (hitTp) return done('tp', s.tp, x)
+    if (hitSl) return done('sl', s.sl, j)
+    if (hitTp) return done('tp', s.tp, j)
   }
-  if (after.length >= s.horizon) return done('time', after[s.horizon - 1].c, after[s.horizon - 1])
+  if (after.length >= s.horizon) return done('time', after[s.horizon - 1].c, s.horizon - 1)
   return null
 }
 

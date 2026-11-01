@@ -2714,6 +2714,44 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('ontrack: buckets split on 0.5', calibration([mk(0.48, 1), mk(0.52, -1)]).map((x) => x.n), [1, 1])
 }
 
+// ---- server bot: trade journal ------------------------------------------------------
+{
+  const J = await import(src('features/selflearn/journal.ts'))
+  // An old real row (no journal columns), a new one, a shadow, an open shadow and junk.
+  const real = [
+    { id: 1, symbol: 'BTCUSDT', side: 1, status: 'closed', opened_at: '2026-10-31T08:00:00Z', closed_at: '2026-10-31T12:00:00Z', entry: 100, sl: 98, tp: 103, exit: 103, exit_reason: 'tp', r_multiple: 1.4, pnl_usd: 14, p_win: 0.5, ev_r: 0.1, mode: 'gated', model_id: 9, features: '{"a":1,"b":"x"}' },
+    { id: 2, symbol: 'ETHUSDT', side: -1, status: 'closed', opened_at: '2026-11-01T08:00:00Z', closed_at: '2026-11-01T09:00:00Z', entry: 10, planned_entry: 10.01, sl: 10.2, tp: 9.7, exit: 10.2, exit_reason: 'sl', r_multiple: -1.05, mae_r: -1.05, mfe_r: 0.3, bars_held: 1, slippage_bps: 10, model_version: 4, model_id: 12, decision: 'P(long) 40%', mode: 'explore' },
+    { id: null, symbol: 'X' },
+  ]
+  const shadow = [
+    { id: 5, symbol: 'BTCUSDT', side: -1, status: 'closed', bar_time: '2026-10-31T20:00:00Z', interval: '4h', entry: 100, sl: 102, tp: 97, exit: 102, exit_reason: 'sl', r_net: -1.03, p_cal: 0.45, model_id: 9, reject_reason: 'EV below the bar' },
+    { id: 6, symbol: 'BTCUSDT', side: 1, status: 'open', bar_time: '2026-11-01T04:00:00Z', created_at: '2026-11-01T08:01:00Z', entry: 101, sl: 99, tp: 104 },
+  ]
+  const rows = J.buildJournal(real, shadow, [{ id: 9, version: 2 }])
+  eq('journal: unusable rows dropped, both tables merged', rows.length, 4)
+  eq('journal: newest first', rows.map((r) => r.key), ['s6', 'r2', 's5', 'r1'])
+  const r1 = rows.find((r) => r.key === 'r1')
+  eq('journal: old rows have null journal fields', [r1.maeR, r1.mfeR, r1.barsHeld, r1.decision, r1.plannedEntry], [null, null, null, null, null])
+  eq('journal: model version from bot_models when the row has none', r1.modelVersion, 2)
+  eq('journal: numeric features kept, junk dropped', r1.features, { a: 1 })
+  eq('journal: a row model_version wins', rows.find((r) => r.key === 'r2').modelVersion, 4)
+  const s5 = rows.find((r) => r.key === 's5')
+  eq('journal: shadow enters at the decision bar close', s5.openedAt, Date.parse('2026-11-01T00:00:00Z'))
+  eq('journal: shadow R is after costs, p is calibrated', [s5.r, s5.pWin, s5.kind, s5.reason], [-1.03, 0.45, 'shadow', 'EV below the bar'])
+  eq('journal: shadow without an interval falls back to created_at', rows.find((r) => r.key === 's6').openedAt, Date.parse('2026-11-01T08:01:00Z'))
+  eq('journal: filter real', J.filterJournal(rows, { ...J.ALL, kind: 'real' }).map((r) => r.key), ['r2', 'r1'])
+  eq('journal: filter wins', J.filterJournal(rows, { ...J.ALL, outcome: 'win' }).map((r) => r.key), ['r1'])
+  eq('journal: filter losses + market', J.filterJournal(rows, { ...J.ALL, outcome: 'loss', symbol: 'BTCUSDT' }).map((r) => r.key), ['s5'])
+  eq('journal: filter open', J.filterJournal(rows, { ...J.ALL, outcome: 'open' }).map((r) => r.key), ['s6'])
+  const st = J.journalStats(rows)
+  eq('journal: stats count decided trades only', [st.count, st.n, st.open, st.wins], [4, 3, 1, 1])
+  near('journal: win rate', st.winRate, 1 / 3)
+  near('journal: total R', st.totalR, 1.4 - 1.05 - 1.03, 1e-9)
+  near('journal: avg R', st.avgR, (1.4 - 1.05 - 1.03) / 3, 1e-9)
+  eq('journal: by market, most trades first', st.bySymbol.map((g) => [g.symbol, g.n, g.wins]), [['BTCUSDT', 2, 1], ['ETHUSDT', 1, 0]])
+  eq('journal: empty stats are zeros', [J.journalStats([]).n, J.journalStats([]).winRate, J.journalStats([]).avgR], [0, 0, 0])
+}
+
 // ---- direction models: is holdout accuracy an edge? ---------------------------------
 {
   const { majorityBaseline, provenEdge } = await import(src('features/ml/edge.ts'))

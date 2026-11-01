@@ -30,6 +30,7 @@ import { calibrate, regimeOf, resolveShadow, scoreModel, selectChampion, splitFo
 import type { Calib } from './learning.ts'
 import { sizePreview } from './plan.ts'
 import type { TradePlan } from './plan.ts'
+import { barsBetween, barsHeld, excursion, slippageBps } from './journal.ts'
 
 /** The exchange calls the trader needs — Futures implements it; tests fake it. */
 export interface Exchange {
@@ -160,6 +161,8 @@ export class SymbolTrader {
   private closedSinceCycle = 0
   /** Last bar the shadow trades were checked on. */
   private shadowBar = 0
+  /** Lowest and highest mark price seen per open trade (journal MAE / MFE between closed bars). */
+  private marks = new Map<number, { lo: number; hi: number }>()
 
   constructor(ex: Exchange, store: BotStore, symbol: string, cfg: TraderConfig) {
     this.ex = ex
@@ -345,7 +348,17 @@ export class SymbolTrader {
         await this.store.event('warn', this.symbol, `shadow #${s.id} expired: ${res.reason}`)
         continue
       }
-      await this.store.closeShadow(s.id, { status: 'closed', closedAt: res.closedAt, exit: res.exitPrice, reason: res.exit, rGross: res.rGross, rNet: res.rNet })
+      await this.store.closeShadow(s.id, {
+        status: 'closed',
+        closedAt: res.closedAt,
+        exit: res.exitPrice,
+        reason: res.exit,
+        rGross: res.rGross,
+        rNet: res.rNet,
+        maeR: res.maeR,
+        mfeR: res.mfeR,
+        barsHeld: res.bars,
+      })
       await this.store.event('info', this.symbol, `shadow #${s.id} closed by ${res.exit}: ${res.rNet >= 0 ? '+' : ''}${res.rNet.toFixed(2)}R after costs`)
     }
   }
@@ -397,6 +410,10 @@ export class SymbolTrader {
 
   private async manage(open: OpenTrade, pos: Position, now: number): Promise<void> {
     if (pos.amt === 0) return this.finalize(open, now)
+    if (pos.mark > 0) {
+      const m = this.marks.get(open.id)
+      this.marks.set(open.id, m ? { lo: Math.min(m.lo, pos.mark), hi: Math.max(m.hi, pos.mark) } : { lo: pos.mark, hi: pos.mark })
+    }
     const H = this.cfg.wf.bracket.horizon
     const deadline = open.barTime + (H + 1) * INTERVAL_MS[this.cfg.interval]
     // A close we started earlier (failed stop, target already crossed, time
@@ -468,10 +485,32 @@ export class SymbolTrader {
     await this.ex.cancelAllOrders(this.symbol)
     await this.ex.cancelAllAlgo(this.symbol)
     const r = open.riskUsd > 0 ? pnl / open.riskUsd : 0
-    await this.store.closeTrade(open.id, { closedAt: exits[exits.length - 1].time, exit: vwap(exits), reason, pnlUsd: pnl, feesUsd: fees, r })
+    const closedAt = exits[exits.length - 1].time
+    const exit = vwap(exits)
+    await this.store.closeTrade(open.id, { closedAt, exit, reason, pnlUsd: pnl, feesUsd: fees, r, ...(await this.journalAtClose(open, closedAt, exit)) })
     this.closing.delete(open.id)
     this.finalizeTries.delete(open.id)
+    this.marks.delete(open.id)
     await this.store.event('info', this.symbol, `trade #${open.id} closed by ${reason}: ${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)} USDT (${r.toFixed(2)}R)`)
+  }
+
+  /**
+   * Journal figures for a closed real trade: MAE / MFE from the closed bars it
+   * was open in, the mark prices seen while managing it and the exit fill, and
+   * the candles it was open in. Never allowed to stop a close.
+   */
+  private async journalAtClose(open: OpenTrade, closedAt: number, exit: number): Promise<{ maeR: number | null; mfeR: number | null; barsHeld: number }> {
+    const step = INTERVAL_MS[this.cfg.interval]
+    const held = barsHeld(open.barTime + step, closedAt, step)
+    const m = this.marks.get(open.id)
+    let bars: Bar[] = []
+    try {
+      bars = barsBetween(await this.barsFn(this.symbol, this.cfg.interval, Math.min(this.cfg.historyBars, held + 3)), open.openedAt, closedAt, step)
+    } catch (e) {
+      await this.store.event('warn', this.symbol, `trade #${open.id}: journal bars unavailable (${(e as Error).message}); MAE/MFE from prices seen only`)
+    }
+    const ex = excursion(open, bars, [...(m ? [m.lo, m.hi] : []), exit])
+    return { maeR: ex?.maeR ?? null, mfeR: ex?.mfeR ?? null, barsHeld: held }
   }
 
   private async maybeEnter(canEnter: boolean, now: number): Promise<void> {
@@ -581,6 +620,7 @@ export class SymbolTrader {
           regime,
           rejectReason: chk.model.join('; '),
           features: x,
+          journal: { interval: this.cfg.interval, modelVersion: this.model.version, decision: summary },
         })
         note = ` · shadow #${sid} ${buy ? 'LONG' : 'SHORT'}`
         plan.status = 'paper'
@@ -631,6 +671,15 @@ export class SymbolTrader {
       regime,
       costR: chk.costR,
       rrNet: chk.rr,
+      journal: {
+        interval: this.cfg.interval,
+        modelVersion: this.model.version,
+        decision: summary,
+        plannedEntry: last.c,
+        plannedSl: last.c - side * slDist,
+        plannedTp: last.c + side * tpDist,
+        slippageBps: slippageBps(side, last.c, fill),
+      },
     })
     const exitSide = buy ? 'SELL' : 'BUY'
     let slAlgo: number | null = null
