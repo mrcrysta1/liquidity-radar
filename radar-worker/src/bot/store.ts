@@ -1,4 +1,4 @@
-// Postgres persistence for the bot (schema in sql/002_bot.sql and sql/005_bot_learning.sql).
+// Postgres persistence for the bot (schema in sql/002_bot.sql, sql/005_bot_learning.sql and sql/006_bot_journal.sql).
 import type { Db } from '../db.ts'
 import type { Model, Metrics } from './walkforward.ts'
 import type { RiskState } from './risk.ts'
@@ -55,6 +55,28 @@ export interface NewTrade {
   regime?: string
   costR?: number
   rrNet?: number
+  /** Journal (006_bot_journal.sql): what was planned, before the fill. */
+  journal?: TradeJournal
+}
+
+/** Journal fields recorded at entry, for real and shadow trades alike. */
+export interface TradeJournal {
+  interval?: string
+  modelVersion?: number
+  /** The model's summary at entry. */
+  decision?: string
+  /** Real trades only: the planned entry (decision bar close), stop and target, and the fill's slippage. */
+  plannedEntry?: number
+  plannedSl?: number
+  plannedTp?: number
+  slippageBps?: number | null
+}
+
+/** Journal fields recorded when a trade closes. */
+export interface CloseJournal {
+  maeR?: number | null
+  mfeR?: number | null
+  barsHeld?: number | null
 }
 
 export interface NewShadow {
@@ -75,6 +97,7 @@ export interface NewShadow {
   regime: string
   rejectReason: string
   features: Record<string, number>
+  journal?: TradeJournal
 }
 
 export interface OpenShadow {
@@ -195,8 +218,10 @@ export class BotStore {
   async insertTrade(t: NewTrade): Promise<number> {
     const r = await this.db.query(
       `insert into bot_trades (symbol, model_id, mode, venue, side, status, opened_at, bar_time, entry, qty, sl, tp, atr,
-                               risk_usd, p_win, ev_r, features, entry_order_id, p_raw, regime, cost_r, rr_net)
-       values ($1, $2, $3, $4, $5, 'open', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21) returning id`,
+                               risk_usd, p_win, ev_r, features, entry_order_id, p_raw, regime, cost_r, rr_net,
+                               interval, model_version, decision, planned_entry, planned_sl, planned_tp, slippage_bps)
+       values ($1, $2, $3, $4, $5, 'open', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
+               $22, $23, $24, $25, $26, $27, $28) returning id`,
       [
         t.symbol,
         t.modelId,
@@ -219,6 +244,13 @@ export class BotStore {
         t.regime ?? null,
         t.costR ?? null,
         t.rrNet ?? null,
+        t.journal?.interval ?? null,
+        t.journal?.modelVersion ?? null,
+        t.journal?.decision?.slice(0, 2000) ?? null,
+        t.journal?.plannedEntry ?? null,
+        t.journal?.plannedSl ?? null,
+        t.journal?.plannedTp ?? null,
+        t.journal?.slippageBps ?? null,
       ],
     )
     return Number(r.rows[0].id)
@@ -230,13 +262,13 @@ export class BotStore {
 
   async closeTrade(
     id: number,
-    c: { closedAt: number; exit: number; reason: 'tp' | 'sl' | 'time' | 'manual' | 'error'; pnlUsd: number; feesUsd: number; r: number; status?: 'closed' | 'error'; notes?: string },
+    c: { closedAt: number; exit: number; reason: 'tp' | 'sl' | 'time' | 'manual' | 'error'; pnlUsd: number; feesUsd: number; r: number; status?: 'closed' | 'error'; notes?: string } & CloseJournal,
   ): Promise<void> {
     await this.db.query(
       `update bot_trades set status = $2, closed_at = $3, exit = $4, exit_reason = $5, pnl_usd = $6, fees_usd = $7,
-              r_multiple = $8, notes = coalesce($9, notes)
+              r_multiple = $8, notes = coalesce($9, notes), mae_r = $10, mfe_r = $11, bars_held = $12
        where id = $1`,
-      [id, c.status ?? 'closed', ts(c.closedAt), c.exit, c.reason, c.pnlUsd, c.feesUsd, c.r, c.notes ?? null],
+      [id, c.status ?? 'closed', ts(c.closedAt), c.exit, c.reason, c.pnlUsd, c.feesUsd, c.r, c.notes ?? null, c.maeR ?? null, c.mfeR ?? null, c.barsHeld ?? null],
     )
   }
 
@@ -289,8 +321,8 @@ export class BotStore {
   async insertShadow(s: NewShadow): Promise<number> {
     const r = await this.db.query(
       `insert into bot_shadow_trades (symbol, model_id, side, status, bar_time, entry, sl, tp, atr, horizon, p_raw, p_cal, ev_r,
-                                      cost_r, rr_net, regime, reject_reason, features)
-       values ($1, $2, $3, 'open', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) returning id`,
+                                      cost_r, rr_net, regime, reject_reason, features, interval, model_version, decision)
+       values ($1, $2, $3, 'open', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20) returning id`,
       [
         s.symbol,
         s.modelId,
@@ -309,6 +341,9 @@ export class BotStore {
         s.regime,
         s.rejectReason.slice(0, 500),
         JSON.stringify(s.features),
+        s.journal?.interval ?? null,
+        s.journal?.modelVersion ?? null,
+        s.journal?.decision?.slice(0, 2000) ?? null,
       ],
     )
     return Number(r.rows[0].id)
@@ -333,14 +368,14 @@ export class BotStore {
 
   async closeShadow(
     id: number,
-    c: { status: 'closed' | 'expired'; closedAt?: number; exit?: number; reason?: 'tp' | 'sl' | 'time'; rGross?: number; rNet?: number },
+    c: { status: 'closed' | 'expired'; closedAt?: number; exit?: number; reason?: 'tp' | 'sl' | 'time'; rGross?: number; rNet?: number } & CloseJournal,
   ): Promise<void> {
     // An expired shadow has no outcome: nothing to learn from it.
     await this.db.query(
       `update bot_shadow_trades set status = $2, closed_at = $3, exit = $4, exit_reason = $5, r_gross = $6, r_net = $7,
-              learned = learned or $2 = 'expired'
+              learned = learned or $2 = 'expired', mae_r = $8, mfe_r = $9, bars_held = $10
        where id = $1 and status = 'open'`,
-      [id, c.status, c.closedAt == null ? null : ts(c.closedAt), c.exit ?? null, c.reason ?? null, c.rGross ?? null, c.rNet ?? null],
+      [id, c.status, c.closedAt == null ? null : ts(c.closedAt), c.exit ?? null, c.reason ?? null, c.rGross ?? null, c.rNet ?? null, c.maeR ?? null, c.mfeR ?? null, c.barsHeld ?? null],
     )
   }
 

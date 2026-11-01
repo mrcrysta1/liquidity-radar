@@ -16,7 +16,7 @@ import type { TradePlan } from '../src/bot/plan.ts'
 async function freshDb() {
   const pg = new PGlite()
   await pg.exec('create role anon;')
-  for (const f of ['001_whales.sql', '002_bot.sql', '005_bot_learning.sql']) await pg.exec(readFileSync(new URL('../sql/' + f, import.meta.url), 'utf8'))
+  for (const f of ['001_whales.sql', '002_bot.sql', '005_bot_learning.sql', '006_bot_journal.sql']) await pg.exec(readFileSync(new URL('../sql/' + f, import.meta.url), 'utf8'))
   const q = (text: string, params?: unknown[]) => pg.query(text, params as never)
   return { db: { query: q, connect: async () => ({ query: q, release() {} }), end: async () => {} } as unknown as Db, pg }
 }
@@ -187,6 +187,16 @@ test('explore mode: enter, take profit, stop out, failed stop, stray position', 
   assert.ok((row.r_multiple as number) > 1.8 && (row.r_multiple as number) < 2, 'tp R ' + row.r_multiple)
   assert.ok((row.fees_usd as number) > 0)
   assert.equal(ex.algo.length, 0, 'leftover stop cancelled')
+  // Journal: planned levels from the decision bar, slippage, MAE/MFE, bars held, model and decision.
+  assert.equal(row.planned_entry, hist[state.idx - 1].c)
+  assert.equal(row.slippage_bps, 0, 'filled at the planned price')
+  assert.ok(Math.abs((row.planned_sl as number) - (row.sl as number)) < 0.01 && Math.abs((row.planned_tp as number) - (row.tp as number)) < 0.01)
+  assert.equal(row.interval, '4h')
+  assert.equal(row.model_version, t.model!.version)
+  assert.match(String(row.decision), /P\(long\).*EV.*R:R/)
+  assert.equal(row.mae_r, 0)
+  assert.ok((row.mfe_r as number) >= 1.4, 'mfe ' + row.mfe_r)
+  assert.ok((row.bars_held as number) >= 1, 'bars held ' + row.bars_held)
 
   // 3. Next bar: enter again, then the stop is hit → about -1R.
   state.idx++
@@ -225,6 +235,32 @@ test('explore mode: enter, take profit, stop out, failed stop, stray position', 
   assert.equal(await store.openTrade('BTCUSDT'), null)
   const why = (await pg.query<{ msg: string }>("select msg from bot_events where msg like '%risk limits%'")).rows
   assert.equal(why.length, 1)
+})
+
+test('journal: MAE / MFE of a real trade include the mark prices seen while it was open', async () => {
+  const { db, pg } = await freshDb()
+  const store = new BotStore(db)
+  const ex = new FakeExchange()
+  const { hist, state, cfg } = setup('explore')
+  const t = new SymbolTrader(ex, store, 'BTCUSDT', cfg)
+  await t.init()
+  ex.price = hist[state.idx - 1].c
+  await t.tick(true, Date.now())
+  const open = (await store.openTrade('BTCUSDT'))!
+  const dist = Math.abs(open.entry - open.sl)
+  // Half a stop against it, then most of the way to the target, then the stop.
+  // (Ticks dated inside the bracket's horizon: these replay bars are old, so "now" would be a time exit.)
+  const during = open.barTime + 2 * 14_400_000
+  ex.move(open.entry - open.side * 0.5 * dist)
+  await t.tick(true, during)
+  ex.move(open.entry + open.side * 1.2 * dist)
+  await t.tick(true, during)
+  ex.move(open.sl - open.side * 0.01)
+  await t.tick(true, during)
+  const row = (await pg.query<Record<string, number | string>>('select * from bot_trades order by id desc limit 1')).rows[0]
+  assert.equal(row.exit_reason, 'sl')
+  assert.ok(Math.abs(Number(row.mae_r) + 1) < 0.02, 'mae ' + row.mae_r)
+  assert.ok(Math.abs(Number(row.mfe_r) - 1.2) < 0.02, 'mfe ' + row.mfe_r)
 })
 
 test('gated mode: a model without a proven edge never trades', async () => {
@@ -307,6 +343,11 @@ test('rejected only by the EV rule → a shadow trade, resolved on bars, learned
   assert.ok(['tp', 'sl', 'time'].includes(String(sh[0].exit_reason)))
   assert.ok(isFinite(Number(sh[0].r_net)) && Number(sh[0].r_net) < Number(sh[0].r_gross), 'costs taken off')
   assert.equal(sh[0].learned, true)
+  assert.equal(Number(sh[0].bars_held) > 0 && Number(sh[0].bars_held) <= cfg.wf.bracket.horizon, true, 'bars held ' + sh[0].bars_held)
+  assert.ok(Number(sh[0].mae_r) <= 0 && Number(sh[0].mfe_r) >= 0, `mae ${sh[0].mae_r} mfe ${sh[0].mfe_r}`)
+  assert.equal(sh[0].model_version, 1)
+  assert.equal(sh[0].interval, '4h')
+  assert.match(String(sh[0].decision), /P\(long\)/)
   const cal = (await pg.query<{ n: number; side: number; regime: string }>('select * from bot_calibration')).rows
   assert.equal(cal.length, 1)
   assert.equal(cal[0].n, 1)
