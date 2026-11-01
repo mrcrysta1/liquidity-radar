@@ -2873,6 +2873,110 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('readiness: nothing yet → pending, not ready', [none.ready, st(none).weeks, st(none).state, none.winRate, none.daysLeft], [false, 'insufficient', 'insufficient', null, null])
 }
 
+// ---- assistant: the bot in its context, and the built-in analyst's bot answers ----
+{
+  const B = await import(src('features/chat/botContext.ts'))
+  const { normalizeStrategies } = await import(src('features/selflearn/botStrategies.ts'))
+  const { buildJournal } = await import(src('features/selflearn/journal.ts'))
+  const { PROJECT_KNOWLEDGE, wantsProjectKnowledge } = await import(src('features/chat/projectKnowledge.ts'))
+  const H = 3_600_000
+  const DAY = 24 * H
+  const now = Date.parse('2026-11-01T15:00:00Z')
+  const iso = (t) => new Date(t).toISOString()
+  const strategies = normalizeStrategies([
+    { id: 'f1', name: 'F1 trend breakout', priority: 1, state: 'live', configured: 'live', hasBands: true, stats: { real: 14, shadow: 40, roll30: 0.12, expR: 0.2, ddR: 3.4, maxDdR: 6.1 }, history: [] },
+    { id: 'ml', name: 'Model', priority: 5, state: 'shadow', configured: 'shadow', hasBands: false, stats: { real: 0, shadow: 300, roll30: -0.05 } },
+  ])
+  const closed = Array.from({ length: 14 }, (_, k) => ({
+    id: 100 + k, symbol: k % 2 ? 'ETHUSDT' : 'BTCUSDT', side: 1, status: 'closed', strategy: 'f1', mode: 'trend',
+    opened_at: iso(now - (k + 2) * DAY), closed_at: iso(now - k * DAY - H), entry: 100, sl: 97, tp: null, exit: 103, exit_reason: k % 3 ? 'trail' : 'signal', r_multiple: k % 3 ? 0.9 : -1.02,
+  }))
+  const open = { id: 200, symbol: 'SOLUSDT', side: 1, status: 'open', strategy: 'f1', mode: 'trend', opened_at: iso(now - 2 * H), closed_at: null, entry: 150, sl: 141, tp: null, exit: null, exit_reason: null, r_multiple: null }
+  const shadow = [{ id: 9, symbol: 'BNBUSDT', side: -1, status: 'open', strategy: 'c2', bar_time: iso(now - 3 * H), interval: '4h', entry: 600, sl: 620, tp: null }]
+  const journal = buildJournal([open, ...closed], shadow, [])
+  const account = {
+    account: { t: now - 30_000, venue: 'testnet', walletBalance: 5000, unrealizedPnl: 12.5, marginBalance: 5012.5, availableBalance: 4800, positions: [{ symbol: 'SOLUSDT', side: 'LONG', size: 2.5, entry: 150, mark: 151, unrealized: 2.5, leverage: 3, liquidation: 0, margin: 125, notional: 377 }], orders: [], fills: [] },
+    heartbeat: { t: now - 60_000, mode: 'trend', venue: 'testnet' },
+  }
+  const readiness = {
+    now, trades: closed.map((t) => ({ strategy: 'f1', status: 'closed', opened_at: t.opened_at, closed_at: t.closed_at, r_multiple: t.r_multiple, slippage_bps: 5, sl_algo_id: 1 })),
+    errors: [], stopEvents: [], equityTimes: [], heartbeat: now - 60_000,
+    strategies: [{ id: 'f1', state: 'live', configured: 'live', bands: { roll30P5: -0.33, ddP95: 22.1 } }],
+  }
+  const plans = [{ symbol: 'BTCUSDT', t: now - H, barClose: 1, interval: '4h', strategy: 'trend', strategyId: 'f1', side: 'LONG', entry: 70000, sl: 66000, tp: null, costR: 0.02, status: 'skipped', reasons: ['no breakout'] }]
+  const events = [{ id: 1, t: iso(now - H), symbol: 'BTCUSDT', level: 'error', msg: 'tick failed: timeout' }]
+  const snap = { now, account, strategies, plans, journal, events, readiness }
+  const s = B.summarizeBot(snap)
+  ok('botctx: heartbeat fresh and equity shown', s.includes('HEARTBEAT: 1 min ago (running') && s.includes('equity $5,012.5'), s.slice(0, 400))
+  ok('botctx: strategies with state, counts, rolling expectancy and bands', s.includes('- f1 F1 trend breakout: LIVE | real 14, shadow 40 | rolling30 +0.12R') && s.includes('p5 -0.33R'))
+  ok('botctx: a band-less strategy says it never moves on its own', s.includes('- ml Model: SHADOW') && s.includes('never auto-promoted'))
+  ok('botctx: readiness verdict and checks', s.includes('GO-LIVE READINESS') && s.includes('NOT READY') && s.includes('Closed real trades: INSUFFICIENT'))
+  ok('botctx: open trade with entry and the stop in force', s.includes('- SOLUSDT LONG [f1] entry 150 | stop in force 141 | no target (trailing stop)'))
+  eq('botctx: last 10 closed real trades only', (s.match(/^- (BTC|ETH)USDT \[f1\] LONG/gm) || []).length, 10)
+  ok('botctx: closed trade line has R and exit reason', s.includes('- BTCUSDT [f1] LONG -1.02R exit signal'))
+  ok('botctx: open risk per side from size × distance to stop', s.includes('open risk at stops 0.45% long, 0.00% short'), s.match(/RISK:.*/)?.[0])
+  ok('botctx: today counts (UTC)', s.includes('TODAY (UTC): 1 real opened, 1 real closed (-1.02R), 1 shadow trades, 1 error events'), s.match(/TODAY.*/)?.[0])
+  ok('botctx: latest plan per market', s.includes('- BTCUSDT 4h LONG [f1] skipped | entry 70000 stop 66000 | no breakout'))
+  ok('botctx: under the size budget', s.length <= B.BOT_CONTEXT_MAX, s.length)
+
+  const stale = B.summarizeBot({ ...snap, account: { ...account, heartbeat: { ...account.heartbeat, t: now - 2 * H } } })
+  ok('botctx: an old heartbeat reads STALE', stale.includes('STALE'))
+  const failed = B.summarizeBot({ now, account: null, strategies: null, plans: null, journal: null, events: null, readiness: null })
+  ok('botctx: failed loaders are marked unavailable, not thrown', ['ACCOUNT: unavailable', 'STRATEGIES: unavailable', 'GO-LIVE READINESS: unavailable', 'TRADES: unavailable', 'LATEST PLANS: unavailable'].every((x) => failed.includes(x)), failed)
+
+  // A busy day: 24 plans with long reasons and 150 trades still fit, plans cut first.
+  const manyPlans = Array.from({ length: 24 }, (_, k) => ({ ...plans[0], symbol: 'M' + k + 'USDT', reasons: ['x'.repeat(200)] }))
+  const manyTrades = buildJournal(Array.from({ length: 150 }, (_, k) => ({ ...closed[0], id: 1000 + k, symbol: 'VERYLONGNAME' + k + 'USDT' })), [], [])
+  const big = B.summarizeBot({ ...snap, plans: manyPlans, journal: manyTrades })
+  ok('botctx: busy record stays under 5k chars', big.length <= 5000, big.length)
+  ok('botctx: busy record keeps the readiness verdict', big.includes('GO-LIVE READINESS'))
+  ok('botctx: a tiny budget is a hard cap', B.summarizeBot({ ...snap, plans: manyPlans }, 800).length <= 800)
+
+  // Intent of a question.
+  const intents = [
+    ['how is the bot doing?', 'status'], ['Ready for real money?', 'ready'], ['is the bot ready to go live', 'ready'],
+    ['open trades', 'open'], ['what positions does the bot hold', 'open'], ['which strategies is the bot running', 'strategies'],
+    ['why is F1 on probation?', 'strategies'], ['take profit strategy', null], ['how do I open trades on binance', null], ['analyze solana', null],
+  ]
+  for (const [q, want] of intents) eq('botctx: intent of "' + q + '"', B.botIntent(q), want)
+
+  // The built-in analyst's answers.
+  const ready = B.botReply('ready', snap)
+  ok('botreply: readiness verdict and each check', ready[0].startsWith('Not ready for real money') && ready.some((l) => l.includes('Closed real trades')), ready)
+  const op = B.botReply('open', snap)
+  ok('botreply: open trades list the position and the risk', op.some((l) => l.includes('SOLUSDT LONG [f1] entry 150')) && op.some((l) => l.startsWith('Risk:')), op)
+  ok('botreply: open trades exclude closed ones', !op.some((l) => l.includes(' exit ')), op)
+  const st = B.botReply('strategies', snap)
+  ok('botreply: strategies show live state and the rules', st.some((l) => l.includes('f1 F1 trend breakout: LIVE')) && st.some((l) => l.startsWith('F1 (live)')), st)
+  const status = B.botReply('status', snap)
+  ok('botreply: status has heartbeat, today, strategies and readiness', ['Heartbeat:', 'Today (utc):', 'Strategies:', 'Go-live readiness: NOT READY'].every((w) => status.some((l) => l.startsWith(w))), status)
+  const none = B.botReply('strategies', null)
+  ok('botreply: no records → says so, still explains the strategies', none[0].includes('not connected') && none.some((l) => l.startsWith('C6')), none)
+
+  // One load per minute, shared by concurrent callers; failures are retried.
+  let t = 0
+  let n = 0
+  const c = B.createCache(async () => ++n, 60_000, () => t)
+  const [a1, a2] = await Promise.all([c(), c()])
+  eq('botcache: concurrent callers share one load', [a1, a2, n], [1, 1, 1])
+  t = 59_000
+  eq('botcache: fresh value reused', await c(), 1)
+  t = 61_000
+  eq('botcache: reloaded after the ttl', await c(), 2)
+  let fail = true
+  const cf = B.createCache(async () => { if (fail) throw new Error('x'); return 'ok' }, 60_000, () => 0)
+  ok('botcache: a failed load rejects', await cf().then(() => false, () => true))
+  fail = false
+  eq('botcache: a failure is not cached', await cf(), 'ok')
+
+  // Site/bot knowledge: small, and sent only for site/bot questions.
+  ok('knowledge: within 6k chars', PROJECT_KNOWLEDGE.length <= 6000, PROJECT_KNOWLEDGE.length)
+  ok('knowledge: research numbers and the honesty note', ['+0.376R', 'PF 2.12', '+0.179R', '+0.169R', 'PF 1.45', 'Sharpe 0.72', 'TESTNET', 'No strategy guarantees profit'].every((w) => PROJECT_KNOWLEDGE.includes(w)))
+  ok('knowledge: bot and site questions want it', ['how does the bot work?', 'what is F1', 'which tab has the screener', 'is it ready for real money'].every((q) => wantsProjectKnowledge(q)))
+  ok('knowledge: a follow-up after a bot question wants it', wantsProjectKnowledge('and why?', 'how is the bot doing'))
+  ok('knowledge: a market question does not', !wantsProjectKnowledge('analyze solana', 'what is RSI on BTC?'))
+}
+
 // ---- server bot on the charts: symbols, markers, Entry / SL / TP --------------------
 {
   const { botSymbol, sameMarket, barAt, botTradeMarkers, botLevels, botOverlayKey, BOT_COLORS } = await import(

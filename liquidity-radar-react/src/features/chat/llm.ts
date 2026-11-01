@@ -7,6 +7,8 @@
 // path. Escaping first and formatting second closes that off entirely.
 import { buildMarketContext } from './aiContext'
 import { appGuide } from './actions'
+import { PROJECT_KNOWLEDGE, wantsProjectKnowledge } from './projectKnowledge'
+import { botContext } from './botContextLive'
 import { storageGet, storageSet } from '../../services/storage'
 
 export interface ChatTurn {
@@ -145,7 +147,14 @@ export async function askLlm(
 ): Promise<string> {
   const messages: ChatTurn[] = [...history, { role: 'user', content: question }]
   const learn = await loadLearnIndex()
-  const context = buildMarketContext() + '\n\n' + appGuide([...learn.keys()])
+  // Site and bot facts only when the question (or the one before it) is about
+  // them: together they cost ~2.5k tokens, which free tiers count per minute.
+  const prev = [...history].reverse().find((t) => t.role === 'user')?.content
+  const aboutSite = wantsProjectKnowledge(question, prev)
+  const bot = aboutSite ? await botContext().catch(() => '') : ''
+  const context = [buildMarketContext(), appGuide([...learn.keys()]), aboutSite ? PROJECT_KNOWLEDGE : '', bot]
+    .filter(Boolean)
+    .join('\n\n')
 
   let res: Response
   try {
