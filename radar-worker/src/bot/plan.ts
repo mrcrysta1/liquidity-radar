@@ -31,18 +31,22 @@ export interface TradePlan {
   /** Close time of the bar it was made on, ms. */
   barClose: number
   interval: string
+  /** 'trend': strategy F1 (no model numbers, no target, a trailing stop). Unset: the model. */
+  strategy?: 'ml' | 'trend'
   side: 'LONG' | 'SHORT'
   entry: number
+  /** The stop in force (a trend trade's current trailed stop). */
   sl: number
-  tp: number
-  /** Calibrated win chance of the side chosen, and of each side. */
-  pWin: number
-  pLong: number
-  pShort: number
-  /** Expected value after costs, R. */
-  evR: number
-  /** Reward:risk after costs. */
-  rr: number
+  /** null: no target (trend strategy). */
+  tp: number | null
+  /** Calibrated win chance of the side chosen, and of each side (model plans only). */
+  pWin?: number
+  pLong?: number
+  pShort?: number
+  /** Expected value after costs, R (model plans only). */
+  evR?: number
+  /** Reward:risk after costs (model plans only). */
+  rr?: number
   costR: number
   status: 'opened' | 'paper' | 'skipped'
   reasons: string[]

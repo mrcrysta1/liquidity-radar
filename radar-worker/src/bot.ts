@@ -39,7 +39,11 @@ const SYMBOLS = (env.BOT_SYMBOLS || 'BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XAUUSDT').s
 // symbols whose walk-forward gate passes, that are in BOT_REAL_SYMBOLS and fit
 // under the portfolio heat cap; every other signal is a shadow trade.
 const MODE: TraderConfig['mode'] = env.BOT_MODE === 'explore' || env.BOT_MODE === 'hybrid' ? env.BOT_MODE : 'gated'
-// BOT_REAL_SYMBOLS (hybrid): symbols allowed to place real orders; default all of BOT_SYMBOLS.
+// BOT_STRATEGY: ml (default) — the model places real orders as BOT_MODE says;
+// trend — research strategy F1 (bot/strategy.ts) places them, long only with a
+// trailing stop, and the model only shadow trades (it keeps learning).
+const STRATEGY: TraderConfig['strategy'] = env.BOT_STRATEGY === 'trend' ? 'trend' : 'ml'
+// BOT_REAL_SYMBOLS (hybrid, trend): symbols allowed to place real orders; default all of BOT_SYMBOLS.
 const REAL_SYMBOLS = env.BOT_REAL_SYMBOLS ? env.BOT_REAL_SYMBOLS.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean) : SYMBOLS
 const TICK_MS = num(env.BOT_TICK_MS, 15_000)
 // BOT_RUN_MINUTES: run continuously for this long, then exit cleanly so a
@@ -84,6 +88,7 @@ const cfg: TraderConfig = {
     shadowMaxOpen: num(env.BOT_SHADOW_MAX_OPEN, MODE === 'hybrid' ? BRACKET.horizon + 1 : DEFAULT_LEARN.shadowMaxOpen),
   },
   mode: MODE,
+  strategy: STRATEGY,
   realSymbols: REAL_SYMBOLS,
   // Each plan also shows how it would be sized on a small real-money account.
   previewEquity: num(env.BOT_PREVIEW_EQUITY, 100),
@@ -115,13 +120,18 @@ for (let attempt = 1; ; attempt++) {
   }
 }
 if (HANDOFF) console.log(new Date().toISOString(), `bot run started · until ${new Date(DEADLINE).toISOString()}`)
-else if (!ONCE) await store.event('info', null, `bot starting on ${ex.base} (${ex.isTestnet ? 'TESTNET' : 'MAINNET'}) · mode ${cfg.mode} · ${SYMBOLS.join(', ')} · ${cfg.interval} bars · risk ${(cfg.risk.riskPerTrade * 100).toFixed(2)}%/trade · bracket ${BRACKET.slAtr}/${BRACKET.tpAtr} ATR over ${BRACKET.horizon} bars · max ${cfg.setup.maxOpen} open, ${cfg.setup.maxTradesPerDay}/day${cfg.mode === 'hybrid' ? ` · real: ${REAL_SYMBOLS.join(', ')} · heat ≤ ${(cfg.risk.maxSideRisk! * 100).toFixed(1)}%/side, ${(cfg.risk.maxTotalRisk! * 100).toFixed(1)}% total` : ''}`)
+else if (!ONCE) await store.event('info', null, `bot starting on ${ex.base} (${ex.isTestnet ? 'TESTNET' : 'MAINNET'}) · mode ${cfg.mode}${STRATEGY === 'trend' ? ' · strategy F1 trend (model shadow only)' : ''} · ${SYMBOLS.join(', ')} · ${cfg.interval} bars · risk ${(cfg.risk.riskPerTrade * 100).toFixed(2)}%/trade · bracket ${BRACKET.slAtr}/${BRACKET.tpAtr} ATR over ${BRACKET.horizon} bars · max ${cfg.setup.maxOpen} open, ${cfg.setup.maxTradesPerDay}/day${cfg.mode === 'hybrid' ? ` · real: ${REAL_SYMBOLS.join(', ')} · heat ≤ ${(cfg.risk.maxSideRisk! * 100).toFixed(1)}%/side, ${(cfg.risk.maxTotalRisk! * 100).toFixed(1)}% total` : ''}`)
 
 // Each market starts on its own: one whose setup fails (a slow link, or a
 // rejection such as -4067) is skipped and retried with a bounded backoff from
 // the trading loop, while the others trade. It never stalls the run.
+// A market dropped from BOT_SYMBOLS while a trade was open on it is never
+// orphaned: a manage-only trader sees that trade through under the rules it
+// was opened with, then idles (no new real or shadow trades, no learning).
+const ORPHANS = (await store.openSymbols()).filter((s) => !SYMBOLS.includes(s))
+if (ORPHANS.length) await store.event('warn', null, `open trade(s) on ${ORPHANS.join(', ')} outside BOT_SYMBOLS — managed until closed, no new entries there`)
 const setupQueue = new InitQueue(
-  SYMBOLS.map((s) => new SymbolTrader(ex, store, s, cfg)),
+  [...SYMBOLS.map((s) => new SymbolTrader(ex, store, s, cfg)), ...ORPHANS.map((s) => new SymbolTrader(ex, store, s, { ...cfg, manageOnly: true }))],
   {
     onFail: (s, attempt, e, waitMs) =>
       store.event('warn', s, `setup failed (attempt ${attempt}): ${e.message} — skipped for now, other markets keep trading; retrying in ${Math.round(waitMs / 1000)}s`),
@@ -157,7 +167,7 @@ let lastFillsAt = 0
 async function mirrorAccount(now: number): Promise<void> {
   const refresh = now - lastFillsAt >= 60_000
   if (refresh) lastFillsAt = now
-  const snap = await readAccount(ex, SYMBOLS, now, refresh ? undefined : fills)
+  const snap = await readAccount(ex, [...SYMBOLS, ...ORPHANS], now, refresh ? undefined : fills)
   fills = snap.fills
   await store.setState('account', snap)
 }

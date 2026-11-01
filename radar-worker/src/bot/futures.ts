@@ -300,6 +300,11 @@ export class Futures {
     await this.request('DELETE', '/fapi/v1/algoOpenOrders', { symbol }).catch(() => {})
   }
 
+  /** Cancel one algo order (a stop being replaced by a trailed one). Throws on failure, so the caller can log it. */
+  async cancelAlgo(symbol: string, algoId: number): Promise<void> {
+    await this.request('DELETE', '/fapi/v1/algoOrder', { symbol, algoId })
+  }
+
   /** Whole account, as the Binance panel shows it (balances and positions). */
   async account(): Promise<unknown> {
     return this.request('GET', '/fapi/v2/account')

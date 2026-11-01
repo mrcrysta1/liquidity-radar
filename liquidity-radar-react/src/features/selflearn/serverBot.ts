@@ -21,12 +21,15 @@ export interface BotTrade {
   closed_at: string | null
   entry: number
   exit: number | null
+  /** The stop in force (a trend trade's trailed stop). */
   sl: number
-  tp: number
+  /** null: no target (trend strategy, mode 'trend'). */
+  tp: number | null
   exit_reason: string | null
   pnl_usd: number | null
   r_multiple: number | null
-  p_win: number
+  /** null on trend-strategy trades (made by rules, not the model). */
+  p_win: number | null
   mode: string
 }
 
@@ -122,15 +125,17 @@ export interface BotPlan {
   t: number
   barClose: number
   interval: string
+  /** 'trend': strategy F1 — no target, a trailing stop, no model numbers. */
+  strategy?: 'ml' | 'trend'
   side: 'LONG' | 'SHORT'
   entry: number
   sl: number
-  tp: number
-  pWin: number
-  pLong: number
-  pShort: number
-  evR: number
-  rr: number
+  tp: number | null
+  pWin?: number
+  pLong?: number
+  pShort?: number
+  evR?: number
+  rr?: number
   costR: number
   status: 'opened' | 'paper' | 'skipped'
   reasons: string[]

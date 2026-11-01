@@ -7,7 +7,25 @@
 #
 # The bot ticks every 15 s: mirrors the Binance Demo account for the website,
 # manages any open trade, and decides on each newly closed 4-hour candle
-# (BOT_INTERVAL) for five markets. HYBRID: a demo trade only on a market whose
+# (BOT_INTERVAL) for four markets.
+#
+# REAL (demo) TRADES: research strategy F1 (BOT_STRATEGY=trend,
+# radar-worker/src/bot/strategy.ts), long only on BTC/ETH/SOL/BNB:
+#   entry  4h close > EMA(300) and > the highest high of the previous 20 bars
+#          → market buy right after the close
+#   stop   entry − 3 × ATR14, exchange-side; no take-profit, no time exit
+#   trail  each 4h close: stop = max(stop, highest high since entry − 4 × ATR14)
+#   exit   4h close < lowest low of the previous 10 bars, or ≤ EMA(300) → market
+#   risk   0.5%/trade at the initial stop; daily halt, drawdown kill switch and
+#          the heat cap below apply (not the model's walk-forward gate)
+# Research (fees, slippage, funding): 2019–Jan 2026 +0.376R/trade, PF 2.12;
+# sealed holdout Feb–Nov 2026 +0.179R/trade, PF 1.48, +4.5%, 63 trades — not
+# significant (t = 0.66). XAUUSDT is dropped: too little history for F1.
+#
+# THE MODEL keeps running beside it as SHADOW trades only (no orders), so
+# calibration and the challenger cycle continue. Its settings below (bracket,
+# EV bar, R:R, cooldown) now shape only those shadow trades. Before trend mode:
+# HYBRID: a demo trade only on a market whose
 # walk-forward gate passes (expectancy >= 0.05R, PF >= 1.15, recent blocks
 # positive), at EV >= 0.1R after fees with the setup rules passing, and only
 # while open risk stays under the portfolio heat cap (1.5% of equity per
@@ -22,8 +40,8 @@
 # negative for ETH, SOL and BNB. It learns from
 # every closed real and shadow trade and trains a challenger every 4 h or
 # every 20 closed trades. Clear a tripped kill switch with npm run reset-risk.
-# Requires radar-worker/sql/005_bot_learning.sql and 006_bot_journal.sql (both
-# applied by this workflow on every run).
+# Requires radar-worker/sql/005_bot_learning.sql, 006_bot_journal.sql and
+# 007_bot_trend.sql (all applied by this workflow on every run).
 #
 # GitHub's runners are in the US, where Binance's main API is blocked; the
 # futures testnet host and the public market-data mirror are reachable, and the
@@ -98,6 +116,10 @@ jobs:
         run: node scripts/apply-sql.mjs sql/006_bot_journal.sql
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      - name: Apply the trend-strategy schema
+        run: node scripts/apply-sql.mjs sql/007_bot_trend.sql
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
       - run: echo "BOT_STARTED=$(date +%s)" >> "$GITHUB_ENV"
       # Time budget: the bot stops its loop 330 min after it starts; this step
       # is killed at 345 min if a last tick or shutdown hangs (a step timeout
@@ -109,8 +131,11 @@ jobs:
         run: node src/bot.ts
         env:
           BOT_RUN_MINUTES: '330'
+          # F1 places the real orders; hybrid keeps the portfolio heat cap
+          # (1.5% per side, 2% total). The model only shadow trades.
+          BOT_STRATEGY: trend
           BOT_MODE: hybrid
-          BOT_SYMBOLS: BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XAUUSDT
+          BOT_SYMBOLS: BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT
           BOT_INTERVAL: 4h
           BOT_MIN_EV: '0.1'
           BOT_MIN_MARGIN: '100'

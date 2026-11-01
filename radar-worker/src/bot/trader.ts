@@ -18,6 +18,14 @@
 // is in the real-trade list, and fits under the portfolio heat cap; every other
 // signal that passes the hard rules is a shadow trade, so the bot still learns
 // from all of them at no cost.
+//
+// Trend strategy (BOT_STRATEGY=trend): real trades come from the rules of
+// research strategy F1 (strategy.ts), not from the model — long on a 4h
+// breakout, an exchange-side stop only (no target), trailed up at each close
+// by placing the new stop before cancelling the old one, and a market close on
+// the exit rule. The risk limits, the heat cap and BOT_REAL_SYMBOLS still apply;
+// the walk-forward gate does not (it judges the model). The model keeps
+// deciding on every bar, as shadow trades only, so it goes on learning.
 import { closedBars, INTERVAL_MS } from './data.ts'
 import { lastPrice } from '../binance.ts'
 import { FEATURES, WARMUP, costR, featureAt, indicators } from './features.ts'
@@ -36,6 +44,11 @@ import type { Calib } from './learning.ts'
 import { sizePreview } from './plan.ts'
 import type { TradePlan } from './plan.ts'
 import { barsBetween, barsHeld, excursion, slippageBps } from './journal.ts'
+import { F1, TREND_BARS, checkTrendSetup, highPrev, lowPrev, noEntryReason, onClose, trendIndicators } from './strategy.ts'
+import type { TrailState } from './strategy.ts'
+
+/** Why we are closing a trade ourselves, so finalize can label it (trend: 'signal' the exit rule, 'trail' a raised stop already crossed). */
+type ClosingReason = 'time' | 'tp' | 'error' | 'signal' | 'trail'
 
 /** The exchange calls the trader needs — Futures implements it; tests fake it. */
 export interface Exchange {
@@ -50,12 +63,19 @@ export interface Exchange {
   takeProfitLimit(symbol: string, side: 'BUY' | 'SELL', quantity: string, price: string, clientId: string): Promise<{ orderId: number; status: string }>
   cancelAllOrders(symbol: string): Promise<void>
   cancelAllAlgo(symbol: string): Promise<void>
+  /** Cancel one exchange-side stop / target by id (the trend trail replaces its stop). */
+  cancelAlgo(symbol: string, algoId: number): Promise<void>
   fills(symbol: string, startTime: number): Promise<Fill[]>
 }
 
 export interface TraderConfig {
   interval: string
   mode: 'gated' | 'explore' | 'hybrid'
+  /**
+   * Who places real orders: 'ml' (default) the model, as set by `mode`;
+   * 'trend' strategy F1 (strategy.ts), with the model shadow trading only.
+   */
+  strategy?: 'ml' | 'trend'
   risk: RiskConfig
   /** Hybrid mode: the only symbols that may place real orders (unset = all); the rest only shadow trade. */
   realSymbols?: string[]
@@ -70,6 +90,14 @@ export interface TraderConfig {
   learn: LearnConfig
   /** Account size for the small real-money sizing preview on each plan (USDT). */
   previewEquity?: number
+  /**
+   * A market with an open trade that is no longer in BOT_SYMBOLS: the trade is
+   * managed to its end under the rules it was opened with (bracket and time
+   * exit, or the trend trail and exit rule), then the trader idles. No real or
+   * shadow entries, no learning, no walk-forward. Its open risk still counts in
+   * the heat cap (read from the database).
+   */
+  manageOnly?: boolean
   /** Injected for tests; defaults to Binance spot klines. */
   bars?: (symbol: string, interval: string, count: number) => Promise<Bar[]>
   /** Injected for tests; defaults to the Binance spot ticker (public, unsigned). Prices non-USDT fees. */
@@ -166,7 +194,7 @@ export class SymbolTrader {
   private rules!: SymbolRules
   private lastBar = 0
   /** Why a trade is being closed by us (time exit), so reconcile can label it. */
-  private closing = new Map<number, 'time' | 'tp' | 'error'>()
+  private closing = new Map<number, ClosingReason>()
   private finalizeTries = new Map<number, number>()
   /** Latest walk-forward verdict. */
   gate: GateState | null = null
@@ -192,6 +220,11 @@ export class SymbolTrader {
 
   async init(): Promise<void> {
     this.rules = await this.ex.rules(this.symbol)
+    if (this.cfg.manageOnly) {
+      // Only an open trade to see through: no margin setup, no model, no walk-forward.
+      this.lastBar = await this.store.getState<number>('lastBar:' + this.symbol, 0)
+      return
+    }
     await this.ex.setup(this.symbol, this.cfg.risk.leverage)
     this.model = await this.champion()
     this.gate = await this.store.getState<GateState | null>(this.gateKey, null)
@@ -379,12 +412,13 @@ export class SymbolTrader {
   }
 
   /** Why a trade is being closed, remembered across runs. */
-  private async markClosing(id: number, reason: 'time' | 'tp' | 'error'): Promise<void> {
+  private async markClosing(id: number, reason: ClosingReason): Promise<void> {
     this.closing.set(id, reason)
     await this.store.setState('closing:' + id, reason)
   }
 
   async tick(canEnter: boolean, now = Date.now()): Promise<void> {
+    if (this.cfg.manageOnly) return this.trade(canEnter, now)
     try {
       await this.trade(canEnter, now)
     } finally {
@@ -395,6 +429,15 @@ export class SymbolTrader {
   }
 
   private async trade(canEnter: boolean, now: number): Promise<void> {
+    const manageOnly = this.cfg.manageOnly === true
+    // A trend trade is managed by the trend rules (trail, exit rule) even on a manage-only market.
+    if (this.cfg.strategy === 'trend' || manageOnly) {
+      const open = manageOnly ? await this.store.openTrade(this.symbol) : null
+      if (!manageOnly || open?.mode === 'trend') return this.tradeTrend(canEnter, now)
+      if (open) await this.manage(open, await this.ex.position(this.symbol), now)
+      // Flat: idle. Nothing new opens on a market outside BOT_SYMBOLS.
+      return
+    }
     const open = await this.store.openTrade(this.symbol)
     const pos = await this.ex.position(this.symbol)
     if (open) {
@@ -425,20 +468,14 @@ export class SymbolTrader {
 
   private async manage(open: OpenTrade, pos: Position, now: number): Promise<void> {
     if (pos.amt === 0) return this.finalize(open, now)
-    if (pos.mark > 0) {
-      const m = this.marks.get(open.id)
-      this.marks.set(open.id, m ? { lo: Math.min(m.lo, pos.mark), hi: Math.max(m.hi, pos.mark) } : { lo: pos.mark, hi: pos.mark })
-    }
+    this.noteMark(open, pos)
     const H = this.cfg.wf.bracket.horizon
     const deadline = open.barTime + (H + 1) * INTERVAL_MS[this.cfg.interval]
     // A close we started earlier (failed stop, target already crossed, time
     // exit) that did not go through — e.g. the reduce-only order timed out —
     // is retried every tick until the position is really gone; otherwise a
     // position without a stop could sit unmanaged until the time exit.
-    if (!this.closing.has(open.id)) {
-      const stored = await this.store.getState<'time' | 'tp' | 'error' | null>('closing:' + open.id, null)
-      if (stored) this.closing.set(open.id, stored)
-    }
+    await this.restoreClosing(open.id)
     if (now >= deadline && !this.closing.has(open.id)) {
       await this.markClosing(open.id, 'time')
       await this.store.event('info', this.symbol, `time exit after ${H} bars`)
@@ -495,8 +532,17 @@ export class SymbolTrader {
     const fees = await this.feesUsdt(open.id, [...entries, ...exits])
     const gross = exits.reduce((a, f) => a + f.realizedPnl, 0)
     const pnl = gross - fees
-    const stored = await this.store.getState<'time' | 'tp' | 'error' | null>('closing:' + open.id, null)
-    const reason = this.closing.get(open.id) ?? stored ?? (open.tpOrderId != null && exits.some((f) => f.orderId === open.tpOrderId) ? 'tp' : 'sl')
+    const stored = await this.store.getState<ClosingReason | null>('closing:' + open.id, null)
+    // A trend trade hit by the exchange stop: 'trail' once that stop was raised, else 'sl'.
+    const byExchange =
+      open.mode === 'trend'
+        ? open.initialSl != null && open.sl !== open.initialSl
+          ? 'trail'
+          : 'sl'
+        : open.tpOrderId != null && exits.some((f) => f.orderId === open.tpOrderId)
+          ? 'tp'
+          : 'sl'
+    const reason = this.closing.get(open.id) ?? stored ?? byExchange
     await this.ex.cancelAllOrders(this.symbol)
     await this.ex.cancelAllAlgo(this.symbol)
     const r = open.riskUsd > 0 ? pnl / open.riskUsd : 0
@@ -524,7 +570,9 @@ export class SymbolTrader {
     } catch (e) {
       await this.store.event('warn', this.symbol, `trade #${open.id}: journal bars unavailable (${(e as Error).message}); MAE/MFE from prices seen only`)
     }
-    const ex = excursion(open, bars, [...(m ? [m.lo, m.hi] : []), exit])
+    // In R of the initial stop; a trade without a target is not capped above.
+    const ref = { side: open.side, entry: open.entry, sl: open.initialSl ?? open.sl, tp: open.tp ?? open.side * Infinity }
+    const ex = excursion(ref, bars, [...(m ? [m.lo, m.hi] : []), exit])
     return { maeR: ex?.maeR ?? null, mfeR: ex?.mfeR ?? null, barsHeld: held }
   }
 
@@ -542,7 +590,18 @@ export class SymbolTrader {
       await this.store.event('info', this.symbol, `skipped the ${new Date(last.t + INTERVAL_MS[this.cfg.interval]).toISOString().slice(11, 16)} UTC bar: ${Math.round(late / 60_000)} min since it closed`)
       return
     }
-    if (!this.model) return
+    await this.mlDecide(canEnter, now, b, false)
+  }
+
+  /**
+   * The model's decision on the latest closed bar of `b`. shadowOnly (trend
+   * strategy): the idea is only ever a shadow trade — the account-level rules
+   * (risk limits, open positions, daily cap, cooldown) are left out, as they are
+   * about real orders, and no plan is written (the plan is F1's).
+   */
+  private async mlDecide(canEnter: boolean, now: number, b: Bar[], shadowOnly: boolean): Promise<void> {
+    const last = b[b.length - 1]
+    if (!this.model || !last) return
     const ind = indicators(b)
     const i = b.length - 1
     const d = decide(this.model.model, b, ind, i)
@@ -568,7 +627,9 @@ export class SymbolTrader {
     const pRaw = buy ? d.pLong : d.pShort
     const pCal = buy ? pL : pS
     const ev = buy ? evL : evS
-    const counts = await this.store.setupCounts(this.symbol, now - (now % 86_400_000))
+    const counts = shadowOnly
+      ? { openPositions: 0, tradesToday: 0, lastStopAt: null }
+      : await this.store.setupCounts(this.symbol, now - (now % 86_400_000))
     const chk = checkSetup(
       {
         entry: last.c,
@@ -581,7 +642,7 @@ export class SymbolTrader {
         gatePass: this.gate?.pass ?? this.model.gatePass,
         gateReason: this.gate?.reasons[0] ?? this.model.gateReasons[0],
         modelId: this.model.id,
-        canEnter,
+        canEnter: canEnter || shadowOnly,
         ...counts,
         now,
       },
@@ -596,7 +657,7 @@ export class SymbolTrader {
     const summary =
       `P(long) ${pct(pL)} EV ${evL.toFixed(3)}R · P(short) ${pct(pS)} EV ${evS.toFixed(3)}R` +
       ` (raw ${pct(d.pLong)}/${pct(d.pShort)}, ${regime}) · R:R ${chk.rr.toFixed(2)} · cost ${chk.costR.toFixed(3)}R`
-    const equityNow = await this.ex.balanceUsdt().catch(() => null)
+    const equityNow = shadowOnly ? null : await this.ex.balanceUsdt().catch(() => null)
     const preview = (eq: number) => sizePreview(eq, last.c, slDist, this.rules, this.cfg.risk, this.cfg.wf.costs)
     const plan: TradePlan = {
       symbol: this.symbol,
@@ -646,6 +707,13 @@ export class SymbolTrader {
       plan.status = 'paper'
       plan.shadowId = sid
       return ` · shadow #${sid} ${buy ? 'LONG' : 'SHORT'}`
+    }
+    if (shadowOnly) {
+      // Real orders come from the trend strategy; the model only paper-trades.
+      chk.model.push('trend strategy: the model trades on paper only')
+      const note = shadowWorthy({ ...chk, ok: false }) ? await shadow(chk.model) : ''
+      await this.store.event('info', this.symbol, `model (shadow only): ${summary}${chk.hard.length ? ' — not shadowed: ' + chk.hard.join('; ') : ''}${note}`)
+      return
     }
     if (!chk.ok) {
       const note = shadowWorthy(chk) ? await shadow(chk.model) : ''
@@ -752,6 +820,268 @@ export class SymbolTrader {
     Object.assign(plan, { status: 'opened', reasons: [], tradeId: id, entry: fill, sl, tp })
     await savePlan()
     await this.store.event('info', this.symbol, `${summary} — opened #${id} ${buy ? 'LONG' : 'SHORT'} ${qty} @ ${fill} · SL ${sl} · TP ${tp} · risk $${(qty * Math.abs(fill - sl)).toFixed(2)}`)
+  }
+
+  // ---- trend strategy (F1, strategy.ts) ----
+
+  /** One tick with BOT_STRATEGY=trend: manage the F1 position, act on a newly closed bar, and let the model shadow trade. */
+  private async tradeTrend(canEnter: boolean, now: number): Promise<void> {
+    const open = await this.store.openTrade(this.symbol)
+    const pos = await this.ex.position(this.symbol)
+    let trend: OpenTrade | null = null
+    if (open && open.mode !== 'trend') {
+      // A model trade from before the switch: managed to its end as before, no F1 entry beside it.
+      await this.manage(open, pos, now)
+    } else if (open) {
+      if (pos.amt === 0) return this.finalize(open, now)
+      this.noteMark(open, pos)
+      await this.restoreClosing(open.id)
+      // A close we started (exit rule, stop above the price, failed stop) is retried every tick.
+      if (this.closing.has(open.id)) return this.flatten(pos)
+      trend = open
+    } else {
+      if (this.cfg.manageOnly) return
+      if ((await this.store.getState<number>('selftest:' + this.symbol, 0)) > now) return
+      if (pos.amt !== 0) {
+        await this.store.event('error', this.symbol, `unrecorded position ${pos.amt} — closing it`)
+        await this.flatten(pos)
+        return
+      }
+    }
+    const step = INTERVAL_MS[this.cfg.interval]
+    // Until the next bar closes there is nothing to decide: skip the long history read.
+    if (Math.floor(now / step) * step - step === this.lastBar) return this.shadowTick(now)
+    const b = await this.barsFn(this.symbol, this.cfg.interval, TREND_BARS)
+    await this.shadowTick(now, b)
+    const last = b[b.length - 1]
+    if (!last || last.t === this.lastBar) return
+    this.lastBar = last.t
+    await this.store.setState('lastBar:' + this.symbol, last.t)
+    const late = now - (last.t + step) > this.cfg.maxLateMs
+    // The exit rule and the trail protect the position: applied however late. A late entry is not taken.
+    if (trend) await this.trendBar(trend, pos, b, now)
+    else if (!open && !this.cfg.manageOnly) {
+      if (late) await this.store.event('info', this.symbol, `skipped the ${new Date(last.t + step).toISOString().slice(11, 16)} UTC bar: ${Math.round((now - last.t - step) / 60_000)} min since it closed`)
+      else await this.trendEntry(canEnter, now, b)
+    }
+    // The model decides on the same bars it always has, as a shadow trade.
+    if (!late && !this.cfg.manageOnly) await this.mlDecide(canEnter, now, b.slice(-(WARMUP + 80)), true)
+  }
+
+  private noteMark(open: OpenTrade, pos: Position): void {
+    if (!(pos.mark > 0)) return
+    const m = this.marks.get(open.id)
+    this.marks.set(open.id, m ? { lo: Math.min(m.lo, pos.mark), hi: Math.max(m.hi, pos.mark) } : { lo: pos.mark, hi: pos.mark })
+  }
+
+  private async restoreClosing(id: number): Promise<void> {
+    if (this.closing.has(id)) return
+    const stored = await this.store.getState<ClosingReason | null>('closing:' + id, null)
+    if (stored) this.closing.set(id, stored)
+  }
+
+  private saveTrendPlan(plan: TradePlan): Promise<void> {
+    return this.store.setState('plan:' + this.symbol, plan).catch((e) => console.error('plan', (e as Error).message))
+  }
+
+  /**
+   * The closes since the trail last ran, oldest first (normally just the newest
+   * one): the exit rule, else a higher stop — placed before the old one is
+   * cancelled, so the position is never without a stop.
+   */
+  private async trendBar(open: OpenTrade, pos: Position, b: Bar[], now: number): Promise<void> {
+    const ind = trendIndicators(b)
+    const step = INTERVAL_MS[this.cfg.interval]
+    const seen = Math.max(open.trailBar ?? open.barTime, open.barTime)
+    let st: TrailState = { stop: open.sl, high: open.trailHigh ?? -Infinity }
+    let lastJ = -1
+    let exitAt = -1
+    for (let j = 0; j < b.length; j++) {
+      if (b[j].t <= seen) continue
+      const r = onClose(b, ind, j, st)
+      lastJ = j
+      if (r.exit) {
+        exitAt = j
+        break
+      }
+      st = { stop: r.stop, high: r.high }
+    }
+    const last = b[b.length - 1]
+    const initial = open.initialSl ?? open.sl
+    const plan: TradePlan = {
+      symbol: this.symbol,
+      t: now,
+      barClose: last.t + step,
+      interval: this.cfg.interval,
+      strategy: 'trend',
+      side: 'LONG',
+      entry: open.entry,
+      sl: open.sl,
+      tp: null,
+      costR: open.entry > initial ? costR(open.entry, open.entry - initial, this.cfg.wf.costs, 'sl') : 0,
+      status: 'opened',
+      reasons: [],
+      tradeId: open.id,
+    }
+    const at = (j: number) => new Date(b[j].t + step).toISOString().slice(11, 16) + ' UTC'
+    if (exitAt >= 0) {
+      const x = b[exitAt]
+      const why =
+        x.c <= ind.ema[exitAt]
+          ? `close ${x.c} ≤ EMA(${F1.emaLen}) ${+ind.ema[exitAt].toPrecision(6)}`
+          : `close ${x.c} < the ${F1.exitLen}-bar low ${lowPrev(b, exitAt, F1.exitLen)}`
+      await this.markClosing(open.id, 'signal')
+      await this.store.event('info', this.symbol, `trade #${open.id}: F1 exit rule at the ${at(exitAt)} close (${why}) — closing`)
+      await this.saveTrendPlan({ ...plan, reasons: ['exit rule: ' + why] })
+      await this.flatten(pos)
+      return
+    }
+    if (lastJ < 0) return
+    const next = Number(roundTick(st.stop, this.rules.tickSize, this.rules.pricePrecision))
+    let sl = open.sl
+    let algo = open.slAlgoId
+    if (next > open.sl) {
+      const px = pos.mark > 0 ? pos.mark : last.c
+      if (next >= px) {
+        // The raised stop is already through the price: the exchange would refuse
+        // it (it would trigger at once). The research engine fills such a stop at
+        // the next open — close now.
+        await this.markClosing(open.id, 'trail')
+        await this.store.event('info', this.symbol, `trade #${open.id}: trailed stop ${next} is at or above the price ${px} — closing`)
+        await this.saveTrendPlan({ ...plan, sl: next, reasons: ['trailed stop crossed'] })
+        await this.flatten(pos)
+        return
+      }
+      try {
+        algo = (await this.ex.bracketLeg(this.symbol, 'SELL', 'STOP_MARKET', String(next), `rb-sl-${open.id}-${Math.round(b[lastJ].t / 1000)}`)).algoId
+        sl = next
+      } catch (e) {
+        // Keep the stop that is in place; not marked as seen, so the next bar retries these closes.
+        await this.store.event('warn', this.symbol, `trade #${open.id}: raised stop ${next} could not be placed (${(e as Error).message}) — the stop at ${open.sl} stays`)
+        await this.saveTrendPlan(plan)
+        return
+      }
+    }
+    await this.store.setTrail(open.id, { sl, slAlgoId: algo, high: st.high, bar: b[lastJ].t })
+    if (sl !== open.sl) {
+      if (open.slAlgoId != null && open.slAlgoId !== algo)
+        await this.ex
+          .cancelAlgo(this.symbol, open.slAlgoId)
+          .catch((e) =>
+            this.store.event('warn', this.symbol, `trade #${open.id}: old stop ${open.slAlgoId} not cancelled (${(e as Error).message}); it sits below the new one and goes when the trade closes`),
+          )
+      await this.store.event('info', this.symbol, `trade #${open.id}: stop trailed ${open.sl} → ${sl} (highest high ${st.high} − ${F1.trailAtr} ATR ${+ind.atr[lastJ].toPrecision(6)})`)
+    }
+    await this.saveTrendPlan({ ...plan, sl })
+  }
+
+  /** F1 entry on the latest closed bar of `b`, if the signal fires and every rule passes. */
+  private async trendEntry(canEnter: boolean, now: number, b: Bar[]): Promise<void> {
+    const ind = trendIndicators(b)
+    const i = b.length - 1
+    const last = b[i]
+    const step = INTERVAL_MS[this.cfg.interval]
+    const atr = ind.atr[i]
+    const slDist = F1.slAtr * atr
+    const costs = this.cfg.wf.costs
+    const cost = slDist > 0 ? costR(last.c, slDist, costs, 'sl') : Infinity
+    const hh = highPrev(b, i, F1.entryLen)
+    const summary =
+      `F1: close ${last.c} · EMA(${F1.emaLen}) ${+ind.ema[i].toPrecision(6)} · ${F1.entryLen}-bar high ${hh}` +
+      ` · ATR ${+atr.toPrecision(6)} · cost ${cost.toFixed(3)}R`
+    const equityNow = await this.ex.balanceUsdt().catch(() => null)
+    const preview = (eq: number) => sizePreview(eq, last.c, slDist, this.rules, this.cfg.risk, costs)
+    const plan: TradePlan = {
+      symbol: this.symbol,
+      t: now,
+      barClose: last.t + step,
+      interval: this.cfg.interval,
+      strategy: 'trend',
+      side: 'LONG',
+      entry: last.c,
+      sl: last.c - slDist,
+      tp: null,
+      costR: cost,
+      status: 'skipped',
+      reasons: [],
+      live: equityNow != null ? preview(equityNow) : undefined,
+      small: preview(this.cfg.previewEquity ?? 100),
+    }
+    const skip = async (reasons: string[], level: 'info' | 'warn' = 'info') => {
+      plan.reasons = reasons
+      await this.saveTrendPlan(plan)
+      await this.store.event(level, this.symbol, `${summary} — no trade: ${reasons.join('; ')}`)
+    }
+    const why = noEntryReason(b, ind, i)
+    if (why) return skip([why])
+    const counts = await this.store.setupCounts(this.symbol, now - (now % 86_400_000))
+    const hard = checkTrendSetup(
+      {
+        entry: last.c,
+        slDist,
+        costR: cost,
+        canEnter,
+        listed: !this.cfg.realSymbols || this.cfg.realSymbols.includes(this.symbol),
+        openPositions: counts.openPositions,
+        tradesToday: counts.tradesToday,
+      },
+      this.cfg.setup,
+    )
+    if (hard.length) return skip(hard)
+    const equity = equityNow ?? (await this.ex.balanceUsdt())
+    if (equity == null) return skip(['USDT balance unavailable'], 'warn')
+    const sz = size(equity, last.c, slDist, this.rules, this.cfg.risk)
+    if (Number(sz.qty) <= 0) return skip([sz.reason || 'size is zero'], 'warn')
+    // Portfolio heat: open risk at the initial stops, across all symbols (research: 1.5% per side).
+    const hot = heatCheck(await this.store.openRisk(), 1, sz.riskUsd, equity, this.cfg.risk)
+    if (hot) return skip([hot])
+    const o = await this.ex.marketOrder(this.symbol, 'BUY', sz.qty, false, `rb-in-${now}`)
+    const fill = Number(o.avgPrice) || last.c
+    const qty = Number(o.executedQty) || Number(sz.qty)
+    const sl = Number(roundTick(fill - slDist, this.rules.tickSize, this.rules.pricePrecision))
+    const id = await this.store.insertTrade({
+      symbol: this.symbol,
+      modelId: null,
+      mode: 'trend',
+      venue: this.ex.base,
+      side: 1,
+      openedAt: now,
+      barTime: last.t,
+      entry: fill,
+      qty,
+      sl,
+      tp: null,
+      atr,
+      riskUsd: qty * (fill - sl),
+      pWin: null,
+      evR: null,
+      features: { close: last.c, ema300: ind.ema[i], high20: hh, low10: lowPrev(b, i, F1.exitLen), atr14: atr },
+      entryOrderId: o.orderId,
+      costR: cost,
+      journal: { interval: this.cfg.interval, decision: summary, plannedEntry: last.c, plannedSl: last.c - slDist, plannedTp: null, slippageBps: slippageBps(1, last.c, fill) },
+    })
+    // The trail starts from the entry bar: the signal bar counts as seen.
+    await this.store.setTrail(id, { sl, slAlgoId: null, high: null, bar: last.t, initialSl: sl })
+    let slAlgo: number
+    try {
+      slAlgo = (await this.ex.bracketLeg(this.symbol, 'SELL', 'STOP_MARKET', String(sl), `rb-sl-${id}`)).algoId
+    } catch (e) {
+      // No stop, no position.
+      await this.store.event('error', this.symbol, `trade #${id}: stop could not be placed (${(e as Error).message}) — closing`)
+      Object.assign(plan, { reasons: ['stop could not be placed, position closed'], tradeId: id })
+      await this.saveTrendPlan(plan)
+      await this.markClosing(id, 'error')
+      await this.flatten(await this.ex.position(this.symbol))
+      return
+    }
+    await this.store.setLegs(id, null, slAlgo)
+    Object.assign(plan, { status: 'opened', reasons: [], tradeId: id, entry: fill, sl })
+    await this.saveTrendPlan(plan)
+    await this.store.event(
+      'info',
+      this.symbol,
+      `${summary} — opened #${id} LONG ${qty} @ ${fill} · SL ${sl} (${F1.slAtr} ATR, trails at ${F1.trailAtr} ATR) · no target · risk $${(qty * (fill - sl)).toFixed(2)}`,
+    )
   }
 }
 
