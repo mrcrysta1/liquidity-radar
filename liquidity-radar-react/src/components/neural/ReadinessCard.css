@@ -1,0 +1,27 @@
+/* "Go-live readiness" card (components/neural/ReadinessCard.tsx). Own file so
+   it never collides with edits to index.css. Uses the app's theme tokens. */
+.rd-verdict{margin-left:auto;font-size:var(--text-xs);font-weight:800;padding:2px 9px;border-radius:6px;background:var(--sunk-2);white-space:nowrap}
+.rd-verdict.rd-pass{color:var(--green)}
+.rd-verdict.rd-fail{color:var(--red)}
+.rd-sub{margin:0 0 10px;font-size:var(--text-xs);color:var(--muted);line-height:1.4}
+.rd-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.rd-row{display:grid;grid-template-columns:72px minmax(0,1fr) minmax(0,220px);gap:10px;align-items:start;padding:8px 10px;border-radius:10px;background:var(--sunk-2);border:1px solid var(--hair-2);border-left:3px solid var(--dim)}
+.rd-row.rd-pass{border-left-color:var(--green)}
+.rd-row.rd-fail{border-left-color:var(--red)}
+.rd-row.rd-wait{border-left-color:var(--amber)}
+.rd-mark{font-size:var(--text-xs);font-weight:800;white-space:nowrap}
+.rd-pass .rd-mark{color:var(--green)}
+.rd-fail .rd-mark{color:var(--red)}
+.rd-wait .rd-mark{color:var(--amber)}
+.rd-main,.rd-target{display:flex;flex-direction:column;gap:2px;min-width:0}
+.rd-main b{font-size:var(--text-sm);color:var(--txt)}
+.rd-val{font-family:var(--mono);font-size:var(--text-xs);color:var(--txt);overflow-wrap:anywhere}
+.rd-main small,.rd-target small{font-size:var(--text-xs);color:var(--dim);line-height:1.35;overflow-wrap:anywhere}
+.rd-target span{font-size:var(--text-xs);color:var(--muted);overflow-wrap:anywhere}
+.rd-target em{font-style:normal;font-size:var(--text-xs);color:var(--amber)}
+.rd-foot{margin:10px 0 4px;font-size:var(--text-xs);color:var(--muted);line-height:1.4}
+.rd-note{display:block;font-size:var(--text-xs);color:var(--dim);line-height:1.4}
+@media (max-width:560px){
+  .rd-row{grid-template-columns:minmax(0,1fr);gap:4px}
+  .rd-target{flex-direction:row;flex-wrap:wrap;gap:4px 8px}
+}

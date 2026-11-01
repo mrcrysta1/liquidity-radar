@@ -463,7 +463,13 @@ export async function refreshHealth(store: BotStore, slots: StrategySlot[], now:
   for (const slot of slots) {
     const prev = await store.getState<HealthRecord | null>('strategy:' + slot.id, null)
     const { record, transition } = evaluateHealth(prev, slot, await store.strategyOutcomes(slot.id), STRATEGIES[slot.id]?.health, now)
-    await store.setState('strategy:' + slot.id, { ...record, name: STRATEGIES[slot.id]?.name ?? slot.id, priority: slots.indexOf(slot) + 1 })
+    await store.setState('strategy:' + slot.id, {
+      ...record,
+      name: STRATEGIES[slot.id]?.name ?? slot.id,
+      priority: slots.indexOf(slot) + 1,
+      // The research bands, for the website's go-live readiness check.
+      bands: STRATEGIES[slot.id]?.health ?? null,
+    })
     if (transition) {
       const worse = transition.to === 'shadow' || transition.to === 'probation'
       await store.event(worse ? 'warn' : 'info', null, `strategy ${slot.id}: ${transition.from} → ${transition.to} — ${transition.reason}`)
