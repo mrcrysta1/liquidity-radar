@@ -181,6 +181,11 @@ jobs:
           BOT_COOLDOWN_MIN: '240'
           BOT_MAX_OPEN: '4'
           BOT_MAX_TRADES_DAY: '10'
+          # Portfolio heat: three 0.5% trades per side, as in the research. The
+          # small margin over 1.5% / 2% is for stops rounded to the tick size,
+          # which can push one trade's risk a hair over 0.5%.
+          BOT_MAX_SIDE_RISK: '0.016'
+          BOT_MAX_TOTAL_RISK: '0.021'
           BOT_SHADOW: '1'
           # One decision per bar, each shadow open at most BOT_HORIZON bars:
           # 13 per market leaves room to shadow every signal.
