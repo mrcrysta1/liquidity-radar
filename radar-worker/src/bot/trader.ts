@@ -125,6 +125,12 @@ export interface TraderConfig {
   manageOnly?: boolean
   /** Injected for tests; defaults to Binance spot klines. */
   bars?: (symbol: string, interval: string, count: number) => Promise<Bar[]>
+  /**
+   * Every market's position from one shared read per tick (bot.ts,
+   * futures.ts PositionBook). Used only for the first read of a tick; null =
+   * read this market alone. Unset: always read this market alone.
+   */
+  positions?: { get(symbol: string): Promise<Position | null> }
   /** Closed bars kept between ticks and shared by all traders (bot.ts); takes the place of `bars`. */
   barCache?: BarCache
   /** Injected for tests; defaults to the Binance spot ticker (public, unsigned). Prices non-USDT fees. */
@@ -504,12 +510,12 @@ export class SymbolTrader {
     if (this.slots || manageOnly) {
       const open = manageOnly ? await this.store.openTrade(this.symbol) : null
       if (!manageOnly || open?.mode === 'trend') return this.tradeMulti(canEnter, now)
-      if (open) await this.manage(open, await this.ex.position(this.symbol), now)
+      if (open) await this.manage(open, await this.tickPosition(), now)
       // Flat: idle. Nothing new opens on a market outside BOT_SYMBOLS.
       return
     }
     const open = await this.store.openTrade(this.symbol)
-    const pos = await this.ex.position(this.symbol)
+    const pos = await this.tickPosition()
     if (open) {
       await this.manage(open, pos, now)
       await this.shadowTick(now)
@@ -525,6 +531,17 @@ export class SymbolTrader {
       return
     }
     await this.maybeEnter(canEnter, now)
+  }
+
+  /**
+   * The position at the start of a tick, before this trader acts: from the
+   * shared all-markets read when there is one, else this market's own read.
+   * Reads after an order of ours (a failed stop, a rejected target) always go
+   * to the exchange for this market alone.
+   */
+  private async tickPosition(): Promise<Position> {
+    const p = await this.cfg.positions?.get(this.symbol).catch(() => null)
+    return p ?? this.ex.position(this.symbol)
   }
 
   private async flatten(pos: Position): Promise<void> {
@@ -907,7 +924,7 @@ export class SymbolTrader {
    */
   private async tradeMulti(canEnter: boolean, now: number): Promise<void> {
     const open = await this.store.openTrade(this.symbol)
-    const pos = await this.ex.position(this.symbol)
+    const pos = await this.tickPosition()
     let rule: OpenTrade | null = null
     if (open && open.mode !== 'trend') {
       // A model trade (live model, or from before a switch): managed to its end by its bracket.

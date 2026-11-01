@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs'
 import { PGlite } from '@electric-sql/pglite'
 import type { Db } from '../src/db.ts'
 import type { Bar } from '../src/bot/features.ts'
+import { PositionBook } from '../src/bot/futures.ts'
 import type { Fill, Position, SymbolRules } from '../src/bot/futures.ts'
 import { BotStore } from '../src/bot/store.ts'
 import { DEFAULT_TRADER, SymbolTrader } from '../src/bot/trader.ts'
@@ -52,7 +53,10 @@ class FakeExchange implements Exchange {
   async balanceUsdt() {
     return this.balance
   }
+  /** Per-market position reads (the shared PositionBook read is counted by the book). */
+  positionCalls = 0
   async position(symbol: string): Promise<Position> {
+    this.positionCalls++
     return { symbol, amt: this.pos.amt, entry: this.pos.entry, mark: this.price, unrealized: 0 }
   }
   async setup() {}
@@ -819,6 +823,50 @@ test('trend: a raised stop that cannot be placed keeps the old one, and the next
   open = (await store.openTrade('BTCUSDT'))!
   assert.ok(open.sl > first.sl, 'raised once placing works again')
   assert.deepEqual(ex.algo.map((a) => a.algoId), [open.slAlgoId])
+})
+
+test('positions: one shared read per tick for every market, no per-market read on the ticks in between', async () => {
+  const { db } = await freshDb()
+  const store = new BotStore(db)
+  const h = trendHist()
+  const SYMS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT']
+  const exes = new Map(SYMS.map((s) => [s, new FakeExchange()]))
+  // One "account" read covers every market (the fakes stand in for one exchange each).
+  const book = new PositionBook(async () => Promise.all(SYMS.map((s) => exes.get(s)!.position(s).finally(() => exes.get(s)!.positionCalls--))))
+  const cfg: TraderConfig = { ...setup('hybrid').cfg, strategy: 'trend', bars: async (_s, _i, n) => h.hist.slice(0, h.S).slice(-n), positions: book }
+  const traders = SYMS.map((s) => new SymbolTrader(exes.get(s)!, store, s, cfg))
+  for (const t of traders) await t.init()
+  for (let k = 1; k <= 3; k++) {
+    book.clear() // bot.ts: at each tick start
+    for (const t of tickOrder(traders)) await t.tick(true, Date.now())
+    assert.equal(book.reads, k, 'one positions request per tick')
+  }
+  for (const e of exes.values()) assert.equal(e.positionCalls, 0, 'no per-market positionRisk read')
+  // A market the shared read does not list (or a failed read) is read on its own, never assumed flat.
+  const lean = new PositionBook(async () => [])
+  const t = new SymbolTrader(exes.get('BTCUSDT')!, store, 'BTCUSDT', { ...cfg, positions: lean })
+  await t.init()
+  exes.get('BTCUSDT')!.pos = { amt: 0.5, entry: 100 }
+  await t.tick(true, Date.now())
+  assert.equal(exes.get('BTCUSDT')!.positionCalls, 1)
+  assert.equal(exes.get('BTCUSDT')!.pos.amt, 0, 'the unrecorded position was seen and flattened')
+})
+
+test('positions: after its own orders a trader re-reads its market, not the shared snapshot', async () => {
+  // Snapshot taken before the entry: flat. The stop is rejected after the fill; the
+  // emergency close must see the real (long) position, so it reads the market itself.
+  let snapshot: Position | null = null
+  const book = new PositionBook(async () => [snapshot!])
+  const { ex, t } = await trendTrader({ positions: book })
+  snapshot = { symbol: 'BTCUSDT', amt: 0, entry: 0, mark: ex.price, unrealized: 0 }
+  ex.positionCalls = 0
+  ex.failStop = true
+  await t.tick(true, Date.now())
+  assert.equal(book.reads, 1)
+  assert.equal(ex.positionCalls, 1, 'one fresh read of this market after the failed stop')
+  assert.equal(ex.pos.amt, 0, 'no unprotected position')
+  assert.ok(ex.log.length >= 2, 'entered, then closed')
+  assert.equal(snapshot.amt, 0, 'the stale snapshot was not used for the close')
 })
 
 test('trend: a stop hit closes as sl (initial stop) or trail (raised stop)', async () => {
