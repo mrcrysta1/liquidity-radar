@@ -97,3 +97,46 @@ export async function loadOutcomes(): Promise<{ real: Outcome[]; shadow: Outcome
     shadow: shadow.filter((x) => x.r_net != null).map((x) => ({ p: x.p_cal, r: x.r_net!, t: Date.parse(x.bar_time), exit: x.exit_reason })),
   }
 }
+
+/** How a plan would be sized (radar-worker/src/bot/plan.ts SizePreview). */
+export interface PlanSize {
+  equity: number
+  qty: number
+  notional: number
+  margin: number
+  riskUsd: number
+  riskPct: number
+  feesUsd: number
+  reason?: string
+}
+
+/** The trade the bot planned on its latest bar for one market (bot_state 'plan:SYMBOL'). */
+export interface BotPlan {
+  symbol: string
+  t: number
+  barClose: number
+  interval: string
+  side: 'LONG' | 'SHORT'
+  entry: number
+  sl: number
+  tp: number
+  pWin: number
+  pLong: number
+  pShort: number
+  evR: number
+  rr: number
+  costR: number
+  status: 'opened' | 'paper' | 'skipped'
+  reasons: string[]
+  tradeId?: number
+  shadowId?: number
+  live?: PlanSize
+  small?: PlanSize
+}
+
+/** Latest plan per market, newest first. */
+export async function loadPlans(): Promise<BotPlan[] | null> {
+  if (!SERVER_BOT) return null
+  const rows = await rest<Array<{ value: BotPlan }>>('bot_state?select=value&key=like.plan:*')
+  return rows.map((r) => r.value).filter((p) => p && p.symbol).sort((a, b) => b.t - a.t)
+}

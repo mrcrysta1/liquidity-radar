@@ -1,0 +1,24 @@
+/* "Planned trades" card (components/neural/PlannedTrades.tsx). Own file so it
+   never collides with edits to index.css. Uses the app's theme tokens. */
+.pt-sub{font-size:var(--text-xs);color:var(--dim)}
+.pt-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+.pt-card{display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:12px;background:var(--sunk-2);border:1px solid var(--hair-2);border-top:3px solid var(--dim);min-width:0}
+.pt-real{border-top-color:var(--green)}
+.pt-paper{border-top-color:var(--amber)}
+.pt-top{display:flex;align-items:center;gap:8px;font-size:var(--text-sm);color:var(--txt)}
+.pt-side{font-size:var(--text-xs);font-weight:800;padding:1px 7px;border-radius:6px;background:var(--card)}
+.pt-status{margin-left:auto;font-size:var(--text-xs);color:var(--muted);white-space:nowrap}
+.pt-levels{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.pt-levels>div{display:flex;flex-direction:column;min-width:0}
+.pt-levels small{font-size:var(--text-xs);color:var(--muted)}
+.pt-levels b{font-family:var(--mono);font-size:var(--text-sm);color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pt-levels em{font-style:normal;font-size:var(--text-xs);color:var(--dim)}
+.pt-nums{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:var(--text-xs);color:var(--muted)}
+.pt-nums b{font-family:var(--mono);color:var(--txt)}
+.pt .up{color:var(--green)}.pt .dn{color:var(--red)}
+.pt-why{margin:0;font-size:var(--text-xs);color:var(--muted);line-height:1.4}
+.pt-size{display:flex;flex-direction:column;gap:1px;padding-top:6px;border-top:1px solid var(--hair-2);font-size:var(--text-xs);color:var(--muted);line-height:1.4}
+.pt-size small{font-weight:700;color:var(--dim)}
+.pt-size b{color:var(--txt)}
+.pt-no{color:var(--amber)}
+.pt-when{font-size:var(--text-xs);color:var(--dim)}

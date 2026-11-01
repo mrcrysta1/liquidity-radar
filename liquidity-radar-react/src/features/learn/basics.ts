@@ -163,6 +163,12 @@ export const TECH: LearnSection = {
 /** Newest first. Add a line here whenever a feature ships. */
 export const WHATS_NEW: Array<{ date: string; items: string[] }> = [
   {
+    date: '2026-11-01',
+    items: [
+      'New "Planned trades" card on the Self Learning tab: for every market, the trade the bot planned on its latest candle (long or short, entry, stop-loss, take-profit, win chance, expected value), whether it became a real trade, a paper trade or was skipped and why, and how it would be sized on the demo account and on a small $100 real account (position, margin, risk, fees, or why Binance would refuse it).',
+    ],
+  },
+  {
     date: '2026-10-31',
     items: [
       'The testnet bot now trades 4-hour candles in gated mode: a market trades only while its model passes the walk-forward test. At the switch none passed yet (BTC was closest), so it paper-trades and learns from shadow trades until one does. The 5-minute explore setup lost $745 over 107 trades, half of it fees.',

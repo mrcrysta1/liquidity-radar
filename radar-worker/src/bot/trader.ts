@@ -28,6 +28,8 @@ import { DEFAULT_SETUP, checkSetup, shadowWorthy } from './setup.ts'
 import type { SetupConfig } from './setup.ts'
 import { calibrate, regimeOf, resolveShadow, scoreModel, selectChampion, splitForChallenger, updateCalibration, winLabel } from './learning.ts'
 import type { Calib } from './learning.ts'
+import { sizePreview } from './plan.ts'
+import type { TradePlan } from './plan.ts'
 
 /** The exchange calls the trader needs — Futures implements it; tests fake it. */
 export interface Exchange {
@@ -58,6 +60,8 @@ export interface TraderConfig {
   /** Rules every setup must pass before an order is placed. */
   setup: SetupConfig
   learn: LearnConfig
+  /** Account size for the small real-money sizing preview on each plan (USDT). */
+  previewEquity?: number
   /** Injected for tests; defaults to Binance spot klines. */
   bars?: (symbol: string, interval: string, count: number) => Promise<Bar[]>
   /** Injected for tests; defaults to the Binance spot ticker (public, unsigned). Prices non-USDT fees. */
@@ -532,6 +536,30 @@ export class SymbolTrader {
     const summary =
       `P(long) ${pct(pL)} EV ${evL.toFixed(3)}R · P(short) ${pct(pS)} EV ${evS.toFixed(3)}R` +
       ` (raw ${pct(d.pLong)}/${pct(d.pShort)}, ${regime}) · R:R ${chk.rr.toFixed(2)} · cost ${chk.costR.toFixed(3)}R`
+    const equityNow = await this.ex.balanceUsdt().catch(() => null)
+    const preview = (eq: number) => sizePreview(eq, last.c, slDist, this.rules, this.cfg.risk, this.cfg.wf.costs)
+    const plan: TradePlan = {
+      symbol: this.symbol,
+      t: now,
+      barClose: last.t + INTERVAL_MS[this.cfg.interval],
+      interval: this.cfg.interval,
+      side: buy ? 'LONG' : 'SHORT',
+      entry: last.c,
+      sl: last.c - side * slDist,
+      tp: last.c + side * tpDist,
+      pWin: pCal,
+      pLong: pL,
+      pShort: pS,
+      evR: ev,
+      rr: chk.rr,
+      costR: chk.costR,
+      status: 'skipped',
+      reasons: [...chk.hard, ...chk.model],
+      live: equityNow != null ? preview(equityNow) : undefined,
+      small: preview(this.cfg.previewEquity ?? 100),
+    }
+    // Shown on the website; never allowed to stop a decision.
+    const savePlan = () => this.store.setState('plan:' + this.symbol, plan).catch((e) => console.error('plan', (e as Error).message))
     if (!chk.ok) {
       let note = ''
       if (this.cfg.learn.shadow && shadowWorthy(chk) && (await this.store.openShadows(this.symbol)).length < this.cfg.learn.shadowMaxOpen) {
@@ -555,17 +583,24 @@ export class SymbolTrader {
           features: x,
         })
         note = ` · shadow #${sid} ${buy ? 'LONG' : 'SHORT'}`
+        plan.status = 'paper'
+        plan.shadowId = sid
       }
+      await savePlan()
       await this.store.event('info', this.symbol, `${summary} — no trade: ${[...chk.hard, ...chk.model].join('; ')}${note}`)
       return
     }
-    const equity = await this.ex.balanceUsdt()
+    const equity = equityNow ?? (await this.ex.balanceUsdt())
     if (equity == null) {
+      plan.reasons = ['USDT balance unavailable']
+      await savePlan()
       await this.store.event('warn', this.symbol, `${summary} — no trade: USDT balance unavailable`)
       return
     }
     const sz = size(equity, last.c, slDist, this.rules, this.cfg.risk)
     if (Number(sz.qty) <= 0) {
+      plan.reasons = [sz.reason || 'size is zero']
+      await savePlan()
       await this.store.event('warn', this.symbol, `${summary} — no trade: ${sz.reason}`)
       return
     }
@@ -604,6 +639,8 @@ export class SymbolTrader {
     } catch (e) {
       // No stop, no position.
       await this.store.event('error', this.symbol, `trade #${id}: stop could not be placed (${(e as Error).message}) — closing`)
+      Object.assign(plan, { status: 'skipped', reasons: ['stop could not be placed, position closed'], tradeId: id })
+      await savePlan()
       await this.markClosing(id, 'error')
       await this.flatten(await this.ex.position(this.symbol))
       return
@@ -625,6 +662,8 @@ export class SymbolTrader {
       } else await this.store.event('warn', this.symbol, `trade #${id}: target not placed (${(e as Error).message}); the stop and time exit still apply`)
     }
     await this.store.setLegs(id, tpOrder, slAlgo)
+    Object.assign(plan, { status: 'opened', reasons: [], tradeId: id, entry: fill, sl, tp })
+    await savePlan()
     await this.store.event('info', this.symbol, `${summary} — opened #${id} ${buy ? 'LONG' : 'SHORT'} ${qty} @ ${fill} · SL ${sl} · TP ${tp} · risk $${(qty * Math.abs(fill - sl)).toFixed(2)}`)
   }
 }
