@@ -24,6 +24,7 @@ import type { TraderConfig } from './bot/trader.ts'
 import { STRATEGIES, parseStrategies, refreshHealth } from './bot/strategies.ts'
 import type { StrategySlot } from './bot/strategies.ts'
 import { c6Tick } from './bot/c6.ts'
+import { Alerts } from './bot/alerts.ts'
 
 if (existsSync('.env')) process.loadEnvFile('.env')
 const env = process.env
@@ -131,6 +132,9 @@ const cfg: TraderConfig = {
 
 const db = connect(env.DATABASE_URL!, env.DATABASE_CA_FILE)
 const store = new BotStore(db)
+// BOT_ALERT_WEBHOOK (optional): halts, strategy state changes, errors and a daily summary to a chat webhook (bot/alerts.ts).
+const alerts = new Alerts(env.BOT_ALERT_WEBHOOK)
+if (alerts.enabled) store.onEvent = (level, symbol, msg) => alerts.onEvent(level, symbol, msg)
 const ex = new Futures(env.BINANCE_API_KEY!, env.BINANCE_API_SECRET!, env.FUTURES_BASE || TESTNET)
 for (let attempt = 1; ; attempt++) {
   try {
@@ -190,6 +194,29 @@ let balanceMissing = false
 let lastMetricsAt = 0
 let lastHealthAt = 0
 
+// Daily summary (alerts on only): once per UTC day, for the day that just
+// ended, in the background so a slow webhook never delays a tick.
+let summaryDay: string | null = null
+let summaryBusy = false
+async function dailyAlert(): Promise<void> {
+  if (!alerts.enabled || summaryBusy) return
+  summaryBusy = true
+  try {
+    summaryDay ??= await store.getState<string>('alerts:summaryDay', '')
+    const day = await alerts.daily(summaryDay, async (d, start) => {
+      const s = await store.daySummary(start)
+      const dayPnl = s.startEquity != null && s.endEquity != null ? s.endEquity - s.startEquity : null
+      return { day: d, equity: lastEquity, dayPnl, realized: s.realized, openPositions: s.openPositions, perStrategy: s.perStrategy }
+    })
+    if (day !== summaryDay) {
+      summaryDay = day
+      await store.setState('alerts:summaryDay', day)
+    }
+  } finally {
+    summaryBusy = false
+  }
+}
+
 // Performance figures for the website (bot_state 'metrics' + bot_metrics), hourly.
 const METRIC_DAYS = 30
 async function writeMetrics(now: number): Promise<void> {
@@ -235,6 +262,7 @@ async function tick(): Promise<void> {
     await store.equity(now - (now % 3_600_000), read)
   }
   await store.setState('heartbeat', { t: now, equity, mode: cfg.mode, venue: ex.base })
+  void dailyAlert().catch((e) => console.error('daily summary', (e as Error).message))
   await mirrorAccount(now).catch((e) => console.error('account mirror', (e as Error).message))
   if (ONCE || now - lastMetricsAt >= 3_600_000) {
     lastMetricsAt = now

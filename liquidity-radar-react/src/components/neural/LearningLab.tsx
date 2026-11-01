@@ -25,6 +25,7 @@ import { BinanceAccount } from './BinanceAccount'
 import { OnTrackPanel } from './OnTrack'
 import { PlannedTrades } from './PlannedTrades'
 import { StrategiesCard } from './StrategiesCard'
+import { ReadinessCard } from './ReadinessCard'
 import { TradeJournal } from './TradeJournal'
 import type { BotEvent, BotTrade } from '../../features/selflearn/serverBot'
 import { useTick } from '../useTick'
@@ -478,6 +479,7 @@ export function LearningLab() {
       <Guard name="Binance account"><BinanceAccount><BotActivity /></BinanceAccount></Guard>
       <Guard name="Planned trades"><PlannedTrades /></Guard>
       <Guard name="Strategies"><StrategiesCard /></Guard>
+      <Guard name="Go-live readiness"><ReadinessCard /></Guard>
       <Guard name="On track"><OnTrackPanel /></Guard>
       <Guard name="Trade journal"><TradeJournal /></Guard>
       <Guard name="Models"><Models /></Guard>

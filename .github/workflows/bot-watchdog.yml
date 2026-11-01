@@ -1,0 +1,51 @@
+# Bot watchdog: every 30 min, reads the trading bot's heartbeat (bot_state
+# 'heartbeat') and posts to the BOT_ALERT_WEBHOOK secret if it is older than
+# 30 min. Read-only: it never starts, cancels or touches a bot run. Without the
+# secret it does nothing (radar-worker/scripts/watchdog.mjs).
+# Uses the DATABASE_URL secret the bot already has. When you stop the bot on
+# purpose, disable this workflow too, or it alerts every 30 min.
+name: Bot watchdog
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bot-watchdog
+  cancel-in-progress: true
+
+jobs:
+  watchdog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: radar-worker
+    steps:
+      - name: Webhook configured?
+        id: cfg
+        env:
+          BOT_ALERT_WEBHOOK: ${{ secrets.BOT_ALERT_WEBHOOK }}
+        run: |
+          if [ -n "$BOT_ALERT_WEBHOOK" ]; then echo on=true >> "$GITHUB_OUTPUT"; else echo "BOT_ALERT_WEBHOOK not set: nothing to do"; echo on=false >> "$GITHUB_OUTPUT"; fi
+        working-directory: .
+      - if: steps.cfg.outputs.on == 'true'
+        uses: actions/checkout@v4
+      - if: steps.cfg.outputs.on == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: radar-worker/package-lock.json
+      - if: steps.cfg.outputs.on == 'true'
+        run: npm ci --omit=dev
+      - if: steps.cfg.outputs.on == 'true'
+        name: Check the heartbeat
+        run: node scripts/watchdog.mjs
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          BOT_ALERT_WEBHOOK: ${{ secrets.BOT_ALERT_WEBHOOK }}
