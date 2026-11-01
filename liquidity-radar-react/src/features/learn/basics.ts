@@ -165,6 +165,7 @@ export const WHATS_NEW: Array<{ date: string; items: string[] }> = [
   {
     date: '2026-11-01',
     items: [
+      'The testnet bot takes demo trades again: explore mode on 4-hour candles, entering when the expected value is at least +0.1R after fees, without waiting for the walk-forward test that no market had passed yet.',
       'New "Planned trades" card on the Self Learning tab: for every market, the trade the bot planned on its latest candle (long or short, entry, stop-loss, take-profit, win chance, expected value), whether it became a real trade, a paper trade or was skipped and why, and how it would be sized on the demo account and on a small $100 real account (position, margin, risk, fees, or why Binance would refuse it).',
     ],
   },
