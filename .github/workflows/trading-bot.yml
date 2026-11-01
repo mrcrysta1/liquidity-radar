@@ -7,15 +7,17 @@
 #
 # The bot ticks every 15 s: mirrors the Binance Demo account for the website,
 # manages any open trade, and decides on each newly closed 4-hour candle
-# (BOT_INTERVAL) for five markets. GATED: a market trades only while its model
-# passes the walk-forward gate (out-of-sample expectancy >= 0.05R, profit
-# factor >= 1.15, recent test blocks positive); the rest stay flat and learn
-# from shadow trades until they earn it. Bracket 1.5 / 2.25 ATR (1:1.5) with a
+# (BOT_INTERVAL) for five markets. EXPLORE: it takes a demo trade whenever the
+# model's EV is >= 0.1R after fees and the setup rules pass, without waiting
+# for the walk-forward gate (expectancy >= 0.05R, PF >= 1.15, recent blocks
+# positive). In gated mode (2026-10-31 to 11-01) no market passed, so the bot
+# placed no real trades at all; real fills teach it more than shadow trades.
+# The gate verdict is still computed and shown. Bracket 1.5 / 2.25 ATR (1:1.5) with a
 # 2-day time exit, entries only at EV >= 0.1R after fees. Chosen by a sweep
 # (2026-10-28) of 15m/1h/4h × six brackets × EV bars: 15m had no
 # profitable setting and 1h one marginal one; on 4h this setting was positive
 # out of sample for BTC (+0.18R/trade, 93 trades) and gold (+0.17R, 70) and
-# negative for ETH, SOL and BNB, which the gate keeps flat. It learns from
+# negative for ETH, SOL and BNB. It learns from
 # every closed real and shadow trade and trains a challenger every 4 h or
 # every 20 closed trades. Clear a tripped kill switch with npm run reset-risk.
 # Requires radar-worker/sql/005_bot_learning.sql to be applied first.
@@ -94,7 +96,7 @@ jobs:
         run: node src/bot.ts
         env:
           BOT_RUN_MINUTES: '340'
-          BOT_MODE: gated
+          BOT_MODE: explore
           BOT_SYMBOLS: BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XAUUSDT
           BOT_INTERVAL: 4h
           BOT_MIN_EV: '0.1'
