@@ -11,6 +11,7 @@ import { DEFAULT_TRADER, SymbolTrader } from '../src/bot/trader.ts'
 import type { Exchange, TraderConfig } from '../src/bot/trader.ts'
 import { DEFAULT_WF } from '../src/bot/walkforward.ts'
 import { DEFAULT_SETUP } from '../src/bot/setup.ts'
+import type { TradePlan } from '../src/bot/plan.ts'
 
 async function freshDb() {
   const pg = new PGlite()
@@ -166,6 +167,15 @@ test('explore mode: enter, take profit, stop out, failed stop, stray position', 
   assert.equal(Math.sign(ex.pos.amt), open!.side)
   const riskPct = open!.riskUsd / 10_000
   assert.ok(riskPct <= 0.005 + 1e-9, 'risk within 0.5%: ' + riskPct)
+  // The plan on the website matches the trade that was opened.
+  const plan = await store.getState<TradePlan | null>('plan:BTCUSDT', null)
+  assert.equal(plan?.status, 'opened')
+  assert.equal(plan?.tradeId, open!.id)
+  assert.equal(plan?.sl, open!.sl)
+  assert.equal(plan?.tp, open!.tp)
+  assert.equal(plan?.side, open!.side > 0 ? 'LONG' : 'SHORT')
+  assert.equal(plan?.live?.equity, 10_000)
+  assert.equal(plan?.small?.equity, 100)
 
   // 2. Target reached → closed as tp, about +2R less fees.
   ex.move(open!.tp + open!.side * 0.05)
@@ -231,6 +241,10 @@ test('gated mode: a model without a proven edge never trades', async () => {
   assert.equal(ex.pos.amt, 0)
   const ev = (await pg.query<{ msg: string }>("select msg from bot_events where msg like '%no proven edge%'")).rows
   assert.equal(ev.length, 1)
+  const plan = await store.getState<TradePlan | null>('plan:BTCUSDT', null)
+  assert.ok(plan && plan.status !== 'opened', 'planned but not opened: ' + plan?.status)
+  assert.ok(plan!.reasons.some((r) => r.includes('no proven edge')), plan!.reasons.join('; '))
+  assert.ok((plan!.side === 'LONG') === plan!.tp > plan!.entry && (plan!.side === 'LONG') === plan!.sl < plan!.entry, 'stop and target on the right sides')
 })
 
 test('scheduled runs (BOT_ONCE): each bar decided once across restarts; late bars skipped', async () => {

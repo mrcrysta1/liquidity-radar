@@ -76,6 +76,8 @@ const cfg: TraderConfig = {
     shadowMaxOpen: num(env.BOT_SHADOW_MAX_OPEN, DEFAULT_LEARN.shadowMaxOpen),
   },
   mode: env.BOT_MODE === 'explore' ? 'explore' : 'gated',
+  // Each plan also shows how it would be sized on a small real-money account.
+  previewEquity: num(env.BOT_PREVIEW_EQUITY, 100),
   risk: {
     riskPerTrade: num(env.RISK_PER_TRADE, DEFAULT_TRADER.risk.riskPerTrade),
     maxNotionalX: num(env.MAX_NOTIONAL_X, INTERVAL_MAX_NOTIONAL_X[INTERVAL] ?? DEFAULT_TRADER.risk.maxNotionalX),
