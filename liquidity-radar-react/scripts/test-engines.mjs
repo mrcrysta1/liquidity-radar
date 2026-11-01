@@ -2782,6 +2782,83 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('strategies: missing fields fall back', [x2.name, x2.real, x2.roll30, x2.priority], ['X2', 0, null, null])
 }
 
+// ---- server bot: model metrics ------------------------------------------------------
+{
+  const M = await import(src('features/selflearn/modelMetrics.ts'))
+  eq('metrics: win label as learning.ts', [M.winLabel('tp', -1), M.winLabel('sl', 2), M.winLabel('time', 0.1), M.winLabel('time', 0)], [1, 0, 1, 0])
+  // Confusion and its rates, by hand.
+  const c = M.classify([1, 1, 0, 0, 1], [true, false, true, false, true])
+  eq('metrics: confusion matrix', [c.tp, c.fp, c.tn, c.fn], [2, 1, 1, 1])
+  near('metrics: accuracy', c.accuracy, 3 / 5)
+  near('metrics: precision', c.precision, 2 / 3)
+  near('metrics: recall', c.recall, 2 / 3)
+  near('metrics: specificity', c.specificity, 1 / 2)
+  near('metrics: F1', c.f1, 2 / 3)
+  eq('metrics: no predicted positives: precision undefined', M.classify([1, 0], [false, false]).precision, null)
+  // AUC: perfect, inverted, ties, one class.
+  eq('metrics: AUC perfect ranking', M.rocAuc([0.1, 0.2, 0.8, 0.9], [0, 0, 1, 1]), 1)
+  eq('metrics: AUC inverted ranking', M.rocAuc([0.9, 0.8, 0.2, 0.1], [0, 0, 1, 1]), 0)
+  eq('metrics: AUC all tied = 0.5', M.rocAuc([0.5, 0.5, 0.5, 0.5], [0, 1, 0, 1]), 0.5)
+  near('metrics: AUC by pair count', M.rocAuc([0.1, 0.4, 0.35, 0.8], [0, 0, 1, 1]), 0.75)
+  eq('metrics: AUC needs both classes', M.rocAuc([0.1, 0.2], [1, 1]), null)
+  // Average precision: ranks 1 (win), 2 (loss), 3 (win) -> (1 + 2/3) / 2.
+  near('metrics: PR-AUC (average precision)', M.prAuc([0.9, 0.8, 0.7], [1, 0, 1]), (1 + 2 / 3) / 2)
+  eq('metrics: PR-AUC perfect', M.prAuc([0.9, 0.8, 0.1], [1, 1, 0]), 1)
+  near('metrics: Brier', M.brier([0.8, 0.3], [1, 0]), (0.04 + 0.09) / 2)
+  near('metrics: log loss of a constant 0.5', M.logLoss([0.5, 0.5], [1, 0]), Math.log(2))
+  const cal = M.calibration([0.05, 0.15, 0.12, 0.95], [0, 1, 0, 1])
+  eq('metrics: calibration bins and counts', cal.bins.map((b) => b.n), [1, 2, 0, 0, 0, 0, 0, 0, 0, 1])
+  near('metrics: calibration bin predicted / actual', cal.bins[1].predicted + cal.bins[1].actual, 0.135 + 0.5)
+  eq('metrics: empty bin has no rates', cal.bins[5].predicted, null)
+  near('metrics: ECE', cal.ece, (1 * 0.05 + 2 * Math.abs(0.135 - 0.5) + 1 * 0.05) / 4)
+  // Rows: shadow label from r_gross, real from r_multiple; old rows without a strategy.
+  const real = [
+    { symbol: 'BTCUSDT', status: 'closed', mode: 'explore', strategy: null, closed_at: '2026-11-01T04:00:00Z', exit_reason: 'time', r_multiple: 0.4, p_win: 0.6, p_raw: 0.55, ev_r: 0.3 },
+    { symbol: 'BTCUSDT', status: 'closed', mode: 'trend', strategy: null, closed_at: '2026-11-01T08:00:00Z', exit_reason: 'sl', r_multiple: -1, bars_held: 5, mae_r: -1, mfe_r: 0.5 },
+    { symbol: 'ETHUSDT', status: 'open', strategy: 'f1', r_multiple: null },
+  ]
+  const shadow = [
+    { symbol: 'ETHUSDT', status: 'closed', strategy: 'ml', closed_at: '2026-11-01T00:00:00Z', exit_reason: 'time', r_gross: 0.05, r_net: -0.03, p_cal: 0.3, p_raw: 0.35, ev_r: -0.2 },
+    { symbol: 'ETHUSDT', status: 'closed', strategy: 'c6', closed_at: '2026-11-01T12:00:00Z', exit_reason: 'rule', r_net: 3, bars_held: 20, mae_r: -0.4, mfe_r: 4 },
+    { symbol: 'ETHUSDT', status: 'expired', strategy: 'ml', p_cal: 0.5 },
+  ]
+  const sp = M.splitRows(real, shadow)
+  eq('metrics: model rows, oldest first, label from gross R on paper', sp.ml.map((r) => [r.kind, r.symbol, r.y, r.p]), [['shadow', 'ETHUSDT', 1, 0.3], ['real', 'BTCUSDT', 1, 0.6]])
+  eq('metrics: rule rows; an old trend trade is F1', sp.rule.map((r) => [r.strategy, r.r]), [['f1', -1], ['c6', 3]])
+  const rep = M.mlReport(sp.ml)
+  eq('metrics: decision threshold uses EV > 0.1R', [rep.atDecision.tp, rep.atDecision.fn], [1, 1])
+  eq('metrics: at 0.5', [rep.at50.tp, rep.at50.fn], [1, 1])
+  near('metrics: taken / skipped mean R', rep.takenR + rep.skippedR, 0.4 - 0.03)
+  // Rule statistics.
+  const rr = M.ruleReport([1, -1, 3, -1, -0.5, 2].map((r, i) => ({ kind: i % 2 ? 'real' : 'shadow', r, barsHeld: 10, maeR: -r / 2, mfeR: r })))
+  eq('metrics: rule counts', [rr.trades, rr.real, rr.shadow], [6, 3, 3])
+  near('metrics: rule win rate', rr.winRate, 0.5)
+  near('metrics: rule avg win / loss', rr.avgWinR + rr.avgLossR, 2 - 2.5 / 3)
+  near('metrics: payoff ratio', rr.payoff, 2 / (2.5 / 3))
+  near('metrics: expectancy', rr.expectancy, 3.5 / 6)
+  near('metrics: profit factor', rr.profitFactor, 6 / 2.5)
+  eq('metrics: max drawdown in R (close order)', rr.maxDdR, 1.5)
+  ok('metrics: Sharpe per trade positive', rr.sharpe > 0 && rr.sharpe < 1)
+  eq('metrics: no losses, no profit factor', M.ruleReport([{ kind: 'real', r: 1, barsHeld: null, maeR: null, mfeR: null }]).profitFactor, null)
+  eq('metrics: median', [M.median([3, 1, 2]), M.median([4, 1, 2, 3]), M.median([])], [2, 2.5, null])
+  // Breakdown: per market and the rolling window.
+  const many = Array.from({ length: 130 }, (_, i) => ({ kind: 'shadow', symbol: i % 2 ? 'BTCUSDT' : 'ETHUSDT', t: i, pRaw: null, p: i < 30 ? 0.9 : 0.4, evR: 0.2, y: i < 30 ? 0 : 1, r: 1 }))
+  const mm = M.mlMetrics(many)
+  eq('metrics: overall all-time vs last 100', [mm.overall.all.n, mm.overall.recent.n], [130, 100])
+  eq('metrics: per market', mm.perMarket.map((m) => [m.symbol, m.all.n]), [['BTCUSDT', 65], ['ETHUSDT', 65]])
+  near('metrics: recent window drops the old misses', mm.overall.recent.baseRate, 1)
+  const sm = M.strategyMetrics([{ strategy: 'c2', symbol: 'A', kind: 'shadow', t: 1, r: 1 }, { strategy: 'f1', symbol: 'A', kind: 'real', t: 2, r: -1 }, { strategy: 'zz', symbol: 'B', kind: 'shadow', t: 3, r: 1 }])
+  eq('metrics: strategies in research order', sm.map((s) => s.id), ['f1', 'c2', 'zz'])
+  // Registry.
+  const reg = M.modelRegistry([
+    { id: 1, symbol: 'BTCUSDT', interval: '4h', version: 1, role: 'retired', created_at: '2026-10-30T00:00:00Z', promoted_at: '2026-10-30T00:00:00Z', gate_pass: false, holdout: { promoted: true, reason: 'no champion yet', trigger: 'initial training', challenger: { logLoss: 0.69 }, champion: null } },
+    { id: 2, symbol: 'BTCUSDT', interval: '4h', version: 2, role: 'champion', created_at: '2026-10-31T00:00:00Z', promoted_at: '2026-10-31T01:00:00Z', gate_pass: true, holdout: JSON.stringify({ promoted: true, reason: 'better', challenger: { logLoss: 0.66 }, champion: { logLoss: 0.69 } }) },
+    { id: 3, symbol: 'BTCUSDT', interval: '4h', version: 3, role: 'challenger', created_at: '2026-11-01T00:00:00Z', gate_pass: true, holdout: { promoted: false, reason: 'log loss not better', challenger: { logLoss: 0.67 }, champion: { logLoss: 0.66 } } },
+  ])
+  eq('metrics: registry champion, last promotion, counts', [reg[0].championVersion, reg[0].lastPromotion, reg[0].challengers, reg[0].promotions, reg[0].gatePass], [2, Date.parse('2026-10-31T01:00:00Z'), 3, 2, true])
+  eq('metrics: latest challenger first', [reg[0].recent[0].version, reg[0].recent[0].promoted, reg[0].recent[0].challLogLoss, reg[0].recent[1].champLogLoss], [3, false, 0.67, 0.69])
+}
+
 // ---- server bot: go-live readiness --------------------------------------------------
 {
   const R = await import(src('features/selflearn/readiness.ts'))

@@ -1,0 +1,44 @@
+/* "Model metrics" card (components/neural/ModelMetricsCard.tsx). Own file so it
+   never collides with edits to index.css. Uses the app's theme tokens; tables
+   reuse .nn-tbl / .lab-table, tabs .nn-seg, the market picker .lab-filters. */
+.mm .nn-head{flex-wrap:wrap}
+.mm-ctrl{display:flex;gap:6px;flex-wrap:wrap}
+.mm .up{color:var(--green)}.mm .dn{color:var(--red)}
+.mm-panel{display:flex;flex-direction:column;gap:12px;min-width:0}
+.mm-panel h4{margin:4px 0 0;font-size:var(--text-sm);color:var(--txt)}
+.mm-panel h4 i{font-style:normal;font-weight:400;font-size:var(--text-xs);color:var(--dim);margin-left:6px}
+.mm-filters label{display:flex;align-items:center;gap:6px;font-size:var(--text-xs);color:var(--muted)}
+.mm-tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.mm-tiles>div{padding:10px 12px;border-radius:11px;background:var(--sunk-2);border:1px solid var(--hair-2);display:flex;flex-direction:column;gap:2px;min-width:0}
+.mm-tiles small{font-size:var(--text-xs);color:var(--muted)}
+.mm-tiles b{font-family:var(--mono);font-size:var(--text-md, 15px);color:var(--txt)}
+.mm-tiles em{font-style:normal;font-size:var(--text-xs);color:var(--dim);overflow-wrap:anywhere}
+.mm-two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}
+.mm-col{display:flex;flex-direction:column;gap:10px;min-width:0}
+.mm-cms{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.mm-cm{display:flex;flex-direction:column;gap:4px;min-width:0}
+.mm-cm small{font-size:var(--text-xs);color:var(--muted)}
+.mm-cm table{border-collapse:separate;border-spacing:3px;font-size:var(--text-xs);width:100%}
+.mm-cm th{color:var(--dim);font-weight:600;text-align:left;white-space:nowrap}
+.mm-cm td{padding:8px;border-radius:8px;text-align:center;font-family:var(--mono);font-size:var(--text-sm);color:var(--txt);background:var(--sunk-2);border:1px solid var(--hair-2)}
+.mm-cm td em{display:block;font-style:normal;font-family:'Inter',sans-serif;font-size:var(--text-2xs, 10px);color:var(--dim)}
+.mm-cm td.mm-ok{border-left:3px solid var(--green)}
+.mm-cm td.mm-bad{border-left:3px solid var(--red)}
+.mm-rel{width:100%;max-width:320px;height:auto;align-self:center}
+.mm-grid{stroke:var(--hair-2);stroke-width:1}
+.mm-diag{stroke:var(--dim);stroke-width:1.5;stroke-dasharray:4 4}
+.mm-line{fill:none;stroke:var(--cyan);stroke-width:2}
+.mm-dot{fill:var(--cyan);fill-opacity:.55;stroke:var(--card);stroke-width:2}
+.mm-ax{fill:var(--muted);font-size:9px;font-family:var(--mono)}
+.mm-table tr.mm-empty td{color:var(--dim)}
+.mm-table td.mm-wrap{white-space:normal;min-width:220px}
+.mm-pick{align-self:flex-start}
+.mm-notes{font-size:var(--text-xs);color:var(--muted);line-height:1.5}
+.mm-notes summary{cursor:pointer;color:var(--txt);font-weight:700}
+.mm-notes ul{margin:8px 0 0;padding-left:18px;display:flex;flex-direction:column;gap:4px}
+.mm-notes b{color:var(--txt)}
+@media (max-width:900px){.mm-two{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:560px){
+  .mm-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .mm-cms{grid-template-columns:minmax(0,1fr)}
+}
