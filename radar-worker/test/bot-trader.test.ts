@@ -879,3 +879,81 @@ test('strategy ml (the default) is unchanged on the same bars: the model trades,
   assert.equal((await pg.query('select id from bot_shadow_trades')).rows.length, 0)
   assert.equal(DEFAULT_TRADER.strategy, undefined, 'the default is the model')
 })
+
+// ---- never orphan an open trade ----
+
+/** A model (ML bracket) trade already open on the exchange and in the database. */
+async function openMlTrade(store: BotStore, ex: FakeExchange, symbol: string, barTime: number, price: number, modelId: number | null) {
+  ex.price = price
+  ex.pos = { amt: 1, entry: price }
+  ex.log.push({ id: 900, orderId: 900, time: barTime + 1000, side: 'BUY', price, qty: 1, realizedPnl: 0, commission: 0.05, commissionAsset: 'USDT' })
+  const id = await store.insertTrade({
+    symbol, modelId, mode: 'explore', venue: 'fake', side: 1, openedAt: barTime + 1000, barTime, entry: price, qty: 1,
+    sl: price * 0.97, tp: price * 1.05, atr: price * 0.02, riskUsd: price * 0.03, pWin: 0.5, evR: 0.1, features: {}, entryOrderId: 900,
+  })
+  ex.algo.push({ algoId: 901, side: 'SELL', trigger: price * 0.97 })
+  ex.limits.push({ orderId: 902, side: 'SELL', qty: 1, price: price * 1.05 })
+  await store.setLegs(id, 902, 901)
+  return id
+}
+
+test('manage-only: an open XAU trade outside BOT_SYMBOLS is managed to its time exit, and nothing new opens there', async () => {
+  const { db, pg } = await freshDb()
+  const store = new BotStore(db)
+  const ex = new FakeExchange()
+  const h = trendHist()
+  const step = 14_400_000
+  const barTime = h.hist[h.S].t
+  await openMlTrade(store, ex, 'XAUUSDT', barTime, 100, null)
+  // bot.ts: the symbols with an open trade that are not in BOT_SYMBOLS get a manage-only trader.
+  const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT']
+  assert.deepEqual((await store.openSymbols()).filter((s) => !symbols.includes(s)), ['XAUUSDT'])
+  assert.equal((await store.openRisk()).long, 3, 'its open risk still counts in the heat cap')
+  const cfg: TraderConfig = { ...setup('hybrid').cfg, strategy: 'trend', manageOnly: true, bars: async (_s, _i, n) => h.hist.slice(0, h.S + 1).slice(-n) }
+  const t = new SymbolTrader(ex, store, 'XAUUSDT', cfg)
+  await t.init()
+  assert.equal(t.model, null, 'no model trained')
+  // Inside its horizon: kept, with its own stop and target.
+  await t.tick(true, barTime + 2 * step)
+  assert.equal(ex.pos.amt, 1)
+  assert.ok(await store.openTrade('XAUUSDT'))
+  // Past the bracket's horizon: the time exit closes it.
+  await t.tick(true, Date.now())
+  assert.equal(ex.pos.amt, 0, 'time exit')
+  await t.tick(true, Date.now())
+  const row = (await pg.query<Record<string, unknown>>('select * from bot_trades order by id desc limit 1')).rows[0]
+  assert.equal(row.status, 'closed')
+  assert.equal(row.exit_reason, 'time')
+  // Flat now (the bars show an F1 breakout): it stays idle.
+  for (let k = 0; k < 3; k++) await t.tick(true, Date.now())
+  assert.equal((await pg.query('select id from bot_trades')).rows.length, 1, 'no new real trade')
+  assert.equal((await pg.query('select id from bot_shadow_trades')).rows.length, 0, 'no shadow trade')
+  assert.equal((await pg.query('select id from bot_models')).rows.length, 0, 'no learning, no walk-forward')
+  assert.equal(ex.pos.amt, 0)
+})
+
+test('trend: a model trade open from before the switch keeps its bracket — time exit, no trail, no F1 entry beside it', async () => {
+  const { store, ex, t, pg, h, state } = await trendTrader()
+  const step = 14_400_000
+  const barTime = h.hist[h.S].t
+  const id = await openMlTrade(store, ex, 'BTCUSDT', barTime, h.hist[h.S].c, t.model!.id)
+  const before = (await store.openTrade('BTCUSDT'))!
+  ex.ops = []
+  // Several new bars inside the horizon, on the F1 breakout and run-up.
+  for (let k = 0; k < 4; k++) {
+    state.idx++
+    ex.price = h.hist[state.idx - 1].c
+    await t.tick(true, barTime + (k + 2) * step)
+  }
+  const still = (await store.openTrade('BTCUSDT'))!
+  assert.equal(still.id, id)
+  assert.equal(still.sl, before.sl, 'no trail on a model trade')
+  assert.deepEqual(ex.ops, [], 'no stop replaced')
+  assert.equal((await pg.query('select id from bot_trades')).rows.length, 1, 'no F1 entry while it is open')
+  // Past its horizon: the time exit.
+  await t.tick(true, Date.now())
+  assert.equal(ex.pos.amt, 0)
+  await t.tick(true, Date.now())
+  const row = (await pg.query<Record<string, unknown>>('select * from bot_trades where id = $1', [id])).rows[0]
+  assert.equal(row.exit_reason, 'time')
+})

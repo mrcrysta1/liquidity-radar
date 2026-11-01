@@ -125,8 +125,13 @@ else if (!ONCE) await store.event('info', null, `bot starting on ${ex.base} (${e
 // Each market starts on its own: one whose setup fails (a slow link, or a
 // rejection such as -4067) is skipped and retried with a bounded backoff from
 // the trading loop, while the others trade. It never stalls the run.
+// A market dropped from BOT_SYMBOLS while a trade was open on it is never
+// orphaned: a manage-only trader sees that trade through under the rules it
+// was opened with, then idles (no new real or shadow trades, no learning).
+const ORPHANS = (await store.openSymbols()).filter((s) => !SYMBOLS.includes(s))
+if (ORPHANS.length) await store.event('warn', null, `open trade(s) on ${ORPHANS.join(', ')} outside BOT_SYMBOLS — managed until closed, no new entries there`)
 const setupQueue = new InitQueue(
-  SYMBOLS.map((s) => new SymbolTrader(ex, store, s, cfg)),
+  [...SYMBOLS.map((s) => new SymbolTrader(ex, store, s, cfg)), ...ORPHANS.map((s) => new SymbolTrader(ex, store, s, { ...cfg, manageOnly: true }))],
   {
     onFail: (s, attempt, e, waitMs) =>
       store.event('warn', s, `setup failed (attempt ${attempt}): ${e.message} — skipped for now, other markets keep trading; retrying in ${Math.round(waitMs / 1000)}s`),
@@ -162,7 +167,7 @@ let lastFillsAt = 0
 async function mirrorAccount(now: number): Promise<void> {
   const refresh = now - lastFillsAt >= 60_000
   if (refresh) lastFillsAt = now
-  const snap = await readAccount(ex, SYMBOLS, now, refresh ? undefined : fills)
+  const snap = await readAccount(ex, [...SYMBOLS, ...ORPHANS], now, refresh ? undefined : fills)
   fills = snap.fills
   await store.setState('account', snap)
 }

@@ -340,6 +340,12 @@ export class BotStore {
     return { openPositions: Number(x.open), tradesToday: Number(x.today), lastStopAt: x.last_stop == null ? null : Math.round(Number(x.last_stop)) }
   }
 
+  /** Symbols with an open real trade. */
+  async openSymbols(): Promise<string[]> {
+    const r = await this.db.query(`select distinct symbol from bot_trades where status = 'open' order by symbol`)
+    return r.rows.map((x) => String(x.symbol))
+  }
+
   /** Risk (USDT at the stop) of all open real trades, by direction, across symbols. */
   async openRisk(): Promise<OpenRisk> {
     const r = await this.db.query(`select side, coalesce(sum(risk_usd), 0) as risk from bot_trades where status = 'open' group by side`)

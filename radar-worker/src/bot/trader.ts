@@ -90,6 +90,14 @@ export interface TraderConfig {
   learn: LearnConfig
   /** Account size for the small real-money sizing preview on each plan (USDT). */
   previewEquity?: number
+  /**
+   * A market with an open trade that is no longer in BOT_SYMBOLS: the trade is
+   * managed to its end under the rules it was opened with (bracket and time
+   * exit, or the trend trail and exit rule), then the trader idles. No real or
+   * shadow entries, no learning, no walk-forward. Its open risk still counts in
+   * the heat cap (read from the database).
+   */
+  manageOnly?: boolean
   /** Injected for tests; defaults to Binance spot klines. */
   bars?: (symbol: string, interval: string, count: number) => Promise<Bar[]>
   /** Injected for tests; defaults to the Binance spot ticker (public, unsigned). Prices non-USDT fees. */
@@ -212,6 +220,11 @@ export class SymbolTrader {
 
   async init(): Promise<void> {
     this.rules = await this.ex.rules(this.symbol)
+    if (this.cfg.manageOnly) {
+      // Only an open trade to see through: no margin setup, no model, no walk-forward.
+      this.lastBar = await this.store.getState<number>('lastBar:' + this.symbol, 0)
+      return
+    }
     await this.ex.setup(this.symbol, this.cfg.risk.leverage)
     this.model = await this.champion()
     this.gate = await this.store.getState<GateState | null>(this.gateKey, null)
@@ -405,6 +418,7 @@ export class SymbolTrader {
   }
 
   async tick(canEnter: boolean, now = Date.now()): Promise<void> {
+    if (this.cfg.manageOnly) return this.trade(canEnter, now)
     try {
       await this.trade(canEnter, now)
     } finally {
@@ -415,7 +429,15 @@ export class SymbolTrader {
   }
 
   private async trade(canEnter: boolean, now: number): Promise<void> {
-    if (this.cfg.strategy === 'trend') return this.tradeTrend(canEnter, now)
+    const manageOnly = this.cfg.manageOnly === true
+    // A trend trade is managed by the trend rules (trail, exit rule) even on a manage-only market.
+    if (this.cfg.strategy === 'trend' || manageOnly) {
+      const open = manageOnly ? await this.store.openTrade(this.symbol) : null
+      if (!manageOnly || open?.mode === 'trend') return this.tradeTrend(canEnter, now)
+      if (open) await this.manage(open, await this.ex.position(this.symbol), now)
+      // Flat: idle. Nothing new opens on a market outside BOT_SYMBOLS.
+      return
+    }
     const open = await this.store.openTrade(this.symbol)
     const pos = await this.ex.position(this.symbol)
     if (open) {
@@ -818,6 +840,7 @@ export class SymbolTrader {
       if (this.closing.has(open.id)) return this.flatten(pos)
       trend = open
     } else {
+      if (this.cfg.manageOnly) return
       if ((await this.store.getState<number>('selftest:' + this.symbol, 0)) > now) return
       if (pos.amt !== 0) {
         await this.store.event('error', this.symbol, `unrecorded position ${pos.amt} — closing it`)
@@ -837,12 +860,12 @@ export class SymbolTrader {
     const late = now - (last.t + step) > this.cfg.maxLateMs
     // The exit rule and the trail protect the position: applied however late. A late entry is not taken.
     if (trend) await this.trendBar(trend, pos, b, now)
-    else if (!open) {
+    else if (!open && !this.cfg.manageOnly) {
       if (late) await this.store.event('info', this.symbol, `skipped the ${new Date(last.t + step).toISOString().slice(11, 16)} UTC bar: ${Math.round((now - last.t - step) / 60_000)} min since it closed`)
       else await this.trendEntry(canEnter, now, b)
     }
     // The model decides on the same bars it always has, as a shadow trade.
-    if (!late) await this.mlDecide(canEnter, now, b.slice(-(WARMUP + 80)), true)
+    if (!late && !this.cfg.manageOnly) await this.mlDecide(canEnter, now, b.slice(-(WARMUP + 80)), true)
   }
 
   private noteMark(open: OpenTrade, pos: Position): void {
