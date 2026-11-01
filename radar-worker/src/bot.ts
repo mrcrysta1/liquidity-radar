@@ -17,10 +17,12 @@ import type { AccountFill } from './bot/account.ts'
 import { BotStore } from './bot/store.ts'
 import { DEFAULT_LEARN, DEFAULT_TRADER, INTERVAL_DEFAULTS, INTERVAL_MAX_NOTIONAL_X, SymbolTrader } from './bot/trader.ts'
 import { DEFAULT_SETUP } from './bot/setup.ts'
-import { InitQueue } from './bot/startup.ts'
+import { InitQueue, listedOnly, tickOrder } from './bot/startup.ts'
 import { buildMetrics } from './bot/learning.ts'
-import { INTERVAL_MS } from './bot/data.ts'
+import { BarCache, INTERVAL_MS } from './bot/data.ts'
 import type { TraderConfig } from './bot/trader.ts'
+import { STRATEGIES, parseStrategies, refreshHealth } from './bot/strategies.ts'
+import type { StrategySlot } from './bot/strategies.ts'
 
 if (existsSync('.env')) process.loadEnvFile('.env')
 const env = process.env
@@ -43,6 +45,22 @@ const MODE: TraderConfig['mode'] = env.BOT_MODE === 'explore' || env.BOT_MODE ==
 // trend — research strategy F1 (bot/strategy.ts) places them, long only with a
 // trailing stop, and the model only shadow trades (it keeps learning).
 const STRATEGY: TraderConfig['strategy'] = env.BOT_STRATEGY === 'trend' ? 'trend' : 'ml'
+// BOT_STRATEGIES: several strategies in priority order, each live or shadow,
+// e.g. "f1:live,ml:shadow" (bot/strategies.ts). Overrides BOT_STRATEGY, of
+// which "trend" is the alias f1:live,ml:shadow. A live strategy that leaves its
+// health bands is demoted to shadow and promoted back on fresh evidence (bot/health.ts).
+let SLOTS: StrategySlot[] | null
+try {
+  SLOTS = parseStrategies(env.BOT_STRATEGIES, env.BOT_STRATEGY)
+} catch (e) {
+  console.error((e as Error).message)
+  process.exit(1)
+}
+for (const s of SLOTS ?? []) {
+  const st = STRATEGIES[s.id]
+  if (st.kind === 'rule' && st.interval !== (env.BOT_INTERVAL || DEFAULT_TRADER.interval))
+    console.warn(`strategy ${s.id} decides on ${st.interval} bars, the bot on ${env.BOT_INTERVAL || DEFAULT_TRADER.interval}: it is skipped`)
+}
 // BOT_REAL_SYMBOLS (hybrid, trend): symbols allowed to place real orders; default all of BOT_SYMBOLS.
 const REAL_SYMBOLS = env.BOT_REAL_SYMBOLS ? env.BOT_REAL_SYMBOLS.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean) : SYMBOLS
 const TICK_MS = num(env.BOT_TICK_MS, 15_000)
@@ -89,7 +107,10 @@ const cfg: TraderConfig = {
   },
   mode: MODE,
   strategy: STRATEGY,
+  strategies: SLOTS ?? undefined,
   realSymbols: REAL_SYMBOLS,
+  // Closed bars kept between ticks, shared by every market: fetched when a new bar is due, not every tick.
+  barCache: new BarCache(),
   // Each plan also shows how it would be sized on a small real-money account.
   previewEquity: num(env.BOT_PREVIEW_EQUITY, 100),
   risk: {
@@ -119,8 +140,21 @@ for (let attempt = 1; ; attempt++) {
     await new Promise((r) => setTimeout(r, wait * 1000))
   }
 }
+// Markets the venue does not list or trade (the testnet lists fewer than
+// mainnet) are dropped with a warning, not retried forever.
+{
+  const listed = await ex.tradingSymbols().catch((e) => {
+    console.warn('exchange listing unavailable:', (e as Error).message)
+    return null
+  })
+  const { keep, dropped } = listedOnly(SYMBOLS, listed)
+  if (dropped.length) {
+    SYMBOLS.splice(0, SYMBOLS.length, ...keep)
+    await store.event('warn', null, `not traded on ${ex.base}, left out: ${dropped.join(', ')}`)
+  }
+}
 if (HANDOFF) console.log(new Date().toISOString(), `bot run started · until ${new Date(DEADLINE).toISOString()}`)
-else if (!ONCE) await store.event('info', null, `bot starting on ${ex.base} (${ex.isTestnet ? 'TESTNET' : 'MAINNET'}) · mode ${cfg.mode}${STRATEGY === 'trend' ? ' · strategy F1 trend (model shadow only)' : ''} · ${SYMBOLS.join(', ')} · ${cfg.interval} bars · risk ${(cfg.risk.riskPerTrade * 100).toFixed(2)}%/trade · bracket ${BRACKET.slAtr}/${BRACKET.tpAtr} ATR over ${BRACKET.horizon} bars · max ${cfg.setup.maxOpen} open, ${cfg.setup.maxTradesPerDay}/day${cfg.mode === 'hybrid' ? ` · real: ${REAL_SYMBOLS.join(', ')} · heat ≤ ${(cfg.risk.maxSideRisk! * 100).toFixed(1)}%/side, ${(cfg.risk.maxTotalRisk! * 100).toFixed(1)}% total` : ''}`)
+else if (!ONCE) await store.event('info', null, `bot starting on ${ex.base} (${ex.isTestnet ? 'TESTNET' : 'MAINNET'}) · mode ${cfg.mode}${SLOTS ? ' · strategies ' + SLOTS.map((s) => `${s.id}:${s.state}${s.symbols ? `@${s.symbols.length} markets` : "@all"}`).join(', ') : ''} · ${SYMBOLS.join(', ')} · ${cfg.interval} bars · risk ${(cfg.risk.riskPerTrade * 100).toFixed(2)}%/trade · bracket ${BRACKET.slAtr}/${BRACKET.tpAtr} ATR over ${BRACKET.horizon} bars · max ${cfg.setup.maxOpen} open, ${cfg.setup.maxTradesPerDay}/day${cfg.mode === 'hybrid' ? ` · real: ${REAL_SYMBOLS.join(', ')} · heat ≤ ${(cfg.risk.maxSideRisk! * 100).toFixed(1)}%/side, ${(cfg.risk.maxTotalRisk! * 100).toFixed(1)}% total` : ''}`)
 
 // Each market starts on its own: one whose setup fails (a slow link, or a
 // rejection such as -4067) is skipped and retried with a bounded backoff from
@@ -151,6 +185,7 @@ let lastEquityAt = 0
 let lastEquity: number | null = null
 let balanceMissing = false
 let lastMetricsAt = 0
+let lastHealthAt = 0
 
 // Performance figures for the website (bot_state 'metrics' + bot_metrics), hourly.
 const METRIC_DAYS = 30
@@ -203,9 +238,15 @@ async function tick(): Promise<void> {
     await writeMetrics(now).catch((e) => console.error('metrics', (e as Error).message))
   }
   const canEnter = control.enabled !== false && lim.canEnter
+  // Strategy health (live / probation / shadow), before any trader decides on it.
+  if (SLOTS && (ONCE || now - lastHealthAt >= 60_000)) {
+    lastHealthAt = now
+    await refreshHealth(store, SLOTS, now).catch((e) => console.error('strategy health', (e as Error).message))
+  }
   // Retry any market whose setup failed earlier (each on its own backoff).
   if (!ONCE && setupQueue.pending.length) await setupQueue.run(now)
-  for (const t of setupQueue.ready) {
+  // Alphabetical: same-bar entries compete for the heat cap in symbol order (startup.ts tickOrder).
+  for (const t of tickOrder(setupQueue.ready)) {
     try {
       await t.tick(canEnter, now)
     } catch (e) {

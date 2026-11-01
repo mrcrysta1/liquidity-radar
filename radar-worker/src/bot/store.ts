@@ -1,9 +1,10 @@
-// Postgres persistence for the bot (schema in sql/002_bot.sql, sql/005_bot_learning.sql, sql/006_bot_journal.sql and sql/007_bot_trend.sql).
+// Postgres persistence for the bot (schema in sql/002_bot.sql, sql/005_bot_learning.sql, sql/006_bot_journal.sql, sql/007_bot_trend.sql and sql/008_bot_strategies.sql).
 import type { Db } from '../db.ts'
 import type { Model, Metrics } from './walkforward.ts'
 import type { OpenRisk, RiskState } from './risk.ts'
 import { CAL_PRIOR, featureVector } from './learning.ts'
 import type { Calib, Experience } from './learning.ts'
+import type { Outcome } from './health.ts'
 
 export interface ModelRow {
   id: number
@@ -38,6 +39,8 @@ export interface OpenTrade {
   initialSl: number | null
   trailHigh: number | null
   trailBar: number | null
+  /** The strategy that opened it (008_bot_strategies.sql; null on older rows: 'trend' = F1, else the model). */
+  strategy: string | null
 }
 
 export interface NewTrade {
@@ -66,6 +69,8 @@ export interface NewTrade {
   rrNet?: number
   /** Journal (006_bot_journal.sql): what was planned, before the fill. */
   journal?: TradeJournal
+  /** The strategy that made it (008_bot_strategies.sql). */
+  strategy?: string
 }
 
 /** Journal fields recorded at entry, for real and shadow trades alike. */
@@ -88,25 +93,28 @@ export interface CloseJournal {
   barsHeld?: number | null
 }
 
+/** A shadow trade to record. A rule strategy's has no model, target or time limit (null). */
 export interface NewShadow {
   symbol: string
-  modelId: number
+  modelId: number | null
   side: 1 | -1
   barTime: number
   entry: number
   sl: number
-  tp: number
+  tp: number | null
   atr: number
-  horizon: number
-  pRaw: number
-  pCal: number
-  evR: number
+  horizon: number | null
+  pRaw: number | null
+  pCal: number | null
+  evR: number | null
   costR: number
-  rrNet: number
-  regime: string
+  rrNet: number | null
+  regime: string | null
   rejectReason: string
   features: Record<string, number>
   journal?: TradeJournal
+  /** The strategy that made it (008_bot_strategies.sql); unset = the model. */
+  strategy?: string
 }
 
 export interface OpenShadow {
@@ -115,8 +123,11 @@ export interface OpenShadow {
   barTime: number
   entry: number
   sl: number
-  tp: number
-  horizon: number
+  /** null on a rule strategy's shadow (no target, no time limit). */
+  tp: number | null
+  horizon: number | null
+  /** 'ml' (also older rows) or a rule strategy's id. */
+  strategy: string
 }
 
 /** A closed trade the calibration has not learned from yet. */
@@ -204,7 +215,8 @@ export class BotStore {
               entry, qty, sl, tp, risk_usd, tp_order_id, sl_algo_id, entry_order_id, mode,
               -- 007_bot_trend.sql columns, read so that a database without them still works.
               to_jsonb(t) ->> 'initial_sl' as initial_sl, to_jsonb(t) ->> 'trail_high' as trail_high,
-              extract(epoch from (to_jsonb(t) ->> 'trail_bar')::timestamptz) * 1000 as trail_bar
+              extract(epoch from (to_jsonb(t) ->> 'trail_bar')::timestamptz) * 1000 as trail_bar,
+              to_jsonb(t) ->> 'strategy' as strategy
        from bot_trades t where symbol = $1 and status = 'open' limit 1`,
       [symbol],
     )
@@ -228,6 +240,7 @@ export class BotStore {
       initialSl: x.initial_sl == null ? null : Number(x.initial_sl),
       trailHigh: x.trail_high == null ? null : Number(x.trail_high),
       trailBar: x.trail_bar == null ? null : Math.round(Number(x.trail_bar)),
+      strategy: x.strategy == null ? null : String(x.strategy),
     }
   }
 
@@ -235,9 +248,9 @@ export class BotStore {
     const r = await this.db.query(
       `insert into bot_trades (symbol, model_id, mode, venue, side, status, opened_at, bar_time, entry, qty, sl, tp, atr,
                                risk_usd, p_win, ev_r, features, entry_order_id, p_raw, regime, cost_r, rr_net,
-                               interval, model_version, decision, planned_entry, planned_sl, planned_tp, slippage_bps)
+                               interval, model_version, decision, planned_entry, planned_sl, planned_tp, slippage_bps, strategy)
        values ($1, $2, $3, $4, $5, 'open', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
-               $22, $23, $24, $25, $26, $27, $28) returning id`,
+               $22, $23, $24, $25, $26, $27, $28, $29) returning id`,
       [
         t.symbol,
         t.modelId,
@@ -267,6 +280,7 @@ export class BotStore {
         t.journal?.plannedSl ?? null,
         t.journal?.plannedTp ?? null,
         t.journal?.slippageBps ?? null,
+        t.strategy ?? null,
       ],
     )
     return Number(r.rows[0].id)
@@ -359,8 +373,8 @@ export class BotStore {
   async insertShadow(s: NewShadow): Promise<number> {
     const r = await this.db.query(
       `insert into bot_shadow_trades (symbol, model_id, side, status, bar_time, entry, sl, tp, atr, horizon, p_raw, p_cal, ev_r,
-                                      cost_r, rr_net, regime, reject_reason, features, interval, model_version, decision)
-       values ($1, $2, $3, 'open', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20) returning id`,
+                                      cost_r, rr_net, regime, reject_reason, features, interval, model_version, decision, strategy)
+       values ($1, $2, $3, 'open', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21) returning id`,
       [
         s.symbol,
         s.modelId,
@@ -382,16 +396,19 @@ export class BotStore {
         s.journal?.interval ?? null,
         s.journal?.modelVersion ?? null,
         s.journal?.decision?.slice(0, 2000) ?? null,
+        s.strategy ?? null,
       ],
     )
     return Number(r.rows[0].id)
   }
 
-  async openShadows(symbol: string): Promise<OpenShadow[]> {
+  /** Open shadow trades on a market, oldest first: all, or one strategy's ('ml' includes rows from before strategies were stored). */
+  async openShadows(symbol: string, strategy?: string): Promise<OpenShadow[]> {
     const r = await this.db.query(
-      `select id, side, extract(epoch from bar_time) * 1000 as bar, entry, sl, tp, horizon
-       from bot_shadow_trades where symbol = $1 and status = 'open' order by bar_time`,
-      [symbol],
+      `select id, side, extract(epoch from bar_time) * 1000 as bar, entry, sl, tp, horizon, coalesce(strategy, 'ml') as strategy
+       from bot_shadow_trades where symbol = $1 and status = 'open' and ($2::text is null or coalesce(strategy, 'ml') = $2::text)
+       order by bar_time`,
+      [symbol, strategy ?? null],
     )
     return r.rows.map((x) => ({
       id: Number(x.id),
@@ -399,14 +416,31 @@ export class BotStore {
       barTime: Math.round(Number(x.bar)),
       entry: Number(x.entry),
       sl: Number(x.sl),
-      tp: Number(x.tp),
-      horizon: Number(x.horizon),
+      tp: x.tp == null ? null : Number(x.tp),
+      horizon: x.horizon == null ? null : Number(x.horizon),
+      strategy: String(x.strategy),
     }))
+  }
+
+  /** Every closed real and shadow trade of a strategy, R after costs, oldest first (for health.ts). */
+  async strategyOutcomes(strategy: string): Promise<Outcome[]> {
+    const r = await this.db.query(
+      `select * from (
+         select 'real' as kind, extract(epoch from closed_at) * 1000 as t, r_multiple as r from bot_trades
+         where status = 'closed' and r_multiple is not null
+           and coalesce(strategy, case when mode = 'trend' then 'f1' else 'ml' end) = $1
+         union all
+         select 'shadow', extract(epoch from closed_at) * 1000, r_net from bot_shadow_trades
+         where status = 'closed' and r_net is not null and coalesce(strategy, 'ml') = $1
+       ) u order by t`,
+      [strategy],
+    )
+    return r.rows.map((x) => ({ kind: x.kind === 'real' ? 'real' : 'shadow', t: Math.round(Number(x.t)), r: Number(x.r) }))
   }
 
   async closeShadow(
     id: number,
-    c: { status: 'closed' | 'expired'; closedAt?: number; exit?: number; reason?: 'tp' | 'sl' | 'time'; rGross?: number; rNet?: number } & CloseJournal,
+    c: { status: 'closed' | 'expired'; closedAt?: number; exit?: number; reason?: 'tp' | 'sl' | 'time' | 'trail' | 'signal'; rGross?: number; rNet?: number } & CloseJournal,
   ): Promise<void> {
     // An expired shadow has no outcome: nothing to learn from it.
     await this.db.query(
@@ -443,7 +477,8 @@ export class BotStore {
          from bot_trades where symbol = $1 and status = 'closed' and not learned and mode <> 'trend'
          union all
          select 'shadow', id, side, p_raw, regime, features, exit_reason, r_gross, closed_at
-         from bot_shadow_trades where symbol = $1 and status = 'closed' and not learned
+         -- A rule strategy's shadow has no model probability: nothing to calibrate.
+         from bot_shadow_trades where symbol = $1 and status = 'closed' and not learned and p_raw is not null
        ) u order by closed_at limit $2`,
       [symbol, limit],
     )
@@ -520,7 +555,7 @@ export class BotStore {
                                when r_multiple + coalesce(fees_usd, 0) / nullif(risk_usd, 0) > 0 then 1 else 0 end as y
        from bot_trades where status = 'closed' and p_raw is not null and closed_at >= $1
        union all
-       select p_cal, case when r_gross > 0 then 1 else 0 end from bot_shadow_trades where status = 'closed' and closed_at >= $1`,
+       select p_cal, case when r_gross > 0 then 1 else 0 end from bot_shadow_trades where status = 'closed' and p_cal is not null and closed_at >= $1`,
       [ts(since)],
     )
     const equity = await this.db.query('select equity from bot_equity where t >= $1 order by t', [ts(since)])

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { InitQueue, initBackoffMs } from '../src/bot/startup.ts'
+import { InitQueue, initBackoffMs, listedOnly, tickOrder } from '../src/bot/startup.ts'
 
 const fake = (symbol: string, failures: number, err = 'Binance 400 -4067: Position side cannot be changed if there exists open orders.') => {
   const t = {
@@ -68,4 +68,16 @@ test('a throwing hook (e.g. the database is down) does not break startup', async
   await q.run(0)
   assert.deepEqual(q.ready.map((t) => t.symbol), ['ETHUSDT'])
   assert.deepEqual(q.pending, ['BTCUSDT'])
+})
+
+test('markets the venue does not trade are dropped; an unreadable listing keeps them all', () => {
+  const syms = ['BTCUSDT', 'APTUSDT', 'SUIUSDT', 'ETHUSDT']
+  assert.deepEqual(listedOnly(syms, new Set(['BTCUSDT', 'ETHUSDT', 'SUIUSDT'])), { keep: ['BTCUSDT', 'SUIUSDT', 'ETHUSDT'], dropped: ['APTUSDT'] })
+  assert.deepEqual(listedOnly(syms, null), { keep: syms, dropped: [] })
+})
+
+test('traders act in alphabetical symbol order (the heat-cap tie-break)', () => {
+  const t = ['SOLUSDT', 'AAVEUSDT', 'BTCUSDT', 'ADAUSDT'].map((symbol) => ({ symbol, init: async () => {} }))
+  assert.deepEqual(tickOrder(t).map((x) => x.symbol), ['AAVEUSDT', 'ADAUSDT', 'BTCUSDT', 'SOLUSDT'])
+  assert.equal(t[0].symbol, 'SOLUSDT', 'the input is left as it was')
 })

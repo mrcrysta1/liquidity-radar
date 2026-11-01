@@ -7,6 +7,8 @@
 import type { Outcome } from './onTrack'
 import { buildJournal } from './journal'
 import type { JournalRow } from './journal'
+import { normalizeStrategies } from './botStrategies'
+import type { BotStrategy } from './botStrategies'
 
 const DB_URL = (import.meta.env.VITE_WHALE_DB_URL as string | undefined)?.replace(/\/+$/, '')
 const DB_KEY = import.meta.env.VITE_WHALE_DB_KEY as string | undefined
@@ -98,7 +100,8 @@ export async function loadOutcomes(): Promise<{ real: Outcome[]; shadow: Outcome
       `bot_trades?select=p_win,r_multiple,opened_at,exit_reason&status=eq.closed&mode=in.(gated,explore)&opened_at=gte.${since}&order=opened_at.desc&limit=1000`,
     ),
     rest<Array<{ p_cal: number; r_net: number | null; bar_time: string; exit_reason: string | null }>>(
-      `bot_shadow_trades?select=p_cal,r_net,bar_time,exit_reason&status=eq.closed&bar_time=gte.${since}&order=bar_time.desc&limit=1000`,
+      // The model's shadows only: a rule strategy's (008_bot_strategies.sql) have no win chance.
+      `bot_shadow_trades?select=p_cal,r_net,bar_time,exit_reason&status=eq.closed&p_cal=not.is.null&bar_time=gte.${since}&order=bar_time.desc&limit=1000`,
     ),
   ])
   return {
@@ -127,6 +130,8 @@ export interface BotPlan {
   interval: string
   /** 'trend': strategy F1 — no target, a trailing stop, no model numbers. */
   strategy?: 'ml' | 'trend'
+  /** The rule strategy behind a 'trend' plan ('f1', ...). */
+  strategyId?: string
   side: 'LONG' | 'SHORT'
   entry: number
   sl: number
@@ -143,6 +148,13 @@ export interface BotPlan {
   shadowId?: number
   live?: PlanSize
   small?: PlanSize
+}
+
+/** The strategies the bot runs and their health (bot_state 'strategy:*'), in priority order. */
+export async function loadStrategies(): Promise<BotStrategy[] | null> {
+  if (!SERVER_BOT) return null
+  const rows = await rest<Array<{ value: unknown }>>('bot_state?select=value&key=like.strategy:*')
+  return normalizeStrategies(rows.map((r) => r.value))
 }
 
 /** Latest plan per market, newest first. */

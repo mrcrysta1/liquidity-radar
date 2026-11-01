@@ -59,3 +59,64 @@ export async function closedBars(symbol: string, interval: string, count: number
   const seen = new Set<number>()
   return closed.filter((b) => !seen.has(b.t) && seen.add(b.t)).slice(-count)
 }
+
+type FetchBars = (symbol: string, interval: string, count: number) => Promise<Bar[]>
+
+/**
+ * Closed bars per market, kept between ticks and shared by every trader (a
+ * strategy that reads BTC on every market fetches BTC once). The data host is
+ * asked again only when a new bar should have closed since the last read — and
+ * then only for the bars that are missing, merged onto what is held. If the new
+ * bar is not published yet (or the request fails), the held bars are served and
+ * the next try waits retryMs. With 24 markets on 4h bars: ~1 request per market
+ * per bar, a few more while a bar is late, instead of one per market per tick.
+ */
+export class BarCache {
+  private held = new Map<string, { bars: Bar[]; n: number; triedAt: number }>()
+  /** Requests sent to the data host (for tests and the run log). */
+  requests = 0
+  private fetchBars: FetchBars
+  private retryMs: number
+  private clock: () => number
+
+  constructor(fetchBars: FetchBars = closedBars, o: { retryMs?: number; now?: () => number } = {}) {
+    this.fetchBars = fetchBars
+    this.retryMs = o.retryMs ?? 20_000
+    this.clock = o.now ?? Date.now
+  }
+
+  /** The last `count` closed bars, oldest first. The same array is returned until it changes. */
+  async get(symbol: string, interval: string, count: number): Promise<Bar[]> {
+    const step = INTERVAL_MS[interval]
+    const now = this.clock()
+    // Open time of the latest bar that should have closed by now.
+    const due = Math.floor(now / step) * step - step
+    const key = symbol + '|' + interval
+    const h = this.held.get(key)
+    const cut = (b: Bar[]) => (b.length > count ? b.slice(-count) : b)
+    if (h && h.n >= count) {
+      const last = h.bars[h.bars.length - 1]?.t ?? -Infinity
+      if (last >= due || now - h.triedAt < this.retryMs) return cut(h.bars)
+      // Only the bars since the last one held (plus one for overlap), if that is fewer.
+      const missing = Math.ceil((due - last) / step) + 1
+      try {
+        this.requests++
+        const fresh = await this.fetchBars(symbol, interval, Math.min(h.n, Math.max(2, missing)))
+        h.triedAt = now
+        if (fresh.length) {
+          const first = fresh[0].t
+          const merged = missing < h.n ? [...h.bars.filter((b) => b.t < first), ...fresh] : fresh
+          if (merged[merged.length - 1].t > last) h.bars = merged.slice(-h.n)
+        }
+      } catch (e) {
+        h.triedAt = now
+        if (!h.bars.length) throw e
+      }
+      return cut(h.bars)
+    }
+    this.requests++
+    const bars = await this.fetchBars(symbol, interval, count)
+    this.held.set(key, { bars, n: count, triedAt: now })
+    return bars
+  }
+}

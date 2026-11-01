@@ -1,0 +1,23 @@
+/* "Strategies" card (components/neural/StrategiesCard.tsx). Own file so it
+   never collides with edits to index.css. Uses the app's theme tokens. */
+.sc-sub{font-size:var(--text-xs);color:var(--dim)}
+.sc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+.sc-card{display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:12px;background:var(--sunk-2);border:1px solid var(--hair-2);border-top:3px solid var(--dim);min-width:0}
+.sc-live{border-top-color:var(--green)}
+.sc-prob{border-top-color:var(--amber)}
+.sc-shadow{border-top-color:var(--dim)}
+.sc-top{display:flex;align-items:center;gap:8px;font-size:var(--text-sm);color:var(--txt);min-width:0}
+.sc-name{font-size:var(--text-xs);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.sc-badge{margin-left:auto;font-size:var(--text-xs);font-weight:800;padding:1px 7px;border-radius:6px;background:var(--card);white-space:nowrap}
+.sc-live .sc-badge{color:var(--green)}
+.sc-prob .sc-badge{color:var(--amber)}
+.sc-shadow .sc-badge{color:var(--muted)}
+.sc-nums{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.sc-nums>div{display:flex;flex-direction:column;min-width:0}
+.sc-nums small{font-size:var(--text-xs);color:var(--muted)}
+.sc-nums b{font-family:var(--mono);font-size:var(--text-sm);color:var(--txt);white-space:nowrap}
+.sc-nums em{font-style:normal;font-size:var(--text-xs);color:var(--dim);white-space:nowrap}
+.sc .up{color:var(--green)}.sc .dn{color:var(--red)}
+.sc-why{margin:0;font-size:var(--text-xs);color:var(--muted);line-height:1.4}
+.sc-note{font-size:var(--text-xs);color:var(--dim);line-height:1.4}
+@media (max-width:420px){.sc-nums{grid-template-columns:repeat(2,minmax(0,1fr))}}

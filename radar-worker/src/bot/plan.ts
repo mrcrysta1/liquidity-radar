@@ -33,6 +33,8 @@ export interface TradePlan {
   interval: string
   /** 'trend': strategy F1 (no model numbers, no target, a trailing stop). Unset: the model. */
   strategy?: 'ml' | 'trend'
+  /** The rule strategy behind a 'trend' plan ('f1', ...). */
+  strategyId?: string
   side: 'LONG' | 'SHORT'
   entry: number
   /** The stop in force (a trend trade's current trailed stop). */

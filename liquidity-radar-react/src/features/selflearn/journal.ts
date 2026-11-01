@@ -43,6 +43,8 @@ export interface JournalRow {
   modelVersion: number | null
   interval: string | null
   mode: string | null
+  /** The strategy that made it ('f1', 'ml', ...; 008_bot_strategies.sql), null on older rows. */
+  strategy: string | null
   /** The model's summary at entry. */
   decision: string | null
   /** Shadow: why it was not a real trade. Real: notes (errors). */
@@ -121,6 +123,7 @@ export function realRow(x: Raw, versions: Map<number, number> = new Map()): Jour
     modelVersion: num(x.model_version) ?? (modelId != null ? (versions.get(modelId) ?? null) : null),
     interval: str(x.interval),
     mode: str(x.mode),
+    strategy: str(x.strategy),
     decision: str(x.decision),
     reason: str(x.notes),
     features: feats(x.features),
@@ -169,6 +172,7 @@ export function shadowRow(x: Raw, versions: Map<number, number> = new Map()): Jo
     modelVersion: num(x.model_version) ?? (modelId != null ? (versions.get(modelId) ?? null) : null),
     interval,
     mode: 'shadow',
+    strategy: str(x.strategy),
     decision: str(x.decision),
     reason: str(x.reject_reason),
     features: feats(x.features),
