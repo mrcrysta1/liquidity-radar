@@ -155,6 +155,30 @@ bot refuses to start. There is no mainnet override.
   trade whose reject reason says why (gate, EV, heat, not listed); up to
   horizon + 1 shadows per symbol are open at once, so none is dropped.
 
+**Trend strategy F1** (`BOT_STRATEGY=trend`, `src/bot/strategy.ts`, `sql/007_bot_trend.sql`)
+
+With `BOT_STRATEGY=trend` real orders come from fixed rules, not from the model;
+the model keeps deciding on every bar as **shadow trades only**, so calibration
+and the challenger cycle go on. Long only, 4h bars, BTC / ETH / SOL / BNB:
+- **Entry:** at a 4h close, close > EMA(300) and close > the highest high of the
+  previous 20 bars → market buy right after the close.
+- **Stop:** an exchange-side STOP_MARKET at entry − 3 × ATR14 (signal bar). No target.
+- **Trail:** at each 4h close, stop = max(stop, highest high since entry − 4 × ATR14);
+  it never moves down. The new stop is placed first, then the old one cancelled
+  by id; if placing fails the old stop stays and the next bar retries.
+- **Exit:** at a 4h close below the lowest low of the previous 10 bars, or not
+  above EMA(300) → market close. No time exit.
+- **Risk:** 0.5% of equity at the initial stop; the daily halt, drawdown kill
+  switch, portfolio heat cap (1.5% per side) and `BOT_REAL_SYMBOLS` apply, and the
+  round-trip cost against the 3 ATR stop must be ≤ `BOT_MAX_COST_R`. The model's
+  walk-forward gate and R:R rule do not apply (there is no target).
+- Trades are stored with mode `trend`, `tp` null and `sl` = the current stop;
+  exit reasons `sl` (initial stop), `trail` (raised stop) and `signal` (rule exit).
+- **Research** (Binance spot 4h, fees + slippage + funding, portfolio rules as above):
+  2019 – Jan 2026 +0.376R/trade, PF 2.12, 615 trades; sealed holdout Feb – Nov 2026
+  +0.179R/trade, PF 1.48, +4.5%, 63 trades — positive but **not significant** (t = 0.66).
+  `test/bot-strategy.test.ts` checks the live code against the research simulation.
+
 **How it trades**
 1. A market entry.
 2. An **exchange-side** STOP_MARKET for the whole position, so the stop works
@@ -179,7 +203,7 @@ the database doesn't know about are closed.
 - Hourly equity, and an event log explaining each decision.
 
 **Setup**
-1. Run `sql/002_bot.sql`, then `sql/005_bot_learning.sql` and `sql/006_bot_journal.sql` (trade journal), in Supabase.
+1. Run `sql/002_bot.sql`, then `sql/005_bot_learning.sql`, `sql/006_bot_journal.sql` (trade journal) and `sql/007_bot_trend.sql` (trend strategy), in Supabase.
 2. Put your testnet keys in `.env` (Binance → Demo Trading → API Management).
 3. Choose the mode: `BOT_MODE=gated` (default, trades only a proven model),
    `BOT_MODE=explore` (trades its best idea anyway, to gather real testnet fills) or

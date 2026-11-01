@@ -12,11 +12,12 @@ import type { Exchange, TraderConfig } from '../src/bot/trader.ts'
 import { DEFAULT_WF } from '../src/bot/walkforward.ts'
 import { DEFAULT_SETUP } from '../src/bot/setup.ts'
 import type { TradePlan } from '../src/bot/plan.ts'
+import { highPrev, trendIndicators, trendSignal } from '../src/bot/strategy.ts'
 
 async function freshDb() {
   const pg = new PGlite()
   await pg.exec('create role anon;')
-  for (const f of ['001_whales.sql', '002_bot.sql', '005_bot_learning.sql', '006_bot_journal.sql']) await pg.exec(readFileSync(new URL('../sql/' + f, import.meta.url), 'utf8'))
+  for (const f of ['001_whales.sql', '002_bot.sql', '005_bot_learning.sql', '006_bot_journal.sql', '007_bot_trend.sql', '007_bot_trend.sql']) await pg.exec(readFileSync(new URL('../sql/' + f, import.meta.url), 'utf8'))
   const q = (text: string, params?: unknown[]) => pg.query(text, params as never)
   return { db: { query: q, connect: async () => ({ query: q, release() {} }), end: async () => {} } as unknown as Db, pg }
 }
@@ -77,7 +78,14 @@ class FakeExchange implements Exchange {
     if (this.failStop) throw new Error('simulated rejection')
     const algoId = this.id++
     this.algo.push({ algoId, side, trigger: Number(triggerPrice) })
+    this.ops.push('place:' + algoId)
     return { algoId }
+  }
+  /** Stop placements and single cancels, in order (the trend trail must place before it cancels). */
+  ops: string[] = []
+  async cancelAlgo(_s: string, algoId: number) {
+    this.ops.push('cancel:' + algoId)
+    this.algo = this.algo.filter((a) => a.algoId !== algoId)
   }
   async takeProfitLimit(_s: string, side: 'BUY' | 'SELL', quantity: string, price: string) {
     if (this.rejectTp) throw Object.assign(new Error('Binance 400 -5022: post only order will be rejected'), { code: -5022 })
@@ -643,4 +651,231 @@ test('explore and gated ignore the heat cap and the real-symbol list (hybrid onl
     const row = (await db.query('select mode from bot_trades where id = $1', [open!.id])).rows[0] as { mode: string }
     assert.equal(row.mode, mode)
   }
+})
+
+// ---- trend strategy (BOT_STRATEGY=trend): F1 places the real orders, the model only shadow trades ----
+
+/**
+ * 1100 bars of a noisy uptrend (or downtrend), then: a flat stretch, an F1
+ * breakout bar (index S), a run-up, a tight range, and a close below the range.
+ */
+function trendHist(up = true) {
+  let s = 7
+  const r = () => (s = (s * 1103515245 + 12345) % 2147483648) / 2147483648
+  const raw: Array<{ o: number; c: number }> = []
+  let p = 100
+  const bar = (c: number) => {
+    raw.push({ o: p, c })
+    p = c
+  }
+  for (let i = 0; i < 1100; i++) bar(p * (1 + (up ? 0.0008 : -0.0008) + (r() - 0.5) * 0.01))
+  for (let i = 0; i < 25; i++) bar(p * (1 + (i % 2 ? 0.002 : -0.002)))
+  const S = raw.length
+  bar(p * 1.03)
+  for (let i = 0; i < 8; i++) bar(p * 1.015)
+  const range = raw.length
+  for (let i = 0; i < 12; i++) bar(p * (1 + (i % 2 ? 0.001 : -0.001)))
+  const brk = raw.length
+  const lo = Math.min(...raw.slice(brk - 10).map((x) => Math.min(x.o, x.c) * 0.997))
+  bar(lo * 0.995)
+  for (let i = 0; i < 3; i++) bar(p)
+  const step = 14_400_000
+  const t0 = Date.now() - raw.length * step
+  const hist: Bar[] = raw.map((x, i) => ({ t: t0 + i * step, o: x.o, h: Math.max(x.o, x.c) * 1.003, l: Math.min(x.o, x.c) * 0.997, c: x.c, v: 100, tb: 50 }))
+  return { hist, S, range, brk }
+}
+
+async function trendTrader(over: Partial<TraderConfig> = {}, up = true) {
+  const { db, pg } = await freshDb()
+  const store = new BotStore(db)
+  const ex = new FakeExchange()
+  const h = trendHist(up)
+  const state = { idx: h.S + 1 }
+  const base = setup('hybrid').cfg
+  const cfg: TraderConfig = { ...base, strategy: 'trend', bars: async (_s, _i, n) => h.hist.slice(0, state.idx).slice(-n), ...over }
+  const t = new SymbolTrader(ex, store, 'BTCUSDT', cfg)
+  await t.init()
+  // Hybrid's walk-forward gate judges the model; it must not stop F1.
+  t.gate = { ...t.gate!, pass: false }
+  ex.price = h.hist[state.idx - 1].c
+  const row = async () => (await pg.query<Record<string, unknown>>('select * from bot_trades order by id desc limit 1')).rows[0]
+  /** The next bar closes: the price moves to its close (stops trigger), then a tick. */
+  const nextBar = async () => {
+    state.idx++
+    ex.move(h.hist[state.idx - 1].c)
+    await t.tick(true, Date.now())
+  }
+  return { store, ex, pg, t, h, state, row, nextBar }
+}
+
+test('trend: the scenario has an F1 signal at the breakout bar only, and none below EMA(300)', () => {
+  const { hist, S } = trendHist()
+  const at = (k: number) => {
+    const b = hist.slice(0, k + 1)
+    return trendSignal(b, trendIndicators(b), k)
+  }
+  assert.equal(at(S), true, 'breakout above the 20-bar high and EMA(300)')
+  assert.equal(at(S - 1), false, 'flat stretch: no breakout')
+  const down = trendHist(false)
+  const b = down.hist.slice(0, down.S + 1)
+  assert.ok(b[down.S].c > highPrev(b, down.S, 20), 'the downtrend breakout clears its 20-bar high')
+  assert.equal(trendSignal(b, trendIndicators(b), down.S), false, '... but is below EMA(300)')
+})
+
+test('trend: a breakout opens a long with an exchange stop only (no target), even with the model gate failed', async () => {
+  const { store, ex, t, row, h } = await trendTrader()
+  await t.tick(true, Date.now())
+  const open = await store.openTrade('BTCUSDT')
+  assert.ok(open, 'F1 trade opened')
+  assert.equal(open!.mode, 'trend')
+  assert.equal(open!.side, 1)
+  assert.equal(open!.tp, null)
+  assert.equal(ex.algo.length, 1, 'one stop on the exchange')
+  assert.equal(ex.limits.length, 0, 'no take-profit order')
+  assert.ok(ex.pos.amt > 0)
+  const b = h.hist.slice(0, h.S + 1)
+  const atr = trendIndicators(b).atr[h.S]
+  assert.ok(Math.abs(open!.entry - 3 * atr - open!.sl) < 0.011, `stop 3 ATR below the fill: ${open!.sl} vs ${open!.entry - 3 * atr}`)
+  assert.equal(open!.initialSl, open!.sl)
+  assert.equal(ex.algo[0].trigger, open!.sl)
+  // 0.5% at the planned stop distance; the stop's tick rounding moves it a hair.
+  assert.ok(Math.abs(open!.riskUsd / 10_000 - 0.005) < 0.00002, 'risk 0.5%: ' + open!.riskUsd)
+  const r = await row()
+  assert.equal(r.model_id, null)
+  assert.equal(r.p_win, null)
+  assert.equal(r.planned_tp, null)
+  assert.match(String(r.decision), /^F1: close/)
+  const plan = await store.getState<TradePlan | null>('plan:BTCUSDT', null)
+  assert.equal(plan?.strategy, 'trend')
+  assert.equal(plan?.status, 'opened')
+  assert.equal(plan?.side, 'LONG')
+  assert.equal(plan?.tp, null)
+  assert.equal(plan?.sl, open!.sl)
+  assert.equal(plan?.tradeId, open!.id)
+})
+
+test('trend: no entry below EMA(300), even on a 20-bar breakout', async () => {
+  const { store, ex, t } = await trendTrader({}, false)
+  await t.tick(true, Date.now())
+  assert.equal(await store.openTrade('BTCUSDT'), null)
+  assert.equal(ex.pos.amt, 0)
+  const plan = await store.getState<TradePlan | null>('plan:BTCUSDT', null)
+  assert.equal(plan?.status, 'skipped')
+  assert.match(plan!.reasons[0], /no F1 entry: close .* not above EMA\(300\)/)
+})
+
+test('trend: the trail raises the stop (new one placed before the old is cancelled), never lowers it; the exit rule closes', async () => {
+  const { store, ex, t, h, state, row, nextBar } = await trendTrader()
+  await t.tick(true, Date.now())
+  const first = (await store.openTrade('BTCUSDT'))!
+  let raised = 0
+  let last = first
+  while (state.idx < h.brk) {
+    const before = (await store.openTrade('BTCUSDT'))!
+    ex.ops = []
+    await nextBar()
+    const now = (await store.openTrade('BTCUSDT'))!
+    assert.ok(now, 'still open at bar ' + state.idx)
+    assert.ok(now.sl >= before.sl, `never lower: ${before.sl} → ${now.sl}`)
+    if (now.sl > before.sl) {
+      raised++
+      assert.deepEqual(ex.ops, ['place:' + now.slAlgoId, 'cancel:' + before.slAlgoId], 'new stop first, then the old one cancelled')
+    } else assert.deepEqual(ex.ops, [])
+    assert.equal(ex.algo.length, 1, 'exactly one stop on the exchange')
+    assert.equal(ex.algo[0].trigger, now.sl)
+    assert.ok(now.trailHigh! >= Math.max(...h.hist.slice(h.S + 1, state.idx).map((x) => x.h)) - 1e-9, 'highest high since entry')
+    last = now
+  }
+  assert.ok(raised >= 3, 'raised on the run-up: ' + raised)
+  assert.ok(last.sl > first.entry, 'trailed into profit')
+  // The close below the 10-bar low (still above the stop): a market close by the rule.
+  await nextBar()
+  assert.equal(ex.pos.amt, 0, 'flattened by the exit rule')
+  await t.tick(true, Date.now())
+  const r = await row()
+  assert.equal(r.status, 'closed')
+  assert.equal(r.exit_reason, 'signal')
+  assert.ok(Number(r.r_multiple) > 0, 'a winner: ' + r.r_multiple)
+  assert.ok(Number(r.mfe_r) > 1, 'MFE in R of the initial stop: ' + r.mfe_r)
+  assert.equal(ex.algo.length, 0, 'stop cancelled after the close')
+})
+
+test('trend: a raised stop that cannot be placed keeps the old one, and the next bar catches up', async () => {
+  const { store, ex, t, state, h, nextBar } = await trendTrader()
+  await t.tick(true, Date.now())
+  const first = (await store.openTrade('BTCUSDT'))!
+  ex.failStop = true
+  while (state.idx < h.range) await nextBar()
+  let open = (await store.openTrade('BTCUSDT'))!
+  assert.equal(open.sl, first.sl, 'old stop kept')
+  assert.deepEqual(ex.algo.map((a) => a.algoId), [first.slAlgoId], 'and still on the exchange')
+  ex.failStop = false
+  await nextBar()
+  open = (await store.openTrade('BTCUSDT'))!
+  assert.ok(open.sl > first.sl, 'raised once placing works again')
+  assert.deepEqual(ex.algo.map((a) => a.algoId), [open.slAlgoId])
+})
+
+test('trend: a stop hit closes as sl (initial stop) or trail (raised stop)', async () => {
+  {
+    const { store, ex, t, row } = await trendTrader()
+    await t.tick(true, Date.now())
+    const open = (await store.openTrade('BTCUSDT'))!
+    ex.move(open.sl - 0.01)
+    assert.equal(ex.pos.amt, 0)
+    await t.tick(true, Date.now())
+    const r = await row()
+    assert.equal(r.exit_reason, 'sl')
+    assert.ok(Number(r.r_multiple) < -1 && Number(r.r_multiple) > -1.2, 'about -1R: ' + r.r_multiple)
+  }
+  {
+    const { store, ex, t, row, state, h, nextBar } = await trendTrader()
+    await t.tick(true, Date.now())
+    while (state.idx < h.range) await nextBar()
+    const open = (await store.openTrade('BTCUSDT'))!
+    assert.ok(open.sl > open.initialSl!)
+    ex.move(open.sl - 0.01)
+    await t.tick(true, Date.now())
+    const r = await row()
+    assert.equal(r.exit_reason, 'trail')
+    assert.ok(Number(r.r_multiple) > 0, 'trailed stop in profit: ' + r.r_multiple)
+  }
+})
+
+test('trend: the portfolio heat cap still applies', async () => {
+  const { store, ex, t } = await trendTrader({ setup: { ...setup('hybrid').cfg.setup, maxOpen: 10 } })
+  await openElsewhere(store, t.model!.id, 3, 50)
+  await t.tick(true, Date.now())
+  assert.equal(await store.openTrade('BTCUSDT'), null)
+  assert.equal(ex.pos.amt, 0, 'no order sent')
+  const plan = await store.getState<TradePlan | null>('plan:BTCUSDT', null)
+  assert.equal(plan?.status, 'skipped')
+  assert.match(plan!.reasons[0], /^portfolio heat: long risk 1\.50% open/)
+})
+
+test('trend: the model keeps deciding on every bar as shadow trades only, beside the F1 position', async () => {
+  const { store, ex, t, pg, nextBar } = await trendTrader({ learn: { ...DEFAULT_TRADER.learn, shadowMaxOpen: 20 } })
+  await t.tick(true, Date.now())
+  assert.ok(await store.openTrade('BTCUSDT'))
+  for (let k = 0; k < 3; k++) await nextBar()
+  const sh = (await pg.query<{ reject_reason: string }>('select reject_reason from bot_shadow_trades order by id')).rows
+  assert.equal(sh.length, 4, 'one shadow per bar, while the F1 trade is open')
+  assert.ok(sh.every((s) => /trend strategy: the model trades on paper only/.test(s.reject_reason)), sh.map((s) => s.reject_reason).join(' | '))
+  const real = (await pg.query<{ mode: string }>('select mode from bot_trades')).rows
+  assert.deepEqual(real.map((x) => x.mode), ['trend'], 'the model placed no real order')
+  assert.equal(ex.limits.length, 0)
+  // The model's idea does not overwrite F1's plan.
+  assert.equal((await store.getState<TradePlan | null>('plan:BTCUSDT', null))?.strategy, 'trend')
+})
+
+test('strategy ml (the default) is unchanged on the same bars: the model trades, with a target', async () => {
+  const { store, ex, t, pg } = await trendTrader({ strategy: 'ml', mode: 'explore' })
+  await t.tick(true, Date.now())
+  const open = await store.openTrade('BTCUSDT')
+  assert.ok(open, 'model trade opened')
+  assert.equal(open!.mode, 'explore')
+  assert.equal(typeof open!.tp, 'number')
+  assert.equal(ex.limits.length, 1, 'target on the book')
+  assert.equal((await pg.query('select id from bot_shadow_trades')).rows.length, 0)
+  assert.equal(DEFAULT_TRADER.strategy, undefined, 'the default is the model')
 })

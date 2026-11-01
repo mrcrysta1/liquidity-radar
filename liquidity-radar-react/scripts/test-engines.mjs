@@ -2750,6 +2750,9 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   near('journal: avg R', st.avgR, (1.4 - 1.05 - 1.03) / 3, 1e-9)
   eq('journal: by market, most trades first', st.bySymbol.map((g) => [g.symbol, g.n, g.wins]), [['BTCUSDT', 2, 1], ['ETHUSDT', 1, 0]])
   eq('journal: empty stats are zeros', [J.journalStats([]).n, J.journalStats([]).winRate, J.journalStats([]).avgR], [0, 0, 0])
+  // A trend-strategy trade: no target, no model numbers.
+  const [tr7] = J.buildJournal([{ id: 7, symbol: 'BTCUSDT', side: 1, status: 'closed', opened_at: '2026-11-01T08:00:00Z', closed_at: '2026-11-02T08:00:00Z', entry: 100, sl: 104, tp: null, exit: 104, exit_reason: 'trail', r_multiple: 0.9, p_win: null, ev_r: null, mode: 'trend', model_id: null }], [], [])
+  eq('journal: trend trade keeps no target and no model numbers', [Number.isNaN(tr7.tp), tr7.pWin, tr7.evR, tr7.modelId, tr7.exitReason, tr7.mode], [true, null, null, null, 'trail', 'trend'])
 }
 
 // ---- server bot on the charts: symbols, markers, Entry / SL / TP --------------------
@@ -2804,6 +2807,11 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('botchart: plan whose trade closed is stale', botLevels([win], { ...plan, status: 'opened', tradeId: 1 }, 'BTCUSDT'), [])
   eq('botchart: skipped plan draws nothing', botLevels([], { ...plan, status: 'skipped' }, 'BTCUSDT'), [])
   eq('botchart: plan for another market ignored', botLevels([], { ...plan, symbol: 'ETHUSDT' }, 'BTCUSDT'), [])
+  // Trend strategy: no target (tp null) → entry and the trailed stop only.
+  const trend = tr({ id: 7, status: 'open', closed_at: null, exit: null, r_multiple: null, pnl_usd: null, exit_reason: null, tp: null, p_win: null, mode: 'trend' })
+  eq('botchart: a trade without a target draws no TP line', botLevels([trend], null, 'BTCUSDT').map((l) => l.title), ['Bot L entry', 'Bot L SL'])
+  eq('botchart: nor does a plan without one', botLevels([], { ...plan, tp: null }, 'BTCUSDT').map((l) => l.title), ['Paper entry', 'Paper SL'])
+  ok('botchart: key changes when the trail raises the stop', botOverlayKey([trend], null, 'BTCUSDT') !== botOverlayKey([{ ...trend, sl: 99 }], null, 'BTCUSDT'))
   const k1 = botOverlayKey([open, other], plan, 'BTCUSDT')
   eq('botchart: key ignores other markets', botOverlayKey([open], plan, 'BTCUSDT'), k1)
   ok('botchart: key changes when a trade closes', botOverlayKey([{ ...open, status: 'closed', closed_at: iso(5 * H) }], plan, 'BTCUSDT') !== k1)

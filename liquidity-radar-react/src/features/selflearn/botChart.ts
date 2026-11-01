@@ -111,10 +111,11 @@ export interface BotLevel {
  */
 export function botLevels(trades: BotTrade[], plan: BotPlan | null, sym: string): BotLevel[] {
   const out: BotLevel[] = []
-  const add = (pre: string, entry: number, sl: number, tp: number) => {
+  const add = (pre: string, entry: number, sl: number, tp: number | null) => {
     if (Number.isFinite(entry)) out.push({ price: entry, color: BOT_COLORS.entry, title: pre + ' entry' })
     if (Number.isFinite(sl)) out.push({ price: sl, color: BOT_COLORS.loss, title: pre + ' SL' })
-    if (Number.isFinite(tp)) out.push({ price: tp, color: BOT_COLORS.win, title: pre + ' TP' })
+    // No target (trend strategy): no TP line.
+    if (tp != null && Number.isFinite(tp)) out.push({ price: tp, color: BOT_COLORS.win, title: pre + ' TP' })
   }
   const mine = trades.filter((t) => sameMarket(t.symbol, sym))
   const open = mine.filter((t) => t.status === 'open')

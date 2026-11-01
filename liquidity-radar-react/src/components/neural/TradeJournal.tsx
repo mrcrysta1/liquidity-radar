@@ -16,7 +16,7 @@ import { NI } from './icons'
 import './TradeJournal.css'
 
 const PER = 40
-const EXIT: Record<string, string> = { tp: 'target', sl: 'stop', time: 'time exit', manual: 'manual', error: 'error' }
+const EXIT: Record<string, string> = { tp: 'target', sl: 'stop', trail: 'trailing stop', signal: 'exit rule', time: 'time exit', manual: 'manual', error: 'error' }
 const when = (t: number) => new Date(t).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 const dash = '—'
 const px = (v: number | null) => (v == null || !isFinite(v) ? dash : pfmt(v))

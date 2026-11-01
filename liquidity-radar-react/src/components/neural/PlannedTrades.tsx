@@ -51,13 +51,18 @@ function Plan({ p }: { p: BotPlan }) {
       <div className="pt-levels">
         <div><small>Entry</small><b>{pfmt(p.entry)}</b></div>
         <div><small>Stop-loss</small><b className="dn">{pfmt(p.sl)}</b><em>{move(p.entry, p.sl).toFixed(2)}%</em></div>
-        <div><small>Take-profit</small><b className="up">{pfmt(p.tp)}</b><em>{move(p.entry, p.tp) >= 0 ? '+' : ''}{move(p.entry, p.tp).toFixed(2)}%</em></div>
+        {p.tp != null ? (
+          <div><small>Take-profit</small><b className="up">{pfmt(p.tp)}</b><em>{move(p.entry, p.tp) >= 0 ? '+' : ''}{move(p.entry, p.tp).toFixed(2)}%</em></div>
+        ) : (
+          <div><small>Take-profit</small><b>—</b><em>{p.strategy === 'trend' ? 'trailing stop' : ''}</em></div>
+        )}
       </div>
       <div className="pt-nums">
-        <span>Win chance <b>{pct(p.pWin)}</b></span>
-        <span>Expected <b className={p.evR >= 0 ? 'up' : 'dn'}>{p.evR >= 0 ? '+' : ''}{p.evR.toFixed(2)}R</b></span>
-        <span>R:R <b>{p.rr.toFixed(2)}</b></span>
-        <span>Fees <b>{p.costR.toFixed(2)}R</b></span>
+        {p.strategy === 'trend' && <span>Strategy <b>F1 trend</b></span>}
+        {p.pWin != null && <span>Win chance <b>{pct(p.pWin)}</b></span>}
+        {p.evR != null && <span>Expected <b className={p.evR >= 0 ? 'up' : 'dn'}>{p.evR >= 0 ? '+' : ''}{p.evR.toFixed(2)}R</b></span>}
+        {p.rr != null && <span>R:R <b>{p.rr.toFixed(2)}</b></span>}
+        {Number.isFinite(p.costR) && <span>Fees <b>{p.costR.toFixed(2)}R</b></span>}
       </div>
       {p.reasons.length > 0 && <p className="pt-why">Why not real: {p.reasons.join('; ')}</p>}
       <Sizing label="Demo account" s={p.live} />

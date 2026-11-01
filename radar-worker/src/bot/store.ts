@@ -1,4 +1,4 @@
-// Postgres persistence for the bot (schema in sql/002_bot.sql, sql/005_bot_learning.sql and sql/006_bot_journal.sql).
+// Postgres persistence for the bot (schema in sql/002_bot.sql, sql/005_bot_learning.sql, sql/006_bot_journal.sql and sql/007_bot_trend.sql).
 import type { Db } from '../db.ts'
 import type { Model, Metrics } from './walkforward.ts'
 import type { OpenRisk, RiskState } from './risk.ts'
@@ -23,19 +23,28 @@ export interface OpenTrade {
   barTime: number
   entry: number
   qty: number
+  /** The stop in force (a trend trade's trailed stop). */
   sl: number
-  tp: number
+  /** null: no target (trend strategy). */
+  tp: number | null
   riskUsd: number
   tpOrderId: number | null
   slAlgoId: number | null
   /** The market order that opened the trade (null on rows from before it was stored). */
   entryOrderId: number | null
+  /** 'gated' | 'explore' (the model's trades) or 'trend' (strategy F1). */
+  mode: string
+  /** Trend trades (007_bot_trend.sql): the stop at entry, the highest high since entry and the last bar the trail saw. */
+  initialSl: number | null
+  trailHigh: number | null
+  trailBar: number | null
 }
 
 export interface NewTrade {
   symbol: string
-  modelId: number
-  mode: 'gated' | 'explore'
+  /** null for a trend trade (made by rules, not by a model). */
+  modelId: number | null
+  mode: 'gated' | 'explore' | 'trend'
   venue: string
   side: 1 | -1
   openedAt: number
@@ -43,11 +52,11 @@ export interface NewTrade {
   entry: number
   qty: number
   sl: number
-  tp: number
+  tp: number | null
   atr: number
   riskUsd: number
-  pWin: number
-  evR: number
+  pWin: number | null
+  evR: number | null
   features: Record<string, number>
   entryOrderId: number
   /** Model probability before calibration (pWin is after). */
@@ -68,7 +77,7 @@ export interface TradeJournal {
   /** Real trades only: the planned entry (decision bar close), stop and target, and the fill's slippage. */
   plannedEntry?: number
   plannedSl?: number
-  plannedTp?: number
+  plannedTp?: number | null
   slippageBps?: number | null
 }
 
@@ -192,8 +201,11 @@ export class BotStore {
   async openTrade(symbol: string): Promise<OpenTrade | null> {
     const r = await this.db.query(
       `select id, symbol, side, extract(epoch from opened_at) * 1000 as opened, extract(epoch from bar_time) * 1000 as bar,
-              entry, qty, sl, tp, risk_usd, tp_order_id, sl_algo_id, entry_order_id
-       from bot_trades where symbol = $1 and status = 'open' limit 1`,
+              entry, qty, sl, tp, risk_usd, tp_order_id, sl_algo_id, entry_order_id, mode,
+              -- 007_bot_trend.sql columns, read so that a database without them still works.
+              to_jsonb(t) ->> 'initial_sl' as initial_sl, to_jsonb(t) ->> 'trail_high' as trail_high,
+              extract(epoch from (to_jsonb(t) ->> 'trail_bar')::timestamptz) * 1000 as trail_bar
+       from bot_trades t where symbol = $1 and status = 'open' limit 1`,
       [symbol],
     )
     const x = r.rows[0]
@@ -207,11 +219,15 @@ export class BotStore {
       entry: Number(x.entry),
       qty: Number(x.qty),
       sl: Number(x.sl),
-      tp: Number(x.tp),
+      tp: x.tp == null ? null : Number(x.tp),
       riskUsd: Number(x.risk_usd),
       tpOrderId: x.tp_order_id == null ? null : Number(x.tp_order_id),
       slAlgoId: x.sl_algo_id == null ? null : Number(x.sl_algo_id),
       entryOrderId: x.entry_order_id == null ? null : Number(x.entry_order_id),
+      mode: String(x.mode),
+      initialSl: x.initial_sl == null ? null : Number(x.initial_sl),
+      trailHigh: x.trail_high == null ? null : Number(x.trail_high),
+      trailBar: x.trail_bar == null ? null : Math.round(Number(x.trail_bar)),
     }
   }
 
@@ -260,9 +276,17 @@ export class BotStore {
     await this.db.query('update bot_trades set tp_order_id = $2, sl_algo_id = $3 where id = $1', [id, tpOrderId, slAlgoId])
   }
 
+  /** A trend trade's trailing state: the stop in force and its exchange order, the highest high since entry, the last bar seen. */
+  async setTrail(id: number, t: { sl: number; slAlgoId: number | null; high: number | null; bar: number; initialSl?: number }): Promise<void> {
+    await this.db.query(
+      'update bot_trades set sl = $2, sl_algo_id = $3, trail_high = $4, trail_bar = $5, initial_sl = coalesce($6, initial_sl) where id = $1',
+      [id, t.sl, t.slAlgoId, t.high != null && isFinite(t.high) ? t.high : null, ts(t.bar), t.initialSl ?? null],
+    )
+  }
+
   async closeTrade(
     id: number,
-    c: { closedAt: number; exit: number; reason: 'tp' | 'sl' | 'time' | 'manual' | 'error'; pnlUsd: number; feesUsd: number; r: number; status?: 'closed' | 'error'; notes?: string } & CloseJournal,
+    c: { closedAt: number; exit: number; reason: 'tp' | 'sl' | 'time' | 'manual' | 'error' | 'trail' | 'signal'; pnlUsd: number; feesUsd: number; r: number; status?: 'closed' | 'error'; notes?: string } & CloseJournal,
   ): Promise<void> {
     await this.db.query(
       `update bot_trades set status = $2, closed_at = $3, exit = $4, exit_reason = $5, pnl_usd = $6, fees_usd = $7,
@@ -409,7 +433,8 @@ export class BotStore {
       `select * from (
          select 'real' as kind, id, side, coalesce(p_raw, p_win) as p, regime, features, exit_reason as exit,
                 r_multiple + coalesce(fees_usd, 0) / nullif(risk_usd, 0) as r_gross, closed_at
-         from bot_trades where symbol = $1 and status = 'closed' and not learned
+         -- Trend trades are made by rules, not by the model: nothing to calibrate.
+         from bot_trades where symbol = $1 and status = 'closed' and not learned and mode <> 'trend'
          union all
          select 'shadow', id, side, p_raw, regime, features, exit_reason, r_gross, closed_at
          from bot_shadow_trades where symbol = $1 and status = 'closed' and not learned
