@@ -6,9 +6,9 @@ import { readFileSync } from 'node:fs'
 import { PGlite } from '@electric-sql/pglite'
 import type { Db } from '../src/db.ts'
 import { BotStore } from '../src/bot/store.ts'
-import { HEALTH, drawdownR, evaluateHealth, rollingExp } from '../src/bot/health.ts'
+import { HEALTH, drawdownR, evaluateHealth, riskScale, rollingExp } from '../src/bot/health.ts'
 import type { HealthBands, HealthRecord, Outcome } from '../src/bot/health.ts'
-import { F1_HEALTH, parseStrategies, refreshHealth } from '../src/bot/strategies.ts'
+import { F1_HEALTH, parseStrategies, refreshHealth, slotRuns } from '../src/bot/strategies.ts'
 
 const BANDS: HealthBands = { expR: 0.18, roll30P5: -0.2, roll30P1: -0.35, ddP95: 15, ddP99: 22 }
 const live = { id: 'f1', state: 'live' as const }
@@ -141,14 +141,47 @@ test('BOT_STRATEGIES: parsing, the BOT_STRATEGY=trend alias, and the workflow se
   assert.throws(() => parseStrategies('f9:live'), /unknown strategy "f9"/)
   assert.throws(() => parseStrategies('f1:paper'), /live or shadow/)
   assert.throws(() => parseStrategies('f1,f1'), /twice/)
+  // Per-strategy markets: ';' between strategies, '@*' or '@' + a comma list.
+  assert.deepEqual(parseStrategies('f1:live@*;c2:shadow@*;ml:shadow@btcusdt, ETHUSDT'), [
+    { id: 'f1', state: 'live' },
+    { id: 'c2', state: 'shadow' },
+    { id: 'ml', state: 'shadow', symbols: ['BTCUSDT', 'ETHUSDT'] },
+  ])
+  assert.deepEqual(parseStrategies('f1;ml:shadow@BTCUSDT'), [{ id: 'f1', state: 'live' }, { id: 'ml', state: 'shadow', symbols: ['BTCUSDT'] }])
+  assert.throws(() => parseStrategies('f1@*,ml'), /separate strategies with ";"/)
   const wf = readFileSync(new URL('../../.github/workflows/trading-bot.yml', import.meta.url), 'utf8')
   const m = wf.match(/^\s*BOT_STRATEGIES:\s*(\S+)\s*$/m)
   assert.ok(m, 'the workflow sets BOT_STRATEGIES')
+  const syms = (wf.match(/^\s*BOT_SYMBOLS:\s*(\S+)\s*$/m) ?? [])[1].replace(/['"]/g, '').split(',')
+  assert.equal(syms.length, 24, 'the 24-market universe')
   assert.deepEqual(parseStrategies(m![1].replace(/['"]/g, ''), (wf.match(/^\s*BOT_STRATEGY:\s*(\S+)\s*$/m) ?? [])[1]), [
     { id: 'f1', state: 'live' },
-    { id: 'ml', state: 'shadow' },
+    { id: 'c2', state: 'shadow' },
+    { id: 'ml', state: 'shadow', symbols: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT'] },
   ])
   assert.ok(F1_HEALTH.roll30P1 < F1_HEALTH.roll30P5 && F1_HEALTH.ddP95 < F1_HEALTH.ddP99)
+  // Which strategy runs where.
+  const [f1, , ml] = parseStrategies(m![1].replace(/['"]/g, ''))!
+  assert.equal(slotRuns(f1, 'XRPUSDT'), true)
+  assert.equal(slotRuns(ml, 'XRPUSDT'), false)
+  assert.equal(slotRuns(ml, 'SOLUSDT'), true)
+})
+
+test('probation halves the risk per trade; live and shadow keep it', () => {
+  assert.deepEqual([riskScale('live'), riskScale('probation'), riskScale('shadow')], [1, 0.5, 1])
+})
+
+test('the drawdown bands are judged over the last 100 trades of the segment', () => {
+  const t0 = 1_000_000
+  const rec = evaluateHealth(null, live, [], BANDS, t0).record
+  // 28 straight losses (28R down, past p99 22R) and then 100 flat trades: the old drawdown has left the window.
+  const o = [...run(28, -1, t0 + 1), ...run(100, (k) => (k % 2 ? 0.1 : -0.1), t0 + 2e8)]
+  const r = evaluateHealth(rec, live, o, BANDS, t0 + 6e8)
+  assert.equal(r.record.state, 'live')
+  assert.ok(r.record.stats.maxDdR < 1)
+  // The same 28 losses inside the last 100 (the rolling 30 breaks too): demoted.
+  const o2 = [...run(72, (k) => (k % 2 ? 0.1 : -0.1), t0 + 1), ...run(28, -1, t0 + 3e8)]
+  assert.equal(evaluateHealth(rec, live, o2, BANDS, t0 + 6e8).record.state, 'shadow')
 })
 
 // ---- against the schema ----

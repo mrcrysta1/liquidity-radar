@@ -13,6 +13,8 @@ import { DEFAULT_WF } from '../src/bot/walkforward.ts'
 import { DEFAULT_SETUP } from '../src/bot/setup.ts'
 import type { TradePlan } from '../src/bot/plan.ts'
 import { highPrev, trendIndicators, trendSignal } from '../src/bot/strategy.ts'
+import { BarCache } from '../src/bot/data.ts'
+import { tickOrder } from '../src/bot/startup.ts'
 
 async function freshDb() {
   const pg = new PGlite()
@@ -976,6 +978,170 @@ test('multi: a demoted strategy (health in bot_state) shadows its signal; on pro
     await t.tick(true, Date.now())
     assert.ok(await store.openTrade('BTCUSDT'))
   }
+})
+
+test('multi: probation halves the risk per trade', async () => {
+  const health = { id: 'f1', state: 'probation', configured: 'live', since: 0, segmentStart: 0, hasBands: true, stats: {}, history: [], updated: 0 }
+  const { store, t } = await trendTrader()
+  await store.setState('strategy:f1', health)
+  await t.tick(true, Date.now())
+  const open = (await store.openTrade('BTCUSDT'))!
+  assert.ok(Math.abs(open.riskUsd / 10_000 - 0.0025) < 0.00002, 'risk 0.25%: ' + open.riskUsd)
+  const plan = await store.getState<TradePlan | null>('plan:BTCUSDT', null)
+  assert.ok(Math.abs(plan!.live!.riskPct - 0.0025) < 0.00002, 'the plan shows the halved risk')
+})
+
+// ---- C2: the bear-market short, reading BTC ----
+
+/** The trend scenario upside down: a downtrend, a breakdown at S, a slide, a range and a close above it. */
+const invert = (h: Bar[]) => h.map((x) => ({ ...x, o: 1e4 / x.o, c: 1e4 / x.c, h: 1e4 / x.l, l: 1e4 / x.h }))
+
+async function c2Trader(symbol: string, btcUp: boolean, over: Partial<TraderConfig> = {}) {
+  const { db, pg } = await freshDb()
+  const store = new BotStore(db)
+  const ex = new FakeExchange()
+  const h = trendHist()
+  const own = invert(h.hist)
+  const btc = btcUp ? h.hist : own
+  const state = { idx: h.S + 1 }
+  const fetched: string[] = []
+  const cfg: TraderConfig = {
+    ...setup('hybrid').cfg,
+    strategies: [{ id: 'c2', state: 'live' }],
+    bars: async (s, _i, n) => (fetched.push(s), (s === symbol ? own : s === 'BTCUSDT' ? btc : []).slice(0, state.idx).slice(-n)),
+    ...over,
+  }
+  const t = new SymbolTrader(ex, store, symbol, cfg)
+  await t.init()
+  ex.price = own[state.idx - 1].c
+  const nextBar = async () => {
+    state.idx++
+    ex.move(own[state.idx - 1].c)
+    await t.tick(true, Date.now())
+  }
+  return { store, ex, pg, t, h, own, state, fetched, nextBar }
+}
+
+test('C2 live: a breakdown with BTC below its EMA opens a short with a stop above; it trails down and the exit rule closes it', async () => {
+  const { store, ex, t, pg, h, own, state, fetched, nextBar } = await c2Trader('ETHUSDT', false)
+  assert.equal(t.mlOn, false, 'no model on this run')
+  assert.equal(t.model, null)
+  await t.tick(true, Date.now())
+  assert.ok(fetched.includes('BTCUSDT'), 'BTC bars read for the filter')
+  const open = (await store.openTrade('ETHUSDT'))!
+  assert.ok(open, 'C2 trade opened')
+  assert.equal(open.side, -1)
+  assert.equal(open.strategy, 'c2')
+  assert.equal(open.tp, null)
+  assert.ok(ex.pos.amt < 0, 'short')
+  assert.ok(open.sl > open.entry, 'stop above the entry')
+  const atr = trendIndicators(own.slice(0, h.S + 1)).atr[h.S]
+  assert.ok(Math.abs(open.sl - open.entry - 3 * atr) < 0.011, 'stop 3 ATR above')
+  assert.equal(ex.algo[0].side, 'BUY')
+  assert.equal((await store.getState<TradePlan | null>('plan:ETHUSDT', null))?.side, 'SHORT')
+  let lowered = 0
+  while (state.idx < h.brk) {
+    const before = (await store.openTrade('ETHUSDT'))!
+    await nextBar()
+    const now = (await store.openTrade('ETHUSDT'))!
+    assert.ok(now.sl <= before.sl, `never higher: ${before.sl} → ${now.sl}`)
+    if (now.sl < before.sl) lowered++
+    assert.equal(ex.algo.length, 1)
+  }
+  assert.ok(lowered >= 3, 'trailed down on the slide: ' + lowered)
+  await nextBar()
+  assert.equal(ex.pos.amt, 0, 'closed by the exit rule')
+  await t.tick(true, Date.now())
+  const row = (await pg.query<Record<string, unknown>>('select * from bot_trades order by id desc limit 1')).rows[0]
+  assert.equal(row.exit_reason, 'signal')
+  assert.equal(row.strategy, 'c2')
+  assert.ok(Number(row.r_multiple) > 0, 'a winner: ' + row.r_multiple)
+  assert.equal((await pg.query('select id from bot_models')).rows.length, 0, 'no model trained')
+})
+
+test('C2: no short while BTC is above its EMA(300), even on the same breakdown', async () => {
+  const { store, ex, t } = await c2Trader('ETHUSDT', true)
+  await t.tick(true, Date.now())
+  assert.equal(await store.openTrade('ETHUSDT'), null)
+  assert.equal(ex.pos.amt, 0)
+  const plan = await store.getState<TradePlan | null>('plan:ETHUSDT', null)
+  assert.match(plan!.reasons[0], /^no C2 entry: BTC is above its EMA\(300\)/)
+})
+
+test('C2 on BTCUSDT reads its own bars as the BTC filter', async () => {
+  const { store, t, fetched } = await c2Trader('BTCUSDT', false)
+  await t.tick(true, Date.now())
+  assert.ok(await store.openTrade('BTCUSDT'))
+  assert.ok(fetched.every((s) => s === 'BTCUSDT'))
+})
+
+test('the model runs only on its own markets: none of its pipeline elsewhere', async () => {
+  const strategies = [{ id: 'f1', state: 'live' as const }, { id: 'ml', state: 'shadow' as const, symbols: ['BTCUSDT'] }]
+  const { db, pg } = await freshDb()
+  const store = new BotStore(db)
+  const ex = new FakeExchange()
+  const h = trendHist()
+  const cfg: TraderConfig = { ...setup('hybrid').cfg, strategies, bars: async (_s, _i, n) => h.hist.slice(0, h.S + 1).slice(-n) }
+  const xrp = new SymbolTrader(ex, store, 'XRPUSDT', cfg)
+  await xrp.init()
+  assert.equal(xrp.mlOn, false)
+  assert.equal(xrp.model, null)
+  assert.equal((await pg.query('select id from bot_models')).rows.length, 0, 'no training, no walk-forward')
+  ex.price = h.hist[h.S].c
+  await xrp.tick(true, Date.now())
+  assert.ok(await store.openTrade('XRPUSDT'), 'F1 still trades there')
+  assert.equal((await pg.query(`select id from bot_shadow_trades where strategy = 'ml'`)).rows.length, 0, 'no model shadow')
+  assert.equal(await store.getState('learn:XRPUSDT', null), null, 'no learning state')
+  const btc = new SymbolTrader(new FakeExchange(), store, 'BTCUSDT', cfg)
+  assert.equal(btc.mlOn, true)
+})
+
+test('24 markets: one bar request per market per candle, idle ticks fetch nothing; same-bar entries take the heat cap in symbol order', async () => {
+  const { db, pg } = await freshDb()
+  const store = new BotStore(db)
+  const h = trendHist()
+  // The whole scenario: its last bar is the latest closed one, as live.
+  const hist = h.hist.slice(0, h.S + 1)
+  const stepMs = 14_400_000
+  const shift = Math.floor(Date.now() / stepMs) * stepMs - stepMs - hist[hist.length - 1].t
+  const bars = hist.map((x) => ({ ...x, t: x.t + shift }))
+  const asked: string[] = []
+  const cache = new BarCache(async (s, _i, n) => (asked.push(s + ':' + n), bars.slice(-n)))
+  const SYMS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'AAVEUSDT', 'ADAUSDT', 'ARBUSDT', 'AVAXUSDT', 'BCHUSDT', 'DOTUSDT', 'ETCUSDT', 'INJUSDT', 'NEARUSDT', 'UNIUSDT', 'APTUSDT', 'ATOMUSDT', 'DOGEUSDT', 'FILUSDT', 'LINKUSDT', 'LTCUSDT', 'OPUSDT', 'SUIUSDT', 'TRXUSDT', 'XRPUSDT']
+  const cfg: TraderConfig = {
+    ...setup('hybrid').cfg,
+    setup: { ...setup('hybrid').cfg.setup, maxOpen: 10 },
+    strategies: [{ id: 'f1', state: 'live' }, { id: 'c2', state: 'shadow' }, { id: 'ml', state: 'shadow', symbols: ['BTCUSDT'] }],
+    barCache: cache,
+  }
+  // One simulated account per market (the fake holds a single position), all at the same equity.
+  const traders = SYMS.map((s) => {
+    const e = new FakeExchange()
+    e.price = bars[bars.length - 1].c
+    return new SymbolTrader(e, store, s, cfg)
+  })
+  for (const t of traders) await t.init()
+  // The model's own start-up (BTCUSDT only) read its training history; count from here.
+  assert.deepEqual(asked, ['BTCUSDT:1400'], 'only the model market trained')
+  const base = cache.requests
+  const t0 = performance.now()
+  for (const t of tickOrder(traders)) await t.tick(true, Date.now())
+  const decide = performance.now() - t0
+  assert.equal(cache.requests - base, traders.length, 'one request per market for the new bar: ' + asked.join(' '))
+  const t1 = performance.now()
+  for (let k = 0; k < 3; k++) for (const t of tickOrder(traders)) await t.tick(true, Date.now())
+  const idle = (performance.now() - t1) / 3
+  assert.equal(cache.requests - base, traders.length, 'no request on the ticks in between')
+  // Well under the 15 s tick, even here (in-process Postgres, every market deciding at once).
+  assert.ok(decide < 15_000 && idle < 5_000, `decision tick ${decide.toFixed(0)} ms, idle tick ${idle.toFixed(0)} ms`)
+  // The heat cap (1.5% per side at ~0.5% each; tick rounding can put a stop a hair further) takes the
+  // first longs in symbol order, every later one is blocked.
+  const real = (await pg.query<{ symbol: string }>('select symbol from bot_trades order by id')).rows.map((r) => r.symbol)
+  assert.ok(real.length >= 2 && real.length <= 3, real.join())
+  assert.deepEqual(real, [...traders.map((t) => t.symbol)].sort().slice(0, real.length))
+  const blocked = (await pg.query<{ reject_reason: string }>(`select reject_reason from bot_shadow_trades where strategy = 'f1'`)).rows
+  assert.equal(blocked.length, traders.length - real.length)
+  assert.ok(blocked.every((r) => /portfolio heat/.test(r.reject_reason)))
 })
 
 test('multi: a live strategy blocked by a risk rule records the signal as its shadow', async () => {

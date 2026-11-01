@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs'
 import type { Bar } from '../src/bot/features.ts'
 import { F1, checkTrendSetup, highPrev, noEntryReason, onClose, trailStop, trendBacktest, trendExit, trendIndicators, trendSignal } from '../src/bot/strategy.ts'
 import type { TrailState } from '../src/bot/strategy.ts'
-import { F1_STRATEGY, STRATEGIES, resolveRuleShadow, ruleBacktest } from '../src/bot/strategies.ts'
+import { C2_STRATEGY, F1_STRATEGY, STRATEGIES, resolveRuleShadow, ruleBacktest } from '../src/bot/strategies.ts'
 import { DEFAULT_WF } from '../src/bot/walkforward.ts'
 
 /** BTCUSDT 4h, 2023-07-26 .. 2024-05-21, [t, o, h, l, c] (a slice of the research data). */
@@ -260,6 +260,143 @@ test('shadow resolver: expired when the signal bar has left the history window o
   assert.equal(resolveRuleShadow(F1_STRATEGY, sh, b.slice(0, t.i + 1), step, DEFAULT_WF.costs), null, 'no bar after it yet')
 })
 
+// ---- C2 (bear breakdown short) against a port of the research engine (round 2 lib2.ts bearShort + rd/lib.ts genTrades, gross) ----
+
+function referenceC2(b: Bar[], btc: Bar[]) {
+  const series = (x: Bar[]) => {
+    const c = x.map((v) => v.c)
+    const atr: number[] = []
+    for (let i = 0; i < x.length; i++) {
+      const tr = i ? Math.max(x[i].h - x[i].l, Math.abs(x[i].h - x[i - 1].c), Math.abs(x[i].l - x[i - 1].c)) : x[i].h - x[i].l
+      atr.push(i < 14 ? (i ? (atr[i - 1] * i + tr) / (i + 1) : tr) : (atr[i - 1] * 13 + tr) / 14)
+    }
+    const a = 2 / 301
+    const E: number[] = []
+    c.forEach((v, i) => E.push(i ? v * a + E[i - 1] * (1 - a) : v))
+    const donch = (n: number, hi: boolean) =>
+      x.map((_, i) => {
+        if (i < n) return NaN
+        let m = hi ? -Infinity : Infinity
+        for (let j = i - n; j < i; j++) m = hi ? Math.max(m, x[j].h) : Math.min(m, x[j].l)
+        return m
+      })
+    return { c, atr, E, donch }
+  }
+  const d = series(b)
+  const bt = series(btc)
+  const btcIdx = new Map(btc.map((x, i) => [x.t, i]))
+  const btcUp = (t: number) => {
+    const i = btcIdx.get(t)
+    if (i === undefined || i < 900) return 0
+    return bt.c[i] > bt.E[i] ? 1 : -1
+  }
+  const { c, E, atr } = d
+  const L = d.donch(20, false)
+  const xh = d.donch(10, true)
+  const sig = {
+    entry: (i: number) => (btcUp(b[i].t) < 0 && c[i] < E[i] && c[i] < L[i] ? -1 : 0),
+    keep: (i: number) => c[i] <= E[i] && c[i] <= xh[i],
+    warm: 900,
+  }
+  const x = { sl: 3, trail: 4 }
+  const out: Array<{ i: number; exitBar: number; entry: number; exit: number; why: string }> = []
+  for (let i = Math.max(sig.warm, 1); i < b.length - 1; i++) {
+    const side = sig.entry(i)
+    if (!side) continue
+    const entry = b[i + 1].o, dist = x.sl * atr[i]
+    if (!(dist > 0)) continue
+    let stop = entry - side * dist
+    let ext = side > 0 ? -Infinity : Infinity
+    let exitPx = NaN, why = '', j = i + 1, exitBar = 0
+    for (; j < b.length; j++) {
+      const bj = b[j]
+      const op = j === i + 1 ? entry : bj.o
+      const hitS = side > 0 ? bj.l <= stop : bj.h >= stop
+      if (hitS) {
+        exitPx = side > 0 ? Math.min(op, stop) : Math.max(op, stop)
+        why = 'stop'
+        exitBar = j
+        break
+      }
+      if (j + 1 >= b.length) break
+      if (!sig.keep(j)) {
+        exitPx = b[j + 1].o
+        why = 'signal'
+        exitBar = j
+        break
+      }
+      ext = side > 0 ? Math.max(ext, bj.h) : Math.min(ext, bj.l)
+      const ch = ext - side * x.trail * atr[j]
+      stop = side > 0 ? Math.max(stop, ch) : Math.min(stop, ch)
+    }
+    if (!why) break
+    out.push({ i, exitBar, entry, exit: exitPx, why })
+    i = exitBar - 1
+  }
+  return out
+}
+
+/** A falling market: synth with a bearish drift, on the same 4h grid as synth(). */
+function bear(n: number, seed: number): Bar[] {
+  return synth(n, seed).map((x) => ({ ...x, o: 1e4 / x.o, c: 1e4 / x.c, h: 1e4 / x.l, l: 1e4 / x.h }))
+}
+
+for (const [name, bars, btc] of [
+  ['BTC fixture (BTC as its own filter)', fixture, fixture],
+  ['synthetic, BTC falling too', bear(2600, 37), bear(2600, 41)],
+  ['synthetic, its own BTC', bear(2600, 33), bear(2600, 33)],
+  ['synthetic, BTC rising (no shorts)', bear(2600, 37), synth(2600, 37).map((x, i) => ({ ...x, o: 100 * 1.001 ** i, c: 100 * 1.001 ** (i + 1), h: 100 * 1.001 ** (i + 1) * 1.001, l: 100 * 1.001 ** i * 0.999 }))],
+] as const) {
+  test(`C2 parity (${name}): the plugin makes exactly the research trades`, () => {
+    const ref = referenceC2(bars, btc)
+    const pl = ruleBacktest(C2_STRATEGY, bars, { BTCUSDT: btc })
+    assert.equal(pl.length, ref.length)
+    pl.forEach((t, k) => {
+      const r = ref[k]
+      assert.equal(t.side, -1)
+      assert.deepEqual([t.i, t.exitBar, t.entry, t.exit], [r.i, r.exitBar, r.entry, r.exit], 'trade ' + k)
+      assert.equal(t.why === 'signal' ? 'signal' : 'stop', r.why, 'trade ' + k)
+      assert.ok(Math.abs(t.r - -(t.exit - t.entry) / t.dist) < 1e-12)
+    })
+    if (name.includes('rising')) assert.equal(pl.length, 0, 'BTC above its EMA: never short')
+  })
+}
+
+test('C2 parity runs cover stops, trailed stops and rule exits; shadows resolve like the research trades', () => {
+  const step = 14_400_000
+  const runs = [bear(2600, 37), bear(2600, 33)].map((b) => ({ b, t: ruleBacktest(C2_STRATEGY, b, { BTCUSDT: b }) }))
+  const all = runs.flatMap((r) => r.t)
+  assert.ok(all.length >= 10, 'trades: ' + all.length)
+  for (const why of ['sl', 'trail', 'signal']) assert.ok(all.some((t) => t.why === why), 'has ' + why)
+  for (const t of all) if (t.why === 'trail') assert.ok(t.exit < t.initialStop, 'a trailed short stop is below the initial one')
+  let n = 0
+  for (const { b, t: trades } of runs)
+    for (const t of trades) {
+      if (b[t.i + 1].o !== b[t.i].c) continue
+      n++
+      const sh = { side: -1 as const, entry: b[t.i].c, sl: b[t.i].c + t.dist, barTime: b[t.i].t }
+      const r = resolveRuleShadow(C2_STRATEGY, sh, b, step, DEFAULT_WF.costs)
+      assert.ok(r && r.status === 'closed')
+      assert.equal(r.exit, t.why)
+      assert.equal(r.bars, t.exitBar - t.i)
+      assert.equal(r.exitPrice, t.why === 'signal' ? b[t.exitBar].c : t.exit)
+    }
+  assert.ok(n >= 3, 'compared ' + n)
+})
+
+test('C2 plugin: needs BTC bars; no BTC, no short', () => {
+  const b = bear(2600, 37)
+  assert.deepEqual(C2_STRATEGY.refs, ['BTCUSDT'])
+  assert.deepEqual(C2_STRATEGY.sides, [-1])
+  const i = ruleBacktest(C2_STRATEGY, b, { BTCUSDT: b })[0].i
+  assert.ok(C2_STRATEGY.signal(b, i, { BTCUSDT: b }))
+  assert.equal(C2_STRATEGY.signal(b, i, {}), null)
+  assert.match(C2_STRATEGY.noEntry(b, i, {}), /^no C2 entry: BTC is above its EMA\(300\)/)
+  assert.equal(C2_STRATEGY.noEntry(b, i, { BTCUSDT: b }), '')
+  const s = C2_STRATEGY.signal(b, i, { BTCUSDT: b })!
+  assert.equal(s.stop, b[i].c + s.dist)
+})
+
 test('F1 plugin: metadata, signal and manage agree with strategy.ts', () => {
   assert.equal(F1_STRATEGY.id, 'f1')
   assert.deepEqual(F1_STRATEGY.sides, [1])
@@ -267,7 +404,8 @@ test('F1 plugin: metadata, signal and manage agree with strategy.ts', () => {
   assert.equal(STRATEGIES.f1, F1_STRATEGY)
   assert.equal(STRATEGIES.ml.kind, 'model')
   assert.equal(STRATEGIES.ml.health, undefined, 'the model has no bands: never auto-promoted')
-  assert.deepEqual(F1_STRATEGY.health, { expR: 0.18, roll30P5: -0.2, roll30P1: -0.35, ddP95: 15, ddP99: 22 })
+  assert.deepEqual(F1_STRATEGY.health, { expR: 0.1, roll30P5: -0.33, roll30P1: -0.43, ddP95: 22.1, ddP99: 27.7 })
+  assert.deepEqual(STRATEGIES.c2.health, { expR: 0.01, roll30P5: -0.38, roll30P1: -0.47, ddP95: 26.1, ddP99: 31.3 })
   const b = synth(2600, 37)
   const ind = trendIndicators(b)
   for (let i = F1.warm; i < b.length; i++) {

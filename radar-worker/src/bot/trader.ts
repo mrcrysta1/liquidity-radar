@@ -37,6 +37,7 @@
 // market, resolved with its own exit logic (resolveRuleShadow); the model's
 // shadows are as before.
 import { closedBars, INTERVAL_MS } from './data.ts'
+import type { BarCache } from './data.ts'
 import { lastPrice } from '../binance.ts'
 import { FEATURES, WARMUP, costR, featureAt, indicators } from './features.ts'
 import { roundStep, roundTick } from './futures.ts'
@@ -55,9 +56,9 @@ import { sizePreview } from './plan.ts'
 import type { TradePlan } from './plan.ts'
 import { barsBetween, barsHeld, excursion, slippageBps } from './journal.ts'
 import { checkTrendSetup } from './strategy.ts'
-import { STRATEGIES, parseStrategies, resolveRuleShadow, ruleStrategy } from './strategies.ts'
-import type { ManagedPos, RuleStrategy, Signal, StrategySlot } from './strategies.ts'
-import { isLive } from './health.ts'
+import { STRATEGIES, parseStrategies, resolveRuleShadow, ruleStrategy, slotRuns } from './strategies.ts'
+import type { ManagedPos, RefBars, RuleStrategy, Signal, StrategySlot } from './strategies.ts'
+import { isLive, riskScale } from './health.ts'
 import type { HealthRecord, StrategyState } from './health.ts'
 
 /** Bars a rule strategy's decisions and shadows read: the most any of them needs. */
@@ -122,6 +123,8 @@ export interface TraderConfig {
   manageOnly?: boolean
   /** Injected for tests; defaults to Binance spot klines. */
   bars?: (symbol: string, interval: string, count: number) => Promise<Bar[]>
+  /** Closed bars kept between ticks and shared by all traders (bot.ts); takes the place of `bars`. */
+  barCache?: BarCache
   /** Injected for tests; defaults to the Binance spot ticker (public, unsigned). Prices non-USDT fees. */
   price?: (symbol: string) => Promise<number>
 }
@@ -237,10 +240,16 @@ export class SymbolTrader {
     this.symbol = symbol
     this.cfg = cfg
     this.slots = cfg.strategies?.length ? cfg.strategies : parseStrategies(undefined, cfg.strategy)
+    // The model's pipeline (training, walk-forward, challengers) is heavy: only on its own markets.
+    this.mlOn = !cfg.manageOnly && (!this.slots || this.slots.some((s) => s.id === 'ml' && slotRuns(s, symbol)))
   }
 
-  private get barsFn() {
-    return this.cfg.bars ?? closedBars
+  /** Does the model run on this market (BOT_STRATEGIES ml@...)? Otherwise no model, no walk-forward, no learning here. */
+  readonly mlOn: boolean
+
+  private get barsFn(): (symbol: string, interval: string, count: number) => Promise<Bar[]> {
+    const c = this.cfg.barCache
+    return c ? (s, i, n) => c.get(s, i, n) : (this.cfg.bars ?? closedBars)
   }
 
   async init(): Promise<void> {
@@ -251,6 +260,10 @@ export class SymbolTrader {
       return
     }
     await this.ex.setup(this.symbol, this.cfg.risk.leverage)
+    if (!this.mlOn) {
+      this.lastBar = await this.store.getState<number>('lastBar:' + this.symbol, 0)
+      return
+    }
     this.model = await this.champion()
     this.gate = await this.store.getState<GateState | null>(this.gateKey, null)
     let bars: Bar[] | undefined
@@ -473,7 +486,7 @@ export class SymbolTrader {
   }
 
   async tick(canEnter: boolean, now = Date.now()): Promise<void> {
-    if (this.cfg.manageOnly) return this.trade(canEnter, now)
+    if (this.cfg.manageOnly || !this.mlOn) return this.trade(canEnter, now)
     try {
       await this.trade(canEnter, now)
     } finally {
@@ -656,7 +669,8 @@ export class SymbolTrader {
    * cap, cooldown) are left out, as they are about real orders, and no plan is
    * written (the plan is the real strategy's).
    */
-  private async mlDecide(canEnter: boolean, now: number, b: Bar[], shadowOnly: string | null): Promise<boolean> {
+  private async mlDecide(canEnter: boolean, now: number, b: Bar[], shadowOnly: string | null, scale = 1): Promise<boolean> {
+    const risk = scale === 1 ? this.cfg.risk : { ...this.cfg.risk, riskPerTrade: this.cfg.risk.riskPerTrade * scale }
     const last = b[b.length - 1]
     if (!this.model || !last) return false
     const ind = indicators(b)
@@ -715,7 +729,7 @@ export class SymbolTrader {
       `P(long) ${pct(pL)} EV ${evL.toFixed(3)}R · P(short) ${pct(pS)} EV ${evS.toFixed(3)}R` +
       ` (raw ${pct(d.pLong)}/${pct(d.pShort)}, ${regime}) · R:R ${chk.rr.toFixed(2)} · cost ${chk.costR.toFixed(3)}R`
     const equityNow = shadowOnly ? null : await this.ex.balanceUsdt().catch(() => null)
-    const preview = (eq: number) => sizePreview(eq, last.c, slDist, this.rules, this.cfg.risk, this.cfg.wf.costs)
+    const preview = (eq: number) => sizePreview(eq, last.c, slDist, this.rules, risk, this.cfg.wf.costs)
     const plan: TradePlan = {
       symbol: this.symbol,
       t: now,
@@ -786,7 +800,7 @@ export class SymbolTrader {
       await this.store.event('warn', this.symbol, `${summary} — no trade: USDT balance unavailable`)
       return false
     }
-    const sz = size(equity, last.c, slDist, this.rules, this.cfg.risk)
+    const sz = size(equity, last.c, slDist, this.rules, risk)
     if (Number(sz.qty) <= 0) {
       plan.reasons = [sz.reason || 'size is zero']
       await savePlan()
@@ -949,9 +963,18 @@ export class SymbolTrader {
     let holder: string | null = open ? (open.strategy ?? (open.mode === 'trend' ? 'f1' : 'ml')) : null
     // The website shows one plan per market: the first live strategy's.
     let planned = false
+    // Other markets' bars a strategy reads (C2: BTC), read once per bar; this market's are `b`.
+    const refs: RefBars = {}
+    const refBars = async (st: RuleStrategy): Promise<RefBars> => {
+      for (const s of st.refs ?? []) {
+        if (s in refs) continue
+        refs[s] = s === this.symbol ? b : await this.barsFn(s, this.cfg.interval, RULE_BARS).catch(() => undefined)
+      }
+      return refs
+    }
     for (const slot of this.slots ?? []) {
       const st = STRATEGIES[slot.id]
-      if (!st || (st.symbols && !st.symbols.includes(this.symbol))) continue
+      if (!st || !slotRuns(slot, this.symbol)) continue
       const state = await this.strategyState(slot)
       const paper = !isLive(state)
         ? `strategy ${slot.id} is in ${state}: the ${st.kind === 'model' ? 'model trades' : 'strategy trades'} on paper only`
@@ -960,20 +983,21 @@ export class SymbolTrader {
           : null
       if (st.kind === 'model') {
         // The model decides on the bars it always has.
-        if (await this.mlDecide(canEnter, now, b.slice(-(WARMUP + 80)), paper)) holder = 'ml'
+        if (this.mlOn && (await this.mlDecide(canEnter, now, b.slice(-(WARMUP + 80)), paper, riskScale(state)))) holder = 'ml'
         if (!paper) planned = true
         continue
       }
       if (st.interval !== this.cfg.interval || holder === slot.id) continue
-      const sg = st.signal(b, i)
+      const ref = await refBars(st)
+      const sg = st.signal(b, i, ref)
       if (paper) {
-        if (sg) await this.ruleShadow(st, b, sg, [paper])
+        if (sg) await this.ruleShadow(st, b, sg, [paper], ref)
         continue
       }
-      const r = await this.ruleEntry(st, canEnter, now, b, sg, !planned)
+      const r = await this.ruleEntry(st, canEnter, now, b, sg, !planned, ref, riskScale(state))
       planned = true
       if (r === 'opened') holder = slot.id
-      else if (sg && r.length) await this.ruleShadow(st, b, sg, r)
+      else if (sg && r.length) await this.ruleShadow(st, b, sg, r, ref)
     }
   }
 
@@ -1092,8 +1116,18 @@ export class SymbolTrader {
    * flat: a real entry if its signal fires and every rule passes. Returns
    * 'opened', or why a signal could not be taken (a shadow trade then); [] when
    * there was no signal. writePlan: this decision is the market's plan.
+   * scale: risk per trade multiplier (0.5 on probation, health.ts).
    */
-  private async ruleEntry(st: RuleStrategy, canEnter: boolean, now: number, b: Bar[], sg: Signal | null, writePlan: boolean): Promise<'opened' | string[]> {
+  private async ruleEntry(
+    st: RuleStrategy,
+    canEnter: boolean,
+    now: number,
+    b: Bar[],
+    sg: Signal | null,
+    writePlan: boolean,
+    ref: RefBars = {},
+    scale = 1,
+  ): Promise<'opened' | string[]> {
     const i = b.length - 1
     const last = b[i]
     const step = INTERVAL_MS[this.cfg.interval]
@@ -1102,9 +1136,10 @@ export class SymbolTrader {
     // Without a signal, the stop an entry here would have had (for the plan on the website).
     const slDist = sg?.dist ?? st.stopDist(b, i)
     const cost = slDist > 0 ? costR(last.c, slDist, costs, 'sl') : Infinity
-    const summary = `${st.describe(b, i)} · cost ${cost.toFixed(3)}R`
+    const summary = `${st.describe(b, i, ref)} · cost ${cost.toFixed(3)}R${scale !== 1 ? ` · risk ×${scale} (probation)` : ''}`
     const equityNow = await this.ex.balanceUsdt().catch(() => null)
-    const preview = (eq: number) => sizePreview(eq, last.c, slDist, this.rules, this.cfg.risk, costs)
+    const risk = scale === 1 ? this.cfg.risk : { ...this.cfg.risk, riskPerTrade: this.cfg.risk.riskPerTrade * scale }
+    const preview = (eq: number) => sizePreview(eq, last.c, slDist, this.rules, risk, costs)
     const plan: TradePlan = {
       symbol: this.symbol,
       t: now,
@@ -1128,7 +1163,7 @@ export class SymbolTrader {
       await this.store.event(level, this.symbol, `${summary} — no trade: ${reasons.join('; ')}`)
     }
     if (!sg) {
-      await skip([st.noEntry(b, i) || `no ${st.id.toUpperCase()} entry`])
+      await skip([st.noEntry(b, i, ref) || `no ${st.id.toUpperCase()} entry`])
       return []
     }
     const counts = await this.store.setupCounts(this.symbol, now - (now % 86_400_000))
@@ -1153,7 +1188,7 @@ export class SymbolTrader {
       await skip(['USDT balance unavailable'], 'warn')
       return ['USDT balance unavailable']
     }
-    const sz = size(equity, last.c, slDist, this.rules, this.cfg.risk)
+    const sz = size(equity, last.c, slDist, this.rules, risk)
     if (Number(sz.qty) <= 0) {
       await skip([sz.reason || 'size is zero'], 'warn')
       return [sz.reason || 'size is zero']
@@ -1216,7 +1251,7 @@ export class SymbolTrader {
    * shadow trade: entry at the signal bar's close, its initial stop, no target;
    * at most one open per strategy and market, like a position.
    */
-  private async ruleShadow(st: RuleStrategy, b: Bar[], sg: Signal, reasons: string[]): Promise<void> {
+  private async ruleShadow(st: RuleStrategy, b: Bar[], sg: Signal, reasons: string[], ref: RefBars = {}): Promise<void> {
     if (!this.cfg.learn.shadow || (await this.store.openShadows(this.symbol, st.id)).length) return
     const i = b.length - 1
     const last = b[i]
@@ -1240,7 +1275,7 @@ export class SymbolTrader {
       regime: null,
       rejectReason: reasons.join('; '),
       features: sg.features,
-      journal: { interval: this.cfg.interval, decision: st.describe(b, i) },
+      journal: { interval: this.cfg.interval, decision: st.describe(b, i, ref) },
       strategy: st.id,
     })
     await this.store.event('info', this.symbol, `${st.id} shadow #${id} ${sg.side > 0 ? 'LONG' : 'SHORT'} @ ${last.c} · SL ${+sl.toPrecision(8)} — ${reasons.join('; ')}`)

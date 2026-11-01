@@ -7,7 +7,11 @@
 #
 # The bot ticks every 15 s: mirrors the Binance Demo account for the website,
 # manages any open trade, and decides on each newly closed 4-hour candle
-# (BOT_INTERVAL) for four markets.
+# (BOT_INTERVAL) for 24 markets (BOT_SYMBOLS; any the futures testnet does not
+# trade is left out at startup with a warning). Bars are cached between ticks
+# and fetched once per market per new candle. Markets act in alphabetical
+# order, so when several real entries on one bar compete for the heat cap the
+# tie-break is the symbol name (as in the research portfolio).
 #
 # STRATEGIES (BOT_STRATEGIES, radar-worker/src/bot/strategies.ts): every
 # strategy decides on every bar; a live one's signal is a real trade if every
@@ -15,9 +19,19 @@
 # signal is that strategy's shadow trade. Health (src/bot/health.ts) demotes a
 # live strategy whose rolling 30-trade expectancy or drawdown leaves its
 # research bands, and promotes it back only on 30 new good shadow trades.
+# Probation (rolling 30 under p5 or drawdown over p95) halves its risk per trade.
+#   f1  live, all 24 markets — bands: rolling 30 p5 -0.33R / p1 -0.43R,
+#       100-trade drawdown p95 22.1R / p99 27.7R (expected ~+0.10R).
+#   c2  shadow, all 24 markets: research strategy C2, the bear-market mirror of
+#       F1 (short when BTC and the market are below EMA(300) and the close
+#       breaks the 20-bar low; 3 ATR stop, 4 ATR trail; exit above the 10-bar
+#       high or EMA(300)). Thin edge (dev +0.047R, PF 1.15, t = 1.08): paper
+#       only; bands p5 -0.38R / p1 -0.47R, drawdown p95 26.1R / p99 31.3R.
+#   ml  shadow, BTC/ETH/SOL/BNB only: the model's training, walk-forward and
+#       challengers are heavy, so they run on those four markets alone.
 #
 # REAL (demo) TRADES: research strategy F1 (f1:live,
-# radar-worker/src/bot/strategy.ts), long only on BTC/ETH/SOL/BNB:
+# radar-worker/src/bot/strategy.ts), long only, on all 24 markets:
 #   entry  4h close > EMA(300) and > the highest high of the previous 20 bars
 #          → market buy right after the close
 #   stop   entry − 3 × ATR14, exchange-side; no take-profit, no time exit
@@ -27,7 +41,10 @@
 #          the heat cap below apply (not the model's walk-forward gate)
 # Research (fees, slippage, funding): 2019–Jan 2026 +0.376R/trade, PF 2.12;
 # sealed holdout Feb–Nov 2026 +0.179R/trade, PF 1.48, +4.5%, 63 trades — not
-# significant (t = 0.66). XAUUSDT is dropped: too little history for F1.
+# significant (t = 0.66). Round 2: on 10 markets never used in development
+# (HOLD-NEW: APT ATOM DOGE FIL LINK LTC OP SUI TRX XRP), 2019–Jan 2026, 834
+# trades, +0.169R/trade, PF 1.45, t ≈ 2.2. XAUUSDT is dropped: too little
+# history for F1.
 #
 # THE MODEL keeps running beside it as SHADOW trades only (no orders), so
 # calibration and the challenger cycle continue. Its settings below (bracket,
@@ -143,14 +160,15 @@ jobs:
         run: node src/bot.ts
         env:
           BOT_RUN_MINUTES: '330'
-          # Strategies in priority order, each live or shadow: F1 places the
-          # real orders, the model only shadow trades. A live strategy that
-          # leaves its health bands is demoted to shadow (and promoted back
-          # after 30 good shadow trades); bot_state 'strategy:<id>'.
+          # Strategies in priority order, id:state@markets (';' between them):
+          # F1 places the real orders everywhere, C2 paper-trades everywhere,
+          # the model paper-trades on the four majors only. A live strategy
+          # that leaves its health bands is demoted to shadow (and promoted
+          # back after 30 good shadow trades); bot_state 'strategy:<id>'.
           # Hybrid keeps the portfolio heat cap (1.5% per side, 2% total).
-          BOT_STRATEGIES: f1:live,ml:shadow
+          BOT_STRATEGIES: 'f1:live@*;c2:shadow@*;ml:shadow@BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT'
           BOT_MODE: hybrid
-          BOT_SYMBOLS: BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT
+          BOT_SYMBOLS: BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,AAVEUSDT,ADAUSDT,ARBUSDT,AVAXUSDT,BCHUSDT,DOTUSDT,ETCUSDT,INJUSDT,NEARUSDT,UNIUSDT,APTUSDT,ATOMUSDT,DOGEUSDT,FILUSDT,LINKUSDT,LTCUSDT,OPUSDT,SUIUSDT,TRXUSDT,XRPUSDT
           BOT_INTERVAL: 4h
           BOT_MIN_EV: '0.1'
           BOT_MIN_MARGIN: '100'

@@ -17,9 +17,9 @@ import type { AccountFill } from './bot/account.ts'
 import { BotStore } from './bot/store.ts'
 import { DEFAULT_LEARN, DEFAULT_TRADER, INTERVAL_DEFAULTS, INTERVAL_MAX_NOTIONAL_X, SymbolTrader } from './bot/trader.ts'
 import { DEFAULT_SETUP } from './bot/setup.ts'
-import { InitQueue } from './bot/startup.ts'
+import { InitQueue, listedOnly, tickOrder } from './bot/startup.ts'
 import { buildMetrics } from './bot/learning.ts'
-import { INTERVAL_MS } from './bot/data.ts'
+import { BarCache, INTERVAL_MS } from './bot/data.ts'
 import type { TraderConfig } from './bot/trader.ts'
 import { STRATEGIES, parseStrategies, refreshHealth } from './bot/strategies.ts'
 import type { StrategySlot } from './bot/strategies.ts'
@@ -109,6 +109,8 @@ const cfg: TraderConfig = {
   strategy: STRATEGY,
   strategies: SLOTS ?? undefined,
   realSymbols: REAL_SYMBOLS,
+  // Closed bars kept between ticks, shared by every market: fetched when a new bar is due, not every tick.
+  barCache: new BarCache(),
   // Each plan also shows how it would be sized on a small real-money account.
   previewEquity: num(env.BOT_PREVIEW_EQUITY, 100),
   risk: {
@@ -138,8 +140,21 @@ for (let attempt = 1; ; attempt++) {
     await new Promise((r) => setTimeout(r, wait * 1000))
   }
 }
+// Markets the venue does not list or trade (the testnet lists fewer than
+// mainnet) are dropped with a warning, not retried forever.
+{
+  const listed = await ex.tradingSymbols().catch((e) => {
+    console.warn('exchange listing unavailable:', (e as Error).message)
+    return null
+  })
+  const { keep, dropped } = listedOnly(SYMBOLS, listed)
+  if (dropped.length) {
+    SYMBOLS.splice(0, SYMBOLS.length, ...keep)
+    await store.event('warn', null, `not traded on ${ex.base}, left out: ${dropped.join(', ')}`)
+  }
+}
 if (HANDOFF) console.log(new Date().toISOString(), `bot run started · until ${new Date(DEADLINE).toISOString()}`)
-else if (!ONCE) await store.event('info', null, `bot starting on ${ex.base} (${ex.isTestnet ? 'TESTNET' : 'MAINNET'}) · mode ${cfg.mode}${SLOTS ? ' · strategies ' + SLOTS.map((s) => `${s.id}:${s.state}`).join(', ') : ''} · ${SYMBOLS.join(', ')} · ${cfg.interval} bars · risk ${(cfg.risk.riskPerTrade * 100).toFixed(2)}%/trade · bracket ${BRACKET.slAtr}/${BRACKET.tpAtr} ATR over ${BRACKET.horizon} bars · max ${cfg.setup.maxOpen} open, ${cfg.setup.maxTradesPerDay}/day${cfg.mode === 'hybrid' ? ` · real: ${REAL_SYMBOLS.join(', ')} · heat ≤ ${(cfg.risk.maxSideRisk! * 100).toFixed(1)}%/side, ${(cfg.risk.maxTotalRisk! * 100).toFixed(1)}% total` : ''}`)
+else if (!ONCE) await store.event('info', null, `bot starting on ${ex.base} (${ex.isTestnet ? 'TESTNET' : 'MAINNET'}) · mode ${cfg.mode}${SLOTS ? ' · strategies ' + SLOTS.map((s) => `${s.id}:${s.state}${s.symbols ? `@${s.symbols.length} markets` : "@all"}`).join(', ') : ''} · ${SYMBOLS.join(', ')} · ${cfg.interval} bars · risk ${(cfg.risk.riskPerTrade * 100).toFixed(2)}%/trade · bracket ${BRACKET.slAtr}/${BRACKET.tpAtr} ATR over ${BRACKET.horizon} bars · max ${cfg.setup.maxOpen} open, ${cfg.setup.maxTradesPerDay}/day${cfg.mode === 'hybrid' ? ` · real: ${REAL_SYMBOLS.join(', ')} · heat ≤ ${(cfg.risk.maxSideRisk! * 100).toFixed(1)}%/side, ${(cfg.risk.maxTotalRisk! * 100).toFixed(1)}% total` : ''}`)
 
 // Each market starts on its own: one whose setup fails (a slow link, or a
 // rejection such as -4067) is skipped and retried with a bounded backoff from
@@ -230,7 +245,8 @@ async function tick(): Promise<void> {
   }
   // Retry any market whose setup failed earlier (each on its own backoff).
   if (!ONCE && setupQueue.pending.length) await setupQueue.run(now)
-  for (const t of setupQueue.ready) {
+  // Alphabetical: same-bar entries compete for the heat cap in symbol order (startup.ts tickOrder).
+  for (const t of tickOrder(setupQueue.ready)) {
     try {
       await t.tick(canEnter, now)
     } catch (e) {

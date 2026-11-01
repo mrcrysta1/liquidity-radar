@@ -181,21 +181,37 @@ and the challenger cycle go on. Long only, 4h bars, BTC / ETH / SOL / BNB:
 
 **Several strategies** (`BOT_STRATEGIES`, `src/bot/strategies.ts`, `src/bot/health.ts`, `sql/008_bot_strategies.sql`)
 
-`BOT_STRATEGIES=f1:live,ml:shadow` lists the strategies in priority order, each
-starting `live` or `shadow` (`BOT_STRATEGY=trend` is an alias of exactly that).
+`BOT_STRATEGIES` lists the strategies in priority order as `id[:state][@markets]`,
+each starting `live` or `shadow`, on `*` (all of `BOT_SYMBOLS`) or a comma list,
+separated by `;` — e.g. `f1:live@*;c2:shadow@*;ml:shadow@BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT`
+(without market lists `,` also separates: `f1:live,ml:shadow`, which is what
+`BOT_STRATEGY=trend` means). The model's pipeline (training, walk-forward,
+challengers) runs only on the model's markets; elsewhere it is not loaded at all.
+Strategies: `f1` (above), `c2` (the bear-market short: BTC and the market below
+EMA(300), close under the 20-bar low; 3 ATR stop, trailed at the lowest low + 4
+ATR; exit on a close above the 10-bar high or EMA(300) — it reads BTC's bars on
+every market) and `ml`.
 Every strategy decides on every bar of its markets. A live strategy's signal is a
 real trade if every rule passes; any other signal (strategy in shadow, the
 market's one real position already held by another strategy, a risk rule said
 no) is that strategy's shadow trade, stored with its `strategy` id. A rule
 strategy's shadow is resolved by its own exit logic (trail, exit rule).
 - **Health** (`bot_state 'strategy:<id>'`, recomputed every minute from all closed
-  real and shadow trades): `live` → `probation` (still real) when the rolling
-  30-trade expectancy is under the strategy's research p5 or the drawdown since
-  its peak over p95; → `shadow` under p1 / over p99. Back to `live` only after
+  real and shadow trades): `live` → `probation` (still real, at **half the risk
+  per trade**) when the rolling 30-trade expectancy is under the strategy's
+  research p5 or the drawdown from its peak over the last 100 trades is over
+  p95; → `shadow` under p1 / over p99. Back to `live` only after
   ≥ 30 new shadow trades since the demotion with expectancy > 0 and drawdown
   within p95. A strategy without bands (the model) never moves on its own.
   Every transition is a `bot_events` line. F1's bands are in `F1_HEALTH`.
 - Changing a strategy's state in `BOT_STRATEGIES` resets it to that state.
+- **Many markets:** markets the futures venue does not trade (exchangeInfo status
+  TRADING) are left out at startup with a warning. Closed bars are cached and
+  shared (`BarCache`): a market's bars are requested only when a new candle is
+  due (then just the missing bars), retried every 20 s while it is late — about
+  one public request per market per candle. Markets act in alphabetical order,
+  so when several real entries on one bar compete for the heat cap, the
+  tie-break is the symbol name.
 
 **How it trades**
 1. A market entry.

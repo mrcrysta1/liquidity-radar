@@ -82,3 +82,23 @@ export class InitQueue<T extends Initable> {
     return this.slots.filter((s) => !s.ready).map((s) => s.item.symbol)
   }
 }
+
+/**
+ * The configured markets the venue lists and trades, and the ones it does not
+ * (dropped with a warning rather than retried forever). `listed` null: the
+ * listing could not be read — keep them all; setup failures are retried.
+ */
+export function listedOnly(symbols: string[], listed: Set<string> | null): { keep: string[]; dropped: string[] } {
+  if (!listed) return { keep: [...symbols], dropped: [] }
+  return { keep: symbols.filter((s) => listed.has(s)), dropped: symbols.filter((s) => !listed.has(s)) }
+}
+
+/**
+ * Traders in the order they act on a bar: alphabetical by symbol. Real entries
+ * on the same bar compete for the portfolio heat cap; the first to ask gets it,
+ * so the tie-break is the symbol name — fixed and reproducible, as in the
+ * research portfolio (sorted by entry time, then symbol).
+ */
+export function tickOrder<T extends Initable>(items: T[]): T[] {
+  return [...items].sort((a, b) => (a.symbol < b.symbol ? -1 : a.symbol > b.symbol ? 1 : 0))
+}

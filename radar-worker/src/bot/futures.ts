@@ -79,6 +79,10 @@ export interface Fill {
   commissionAsset: string
 }
 
+interface ExchangeInfo {
+  symbols: Array<{ symbol: string; status?: string; pricePrecision: number; quantityPrecision: number; filters: Array<Record<string, string>> }>
+}
+
 export class Futures {
   readonly base: string
   private key: string
@@ -175,10 +179,28 @@ export class Futures {
     return body
   }
 
-  async rules(symbol: string): Promise<SymbolRules> {
-    const info = (await this.request('GET', '/fapi/v1/exchangeInfo', {}, false)) as {
-      symbols: Array<{ symbol: string; pricePrecision: number; quantityPrecision: number; filters: Array<Record<string, string>> }>
+  /** exchangeInfo, kept for 10 minutes: every market's setup reads it, and it is large. */
+  private infoAt = 0
+  private infoP: Promise<ExchangeInfo> | null = null
+  private exchangeInfo(): Promise<ExchangeInfo> {
+    if (!this.infoP || Date.now() - this.infoAt > 10 * 60_000) {
+      this.infoAt = Date.now()
+      this.infoP = (this.request('GET', '/fapi/v1/exchangeInfo', {}, false) as Promise<ExchangeInfo>).catch((e) => {
+        this.infoP = null
+        throw e
+      })
     }
+    return this.infoP
+  }
+
+  /** Symbols this venue lists and currently trades (status TRADING). */
+  async tradingSymbols(): Promise<Set<string>> {
+    const info = await this.exchangeInfo()
+    return new Set(info.symbols.filter((x) => x.status === undefined || x.status === 'TRADING').map((x) => x.symbol))
+  }
+
+  async rules(symbol: string): Promise<SymbolRules> {
+    const info = await this.exchangeInfo()
     const s = info.symbols.find((x) => x.symbol === symbol)
     if (!s) throw new Error(symbol + ' is not listed on ' + this.base)
     const f = (type: string) => s.filters.find((x) => x.filterType === type) || {}

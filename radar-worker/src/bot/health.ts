@@ -5,9 +5,10 @@
 //
 //   live       real orders. Shadow trades (signals it could not take for real)
 //              count too.
-//   probation  still real orders, but a warning: the rolling 30-trade
-//              expectancy is under its band's 5th percentile, or the drawdown
-//              in R since its peak is over the 95th.
+//   probation  still real orders, at half the risk per trade: the rolling
+//              30-trade expectancy is under its band's 5th percentile, or the
+//              drawdown in R from its peak (over the last 100 trades of the
+//              segment) is over the 95th.
 //   shadow     paper trades only. A live strategy is demoted when the rolling
 //              30-trade expectancy falls under the 1st percentile or the
 //              drawdown passes the 99th. It is promoted back only after at
@@ -55,7 +56,7 @@ export interface HealthStats {
   expR: number | null
   /** Mean R of the last 30 (null with fewer). */
   roll30: number | null
-  /** Drawdown in R from the peak, over the current segment (since it went live, or since its demotion). */
+  /** Drawdown in R from the peak, over the last 100 trades of the current segment (since it went live, or since its demotion). */
   ddR: number
   maxDdR: number
   /** Trades and mean R in the current segment. */
@@ -83,7 +84,10 @@ export interface HealthRecord {
   updated: number
 }
 
-export const HEALTH = { window: 30, minRecover: 30, historyMax: 50 }
+export const HEALTH = { window: 30, minRecover: 30, historyMax: 50, ddWindow: 100, probationRisk: 0.5 }
+
+/** Risk per trade multiplier for a strategy in this state: probation trades at half risk. */
+export const riskScale = (s: StrategyState): number => (s === 'probation' ? HEALTH.probationRisk : 1)
 
 /** May a strategy in this state place real orders? */
 export const isLive = (s: StrategyState): boolean => s === 'live' || s === 'probation'
@@ -137,7 +141,8 @@ export function evaluateHealth(
   const r = all.map((o) => o.r)
   const roll30 = rollingExp(r)
   const seg = all.filter((o) => o.t > cur.segmentStart).map((o) => o.r)
-  const dd = drawdownR(seg)
+  // The bands are drawdowns within 100 trades: judged on the last 100 of the segment.
+  const dd = drawdownR(seg.slice(-HEALTH.ddWindow))
   const segExp = mean(seg)
   if (bands && !cur.transition) {
     if (isLive(cur.state)) {
@@ -167,7 +172,7 @@ export function evaluateHealth(
     }
   }
   const segNow = all.filter((o) => o.t > cur.segmentStart).map((o) => o.r)
-  const ddNow = drawdownR(segNow)
+  const ddNow = drawdownR(segNow.slice(-HEALTH.ddWindow))
   const record: HealthRecord = {
     id: slot.id,
     state: cur.state,
