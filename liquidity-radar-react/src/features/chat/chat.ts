@@ -37,6 +37,8 @@ import { getMLState } from '../ml/store'
 import type { AIScore, CandleLike, Forecast } from '../../types/market'
 import { neuralVerdict } from '../signals/neuralSignal'
 import { pushMsg } from './log'
+import { botIntent, botReply } from './botContext'
+import { botSnapshot } from './botContextLive'
 
 // Same alias the sibling feature modules use for values that cross the
 // untyped engine boundary.
@@ -187,9 +189,16 @@ export async function generateReply(raw: string): Promise<string> {
   let coin: string | null = null
 
   if (/^(hi|hello|hey|yo|sup|gm|good morning)\s/.test(text) || has('help') || has('what can you do') || has('commands')) {
-    return 'I\'m <b>Radar AI</b>, your microstructure co-pilot. Try me with:<br><br>• Any market — <i>"analyze solana"</i>, <i>"how is gold looking?"</i>, <i>"compare eurusd and the dollar index"</i>, <i>"what is nvidia doing?"</i><br>• Any coin — <i>"pepe price"</i>, <i>"should I buy trump?"</i><br>• Indicators — <i>"explain rsi"</i>, <i>"current macd"</i>, <i>"bollinger squeeze?"</i><br>• Derivatives — <i>"funding rate"</i>, <i>"open interest"</i>, <i>"liquidation zones"</i><br>• Flow — <i>"whale activity"</i>, <i>"support and resistance"</i>, <i>"breakout levels"</i><br>• Signals — <i>"show signals"</i>, <i>"best signal"</i>, <i>"scan the market"</i><br>• Economics — <i>"what is inflation?"</i>, <i>"fed rates"</i>, <i>"nfp impact"</i><br>• Crypto basics — <i>"what is bitcoin?"</i>, <i>"explain defi"</i>, <i>"layer 2 scaling"</i><br>• Trading — <i>"position sizing"</i>, <i>"stop loss"</i>, <i>"take profit strategy"</i><br>• News — <i>"show news"</i>, <i>"forex events"</i>, <i>"what is happening today?"</i><br>• Conversation — <i>"tell me a joke"</i>, <i>"how to trade?"</i><br><br>I sweep 19 markets every 2 min — crypto, spot gold and silver, FX majors, the S&amp;P and Nasdaq, and crude — across 1H/4H/1D, track whale flow, and train a direction model on them in the background.'
+    return 'I\'m <b>Radar AI</b>, your microstructure co-pilot. Try me with:<br><br>• Any market — <i>"analyze solana"</i>, <i>"how is gold looking?"</i>, <i>"compare eurusd and the dollar index"</i>, <i>"what is nvidia doing?"</i><br>• Any coin — <i>"pepe price"</i>, <i>"should I buy trump?"</i><br>• Indicators — <i>"explain rsi"</i>, <i>"current macd"</i>, <i>"bollinger squeeze?"</i><br>• Derivatives — <i>"funding rate"</i>, <i>"open interest"</i>, <i>"liquidation zones"</i><br>• Flow — <i>"whale activity"</i>, <i>"support and resistance"</i>, <i>"breakout levels"</i><br>• Signals — <i>"show signals"</i>, <i>"best signal"</i>, <i>"scan the market"</i><br>• Testnet bot — <i>"how is the bot doing?"</i>, <i>"bot open trades"</i>, <i>"bot strategies"</i>, <i>"ready for real money?"</i><br>• Economics — <i>"what is inflation?"</i>, <i>"fed rates"</i>, <i>"nfp impact"</i><br>• Crypto basics — <i>"what is bitcoin?"</i>, <i>"explain defi"</i>, <i>"layer 2 scaling"</i><br>• Trading — <i>"position sizing"</i>, <i>"stop loss"</i>, <i>"take profit strategy"</i><br>• News — <i>"show news"</i>, <i>"forex events"</i>, <i>"what is happening today?"</i><br>• Conversation — <i>"tell me a joke"</i>, <i>"how to trade?"</i><br><br>I sweep 19 markets every 2 min — crypto, spot gold and silver, FX majors, the S&amp;P and Nasdaq, and crude — across 1H/4H/1D, track whale flow, and train a direction model on them in the background.'
   }
   if (has('thank')) return 'Anytime — Radar never sleeps.'
+  // The testnet bot: its status, open trades, strategies and go-live readiness,
+  // from the same records as the Self Learning tab (cached a minute).
+  const botQ = botIntent(raw)
+  if (botQ) {
+    const lines = botReply(botQ, await botSnapshot())
+    return lines.map(esc).join('<br>') + actionButtons([{ kind: 'tab', arg: 'selflearn' }])
+  }
   if ((has('what did i ask') || has('history') || has('remember') || has('repeat that') || has('what were we')) && state.mem.topics.length) {
     const last = state.mem.topics[state.mem.topics.length - 1]
     return 'From memory, your last question was: <i>"' + esc(String(last)) + '"</i>'
