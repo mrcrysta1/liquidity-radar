@@ -108,6 +108,9 @@ const cfg: TraderConfig = {
     shadow: env.BOT_SHADOW !== '0',
     // Hybrid shadows every signal: one decision per bar, each open at most horizon bars.
     shadowMaxOpen: num(env.BOT_SHADOW_MAX_OPEN, MODE === 'hybrid' ? BRACKET.horizon + 1 : DEFAULT_LEARN.shadowMaxOpen),
+    // BOT_LEARN_BACKGROUND=1: the model's first walk-forward and training run from
+    // the tick loop on the heavyJobs spacing, not in startup (ML on many markets).
+    background: env.BOT_LEARN_BACKGROUND === '1',
   },
   mode: MODE,
   strategy: STRATEGY,

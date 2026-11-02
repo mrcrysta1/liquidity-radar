@@ -181,6 +181,40 @@ export async function loadJournal(limit = 500): Promise<JournalRow[] | null> {
 }
 
 /**
+ * Closed real and shadow trades (only the columns the metrics use) and the
+ * model registry, for the "Model metrics" card (modelMetrics.ts). The model
+ * weights in bot_models are not fetched.
+ */
+/** Every row of a query, a page at a time (Supabase returns at most 1000 per request), up to `max`. */
+async function restAll<T>(path: string, max: number, page = 1000): Promise<T[]> {
+  const out: T[] = []
+  while (out.length < max) {
+    const want = Math.min(page, max - out.length)
+    const rows = await rest<T[]>(`${path}&limit=${want}&offset=${out.length}`)
+    out.push(...rows)
+    if (rows.length < want) break
+  }
+  return out
+}
+
+export async function loadModelMetrics(limit = 20_000): Promise<{ real: Array<Record<string, unknown>>; shadow: Array<Record<string, unknown>>; models: Array<Record<string, unknown>> } | null> {
+  if (!SERVER_BOT) return null
+  const [real, shadow, models] = await Promise.all([
+    restAll<Record<string, unknown>>(
+      'bot_trades?select=id,symbol,status,mode,strategy,opened_at,closed_at,exit_reason,r_multiple,p_win,p_raw,ev_r,bars_held,mae_r,mfe_r&status=eq.closed&order=closed_at.desc,id.desc',
+      limit,
+    ),
+    restAll<Record<string, unknown>>(
+      'bot_shadow_trades?select=id,symbol,status,strategy,bar_time,closed_at,exit_reason,r_gross,r_net,p_cal,p_raw,ev_r,bars_held,mae_r,mfe_r&status=eq.closed&order=closed_at.desc,id.desc',
+      limit,
+    ),
+    // Readable with the anon key (002_bot.sql); an older schema without the registry columns just shows no registry.
+    rest<Array<Record<string, unknown>>>('bot_models?select=id,symbol,interval,version,role,created_at,promoted_at,gate_pass,holdout&order=id.desc&limit=2000').catch(() => []),
+  ])
+  return { real, shadow, models }
+}
+
+/**
  * Everything the go-live readiness check (readiness.ts computeReadiness) needs:
  * real trades with a strategy, error events of the last 7 days and every
  * failed-stop error, the last 14 days of hourly equity rows, the heartbeat and

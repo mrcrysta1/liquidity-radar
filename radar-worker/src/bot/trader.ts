@@ -157,6 +157,15 @@ export interface LearnConfig {
    * the calibration's n then counts more trades than independent bets.
    */
   shadowMaxOpen: number
+  /**
+   * The bot (bot.ts) on many markets: init() does not run the model's first
+   * walk-forward or initial training; learnTick does, and every challenger
+   * cycle too, one heavy job at a time on the heavyJobs spacing, so startup is
+   * not held up by ~10 s of CPU per market and heavy jobs never stack in one
+   * tick. The model decides nothing on a market until its first model exists.
+   * Unset (tests): init trains synchronously, cycles are not spaced.
+   */
+  background?: boolean
 }
 
 export const DEFAULT_LEARN: LearnConfig = {
@@ -274,12 +283,14 @@ export class SymbolTrader {
     }
     this.model = await this.champion()
     this.gate = await this.store.getState<GateState | null>(this.gateKey, null)
+    const background = this.cfg.learn.background === true
     let bars: Bar[] | undefined
-    if (!this.gate || Date.now() - this.gate.t > this.cfg.retrainMs) bars = await this.walkForwardGate()
+    if (!background && (!this.gate || Date.now() - this.gate.t > this.cfg.retrainMs)) bars = await this.walkForwardGate()
     const ls = await this.store.getState<{ t: number; n?: number }>('learn:' + this.symbol, { t: 0 })
     this.learnAt = Math.max(ls.t || 0, this.model?.createdAt ?? 0)
     this.closedSinceCycle = ls.n || 0
-    if (!this.model) await this.learnCycle('initial training', bars)
+    // In the background, learnTick trains it on its turn ('initial training').
+    if (!this.model && !background) await this.learnCycle('initial training', bars)
     // Kept in the database, so a bot that runs as short scheduled jobs (BOT_ONCE)
     // decides each bar once, like the long-running one.
     this.lastBar = await this.store.getState<number>('lastBar:' + this.symbol, 0)
@@ -416,10 +427,17 @@ export class SymbolTrader {
     }
     const age = now - this.learnAt
     let trigger = ''
-    if (age >= this.cfg.learn.everyMs) trigger = 'hourly'
+    if (!this.model && !this.learnAt) trigger = 'initial training'
+    else if (age >= this.cfg.learn.everyMs) trigger = 'hourly'
     else if (!this.model && age >= 10 * 60_000) trigger = 'no usable model'
     else if (this.closedSinceCycle >= this.cfg.learn.everyTrades) trigger = `${this.closedSinceCycle} new closed trades`
-    if (trigger) await this.learnCycle(trigger)
+    if (!trigger) return
+    if (this.cfg.learn.background) {
+      // One heavy job per spacing across all markets; a due cycle waits for a later tick.
+      if (Date.now() - heavyJobs.at < heavyJobs.spacingMs) return
+      heavyJobs.at = Date.now()
+    }
+    await this.learnCycle(trigger)
   }
 
   /** Resolve open shadow trades once per new closed bar. */

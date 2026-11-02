@@ -159,15 +159,17 @@ test('BOT_STRATEGIES: parsing, the BOT_STRATEGY=trend alias, and the workflow se
     { id: 'c6', state: 'shadow' },
     { id: 'f1x', state: 'shadow' },
     { id: 'c2', state: 'shadow' },
-    { id: 'ml', state: 'shadow', symbols: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT'] },
+    { id: 'ml', state: 'shadow' },
   ])
+  // The model on all 24 markets: its heavy jobs must run in the background, not in startup.
+  assert.match(wf, /^\s*BOT_LEARN_BACKGROUND:\s*'1'\s*$/m)
   assert.ok(F1_HEALTH.roll30P1 < F1_HEALTH.roll30P5 && F1_HEALTH.ddP95 < F1_HEALTH.ddP99)
   // Which strategy runs where.
   const [f1, c6, f1x, , ml] = parseStrategies(m![1].replace(/['"]/g, ''))!
   assert.equal(slotRuns(f1, 'XRPUSDT'), true)
   assert.equal(slotRuns(c6, 'XRPUSDT'), true)
   assert.equal(slotRuns(f1x, 'XRPUSDT'), true)
-  assert.equal(slotRuns(ml, 'XRPUSDT'), false)
+  assert.equal(slotRuns(ml, 'XRPUSDT'), true, 'the model paper-trades all 24 markets')
   assert.equal(slotRuns(ml, 'SOLUSDT'), true)
 })
 

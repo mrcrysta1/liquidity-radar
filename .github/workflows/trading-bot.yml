@@ -39,8 +39,14 @@
 #       breaks the 20-bar low; 3 ATR stop, 4 ATR trail; exit above the 10-bar
 #       high or EMA(300)). Thin edge (dev +0.047R, PF 1.15, t = 1.08): paper
 #       only; bands p5 -0.38R / p1 -0.47R, drawdown p95 26.1R / p99 31.3R.
-#   ml  shadow, BTC/ETH/SOL/BNB only: the model's training, walk-forward and
-#       challengers are heavy, so they run on those four markets alone.
+#   ml  shadow, all 24 markets (6 bars a day each: ~144 shadow decisions a
+#       day of learning data). Its walk-forward (~4-7 s per market) and
+#       training are heavy, so with BOT_LEARN_BACKGROUND they never run inside
+#       startup: the tick loop runs them one at a time, at least 60 s apart
+#       across all markets (trader.ts heavyJobs, shared with C6). A fresh
+#       market needs ~2 such slots before the model decides there (first run:
+#       ~45 min for all 24); later, the 24-hourly walk-forwards and 4-hourly
+#       challengers are ~30 slots per 4 h, well inside the 5 h 30 min run.
 #
 # REAL (demo) TRADES: research strategy F1 (f1:live,
 # radar-worker/src/bot/strategy.ts), long only, on all 24 markets:
@@ -49,7 +55,7 @@
 #   stop   entry − 3 × ATR14, exchange-side; no take-profit, no time exit
 #   trail  each 4h close: stop = max(stop, highest high since entry − 4 × ATR14)
 #   exit   4h close < lowest low of the previous 10 bars, or ≤ EMA(300) → market
-#   risk   0.5%/trade at the initial stop; daily halt, drawdown kill switch and
+#   risk   0.75%/trade at the initial stop; daily halt, drawdown kill switch and
 #          the heat cap below apply (not the model's walk-forward gate)
 # Research (fees, slippage, funding): 2019–Jan 2026 +0.376R/trade, PF 2.12;
 # sealed holdout Feb–Nov 2026 +0.179R/trade, PF 1.48, +4.5%, 63 trades — not
@@ -176,18 +182,33 @@ jobs:
         env:
           BOT_RUN_MINUTES: '330'
           # Strategies in priority order, id:state@markets (';' between them):
-          # F1 places the real orders everywhere, C6 (F1 filtered by its GBDT)
-          # and C2 paper-trade everywhere, the model paper-trades on the four
-          # majors only. A live strategy
+          # F1 places the real orders everywhere; C6 (F1 filtered by its GBDT),
+          # F1X, C2 and the model paper-trade everywhere. A live strategy
           # that leaves its health bands is demoted to shadow (and promoted
           # back after 30 good shadow trades); bot_state 'strategy:<id>'.
-          # Hybrid keeps the portfolio heat cap (1.5% per side, 2% total).
-          BOT_STRATEGIES: 'f1:live@*;c6:shadow@*;f1x:shadow@*;c2:shadow@*;ml:shadow@BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT'
+          # Hybrid keeps the portfolio heat cap (2.4% per side, 3.15% total).
+          BOT_STRATEGIES: 'f1:live@*;c6:shadow@*;f1x:shadow@*;c2:shadow@*;ml:shadow@*'
+          # The model's walk-forward and training run from the tick loop, one
+          # heavy job per minute across all markets, not inside startup.
+          BOT_LEARN_BACKGROUND: '1'
           BOT_MODE: hybrid
           BOT_SYMBOLS: BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,AAVEUSDT,ADAUSDT,ARBUSDT,AVAXUSDT,BCHUSDT,DOTUSDT,ETCUSDT,INJUSDT,NEARUSDT,UNIUSDT,APTUSDT,ATOMUSDT,DOGEUSDT,FILUSDT,LINKUSDT,LTCUSDT,OPUSDT,SUIUSDT,TRXUSDT,XRPUSDT
           BOT_INTERVAL: 4h
           BOT_MIN_EV: '0.1'
           BOT_MIN_MARGIN: '100'
+          # RISK (2026-11-01): the owner's target is ~30%/year, so risk per
+          # trade rises from 0.5% to 0.75% (1.5x; returns and drawdowns in %
+          # scale with it). The other limits in % of equity scale by the same
+          # 1.5x, so the bot behaves as before, only bigger: research F1
+          # max drawdown was ~12-31% at 0.5% risk, so expect ~18-46% at 0.75%
+          # (drawdown in R is unchanged; each R is 1.5x larger in %).
+          RISK_PER_TRADE: '0.0075'
+          # Daily halt 3% -> 4.5%: the same ~6 stops in a day as before.
+          MAX_DAILY_LOSS: '0.045'
+          # Drawdown kill switch 15% -> 22% (1.5x, rounded down): still ~29R,
+          # about F1's 100-trade drawdown p99 (27.7R), so it trips on a broken
+          # strategy rather than on ordinary bad luck. Reset: npm run reset-risk.
+          MAX_DRAWDOWN: '0.22'
           BOT_SL_ATR: '1.5'
           BOT_TP_ATR: '2.25'
           BOT_HORIZON: '12'
@@ -197,11 +218,12 @@ jobs:
           BOT_COOLDOWN_MIN: '240'
           BOT_MAX_OPEN: '4'
           BOT_MAX_TRADES_DAY: '10'
-          # Portfolio heat: three 0.5% trades per side, as in the research. The
-          # small margin over 1.5% / 2% is for stops rounded to the tick size,
-          # which can push one trade's risk a hair over 0.5%.
-          BOT_MAX_SIDE_RISK: '0.016'
-          BOT_MAX_TOTAL_RISK: '0.021'
+          # Portfolio heat: three 0.75% trades per side, as in the research (it
+          # used three 0.5% trades). The small margin over 2.25% / 3% is for
+          # stops rounded to the tick size, which can push one trade's risk a
+          # hair over 0.75% (both scaled 1.5x from 1.6% / 2.1%).
+          BOT_MAX_SIDE_RISK: '0.024'
+          BOT_MAX_TOTAL_RISK: '0.0315'
           BOT_SHADOW: '1'
           # One decision per bar, each shadow open at most BOT_HORIZON bars:
           # 13 per market leaves room to shadow every signal.
