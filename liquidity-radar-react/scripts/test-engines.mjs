@@ -2998,6 +2998,8 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
 
   const stale = B.summarizeBot({ ...snap, account: { ...account, heartbeat: { ...account.heartbeat, t: now - 2 * H } } })
   ok('botctx: an old heartbeat reads STALE', stale.includes('STALE'))
+  const noAcct = B.summarizeBot({ ...snap, account: { account: null, heartbeat: account.heartbeat, unavailable: 'not configured' } })
+  ok('botctx: an unavailable account view says so and keeps the heartbeat', noAcct.includes('ACCOUNT: account view unavailable') && noAcct.includes('HEARTBEAT: 1 min ago'))
   const failed = B.summarizeBot({ now, account: null, strategies: null, plans: null, journal: null, events: null, readiness: null })
   ok('botctx: failed loaders are marked unavailable, not thrown', ['ACCOUNT: unavailable', 'STRATEGIES: unavailable', 'GO-LIVE READINESS: unavailable', 'TRADES: unavailable', 'LATEST PLANS: unavailable'].every((x) => failed.includes(x)), failed)
 

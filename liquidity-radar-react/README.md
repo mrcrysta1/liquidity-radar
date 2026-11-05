@@ -60,6 +60,25 @@ busy, failing or slow one is skipped. Optional: `LLM_PROVIDERS` (e.g. `gemini,gr
 sets the order; `GROQ_MODEL` / `GEMINI_MODEL` / `OPENROUTER_MODEL` override the default
 models (`llama-3.3-70b-versatile`, `gemini-3.8-flash`, `google/gemma-4-31b-it:free`).
 
+## Bot account view setup
+
+The Neural Net page's Binance account card calls `/api/bot-account`
+(`api/bot-account.mjs`). The account snapshot is not readable with the public
+anon key (`radar-worker/sql/009_bot_private.sql`), so the function reads it with
+the Supabase service-role key and returns only the fields the card shows. Same
+origin gate and per-IP rate limit as `/api/chat`.
+
+In Vercel → **Project → Settings → Environment Variables** (server-only, never a
+`VITE_` name, never in the browser bundle):
+
+| Name | Value |
+|---|---|
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase *service_role* (or `sb_secret_…`) key |
+| `SUPABASE_URL` | optional; Supabase Project URL, defaults to `VITE_WHALE_DB_URL` |
+
+Then redeploy. Without the key the card says the account view is unavailable;
+the bot's trades and activity still show.
+
 ## Regenerating generated files
 
 ```bash
