@@ -1063,6 +1063,18 @@ test('multi: a demoted strategy (health in bot_state) shadows its signal; on pro
   }
 })
 
+test('multi: a health record never makes a strategy more permissive than configured (P0.1)', async () => {
+  // Configured shadow, but a stored record says live (e.g. auto-promoted before the cap): still paper only.
+  const { store, ex, t, pg } = await trendTrader({ strategies: [{ id: 'f1', state: 'shadow' }] })
+  await store.setState('strategy:f1', { id: 'f1', state: 'live', configured: 'shadow', since: 0, segmentStart: 0, hasBands: true, stats: {}, history: [], updated: 0 })
+  await t.tick(true, Date.now())
+  assert.equal(await store.openTrade('BTCUSDT'), null)
+  assert.equal(ex.pos.amt, 0)
+  const f1 = (await pg.query<Row>(`select reject_reason from bot_shadow_trades where strategy = 'f1'`)).rows
+  assert.equal(f1.length, 1)
+  assert.match(String(f1[0].reject_reason), /strategy f1 is in shadow/)
+})
+
 test('multi: probation halves the risk per trade', async () => {
   const health = { id: 'f1', state: 'probation', configured: 'live', since: 0, segmentStart: 0, hasBands: true, stats: {}, history: [], updated: 0 }
   const { store, t } = await trendTrader()

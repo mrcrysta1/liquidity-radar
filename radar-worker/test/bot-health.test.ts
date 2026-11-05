@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs'
 import { PGlite } from '@electric-sql/pglite'
 import type { Db } from '../src/db.ts'
 import { BotStore } from '../src/bot/store.ts'
-import { HEALTH, drawdownR, evaluateHealth, riskScale, rollingExp } from '../src/bot/health.ts'
+import { HEALTH, clampState, drawdownR, evaluateHealth, riskScale, rollingExp } from '../src/bot/health.ts'
 import type { HealthBands, HealthRecord, Outcome } from '../src/bot/health.ts'
 import { F1_HEALTH, parseStrategies, refreshHealth, slotRuns } from '../src/bot/strategies.ts'
 
@@ -105,6 +105,59 @@ test('no recovery with a non-positive expectancy or a drawdown past p95', () => 
   assert.ok(deep.record.stats.maxDdR >= 16)
 })
 
+test('configured shadow: never auto-promoted; flagged eligible instead (P0.1)', () => {
+  const t0 = 1_000_000
+  const c2 = { id: 'c2', state: 'shadow' as const }
+  const rec = evaluateHealth(null, c2, [], BANDS, t0).record
+  assert.equal(rec.state, 'shadow')
+  assert.equal(rec.eligible, false)
+  const good = run(40, 0.6, t0 + 1)
+  const r = evaluateHealth(rec, c2, good, BANDS, t0 + 1e9)
+  assert.equal(r.record.state, 'shadow', 'stays shadow: live needs BOT_STRATEGIES')
+  assert.equal(r.transition, null)
+  assert.equal(r.record.eligible, true)
+  assert.match(r.record.eligibleReason!, /would qualify for live — needs explicit approval in BOT_STRATEGIES \(40 shadow trades since it started: \+0\.60R\/trade/)
+  assert.equal(r.record.eligibleSince, t0 + 1e9)
+  // Still eligible later: same since; never live however long it runs.
+  const r2 = evaluateHealth(r.record, c2, [...good, ...run(100, 0.6, t0 + 2e9)], BANDS, t0 + 3e9)
+  assert.equal(r2.record.state, 'shadow')
+  assert.equal(r2.record.eligibleSince, t0 + 1e9)
+  // Results turn: no longer eligible.
+  const r3 = evaluateHealth(r2.record, c2, [...good, ...run(40, -1, t0 + 4e9)], BANDS, t0 + 5e9)
+  assert.equal(r3.record.eligible, false)
+  assert.equal(r3.record.eligibleReason, undefined)
+  // Approved in BOT_STRATEGIES: live.
+  const approved = evaluateHealth(r2.record, { id: 'c2', state: 'live' }, [], BANDS, t0 + 6e9)
+  assert.equal(approved.record.state, 'live')
+  assert.match(approved.transition!.reason, /configured live/)
+})
+
+test('a stored state above the configured one is clamped back to shadow', () => {
+  const t0 = 1_000_000
+  const c2 = { id: 'c2', state: 'shadow' as const }
+  // e.g. a record auto-promoted before the cap: configured shadow, state live.
+  const stale: HealthRecord = { ...evaluateHealth(null, c2, [], BANDS, t0).record, state: 'live' }
+  const r = evaluateHealth(stale, c2, run(40, 0.6, t0 + 1), BANDS, t0 + 1e9)
+  assert.equal(r.record.state, 'shadow')
+  assert.equal(r.transition!.from, 'live')
+  assert.match(r.transition!.reason, /configured shadow \(BOT_STRATEGIES\)/)
+  for (const s of ['live', 'probation', 'shadow'] as const) {
+    assert.equal(clampState(s, 'shadow'), 'shadow')
+    assert.equal(clampState(s, 'live'), s)
+  }
+})
+
+test('configured live: demoted to shadow, then recovers to live (unchanged); never eligible', () => {
+  const t0 = 1_000_000
+  let rec = evaluateHealth(null, live, [], BANDS, t0).record
+  const bad = run(30, -0.6, t0 + 1, 'real')
+  rec = evaluateHealth(rec, live, bad, BANDS, t0 + 2e8).record
+  assert.equal(rec.state, 'shadow')
+  const r = evaluateHealth(rec, live, [...bad, ...run(30, 0.6, t0 + 3e8)], BANDS, t0 + 4e8)
+  assert.equal(r.record.state, 'live')
+  assert.equal(r.record.eligible, false)
+})
+
 test('never promoted (nor demoted) without health bands', () => {
   const t0 = 1_000_000
   const ml = { id: 'ml', state: 'shadow' as const }
@@ -113,6 +166,7 @@ test('never promoted (nor demoted) without health bands', () => {
   assert.equal(r.record.state, 'shadow')
   assert.equal(r.transition, null)
   assert.equal(r.record.hasBands, false)
+  assert.equal(r.record.eligible, false, 'no bands: never eligible either')
   const mlLive = evaluateHealth(null, { id: 'ml', state: 'live' }, run(100, -2, t0 + 1), undefined, t0 + 1e9)
   assert.equal(mlLive.record.state, 'live')
 })
@@ -246,4 +300,23 @@ test('refreshHealth: demotes F1 from its closed trades, logs it, and promotes it
   await closedShadows(pg, 'f1', HEALTH.minRecover, 0.8, demoteAt + 1000)
   assert.equal((await refreshHealth(store, slots, demoteAt + 7_200_000)).f1, 'live')
   assert.equal((await store.getState<HealthRecord | null>('strategy:f1', null))?.history.length, 2)
+})
+
+test('refreshHealth: a configured-shadow strategy stays shadow on 40 good shadow trades; one eligible event', async () => {
+  const { db, pg } = await freshDb()
+  const store = new BotStore(db)
+  const slots = parseStrategies('f1:live;c2:shadow')!
+  const t0 = Date.UTC(2026, 10, 1)
+  await refreshHealth(store, slots, t0)
+  await closedShadows(pg, 'c2', 40, 0.8, t0 + 1000)
+  assert.equal((await refreshHealth(store, slots, t0 + 3_600_000)).c2, 'shadow')
+  assert.equal((await refreshHealth(store, slots, t0 + 7_200_000)).c2, 'shadow')
+  const rec = await store.getState<HealthRecord | null>('strategy:c2', null)
+  assert.equal(rec?.state, 'shadow')
+  assert.equal(rec?.eligible, true)
+  assert.equal(rec?.history.length, 0)
+  const ev = (await pg.query<{ level: string; msg: string }>(`select level, msg from bot_events where msg like 'strategy c2%'`)).rows
+  assert.equal(ev.length, 1, 'once')
+  assert.equal(ev[0].level, 'info')
+  assert.match(ev[0].msg, /^strategy c2: eligible — would qualify for live — needs explicit approval in BOT_STRATEGIES/)
 })

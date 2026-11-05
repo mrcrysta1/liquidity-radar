@@ -34,6 +34,9 @@ export interface BotStrategy {
   maxDdR: number | null
   /** Trades since it went live / was demoted. */
   segN: number | null
+  /** Configured shadow and would qualify for live: needs approval in BOT_STRATEGIES (false in older records). */
+  eligible: boolean
+  eligibleReason: string | null
   last: BotStrategyTransition | null
   updated: number | null
 }
@@ -68,6 +71,8 @@ export function normalizeStrategies(values: unknown[]): BotStrategy[] {
       ddR: num(s.ddR),
       maxDdR: num(s.maxDdR),
       segN: num(s.segN),
+      eligible: x.eligible === true,
+      eligibleReason: typeof x.eligibleReason === 'string' ? x.eligibleReason : null,
       last: h && STATES.includes(h.to as BotStrategyState) ? { t: num(h.t) ?? 0, from: h.from as BotStrategyState, to: h.to as BotStrategyState, reason: String(h.reason ?? '') } : null,
       updated: num(x.updated),
     })

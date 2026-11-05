@@ -43,8 +43,14 @@ function Strategy({ s }: { s: BotStrategy }) {
         <p className="sc-why">No state change yet (started {s.configured}).</p>
       )}
       {!s.hasBands && <small className="sc-note">No health bands: it never moves between live and shadow on its own.</small>}
-      {s.hasBands && s.state === 'shadow' && s.segN != null && (
-        <small className="sc-note">{s.segN} paper trades since {s.last?.to === 'shadow' ? 'the demotion' : 'it started'} · needs 30 with a positive result to go live</small>
+      {s.hasBands && s.state === 'shadow' && s.eligible && (
+        <small className="sc-note">Eligible: would qualify for live — needs explicit approval in BOT_STRATEGIES</small>
+      )}
+      {s.hasBands && s.state === 'shadow' && !s.eligible && s.segN != null && (
+        <small className="sc-note">
+          {s.segN} paper trades since {s.last?.to === 'shadow' ? 'the demotion' : 'it started'} ·{' '}
+          {s.configured === 'shadow' ? 'configured shadow: stays paper until approved in BOT_STRATEGIES' : 'needs 30 with a positive result to go live'}
+        </small>
       )}
     </div>
   )

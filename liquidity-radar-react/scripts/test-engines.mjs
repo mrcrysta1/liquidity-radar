@@ -2780,6 +2780,9 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('strategies: last transition', [f1.last.from, f1.last.to, f1.last.t], ['probation', 'shadow', 5])
   eq('strategies: no history, no transition; bands flag', [ml.last, ml.hasBands, f1.hasBands], [null, false, true])
   eq('strategies: missing fields fall back', [x2.name, x2.real, x2.roll30, x2.priority], ['X2', 0, null, null])
+  eq('strategies: eligible flag, absent in older records', [x2.eligible, x2.eligibleReason, f1.eligible], [false, null, false])
+  const [c2] = S.normalizeStrategies([{ id: 'c2', state: 'shadow', configured: 'shadow', hasBands: true, eligible: true, eligibleReason: 'would qualify for live', stats: {} }])
+  eq('strategies: eligible configured-shadow', [c2.state, c2.eligible, c2.eligibleReason], ['shadow', true, 'would qualify for live'])
 }
 
 // ---- server bot: model metrics ------------------------------------------------------

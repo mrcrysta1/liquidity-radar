@@ -60,7 +60,7 @@ import { barsBetween, barsHeld, excursion, slippageBps } from './journal.ts'
 import { checkTrendSetup } from './strategy.ts'
 import { STRATEGIES, parseStrategies, resolveRuleShadow, ruleStrategy, slotRuns } from './strategies.ts'
 import type { ManagedPos, RefBars, RuleStrategy, Signal, StrategySlot } from './strategies.ts'
-import { isLive, riskScale } from './health.ts'
+import { clampState, isLive, riskScale } from './health.ts'
 import type { HealthRecord, StrategyState } from './health.ts'
 
 /** Bars a rule strategy's decisions and shadows read: the most any of them needs. */
@@ -983,10 +983,13 @@ export class SymbolTrader {
     await this.decideAll(canEnter, now, b, open)
   }
 
-  /** A strategy's state: health.ts's verdict (bot_state 'strategy:<id>'), or the configured one until there is one. */
+  /**
+   * A strategy's state: health.ts's verdict (bot_state 'strategy:<id>'), or the configured one until there is one.
+   * Never more permissive than configured: only BOT_STRATEGIES permits real orders.
+   */
   private async strategyState(slot: StrategySlot): Promise<StrategyState> {
     const rec = await this.store.getState<HealthRecord | null>('strategy:' + slot.id, null)
-    return rec && rec.configured === slot.state ? rec.state : slot.state
+    return clampState(rec && rec.configured === slot.state ? rec.state : slot.state, slot.state)
   }
 
   /**
