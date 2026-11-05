@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { InitQueue, initBackoffMs, listedOnly, tickOrder } from '../src/bot/startup.ts'
+import { InitQueue, initBackoffMs, listedOnly, settle, tickOrder } from '../src/bot/startup.ts'
 
 const fake = (symbol: string, failures: number, err = 'Binance 400 -4067: Position side cannot be changed if there exists open orders.') => {
   const t = {
@@ -70,6 +70,15 @@ test('a throwing hook (e.g. the database is down) does not break startup', async
   assert.deepEqual(q.pending, ['BTCUSDT'])
 })
 
+test('all: every item, ready or not, in order (each is ticked; the ones not set up manage only)', async () => {
+  const btc = fake('BTCUSDT', Infinity)
+  const eth = fake('ETHUSDT', 0)
+  const q = new InitQueue([btc, eth])
+  await q.run(0)
+  assert.deepEqual(q.all.map((t) => t.symbol), ['BTCUSDT', 'ETHUSDT'])
+  assert.deepEqual(q.ready.map((t) => t.symbol), ['ETHUSDT'])
+})
+
 test('markets the venue does not trade are dropped; an unreadable listing keeps them all', () => {
   const syms = ['BTCUSDT', 'APTUSDT', 'SUIUSDT', 'ETHUSDT']
   assert.deepEqual(listedOnly(syms, new Set(['BTCUSDT', 'ETHUSDT', 'SUIUSDT'])), { keep: ['BTCUSDT', 'SUIUSDT', 'ETHUSDT'], dropped: ['APTUSDT'] })
@@ -80,4 +89,14 @@ test('traders act in alphabetical symbol order (the heat-cap tie-break)', () => 
   const t = ['SOLUSDT', 'AAVEUSDT', 'BTCUSDT', 'ADAUSDT'].map((symbol) => ({ symbol, init: async () => {} }))
   assert.deepEqual(tickOrder(t).map((x) => x.symbol), ['AAVEUSDT', 'ADAUSDT', 'BTCUSDT', 'SOLUSDT'])
   assert.equal(t[0].symbol, 'SOLUSDT', 'the input is left as it was')
+})
+
+test('shutdown waits for the tick in flight (settle), with a hard timeout; a failed tick has settled too', async () => {
+  let done = false
+  const tick = new Promise<void>((r) => setTimeout(() => ((done = true), r()), 30))
+  assert.equal(await settle(tick, 1000), true)
+  assert.ok(done, 'the tick finished before shutdown went on')
+  assert.equal(await settle(new Promise(() => {}), 20), false, 'a hung tick: exit after the timeout')
+  assert.equal(await settle(Promise.reject(new Error('tick failed')), 1000), true)
+  assert.equal(await settle(null, 1000), true, 'no tick running')
 })

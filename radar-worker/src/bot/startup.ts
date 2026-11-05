@@ -78,8 +78,30 @@ export class InitQueue<T extends Initable> {
     return this.slots.filter((s) => s.ready).map((s) => s.item)
   }
 
+  /** Every item, ready or not, in the original order (bot.ts manages the open positions of both). */
+  get all(): T[] {
+    return this.slots.map((s) => s.item)
+  }
+
   get pending(): string[] {
     return this.slots.filter((s) => !s.ready).map((s) => s.item.symbol)
+  }
+}
+
+/**
+ * Wait for `p` (the tick in flight) to settle, at most `ms`: true if it did,
+ * false on the timeout. Never throws — a failed tick has settled too. A
+ * shutdown uses it so a SIGTERM between a fill and its stop lets the tick
+ * place the stop before the process exits.
+ */
+export async function settle(p: Promise<unknown> | null, ms: number): Promise<boolean> {
+  if (!p) return true
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const late = new Promise<boolean>((r) => (timer = setTimeout(() => r(false), ms)))
+  try {
+    return await Promise.race([p.then(() => true, () => true), late])
+  } finally {
+    clearTimeout(timer)
   }
 }
 
