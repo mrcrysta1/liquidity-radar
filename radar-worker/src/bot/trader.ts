@@ -43,7 +43,7 @@ import type { BarCache } from './data.ts'
 import { lastPrice } from '../binance.ts'
 import { FEATURES, WARMUP, costR, featureAt, indicators } from './features.ts'
 import { roundStep, roundTick } from './futures.ts'
-import type { Fill, Position, SymbolRules } from './futures.ts'
+import type { AlgoOrder, Fill, Position, SymbolRules } from './futures.ts'
 import { heatCheck, size } from './risk.ts'
 import type { RiskConfig } from './risk.ts'
 import type { BotStore, ModelRow, OpenTrade } from './store.ts'
@@ -78,12 +78,14 @@ export interface Exchange {
   position(symbol: string): Promise<Position>
   setup(symbol: string, leverage: number): Promise<void>
   marketOrder(symbol: string, side: 'BUY' | 'SELL', quantity: string, reduceOnly?: boolean, clientId?: string): Promise<{ orderId: number; avgPrice: string; executedQty: string }>
-  bracketLeg(symbol: string, side: 'BUY' | 'SELL', type: 'STOP_MARKET' | 'TAKE_PROFIT_MARKET', triggerPrice: string, clientAlgoId: string): Promise<{ algoId: number }>
+  bracketLeg(symbol: string, side: 'BUY' | 'SELL', type: 'STOP_MARKET' | 'TAKE_PROFIT_MARKET', triggerPrice: string, clientAlgoId: string): Promise<{ algoId: number; algoStatus?: string }>
   takeProfitLimit(symbol: string, side: 'BUY' | 'SELL', quantity: string, price: string, clientId: string): Promise<{ orderId: number; status: string }>
   cancelAllOrders(symbol: string): Promise<void>
   cancelAllAlgo(symbol: string): Promise<void>
   /** Cancel one exchange-side stop / target by id (the trend trail replaces its stop). */
   cancelAlgo(symbol: string, algoId: number): Promise<void>
+  /** This market's working algo orders (the stops); throws when they cannot be read. */
+  openAlgo(symbol: string): Promise<AlgoOrder[]>
   fills(symbol: string, startTime: number): Promise<Fill[]>
 }
 
@@ -222,6 +224,23 @@ export const INTERVAL_DEFAULTS: Record<string, Partial<TraderConfig>> = {
 }
 export const INTERVAL_MAX_NOTIONAL_X: Record<string, number> = { '5m': 1, '15m': 1 }
 
+/** Algo-order states in which a just-placed stop is not working. */
+const STOP_DEAD = new Set(['REJECTED', 'EXPIRED', 'CANCELED', 'CANCELLED'])
+
+/**
+ * A failure worth one more try next tick: a timeout, a network error, a rate
+ * limit or a 5xx. A 4xx rejection of the order itself (e.g. -2021 would
+ * trigger immediately) is not: it will not go through on a retry either.
+ */
+function transient(e: unknown): boolean {
+  const x = e as { status?: unknown; name?: unknown }
+  if (typeof x?.status === 'number') return x.status >= 500 || x.status === 429 || x.status === 418
+  return x?.name === 'TimeoutError' || x?.name === 'AbortError' || x?.name === 'TypeError'
+}
+
+/** closePosition as the exchange lists it; a list without the field is read as ours (always closePosition). */
+const closesPosition = (a: AlgoOrder) => a.closePosition !== false && a.closePosition !== 'false'
+
 const vwap = (f: Fill[]) => {
   const q = f.reduce((a, x) => a + x.qty, 0)
   return q ? f.reduce((a, x) => a + x.price * x.qty, 0) / q : 0
@@ -250,6 +269,10 @@ export class SymbolTrader {
   private marks = new Map<number, { lo: number; hi: number }>()
   /** The strategies, in priority order (null: the model alone, the single-strategy path). */
   private slots: StrategySlot[] | null
+  /** Failed stop repairs in a row, per trade: a second one is an emergency close (ensureStop). */
+  private stopFails = new Map<number, number>()
+  /** Trades whose stop orders could not be read: logged once per outage. */
+  private stopUnread = new Set<number>()
 
   constructor(ex: Exchange, store: BotStore, symbol: string, cfg: TraderConfig) {
     this.ex = ex
@@ -586,6 +609,108 @@ export class SymbolTrader {
       await this.store.event('info', this.symbol, `time exit after ${H} bars`)
     }
     if (this.closing.has(open.id)) await this.flatten(pos)
+    else await this.ensureStop(open, pos)
+  }
+
+  /** Place an exchange-side stop and confirm the answer: an id and a working status, else it throws. */
+  private async placeStop(side: 'BUY' | 'SELL', trigger: number, clientId: string): Promise<number> {
+    const r = await this.ex.bracketLeg(this.symbol, side, 'STOP_MARKET', String(trigger), clientId)
+    const status = String(r?.algoStatus ?? 'NEW').toUpperCase()
+    const id = Number(r?.algoId)
+    if (!Number.isFinite(id) || STOP_DEAD.has(status)) throw new Error(`stop not accepted (algoId ${r?.algoId}, status ${status})`)
+    return id
+  }
+
+  /**
+   * Every tick, for an open position: is it protected on the exchange? That is
+   * a STOP_MARKET algo order with closePosition on the exit side, its trigger
+   * on the protective side of the mark and no looser than the stored stop (the
+   * trail's latest for a rule trade, the bracket's for a model trade).
+   *
+   * Missing (never placed: a crash or SIGTERM between the fill and the stop;
+   * cancelled, rejected, expired) or wrong: placed again at the stored stop,
+   * closePosition so it covers whatever is open (a partial fill too), and its
+   * id stored. Extra stops (a trail cancel that failed, a repair whose answer
+   * was lost) are cancelled, keeping the stored one or else the tightest, so
+   * repeated ticks settle on exactly one. An unreadable order list is unknown,
+   * not missing: nothing is placed on a guess. Emergency, a market close with
+   * an error event (and so an alert): the stored stop is already through the
+   * mark, the exchange rejects the stop, or a repair fails twice in a row.
+   * Returns false when the position is being closed.
+   */
+  private async ensureStop(open: OpenTrade, pos: Position): Promise<boolean> {
+    const side = open.side
+    const exitSide = side > 0 ? 'SELL' : 'BUY'
+    let algos: AlgoOrder[]
+    try {
+      algos = await this.ex.openAlgo(this.symbol)
+      this.stopUnread.delete(open.id)
+    } catch (e) {
+      if (!this.stopUnread.has(open.id)) {
+        this.stopUnread.add(open.id)
+        await this.store.event('warn', this.symbol, `trade #${open.id}: stop orders unreadable (${(e as Error).message}) — not verified until they can be read`)
+      }
+      return true
+    }
+    const mark = pos.mark > 0 ? pos.mark : NaN
+    const tol = (this.rules?.tickSize ?? 0) / 2 + Math.abs(open.sl) * 1e-9
+    const trig = (a: AlgoOrder) => Number(a.triggerPrice)
+    const stops = algos.filter((a) => (a.orderType ?? 'STOP_MARKET') === 'STOP_MARKET' && closesPosition(a))
+    // An unknown mark (NaN) cannot judge a trigger: only the stored stop does then.
+    const protective = (a: AlgoOrder) =>
+      (a.side ?? exitSide) === exitSide && Number.isFinite(trig(a)) && !(side * (mark - trig(a)) <= 0) && side * (trig(a) - open.sl) >= -tol
+    const good = stops.filter(protective).sort((a, b) => side * (trig(b) - trig(a)))
+    const keep = good.find((a) => Number(a.algoId) === open.slAlgoId) ?? good[0]
+    const cancelRest = async (rest: AlgoOrder[]) => {
+      for (const a of rest)
+        await this.ex.cancelAlgo(this.symbol, Number(a.algoId)).then(
+          () => this.store.event('warn', this.symbol, `trade #${open.id}: extra stop ${a.algoId} (${a.side ?? '?'} @ ${a.triggerPrice}) cancelled`),
+          (e) => this.store.event('warn', this.symbol, `trade #${open.id}: extra stop ${a.algoId} not cancelled (${(e as Error).message}); tried again next tick`),
+        )
+    }
+    if (keep) {
+      const id = Number(keep.algoId)
+      if (id !== open.slAlgoId) {
+        await this.store.setLegs(open.id, open.tpOrderId, id)
+        await this.store.event('info', this.symbol, `trade #${open.id}: stop ${id} @ ${keep.triggerPrice} on the exchange adopted (stored: ${open.slAlgoId ?? 'none'})`)
+        open.slAlgoId = id
+      }
+      this.stopFails.delete(open.id)
+      await cancelRest(stops.filter((a) => a !== keep))
+      return true
+    }
+    const why = stops.length
+      ? `stop(s) ${stops.map((a) => `${a.algoId} ${a.side ?? '?'} @ ${a.triggerPrice}`).join(', ')} not protective`
+      : open.slAlgoId == null
+        ? 'stop never placed'
+        : `stop ${open.slAlgoId} missing (cancelled, rejected or expired)`
+    const emergency = async (reason: string) => {
+      await this.store.event('error', this.symbol, `trade #${open.id}: ${why}; ${reason} — closing the position at market`)
+      this.stopFails.delete(open.id)
+      await this.markClosing(open.id, 'error')
+      await this.flatten(pos)
+      return false
+    }
+    if (side > 0 ? open.sl >= mark : open.sl <= mark) return emergency(`the stop ${open.sl} is already through the mark ${mark}`)
+    let id: number
+    try {
+      id = await this.placeStop(exitSide, open.sl, `rb-sl-${open.id}-r${Date.now().toString(36)}`)
+    } catch (e) {
+      const n = (this.stopFails.get(open.id) || 0) + 1
+      this.stopFails.set(open.id, n)
+      if (transient(e) && n < 2) {
+        await this.store.event('warn', this.symbol, `trade #${open.id}: ${why} → stop re-place failed (${(e as Error).message}); tried again next tick`)
+        return true
+      }
+      return emergency(`stop re-place failed${n > 1 ? ` ${n} times` : ''} (${(e as Error).message})`)
+    }
+    await this.store.setLegs(open.id, open.tpOrderId, id)
+    open.slAlgoId = id
+    this.stopFails.delete(open.id)
+    await this.store.event('warn', this.symbol, `trade #${open.id}: ${why} → re-placed at ${open.sl} (#${id}, closePosition)`)
+    // The old, non-protective ones go only once the new stop is in place.
+    await cancelRest(stops)
+    return true
   }
 
   /**
@@ -900,7 +1025,7 @@ export class SymbolTrader {
     const exitSide = buy ? 'SELL' : 'BUY'
     let slAlgo: number | null = null
     try {
-      slAlgo = (await this.ex.bracketLeg(this.symbol, exitSide, 'STOP_MARKET', String(sl), `rb-sl-${id}`)).algoId
+      slAlgo = await this.placeStop(exitSide, sl, `rb-sl-${id}`)
     } catch (e) {
       // No stop, no position.
       await this.store.event('error', this.symbol, `trade #${id}: stop could not be placed (${(e as Error).message}) — closing`)
@@ -953,6 +1078,7 @@ export class SymbolTrader {
       await this.restoreClosing(open.id)
       // A close we started (exit rule, stop above the price, failed stop) is retried every tick.
       if (this.closing.has(open.id)) return this.flatten(pos)
+      if (!(await this.ensureStop(open, pos))) return
       rule = open
     } else {
       if (this.cfg.manageOnly) return
@@ -1139,7 +1265,7 @@ export class SymbolTrader {
         return
       }
       try {
-        algo = (await this.ex.bracketLeg(this.symbol, exitSide, 'STOP_MARKET', String(next), `rb-sl-${open.id}-${Math.round(b[lastJ].t / 1000)}`)).algoId
+        algo = await this.placeStop(exitSide, next, `rb-sl-${open.id}-${Math.round(b[lastJ].t / 1000)}`)
         sl = next
       } catch (e) {
         // Keep the stop that is in place; not marked as seen, so the next bar retries these closes.
@@ -1279,7 +1405,7 @@ export class SymbolTrader {
     await this.store.setTrail(id, { sl, slAlgoId: null, high: null, bar: last.t, initialSl: sl })
     let slAlgo: number
     try {
-      slAlgo = (await this.ex.bracketLeg(this.symbol, side > 0 ? 'SELL' : 'BUY', 'STOP_MARKET', String(sl), `rb-sl-${id}`)).algoId
+      slAlgo = await this.placeStop(side > 0 ? 'SELL' : 'BUY', sl, `rb-sl-${id}`)
     } catch (e) {
       // No stop, no position.
       await this.store.event('error', this.symbol, `trade #${id}: stop could not be placed (${(e as Error).message}) — closing`)

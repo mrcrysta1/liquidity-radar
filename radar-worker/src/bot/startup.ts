@@ -84,6 +84,23 @@ export class InitQueue<T extends Initable> {
 }
 
 /**
+ * Wait for `p` (the tick in flight) to settle, at most `ms`: true if it did,
+ * false on the timeout. Never throws — a failed tick has settled too. A
+ * shutdown uses it so a SIGTERM between a fill and its stop lets the tick
+ * place the stop before the process exits.
+ */
+export async function settle(p: Promise<unknown> | null, ms: number): Promise<boolean> {
+  if (!p) return true
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const late = new Promise<boolean>((r) => (timer = setTimeout(() => r(false), ms)))
+  try {
+    return await Promise.race([p.then(() => true, () => true), late])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
  * The configured markets the venue lists and trades, and the ones it does not
  * (dropped with a warning rather than retried forever). `listed` null: the
  * listing could not be read — keep them all; setup failures are retried.

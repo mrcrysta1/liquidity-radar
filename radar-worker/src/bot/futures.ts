@@ -79,6 +79,17 @@ export interface Fill {
   commissionAsset: string
 }
 
+/** A working algo (conditional) order, as /fapi/v1/openAlgoOrders lists it. */
+export interface AlgoOrder {
+  algoId: number
+  clientAlgoId?: string
+  orderType?: string
+  side?: 'BUY' | 'SELL'
+  triggerPrice?: string
+  closePosition?: boolean | string
+  algoStatus?: string
+}
+
 interface ExchangeInfo {
   symbols: Array<{ symbol: string; status?: string; pricePrecision: number; quantityPrecision: number; filters: Array<Record<string, string>> }>
 }
@@ -342,9 +353,16 @@ export class Futures {
     return this.request('GET', '/fapi/v1/openOrders')
   }
 
-  async openAlgo(symbol: string): Promise<Array<{ algoId: number; orderType: string; triggerPrice: string; clientAlgoId: string }>> {
+  /**
+   * This symbol's working algo orders (stops). An answer that is not a list
+   * throws rather than reading as "none": the stop check (trader.ts) would
+   * otherwise place a new stop on every tick.
+   */
+  async openAlgo(symbol: string): Promise<AlgoOrder[]> {
     const r = (await this.request('GET', '/fapi/v1/openAlgoOrders', { symbol })) as unknown
-    return Array.isArray(r) ? (r as never) : ((r as { orders?: never[] })?.orders ?? [])
+    const list = Array.isArray(r) ? r : (r as { orders?: unknown })?.orders
+    if (!Array.isArray(list)) throw new Error('openAlgoOrders: unexpected response')
+    return list as AlgoOrder[]
   }
 
   async fills(symbol: string, startTime: number): Promise<Fill[]> {
