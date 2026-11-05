@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { Futures, SETUP_NON_FATAL, TESTNET, TESTNET_BASES, assertTestnetBase, roundStep, roundTick, sign } from '../src/bot/futures.ts'
+import { Futures, SETUP_NON_FATAL, TESTNET, TESTNET_BASES, assertTestnetBase, roundStep, roundTick, sign, usdtEquity } from '../src/bot/futures.ts'
 import { DEFAULT_RISK, checkLimits, heatCheck, size } from '../src/bot/risk.ts'
 
 test('request signing matches Binance’s published example', () => {
@@ -71,7 +71,7 @@ test('a -1021 clock rejection re-syncs and retries once; stamps stay behind serv
       rejected++
       return new Response(JSON.stringify({ code: -1021, msg: 'Timestamp for this request was 1000ms ahead' }), { status: 400 })
     }
-    return new Response(JSON.stringify([{ asset: 'USDT', balance: '5000', crossUnPnl: '0' }]))
+    return new Response(JSON.stringify(acct('5000', '0')))
   }) as typeof fetch
   try {
     const f = new Futures('k', 's')
@@ -168,25 +168,114 @@ test('setup: the non-fatal codes are exactly the "already so / cannot change now
   assert.ok(!SETUP_NON_FATAL.includes(-2015))
 })
 
-test('balanceUsdt: a missing USDT row reads as null (unknown), not 0', async () => {
+/** A /fapi/v2/account response: the USDT asset row and the positions (symbol, positionAmt, unrealizedProfit). */
+function acct(wallet: string | undefined, upnl: string | undefined, positions: Array<[string, string, string | undefined]> = [], more: Record<string, unknown> = {}) {
+  return {
+    totalWalletBalance: wallet,
+    totalUnrealizedProfit: upnl,
+    assets: [
+      { asset: 'BNB', walletBalance: '2', unrealizedProfit: '0' },
+      { asset: 'USDT', walletBalance: wallet, unrealizedProfit: upnl, crossUnPnl: '0' },
+    ],
+    positions: [
+      { symbol: 'ETHUSDT', positionAmt: '0', unrealizedProfit: '0', isolated: true },
+      ...positions.map(([symbol, positionAmt, unrealizedProfit]) => ({ symbol, positionAmt, unrealizedProfit, isolated: true })),
+    ],
+    ...more,
+  }
+}
+
+test('balanceUsdt: reads /fapi/v2/account; a missing USDT row reads as null (unknown), not 0', async () => {
   const real = globalThis.fetch
-  let rows: unknown = [{ asset: 'BNB', balance: '2', crossUnPnl: '0' }]
+  let body: unknown = { assets: [{ asset: 'BNB', walletBalance: '2', unrealizedProfit: '0' }], positions: [] }
+  const paths: string[] = []
   globalThis.fetch = (async (url: string) => {
     const u = new URL(url)
     assert.ok(TESTNET_BASES.includes(u.origin), 'only the testnet is called')
     if (u.pathname === '/fapi/v1/time') return new Response(JSON.stringify({ serverTime: Date.now() }))
-    return new Response(JSON.stringify(rows))
+    paths.push(u.pathname)
+    return new Response(JSON.stringify(body))
   }) as typeof fetch
   try {
     const f = new Futures('k', 's')
     assert.equal(await f.balanceUsdt(), null)
-    rows = [{ asset: 'USDT', balance: 'oops', crossUnPnl: '0' }]
+    body = acct('oops', '0')
     assert.equal(await f.balanceUsdt(), null)
-    rows = [{ asset: 'USDT', balance: '4000', crossUnPnl: '-50' }]
+    body = acct('4000', '-50', [['BTCUSDT', '0.01', '-50']])
     assert.equal(await f.balanceUsdt(), 3950)
+    assert.ok(paths.every((x) => x === '/fapi/v2/account'), paths.join(','))
   } finally {
     globalThis.fetch = real
   }
+})
+
+test('usdtEquity: wallet + unrealized P&L of every USDT position, isolated included, counted once', () => {
+  // Realized only (no open position): the wallet, as before.
+  assert.equal(usdtEquity(acct('10000', '0')), 10_000)
+  // An isolated loser: the old /fapi/v2/balance read (crossUnPnl 0) missed it.
+  assert.equal(usdtEquity(acct('10000', '-300', [['BTCUSDT', '0.05', '-300']])), 9_700)
+  // A cross winner and an isolated loser: each once (the asset figure already sums both).
+  const mixed = acct('10000', '-200', [['BTCUSDT', '0.05', '-300'], ['SOLUSDT', '-3', '100']])
+  ;(mixed.positions[2] as Record<string, unknown>).isolated = false
+  assert.equal(usdtEquity(mixed), 9_800)
+  // Other margin assets and their positions do not count.
+  assert.equal(usdtEquity(acct('10000', '-300', [['BTCUSDT', '0.05', '-300'], ['BTCUSDC', '0.1', '-999']])), 9_700)
+  // The legacy field spelling is read too.
+  const legacy = acct('10000', '-300', [])
+  ;(legacy.positions as Array<Record<string, unknown>>).push({ symbol: 'XRPUSDT', positionAmt: '10', unRealizedProfit: '-300' })
+  assert.equal(usdtEquity(legacy), 9_700)
+})
+
+test('usdtEquity: missing, NaN or inconsistent figures read as null (unknown)', () => {
+  for (const bad of [
+    null,
+    'nope',
+    [],
+    { assets: [] },
+    acct(undefined, '0'),
+    acct('10000', undefined),
+    acct('10000', ''),
+    acct('NaN', '0'),
+    acct('10000', 'Infinity'),
+    // A position whose P&L cannot be read.
+    acct('10000', '-300', [['BTCUSDT', '0.05', undefined]]),
+    acct('10000', '-300', [['BTCUSDT', '0.05', 'oops']]),
+    acct('10000', '0', [['BTCUSDT', 'x', '0']]),
+    // Positions losing 300 but the asset row says 0: not trusted.
+    acct('10000', '0', [['BTCUSDT', '0.05', '-300']]),
+    acct('10000', '-300', [], { positions: undefined }),
+  ])
+    assert.equal(usdtEquity(bad), null, JSON.stringify(bad))
+  // Rounding in the exchange's figures is tolerated.
+  assert.ok(Math.abs(usdtEquity(acct('10000', '-300.004', [['BTCUSDT', '0.05', '-100.001'], ['ETHUSDT', '1', '-200.002']]))! - 9_699.996) < 1e-9)
+})
+
+test('an isolated losing position counts toward the daily loss limit and the drawdown kill switch', () => {
+  const day1 = Date.UTC(2026, 0, 1, 1)
+  const fresh = { day: '', dayStartEquity: 0, peakEquity: 0, halted: false, haltReason: '' }
+  const r = { ...DEFAULT_RISK, maxDailyLoss: 0.045, maxDrawdown: 0.22 }
+  let { state } = checkLimits(fresh, usdtEquity(acct('10000', '0')), day1, r)
+  // Wallet untouched (nothing realized), but the open isolated position is down 5%.
+  const losing = usdtEquity(acct('10000', '-500', [['BTCUSDT', '0.1', '-500']]))
+  assert.equal(losing, 9_500)
+  const d = checkLimits(state, losing, day1 + 3_600_000, r)
+  assert.equal(d.canEnter, false)
+  assert.match(d.reason, /daily loss limit: down 5\.00% today/)
+  // The next day the daily halt lifts; a 23% open loss from the peak trips the drawdown switch.
+  ;({ state } = checkLimits(d.state, 10_000, day1 + 86_400_000, r))
+  assert.equal(state.halted, false)
+  const deep = checkLimits(state, usdtEquity(acct('10000', '-2300', [['BTCUSDT', '0.1', '-2300']])), day1 + 90_000_000, r)
+  assert.equal(deep.canEnter, false)
+  assert.match(deep.reason, /drawdown kill switch: 23\.0% below peak/)
+  // An unreadable P&L: null → entries paused, nothing tripped.
+  const unknown = checkLimits(state, usdtEquity(acct('10000', '-2300', [['BTCUSDT', '0.1', undefined]])), day1 + 90_000_000, r)
+  assert.equal(unknown.canEnter, false)
+  assert.match(unknown.reason, /balance unavailable/)
+  assert.equal(unknown.state.halted, false)
+  // Sizing follows the lower equity: 0.75% of 9 500, not of 10 000.
+  const btcRules = { tickSize: 0.1, stepSize: 0.001, minQty: 0.001, minNotional: 100, pricePrecision: 1, quantityPrecision: 3 }
+  const sz = size(losing!, 80_000, 1_000, btcRules, { ...r, riskPerTrade: 0.0075, minMarginUsd: 0 })
+  assert.ok(sz.riskUsd <= 9_500 * 0.0075 + 1e-9 && sz.riskUsd > 70, String(sz.riskUsd))
 })
 
 test('an unknown balance blocks new entries for that tick without tripping the drawdown kill switch', () => {

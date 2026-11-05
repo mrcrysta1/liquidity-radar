@@ -214,13 +214,14 @@ export class Futures {
     }
   }
 
-  /** USDT equity (wallet + unrealized), or null when the USDT row is missing or unreadable — never a false 0. */
+  /**
+   * USDT equity: wallet balance + the unrealized P&L of every USDT position,
+   * cross and isolated; null when it cannot be read reliably — never a false 0
+   * (see usdtEquity). Feeds sizing, the daily loss limit and the drawdown kill
+   * switch.
+   */
   async balanceUsdt(): Promise<number | null> {
-    const rows = (await this.request('GET', '/fapi/v2/balance')) as Array<{ asset: string; balance: string; crossUnPnl: string }>
-    const u = Array.isArray(rows) ? rows.find((x) => x.asset === 'USDT') : undefined
-    if (!u) return null
-    const v = Number(u.balance) + Number(u.crossUnPnl || 0)
-    return Number.isFinite(v) ? v : null
+    return usdtEquity(await this.request('GET', '/fapi/v2/account'))
   }
 
   async position(symbol: string): Promise<Position> {
@@ -371,6 +372,55 @@ function toPosition(symbol: string, p: Record<string, string>): Position {
     mark: Number(p.markPrice || 0),
     unrealized: Number(p.unRealizedProfit || 0),
   }
+}
+
+const finite = (v: unknown): number | null => {
+  if (v == null || v === '') return null
+  const x = Number(v)
+  return Number.isFinite(x) ? x : null
+}
+
+/** A USDT-margined contract: perpetual (BTCUSDT) or dated (BTCUSDT_250328). */
+const USDT_SYMBOL = /USDT(_\d+)?$/
+
+/**
+ * USDT equity from one /fapi/v2/account response, or null when any part is
+ * missing, non-finite or inconsistent.
+ *
+ * Why this endpoint: /fapi/v2/balance only carries `crossUnPnl`, the P&L of
+ * CROSS positions, and every bot position is ISOLATED, so its open losses never
+ * showed. /fapi/v2/account's per-asset USDT row has `walletBalance` (which
+ * already holds the isolated margin: no double count) and `unrealizedProfit`
+ * (every USDT position, cross and isolated), in the same snapshot as its
+ * `positions`. The per-asset row is used, not totalWalletBalance /
+ * totalUnrealizedProfit, which in multi-assets mode are USD sums over every
+ * asset. The open positions' own unrealizedProfit is the cross-check: each must
+ * be readable and together they must match the asset's figure (within 0.5
+ * USDT + 0.01% of the wallet), otherwise the P&L is not trusted. Null makes
+ * risk.ts checkLimits pause new entries for the tick; open positions are still
+ * managed.
+ */
+export function usdtEquity(raw: unknown): number | null {
+  const a = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null
+  if (!a || !Array.isArray(a.assets) || !Array.isArray(a.positions)) return null
+  const u = (a.assets as Array<Record<string, unknown>>).find((x) => x?.asset === 'USDT')
+  const wallet = finite(u?.walletBalance)
+  const upnl = finite(u?.unrealizedProfit)
+  if (wallet == null || upnl == null) return null
+  let sum = 0
+  for (const p of a.positions as Array<Record<string, unknown>>) {
+    if (!p || typeof p !== 'object') return null
+    if (!USDT_SYMBOL.test(String(p.symbol ?? ''))) continue
+    const amt = finite(p.positionAmt)
+    if (amt == null) return null
+    if (amt === 0) continue
+    const pnl = finite(p.unrealizedProfit ?? p.unRealizedProfit)
+    if (pnl == null) return null
+    sum += pnl
+  }
+  if (Math.abs(sum - upnl) > 0.5 + 1e-4 * Math.abs(wallet)) return null
+  const v = wallet + upnl
+  return Number.isFinite(v) ? v : null
 }
 
 /**
