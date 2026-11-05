@@ -59,7 +59,11 @@ class FakeExchange implements Exchange {
     this.positionCalls++
     return { symbol, amt: this.pos.amt, entry: this.pos.entry, mark: this.price, unrealized: 0 }
   }
-  async setup() {}
+  /** Setup (margin, leverage) is refused, e.g. -4067. */
+  failSetup = false
+  async setup() {
+    if (this.failSetup) throw new Error('Binance 400 -4067: Position side cannot be changed if there exists open orders.')
+  }
   private exec(side: 'BUY' | 'SELL', qty: number, price: number, maker: boolean, orderId: number) {
     const signed = side === 'BUY' ? qty : -qty
     let pnl = 0
@@ -1670,4 +1674,65 @@ test('leftovers: a cancel that fails after a close is logged, and the trade is s
   assert.equal(await store.openTrade('XAUUSDT'), null)
   assert.ok((await events()).some((e) => e.level === 'warn' && /leftover orders not cancelled \(simulated cancel failure\)/.test(e.msg)))
   assert.equal(ex.limits.length, 1, 'the target is still there — the next entry clears it first')
+})
+
+// ---- a market whose setup keeps failing is still managed ----
+
+test('setup failing: an open trade is still protected and managed to its exit; nothing new opens until setup succeeds', async () => {
+  const { db, pg } = await freshDb()
+  const store = new BotStore(db)
+  const ex = new FakeExchange()
+  const h = trendHist()
+  const step = 14_400_000
+  const barTime = h.hist[h.S].t
+  // A model trade recorded without its stop (the run that opened it was cut off).
+  const id = await openMlTrade(store, ex, 'BTCUSDT', barTime, 100, null, false)
+  ex.failSetup = true
+  const cfg: TraderConfig = { ...setup('hybrid').cfg, strategies: [{ id: 'f1', state: 'live' }], bars: async (_s, _i, n) => h.hist.slice(0, h.S + 1).slice(-n) }
+  const t = new SymbolTrader(ex, store, 'BTCUSDT', cfg)
+  await assert.rejects(t.init(), /-4067/)
+  await t.tick(true, barTime + 2 * step)
+  assert.equal(ex.algo.length, 1, 'the missing stop placed although setup failed')
+  assert.equal(ex.pos.amt, 1)
+  // Past its horizon: the time exit still applies, and the close is booked.
+  await t.tick(true, Date.now())
+  assert.equal(ex.pos.amt, 0, 'time exit')
+  await t.tick(true, Date.now())
+  const row = (await pg.query<Record<string, unknown>>('select * from bot_trades where id = $1', [id])).rows[0]
+  assert.equal(row.exit_reason, 'time')
+  // A flat market on an F1 breakout bar: no entry, no shadow, while its setup fails.
+  const ex2 = new FakeExchange()
+  ex2.failSetup = true
+  ex2.price = h.hist[h.S].c
+  const t2 = new SymbolTrader(ex2, store, 'ETHUSDT', cfg)
+  await assert.rejects(t2.init(), /-4067/)
+  for (let k = 0; k < 3; k++) await t2.tick(true, Date.now())
+  assert.equal(await store.openTrade('ETHUSDT'), null, 'no new trade')
+  assert.equal((await pg.query('select id from bot_shadow_trades')).rows.length, 0, 'no shadow trade')
+  assert.equal(ex2.pos.amt, 0)
+  // Setup goes through (bot.ts retries it): entries resume, on that same bar.
+  ex2.failSetup = false
+  await t2.init()
+  await t2.tick(true, Date.now())
+  assert.ok(await store.openTrade('ETHUSDT'), 'F1 entered once set up')
+})
+
+test('setup failing: a trailed rule trade is re-protected with no bars at all', async () => {
+  const { store, ex, t, cfg } = await f1Only()
+  await t.tick(true, Date.now())
+  const open = (await store.openTrade('BTCUSDT'))!
+  ex.algo = []
+  ex.failSetup = true
+  const t2 = new SymbolTrader(ex, store, 'BTCUSDT', {
+    ...cfg,
+    bars: async () => {
+      throw new Error('bars unavailable')
+    },
+  })
+  await assert.rejects(t2.init(), /-4067/)
+  // The bars fail after the stop check: the tick reports the failure, the stop is in place.
+  await assert.rejects(t2.tick(true, Date.now() + 14_400_000), /bars unavailable/)
+  assert.equal(ex.algo.length, 1)
+  assert.equal(ex.algo[0].trigger, open.sl)
+  assert.equal((await store.openTrade('BTCUSDT'))!.slAlgoId, ex.algo[0].algoId)
 })

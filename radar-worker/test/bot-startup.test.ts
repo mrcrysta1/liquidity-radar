@@ -70,6 +70,15 @@ test('a throwing hook (e.g. the database is down) does not break startup', async
   assert.deepEqual(q.pending, ['BTCUSDT'])
 })
 
+test('all: every item, ready or not, in order (each is ticked; the ones not set up manage only)', async () => {
+  const btc = fake('BTCUSDT', Infinity)
+  const eth = fake('ETHUSDT', 0)
+  const q = new InitQueue([btc, eth])
+  await q.run(0)
+  assert.deepEqual(q.all.map((t) => t.symbol), ['BTCUSDT', 'ETHUSDT'])
+  assert.deepEqual(q.ready.map((t) => t.symbol), ['ETHUSDT'])
+})
+
 test('markets the venue does not trade are dropped; an unreadable listing keeps them all', () => {
   const syms = ['BTCUSDT', 'APTUSDT', 'SUIUSDT', 'ETHUSDT']
   assert.deepEqual(listedOnly(syms, new Set(['BTCUSDT', 'ETHUSDT', 'SUIUSDT'])), { keep: ['BTCUSDT', 'SUIUSDT', 'ETHUSDT'], dropped: ['APTUSDT'] })

@@ -171,8 +171,9 @@ if (HANDOFF) console.log(new Date().toISOString(), `bot run started · until ${n
 else if (!ONCE) await store.event('info', null, `bot starting on ${ex.base} (${ex.isTestnet ? 'TESTNET' : 'MAINNET'}) · mode ${cfg.mode}${SLOTS ? ' · strategies ' + SLOTS.map((s) => `${s.id}:${s.state}${s.symbols ? `@${s.symbols.length} markets` : "@all"}`).join(', ') : ''} · ${SYMBOLS.join(', ')} · ${cfg.interval} bars · risk ${(cfg.risk.riskPerTrade * 100).toFixed(2)}%/trade · bracket ${BRACKET.slAtr}/${BRACKET.tpAtr} ATR over ${BRACKET.horizon} bars · max ${cfg.setup.maxOpen} open, ${cfg.setup.maxTradesPerDay}/day${cfg.mode === 'hybrid' ? ` · real: ${REAL_SYMBOLS.join(', ')} · heat ≤ ${(cfg.risk.maxSideRisk! * 100).toFixed(1)}%/side, ${(cfg.risk.maxTotalRisk! * 100).toFixed(1)}% total` : ''}`)
 
 // Each market starts on its own: one whose setup fails (a slow link, or a
-// rejection such as -4067) is skipped and retried with a bounded backoff from
-// the trading loop, while the others trade. It never stalls the run.
+// rejection such as -4067) is retried with a bounded backoff from the trading
+// loop, while the others trade; meanwhile it is managed only (open positions
+// keep their stop check, trail and exits; no entries). It never stalls the run.
 // A market dropped from BOT_SYMBOLS while a trade was open on it is never
 // orphaned: a manage-only trader sees that trade through under the rules it
 // was opened with, then idles (no new real or shadow trades, no learning).
@@ -182,12 +183,13 @@ const setupQueue = new InitQueue(
   [...SYMBOLS.map((s) => new SymbolTrader(ex, store, s, cfg)), ...ORPHANS.map((s) => new SymbolTrader(ex, store, s, { ...cfg, manageOnly: true }))],
   {
     onFail: (s, attempt, e, waitMs) =>
-      store.event('warn', s, `setup failed (attempt ${attempt}): ${e.message} — skipped for now, other markets keep trading; retrying in ${Math.round(waitMs / 1000)}s`),
+      store.event('warn', s, `setup failed (attempt ${attempt}): ${e.message} — no entries here for now (an open position is still managed), other markets keep trading; retrying in ${Math.round(waitMs / 1000)}s`),
     onReady: (s, attempts) => (attempts > 1 ? store.event('info', s, `setup succeeded after ${attempts} attempts — trading resumed`) : undefined),
   },
 )
 await setupQueue.run()
-if (ONCE && setupQueue.ready.length === 0) {
+// BOT_ONCE with no market set up still runs its tick when a trade is open: its position is managed.
+if (ONCE && setupQueue.ready.length === 0 && !(await store.openSymbols().catch(() => [])).length) {
   console.error('no market could be set up')
   await db.end().catch(() => {})
   process.exit(1)
@@ -292,7 +294,9 @@ async function tick(): Promise<void> {
   await cfg.barCache?.refreshDue(6).catch((e) => console.error('bars', (e as Error).message))
   positions.clear()
   // Alphabetical: same-bar entries compete for the heat cap in symbol order (startup.ts tickOrder).
-  for (const t of tickOrder(setupQueue.ready)) {
+  // A market whose setup is still failing is ticked too: its open position is
+  // protected and managed, and it opens nothing until the setup succeeds.
+  for (const t of tickOrder(setupQueue.all)) {
     try {
       // Once stopping, the tick in flight still manages every position but opens nothing new.
       await t.tick(canEnter && !stopping, now)

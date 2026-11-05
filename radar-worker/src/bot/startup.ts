@@ -78,6 +78,11 @@ export class InitQueue<T extends Initable> {
     return this.slots.filter((s) => s.ready).map((s) => s.item)
   }
 
+  /** Every item, ready or not, in the original order (bot.ts manages the open positions of both). */
+  get all(): T[] {
+    return this.slots.map((s) => s.item)
+  }
+
   get pending(): string[] {
     return this.slots.filter((s) => !s.ready).map((s) => s.item.symbol)
   }

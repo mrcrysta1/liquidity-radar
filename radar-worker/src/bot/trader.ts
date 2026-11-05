@@ -276,6 +276,8 @@ export class SymbolTrader {
   private stopFails = new Map<number, number>()
   /** Trades whose stop orders could not be read: logged once per outage. */
   private stopUnread = new Set<number>()
+  /** init() went through. Until then the market is managed only (manageUnready): bot.ts ticks it while it retries the setup. */
+  private ready = false
 
   constructor(ex: Exchange, store: BotStore, symbol: string, cfg: TraderConfig) {
     this.ex = ex
@@ -300,11 +302,13 @@ export class SymbolTrader {
     if (this.cfg.manageOnly) {
       // Only an open trade to see through: no margin setup, no model, no walk-forward.
       this.lastBar = await this.store.getState<number>('lastBar:' + this.symbol, 0)
+      this.ready = true
       return
     }
     await this.ex.setup(this.symbol, this.cfg.risk.leverage)
     if (!this.mlOn) {
       this.lastBar = await this.store.getState<number>('lastBar:' + this.symbol, 0)
+      this.ready = true
       return
     }
     this.model = await this.champion()
@@ -320,6 +324,7 @@ export class SymbolTrader {
     // Kept in the database, so a bot that runs as short scheduled jobs (BOT_ONCE)
     // decides each bar once, like the long-running one.
     this.lastBar = await this.store.getState<number>('lastBar:' + this.symbol, 0)
+    this.ready = true
   }
 
   private get gateKey(): string {
@@ -538,6 +543,7 @@ export class SymbolTrader {
   }
 
   async tick(canEnter: boolean, now = Date.now()): Promise<void> {
+    if (!this.ready) return this.manageUnready(now)
     if (this.cfg.manageOnly || !this.mlOn) return this.trade(canEnter, now)
     try {
       await this.trade(canEnter, now)
@@ -546,6 +552,20 @@ export class SymbolTrader {
       // a learning failure never stops the trading.
       await this.learnTick(now).catch((e) => this.store.event('error', this.symbol, 'learning failed: ' + (e as Error).message))
     }
+  }
+
+  /**
+   * A market whose setup (margin, leverage, exchange info, the first model)
+   * has not gone through yet; bot.ts retries it on its backoff and ticks it
+   * here meanwhile. An open trade keeps its stop check (no bars needed), its
+   * time exit, trail and exit rule (when bars and the symbol rules can be
+   * read); an unrecorded position is closed as usual. No entry, no shadow
+   * trade, no learning until init() succeeds.
+   */
+  private async manageUnready(now: number): Promise<void> {
+    if (!this.rules) this.rules = (await this.ex.rules(this.symbol).catch(() => undefined)) as SymbolRules
+    if (!this.lastBar) this.lastBar = await this.store.getState<number>('lastBar:' + this.symbol, 0)
+    return this.trade(false, now)
   }
 
   private async trade(canEnter: boolean, now: number): Promise<void> {
@@ -574,6 +594,7 @@ export class SymbolTrader {
       await this.flatten(pos)
       return
     }
+    if (!this.ready) return
     await this.maybeEnter(canEnter, now)
   }
 
@@ -590,7 +611,8 @@ export class SymbolTrader {
 
   private async flatten(pos: Position): Promise<void> {
     if (pos.amt !== 0) {
-      const qty = roundStep(Math.abs(pos.amt), this.rules.stepSize, this.rules.quantityPrecision)
+      // Without the symbol rules (a market whose setup could not read them): the exchange's own amount is already on its step.
+      const qty = this.rules ? roundStep(Math.abs(pos.amt), this.rules.stepSize, this.rules.quantityPrecision) : String(Math.abs(pos.amt))
       await this.ex.marketOrder(this.symbol, pos.amt > 0 ? 'SELL' : 'BUY', qty, true, `rb-flat-${Date.now()}`)
     }
     await this.cancelLeftovers()
@@ -1140,6 +1162,8 @@ export class SymbolTrader {
         await this.flatten(pos)
         return
       }
+      // Flat, setup not done: nothing to manage, and no entry.
+      if (!this.ready) return
     }
     const step = INTERVAL_MS[this.cfg.interval]
     // Until the next bar closes there is nothing to decide: skip the long history read.
@@ -1153,7 +1177,7 @@ export class SymbolTrader {
     const late = now - (last.t + step) > this.cfg.maxLateMs
     // The exit rule and the trail protect the position: applied however late. A late entry is not taken.
     if (rule) await this.ruleBar(rule, pos, b, now)
-    if (this.cfg.manageOnly) return
+    if (this.cfg.manageOnly || !this.ready) return
     if (late) {
       if (!open) await this.store.event('info', this.symbol, `skipped the ${new Date(last.t + step).toISOString().slice(11, 16)} UTC bar: ${Math.round((now - last.t - step) / 60_000)} min since it closed`)
       return
