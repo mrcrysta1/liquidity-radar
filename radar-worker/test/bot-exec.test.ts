@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { Futures, SETUP_NON_FATAL, TESTNET, TESTNET_BASES, assertTestnetBase, roundStep, roundTick, sign } from '../src/bot/futures.ts'
+import { Futures, RATE_LIMIT, RateLimitError, SETUP_NON_FATAL, TESTNET, TESTNET_BASES, assertTestnetBase, roundStep, roundTick, sign } from '../src/bot/futures.ts'
 import { DEFAULT_RISK, checkLimits, heatCheck, size } from '../src/bot/risk.ts'
 
 test('request signing matches Binance’s published example', () => {
@@ -291,5 +291,127 @@ test('cancel-all and the open-order reads surface failures instead of swallowing
     assert.equal((await f.openAlgo('BTCUSDT')).length, 1)
   } finally {
     globalThis.fetch = real
+  }
+})
+
+// ---- rate limits (429 / 418 / -1003, X-MBX-USED-WEIGHT-1M), with a fake fetch and a fake clock ----
+
+/** A client on a fake clock whose sleeps only advance it; `answer` decides each response (time sync is answered here). */
+function limitedClient(answer: (path: string, method: string) => Response) {
+  const real = globalThis.fetch
+  const quiet = console.warn
+  const warns: string[] = []
+  console.warn = (m: string) => void warns.push(m)
+  let clock = Date.UTC(2026, 10, 5, 12, 0, 10)
+  const sleeps: number[] = []
+  const calls: string[] = []
+  const urls: string[] = []
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    const u = new URL(url)
+    if (u.pathname === '/fapi/v1/time') return new Response(JSON.stringify({ serverTime: Date.now() }))
+    calls.push((init?.method ?? 'GET') + ' ' + u.pathname)
+    urls.push(url)
+    return answer(u.pathname, init?.method ?? 'GET')
+  }) as typeof fetch
+  const f = new Futures('the-key', 'the-secret', TESTNET, {
+    now: () => clock,
+    sleep: async (ms) => {
+      sleeps.push(ms)
+      clock += ms
+    },
+    random: () => 0.5,
+  })
+  const restore = () => {
+    globalThis.fetch = real
+    console.warn = quiet
+  }
+  return { f, sleeps, calls, urls, warns, restore, advance: (ms: number) => (clock += ms) }
+}
+const json = (body: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(body), { status, headers })
+const tooMany = (headers: Record<string, string> = {}) => json({ code: -1003, msg: 'Too many requests; current limit is 2400 request weight per 1 MINUTE.' }, 429, headers)
+
+test('rate limit: a read answered 429 with Retry-After waits that long, then succeeds', async () => {
+  let n = 0
+  const c = limitedClient(() => (n++ === 0 ? tooMany({ 'Retry-After': '7' }) : json([])))
+  try {
+    assert.deepEqual(await c.f.positions(), [])
+    assert.deepEqual(c.calls, ['GET /fapi/v2/positionRisk', 'GET /fapi/v2/positionRisk'])
+    assert.deepEqual(c.sleeps, [7000], 'waited exactly Retry-After')
+    assert.equal(c.warns.length, 1)
+  } finally {
+    c.restore()
+  }
+})
+
+test('rate limit: without Retry-After the back-off doubles (with jitter); reads give up after a bounded number of attempts', async () => {
+  const c = limitedClient(() => tooMany())
+  try {
+    await assert.rejects(c.f.positions(), (e: Error) => e instanceof RateLimitError && /GET \/fapi\/v2\/positionRisk: Too many requests/.test(e.message))
+    assert.equal(c.calls.length, RATE_LIMIT.getAttempts)
+    assert.deepEqual(c.sleeps, [750, 1500], 'jittered 1 s, then 2 s')
+  } finally {
+    c.restore()
+  }
+})
+
+test('rate limit: an order answered 429 is not resent, and the error says so', async () => {
+  const c = limitedClient((_path, method) => (method === 'POST' ? tooMany({ 'Retry-After': '2' }) : json([])))
+  try {
+    await assert.rejects(c.f.marketOrder('BTCUSDT', 'BUY', '0.01', false, 'rb-in-1'), (e: Error) => e instanceof RateLimitError && /not resent/.test(e.message))
+    await assert.rejects(c.f.bracketLeg('BTCUSDT', 'SELL', 'STOP_MARKET', '90', 'rb-sl-1'), /-1003/)
+    assert.deepEqual(c.calls, ['POST /fapi/v1/order', 'POST /fapi/v1/algoOrder'], 'each write sent once')
+    // The next request waits out the back-off before it goes.
+    await c.f.positions()
+    assert.ok(c.sleeps.length >= 1)
+  } finally {
+    c.restore()
+  }
+})
+
+test('rate limit: a 418 ban pauses every request for Retry-After, logged once; afterwards requests go again', async () => {
+  let banned = true
+  const c = limitedClient(() => (banned ? json({ code: -1003, msg: 'Way too many requests; IP banned until 1762344000000.' }, 418, { 'Retry-After': '120' }) : json([])))
+  try {
+    await assert.rejects(c.f.positions(), (e: Error) => e instanceof RateLimitError && (e as RateLimitError).status === 418)
+    assert.equal(c.calls.length, 1, 'a ban is not retried')
+    banned = false
+    for (const call of [() => c.f.positions(), () => c.f.marketOrder('BTCUSDT', 'SELL', '0.01', true, 'rb-flat-1'), () => c.f.openAlgo('BTCUSDT')])
+      await assert.rejects(call(), /IP banned by the exchange for \d+s more/)
+    assert.equal(c.calls.length, 1, 'nothing sent during the ban')
+    assert.equal(c.warns.filter((w) => /418/.test(w)).length, 1, 'logged once')
+    c.advance(121_000)
+    assert.deepEqual(await c.f.positions(), [])
+    assert.equal(c.calls.length, 2)
+  } finally {
+    c.restore()
+  }
+})
+
+test('rate limit: above the weight threshold only deferrable reads wait for the next minute', async () => {
+  const c = limitedClient(() => json([], 200, { 'X-MBX-USED-WEIGHT-1M': '2100' }))
+  try {
+    await c.f.positions()
+    assert.equal(c.f.usedWeight, 2100)
+    assert.deepEqual(c.sleeps, [])
+    await c.f.positions()
+    await c.f.openAlgo('BTCUSDT')
+    assert.deepEqual(c.sleeps, [], 'positions and stops never wait')
+    await c.f.account()
+    assert.equal(c.sleeps.length, 1, 'the account read waited')
+    assert.ok(c.sleeps[0] > 0 && c.sleeps[0] <= 60_500, 'into the next minute: ' + c.sleeps[0])
+  } finally {
+    c.restore()
+  }
+})
+
+test('errors carry the reason, never the key, secret or signature', async () => {
+  const c = limitedClient(() => json({ code: -2019, msg: 'Margin is insufficient.' }, 400))
+  try {
+    const e = await c.f.marketOrder('BTCUSDT', 'BUY', '1', false, 'rb-in-2').catch((x: Error) => x)
+    assert.ok(e instanceof Error)
+    assert.match(e.message, /-2019: Margin is insufficient/)
+    for (const s of ['the-key', 'the-secret', 'signature', new URL(c.urls[0]).searchParams.get('signature')!]) assert.ok(!e.message.includes(s), s)
+  } finally {
+    c.restore()
   }
 })
