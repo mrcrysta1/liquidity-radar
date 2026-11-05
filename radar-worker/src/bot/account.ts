@@ -1,7 +1,8 @@
 // A snapshot of the Binance futures account, exactly as Binance reports it, so
 // the website can show the same balance, positions, orders and fills as the
 // Binance panel. The exchange keys stay here; the site only reads the snapshot
-// (bot_state key 'account', public read like the other bot tables).
+// (bot_state key 'account': private since sql/009_bot_private.sql; the site
+// reads it through its server endpoint, api/bot-account.mjs).
 //
 // Pure helpers (tested in test/bot-account.test.ts); bot.ts fetches and saves.
 
