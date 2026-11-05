@@ -2,6 +2,11 @@
 // Mirrors pro-terminal/server/allowlist.mjs + the dev feedProxy middleware so the
 // same route GET /api/fetch?url=<encoded> works in dev (Vite middleware on :5174)
 // and in production (this function). Keep the allow-list in sync with that file.
+//
+// Only the app itself may use it (same origin gate as api/chat.mjs), with a
+// per-IP rate limit, so it is not an open relay for the allow-listed hosts.
+import { clientIp, createRateLimiter, requestAllowed } from './chat.mjs'
+
 const ALLOW = new Set([
   'nfs.faireconomy.media', // Forex Factory calendar JSON
   'xoomar.com', // economic calendar fallback API
@@ -19,6 +24,11 @@ const MAX_HOPS = 3;
 const TTL_MS = 30_000;
 const CACHE_MAX = 200;
 const REDIRECTS = new Set([301, 302, 303, 307, 308]);
+/** Longest target URL accepted (feed and quote URLs are well under 1 KB). */
+export const MAX_URL = 2048;
+// A news refresh fetches a few dozen feeds at once and quotes poll on top, per
+// open tab: generous for the app, a bound for anyone else.
+const limiter = createRateLimiter({ limit: 180, windowMs: 60_000 });
 
 /** Returns the parsed URL when it is https and on the allow-list, else null. */
 export function allowedUrl(target, allow = ALLOW) {
@@ -124,7 +134,8 @@ export async function proxyFetch(target, allow = ALLOW) {
     const body = await readCapped(r, MAX_BYTES);
     return { status: r.status, body, type: safeContentType(r.headers.get('content-type')) };
   } catch (e) {
-    console.error('[api/fetch] upstream fetch failed', u.href, e && e.message ? e.message : e);
+    // Host only: a query string may carry tokens and does not belong in logs.
+    console.error('[api/fetch] upstream fetch failed', u.hostname, e && e.name ? e.name : 'error');
     return fail(502, e && e.message === 'too large' ? 'upstream response too large' : 'upstream fetch failed');
   }
 }
@@ -142,8 +153,32 @@ function send(res, out, cacheHit) {
   res.status(out.status).end(out.body);
 }
 
+/**
+ * The `url` query parameter as a string, or an error status: missing, repeated
+ * or over MAX_URL characters.
+ */
+export function targetParam(query) {
+  const raw = query?.url;
+  if (Array.isArray(raw)) return { error: fail(400, 'one url only') };
+  const target = raw == null ? '' : String(raw).trim();
+  if (!target) return { error: fail(400, 'missing url') };
+  if (target.length > MAX_URL) return { error: fail(414, 'url too long') };
+  return { target };
+}
+
 export default async function handler(req, res) {
-  const target = (req.query?.url ?? '').toString();
+  if (req.method && req.method !== 'GET' && req.method !== 'HEAD') {
+    res.setHeader('allow', 'GET');
+    return send(res, fail(405, 'GET only'), false);
+  }
+  if (!requestAllowed(req)) return send(res, fail(403, 'origin not allowed'), false);
+  const slot = limiter.take(clientIp(req));
+  if (!slot.ok) {
+    res.setHeader('retry-after', String(slot.retryAfter));
+    return send(res, fail(429, 'too many requests'), false);
+  }
+  const { target, error } = targetParam(req.query);
+  if (error) return send(res, error, false);
   const u = allowedUrl(target);
   const key = u ? u.href : null;
   if (key) {

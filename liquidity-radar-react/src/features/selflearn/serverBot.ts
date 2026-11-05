@@ -3,7 +3,9 @@
 // Uses the same public URL and anon key as the whale history (see
 // radar-worker/sql/002_bot.sql: the bot tables allow anonymous *select* and
 // nothing else). Without those two variables the Neural Net page simply
-// shows the in-browser engine alone.
+// shows the in-browser engine alone. The Binance account snapshot and the
+// model weights are not readable with the anon key (sql/009_bot_private.sql):
+// the account comes from the server endpoint /api/bot-account instead.
 import type { Outcome } from './onTrack'
 import { buildJournal } from './journal'
 import type { JournalRow } from './journal'
@@ -72,17 +74,42 @@ export interface BinanceAccount {
   unrealizedPnl: number
   marginBalance: number
   availableBalance: number
-  positions: Array<{ symbol: string; side: 'LONG' | 'SHORT'; size: number; entry: number; mark: number; unrealized: number; leverage: number; liquidation: number; margin: number; notional: number }>
+  positions: Array<{ symbol: string; side: 'LONG' | 'SHORT'; size: number; entry: number; mark: number; unrealized: number; leverage: number; liquidation: number; margin: number }>
   orders: Array<{ symbol: string; side: 'BUY' | 'SELL'; type: string; price: number; qty: number; reduceOnly: boolean }>
   fills: Array<{ symbol: string; time: number; side: 'BUY' | 'SELL'; price: number; qty: number; realizedPnl: number; commission: number }>
 }
 
+export interface AccountView {
+  account: BinanceAccount | null
+  heartbeat: { t: number; mode: string; venue: string } | null
+  /** Set when the account endpoint could not serve the snapshot (not configured, refused or down). */
+  unavailable?: string
+}
+
+/**
+ * The account snapshot from the server endpoint (api/bot-account.mjs, which
+ * holds the only key that can read it). Never throws: a missing endpoint (dev
+ * server), 503 (not configured) or any error becomes `unavailable`.
+ */
+async function loadAccountSnapshot(): Promise<{ account: BinanceAccount | null; unavailable?: string }> {
+  try {
+    const r = await fetch('/api/bot-account', { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(15_000) })
+    if (r.status === 503) return { account: null, unavailable: 'Account view is not configured on this deployment.' }
+    if (!r.ok) return { account: null, unavailable: 'Account view unavailable (HTTP ' + r.status + ').' }
+    if (!/json/i.test(r.headers.get('content-type') || '')) return { account: null, unavailable: 'Account view unavailable here.' }
+    const body = (await r.json()) as { account?: BinanceAccount | null }
+    return { account: body && body.account ? body.account : null }
+  } catch {
+    return { account: null, unavailable: 'Account view unavailable right now.' }
+  }
+}
+
 /** Account snapshot and bot heartbeat. Null when the database is not configured. */
-export async function loadAccount(): Promise<{ account: BinanceAccount | null; heartbeat: { t: number; mode: string; venue: string } | null } | null> {
+export async function loadAccount(): Promise<AccountView | null> {
   if (!SERVER_BOT) return null
-  const rows = await rest<Array<{ key: string; value: unknown }>>('bot_state?select=key,value&key=in.(account,heartbeat)')
-  const get = (k: string) => rows.find((r) => r.key === k)?.value ?? null
-  return { account: get('account') as BinanceAccount | null, heartbeat: get('heartbeat') as { t: number; mode: string; venue: string } | null }
+  const [rows, snap] = await Promise.all([rest<Array<{ key: string; value: unknown }>>('bot_state?select=key,value&key=eq.heartbeat'), loadAccountSnapshot()])
+  const heartbeat = (rows.find((r) => r.key === 'heartbeat')?.value ?? null) as AccountView['heartbeat']
+  return snap.unavailable ? { account: null, heartbeat, unavailable: snap.unavailable } : { account: snap.account, heartbeat }
 }
 
 /**
@@ -208,7 +235,7 @@ export async function loadModelMetrics(limit = 20_000): Promise<{ real: Array<Re
       'bot_shadow_trades?select=id,symbol,status,strategy,bar_time,closed_at,exit_reason,r_gross,r_net,p_cal,p_raw,ev_r,bars_held,mae_r,mfe_r&status=eq.closed&order=closed_at.desc,id.desc',
       limit,
     ),
-    // Readable with the anon key (002_bot.sql); an older schema without the registry columns just shows no registry.
+    // Readable with the anon key (002_bot.sql; named columns only since 009_bot_private.sql, never the weights); an older schema without the registry columns just shows no registry.
     rest<Array<Record<string, unknown>>>('bot_models?select=id,symbol,interval,version,role,created_at,promoted_at,gate_pass,holdout&order=id.desc&limit=2000').catch(() => []),
   ])
   return { real, shadow, models }

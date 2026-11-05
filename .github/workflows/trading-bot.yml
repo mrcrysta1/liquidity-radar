@@ -83,7 +83,7 @@
 # every closed real and shadow trade and trains a challenger every 4 h or
 # every 20 closed trades. Clear a tripped kill switch with npm run reset-risk.
 # Requires radar-worker/sql/005_bot_learning.sql, 006_bot_journal.sql,
-# 007_bot_trend.sql and 008_bot_strategies.sql (all applied by this workflow
+# 007_bot_trend.sql, 008_bot_strategies.sql and 009_bot_private.sql (all applied by this workflow
 # on every run).
 #
 # GitHub's runners are in the US, where Binance's main API is blocked; the
@@ -168,6 +168,12 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
       - name: Apply the multi-strategy schema
         run: node scripts/apply-sql.mjs sql/008_bot_strategies.sql
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      # Last: narrows what the public anon key may read (private bot_state
+      # keys, model weights). 005 re-creates its own policies on every run.
+      - name: Apply the bot privacy rules
+        run: node scripts/apply-sql.mjs sql/009_bot_private.sql
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
       - run: echo "BOT_STARTED=$(date +%s)" >> "$GITHUB_ENV"

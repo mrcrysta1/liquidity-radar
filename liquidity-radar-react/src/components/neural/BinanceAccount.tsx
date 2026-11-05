@@ -1,11 +1,12 @@
 // The Binance Demo (testnet) futures account, mirrored: the same wallet,
 // unrealized P&L, margin and available balance, positions, open orders and
 // fills that the Binance panel shows. The bot (radar-worker) reads them with
-// the exchange keys every 15 seconds and saves a snapshot; this only reads it.
+// the exchange keys every 15 seconds and saves a snapshot; this only reads it,
+// through the server endpoint /api/bot-account (the snapshot is not public).
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { SERVER_BOT, loadAccount } from '../../features/selflearn/serverBot'
-import type { BinanceAccount as Account } from '../../features/selflearn/serverBot'
+import type { AccountView } from '../../features/selflearn/serverBot'
 import { pfmt } from '../../utils/format'
 
 const usd = (v: number) => (v < 0 ? '-' : '') + '$' + Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -19,7 +20,7 @@ const panelUrl = (venue: string, sym = 'BTCUSDT') =>
 
 /** `children`: extra sections (the bot's own trades and activity) shown under the fills. */
 export function BinanceAccount({ children }: { children?: ReactNode }) {
-  const [d, setD] = useState<{ account: Account | null; heartbeat: { t: number; mode: string; venue: string } | null } | null>(null)
+  const [d, setD] = useState<AccountView | null>(null)
   const [err, setErr] = useState('')
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
@@ -72,7 +73,12 @@ export function BinanceAccount({ children }: { children?: ReactNode }) {
       </header>
 
       {err && <p className="nn-err">{err}</p>}
-      {!a ? (
+      {!a && d?.unavailable ? (
+        <>
+          <p className="nn-empty">{d.unavailable} The bot's trades and activity are below.</p>
+          {children}
+        </>
+      ) : !a ? (
         <p className="nn-empty">
           {d ? 'No account snapshot yet. Start the bot (radar-worker: npm run bot); it reads the account every 15 seconds.' : 'Loading…'}
         </p>
