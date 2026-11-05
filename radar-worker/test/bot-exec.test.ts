@@ -485,6 +485,8 @@ test('rate limit: above the weight threshold only deferrable reads wait for the 
     await c.f.positions()
     await c.f.openAlgo('BTCUSDT')
     assert.deepEqual(c.sleeps, [], 'positions and stops never wait')
+    await c.f.balanceUsdt()
+    assert.deepEqual(c.sleeps, [], 'the equity read behind the risk checks never waits')
     await c.f.account()
     assert.equal(c.sleeps.length, 1, 'the account read waited')
     assert.ok(c.sleeps[0] > 0 && c.sleeps[0] <= 60_500, 'into the next minute: ' + c.sleeps[0])

@@ -764,6 +764,14 @@ export class SymbolTrader {
     try {
       id = await this.placeStop(exitSide, open.sl, `rb-sl-${open.id}-r${Date.now().toString(36)}`)
     } catch (e) {
+      // A looser stop that is still on the right side of the mark protects the
+      // position: keep it and try the tighter one again, rather than close
+      // (e.g. the exchange refusing a second closePosition stop, -4130).
+      const looser = stops.find((a) => (a.side ?? exitSide) === exitSide && Number.isFinite(trig(a)) && side * (mark - trig(a)) > 0)
+      if (looser) {
+        await this.store.event('warn', this.symbol, `trade #${open.id}: ${why} → re-place at ${open.sl} failed (${(e as Error).message}); keeping stop ${looser.algoId} @ ${looser.triggerPrice}, tried again next tick`)
+        return true
+      }
       const n = (this.stopFails.get(open.id) || 0) + 1
       this.stopFails.set(open.id, n)
       if (transient(e) && n < 2) {

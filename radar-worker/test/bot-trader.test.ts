@@ -1554,6 +1554,22 @@ test('stop: rejected by the exchange (an error, or a REJECTED status) → closed
   }
 })
 
+test('stop: a refused tighter re-place keeps a looser stop that still protects, instead of closing', async () => {
+  const { store, ex, t, state, h, nextBar } = await f1Only()
+  await t.tick(true, Date.now())
+  const first = (await store.openTrade('BTCUSDT'))!
+  while (state.idx < h.range) await nextBar()
+  const trailed = (await store.openTrade('BTCUSDT'))!
+  assert.ok(trailed.sl > first.sl, 'the stop was trailed')
+  // The exchange still holds the initial, looser stop; placing the tighter one is refused.
+  ex.algo[0].trigger = first.sl
+  ex.failStop = true
+  await t.tick(true, Date.now())
+  assert.notEqual(ex.pos.amt, 0, 'still open')
+  assert.equal(ex.algo.length, 1, 'the looser stop is kept')
+  assert.equal(await store.getState('closing:' + trailed.id, null), null)
+})
+
 test('stop: an entry whose stop is answered REJECTED is closed at once, not treated as protected', async () => {
   const { store, ex, t } = await f1Only()
   ex.stopStatus = 'REJECTED'

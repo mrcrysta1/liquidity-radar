@@ -53,8 +53,10 @@ export class RateLimitError extends BinanceError {
 }
 
 /** Reads that can wait for the next weight minute: the account mirror's (account.ts) and the exchange listing. Positions, stops and fills never wait. */
+/** Params of the account-mirror read: deferrable, unlike balanceUsdt's read of the same endpoint (risk checks must not wait). */
+const MIRROR = new WeakSet<Params>()
 function deferrable(method: string, path: string, p: Params): boolean {
-  return method === 'GET' && (path === '/fapi/v2/account' || path === '/fapi/v1/exchangeInfo' || (path === '/fapi/v1/openOrders' && p.symbol === undefined))
+  return method === 'GET' && (MIRROR.has(p) || path === '/fapi/v1/exchangeInfo' || (path === '/fapi/v1/openOrders' && p.symbol === undefined))
 }
 
 /**
@@ -454,7 +456,9 @@ export class Futures {
 
   /** Whole account, as the Binance panel shows it (balances and positions). */
   async account(): Promise<unknown> {
-    return this.request('GET', '/fapi/v2/account')
+    const p: Params = {}
+    MIRROR.add(p)
+    return this.request('GET', '/fapi/v2/account', p)
   }
 
   /**
