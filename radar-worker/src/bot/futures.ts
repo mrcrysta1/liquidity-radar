@@ -330,12 +330,17 @@ export class Futures {
     })) as { orderId: number; status: string }
   }
 
+  /**
+   * Cancel every open regular order of the symbol. Throws on failure: each
+   * caller decides whether passing over it is safe (and logs it) or not.
+   */
   async cancelAllOrders(symbol: string): Promise<void> {
-    await this.request('DELETE', '/fapi/v1/allOpenOrders', { symbol }).catch(() => {})
+    await this.request('DELETE', '/fapi/v1/allOpenOrders', { symbol })
   }
 
+  /** Cancel every open algo order (stop) of the symbol. Throws on failure, like cancelAllOrders. */
   async cancelAllAlgo(symbol: string): Promise<void> {
-    await this.request('DELETE', '/fapi/v1/algoOpenOrders', { symbol }).catch(() => {})
+    await this.request('DELETE', '/fapi/v1/algoOpenOrders', { symbol })
   }
 
   /** Cancel one algo order (a stop being replaced by a trailed one). Throws on failure, so the caller can log it. */
@@ -348,9 +353,15 @@ export class Futures {
     return this.request('GET', '/fapi/v2/account')
   }
 
-  /** Every open regular order (limits, take-profits), all symbols. */
-  async openOrders(): Promise<unknown> {
-    return this.request('GET', '/fapi/v1/openOrders')
+  /**
+   * Every open regular order (limits, take-profits): all symbols, or one
+   * symbol's. One symbol's answer must be a list (the pre-entry check reads
+   * "none" from it), else it throws.
+   */
+  async openOrders(symbol?: string): Promise<unknown> {
+    const r = await this.request('GET', '/fapi/v1/openOrders', symbol ? { symbol } : {})
+    if (symbol && !Array.isArray(r)) throw new Error('openOrders: unexpected response')
+    return r
   }
 
   /**

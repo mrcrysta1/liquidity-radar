@@ -267,3 +267,29 @@ test('portfolio heat: three 0.5% trades fit one side, the fourth does not; the t
   assert.equal(heatCheck({ long: 0, short: 0 }, 1, 1e9, eq, DEFAULT_RISK), null, 'no caps set → never blocks')
   assert.match(heatCheck({ long: 0, short: 0 }, 1, 50, 0, r)!, /equity unknown/)
 })
+
+test('cancel-all and the open-order reads surface failures instead of swallowing them', async () => {
+  const real = globalThis.fetch
+  let algoBody: unknown = { code: -1000, msg: 'odd' }
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    const u = new URL(url)
+    if (u.pathname === '/fapi/v1/time') return new Response(JSON.stringify({ serverTime: Date.now() }))
+    if (init?.method === 'DELETE') return new Response(JSON.stringify({ code: -1001, msg: 'Internal error' }), { status: 400 })
+    if (u.pathname === '/fapi/v1/openAlgoOrders') return new Response(JSON.stringify(algoBody))
+    if (u.pathname === '/fapi/v1/openOrders') return new Response(JSON.stringify(u.searchParams.get('symbol') ? {} : []))
+    return new Response('{}')
+  }) as typeof fetch
+  try {
+    const f = new Futures('k', 's')
+    await assert.rejects(f.cancelAllOrders('BTCUSDT'), /-1001/)
+    await assert.rejects(f.cancelAllAlgo('BTCUSDT'), /-1001/)
+    // An answer that is not a list is not "no orders".
+    await assert.rejects(f.openAlgo('BTCUSDT'), /unexpected response/)
+    await assert.rejects(f.openOrders('BTCUSDT'), /unexpected response/)
+    assert.deepEqual(await f.openOrders(), [], 'all symbols: as before')
+    algoBody = { orders: [{ algoId: 1, orderType: 'STOP_MARKET' }] }
+    assert.equal((await f.openAlgo('BTCUSDT')).length, 1)
+  } finally {
+    globalThis.fetch = real
+  }
+})

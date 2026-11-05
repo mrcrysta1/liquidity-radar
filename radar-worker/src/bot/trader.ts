@@ -80,8 +80,11 @@ export interface Exchange {
   marketOrder(symbol: string, side: 'BUY' | 'SELL', quantity: string, reduceOnly?: boolean, clientId?: string): Promise<{ orderId: number; avgPrice: string; executedQty: string }>
   bracketLeg(symbol: string, side: 'BUY' | 'SELL', type: 'STOP_MARKET' | 'TAKE_PROFIT_MARKET', triggerPrice: string, clientAlgoId: string): Promise<{ algoId: number; algoStatus?: string }>
   takeProfitLimit(symbol: string, side: 'BUY' | 'SELL', quantity: string, price: string, clientId: string): Promise<{ orderId: number; status: string }>
+  /** Cancel all of a market's regular / algo orders; both throw when the exchange refuses or cannot be reached. */
   cancelAllOrders(symbol: string): Promise<void>
   cancelAllAlgo(symbol: string): Promise<void>
+  /** This market's open regular orders (a list); throws when they cannot be read. */
+  openOrders(symbol: string): Promise<unknown>
   /** Cancel one exchange-side stop / target by id (the trend trail replaces its stop). */
   cancelAlgo(symbol: string, algoId: number): Promise<void>
   /** This market's working algo orders (the stops); throws when they cannot be read. */
@@ -590,8 +593,51 @@ export class SymbolTrader {
       const qty = roundStep(Math.abs(pos.amt), this.rules.stepSize, this.rules.quantityPrecision)
       await this.ex.marketOrder(this.symbol, pos.amt > 0 ? 'SELL' : 'BUY', qty, true, `rb-flat-${Date.now()}`)
     }
-    await this.ex.cancelAllOrders(this.symbol)
-    await this.ex.cancelAllAlgo(this.symbol)
+    await this.cancelLeftovers()
+  }
+
+  /**
+   * Cancel what a closed position leaves behind (its stop, its target). Only
+   * after the position is gone, so a failure here is logged and passed over:
+   * nothing is unprotected, and the next entry on this market first clears any
+   * order still open, or does not enter (clearStale).
+   */
+  private async cancelLeftovers(): Promise<void> {
+    for (const [what, cancel] of [
+      ['orders', () => this.ex.cancelAllOrders(this.symbol)],
+      ['stops', () => this.ex.cancelAllAlgo(this.symbol)],
+    ] as const)
+      await cancel().catch((e) => this.store.event('warn', this.symbol, `leftover ${what} not cancelled (${(e as Error).message}); cleared before the next entry`))
+  }
+
+  /**
+   * Before an entry on a flat market: no order of an earlier trade may act on
+   * the new position (an old closePosition stop would close it, an old
+   * reduce-only target would cut it). Reads this market's position and open
+   * orders fresh, cancels whatever is left and reads again. Returns why the
+   * entry must be skipped, or null when the market is clean. A market that
+   * turns out not to be flat is never touched: those orders protect it.
+   */
+  private async clearStale(): Promise<string | null> {
+    const read = async () => {
+      const [orders, algos] = await Promise.all([this.ex.openOrders(this.symbol), this.ex.openAlgo(this.symbol)])
+      if (!Array.isArray(orders)) throw new Error('open orders: unexpected response')
+      return { n: orders.length, k: algos.length }
+    }
+    try {
+      const pos = await this.ex.position(this.symbol)
+      if (pos.amt !== 0) return `a position of ${pos.amt} is open on the exchange — its orders are not stale, no entry beside it`
+      const r = await read()
+      if (!r.n && !r.k) return null
+      await this.store.event('warn', this.symbol, `stale orders before entry: ${r.n} regular, ${r.k} stop(s) with no position — cancelling`)
+      if (r.n) await this.ex.cancelAllOrders(this.symbol)
+      if (r.k) await this.ex.cancelAllAlgo(this.symbol)
+      const left = await read()
+      if (left.n || left.k) return `stale orders still open after cancelling (${left.n} regular, ${left.k} stop(s))`
+      return null
+    } catch (e) {
+      return `stale-order check failed (${(e as Error).message})`
+    }
   }
 
   private async manage(open: OpenTrade, pos: Position, now: number): Promise<void> {
@@ -773,8 +819,7 @@ export class SymbolTrader {
           ? 'tp'
           : 'sl'
     const reason = this.closing.get(open.id) ?? stored ?? byExchange
-    await this.ex.cancelAllOrders(this.symbol)
-    await this.ex.cancelAllAlgo(this.symbol)
+    await this.cancelLeftovers()
     const r = open.riskUsd > 0 ? pnl / open.riskUsd : 0
     const closedAt = exits[exits.length - 1].time
     const exit = vwap(exits)
@@ -982,6 +1027,13 @@ export class SymbolTrader {
         await this.store.event('info', this.symbol, `${summary} — no trade: ${hot}${note}`)
         return false
       }
+    }
+    const stale = await this.clearStale()
+    if (stale) {
+      plan.reasons = [stale]
+      await savePlan()
+      await this.store.event('warn', this.symbol, `${summary} — no trade: ${stale}`)
+      return false
     }
     const o = await this.ex.marketOrder(this.symbol, buy ? 'BUY' : 'SELL', sz.qty, false, `rb-in-${now}`)
     const fill = Number(o.avgPrice) || last.c
@@ -1374,6 +1426,11 @@ export class SymbolTrader {
     if (hot) {
       await skip([hot])
       return [hot]
+    }
+    const stale = await this.clearStale()
+    if (stale) {
+      await skip([stale], 'warn')
+      return [stale]
     }
     const o = await this.ex.marketOrder(this.symbol, side > 0 ? 'BUY' : 'SELL', sz.qty, false, `rb-in-${now}`)
     const fill = Number(o.avgPrice) || last.c

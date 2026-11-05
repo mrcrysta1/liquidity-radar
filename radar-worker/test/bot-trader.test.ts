@@ -115,11 +115,20 @@ class FakeExchange implements Exchange {
     this.limits.push({ orderId, side, qty: Number(quantity), price: Number(price) })
     return { orderId, status: 'NEW' }
   }
+  /** Cancel-all requests fail (refused, unreachable). */
+  failCancel = false
+  /** Cancel-all requests answer OK but the orders stay. */
+  stickyOrders = false
   async cancelAllOrders() {
-    this.limits = []
+    if (this.failCancel) throw new Error('simulated cancel failure')
+    if (!this.stickyOrders) this.limits = []
   }
   async cancelAllAlgo() {
-    this.algo = []
+    if (this.failCancel) throw new Error('simulated cancel failure')
+    if (!this.stickyOrders) this.algo = []
+  }
+  async openOrders() {
+    return this.limits.map((l) => ({ orderId: l.orderId, side: l.side, type: 'LIMIT', price: String(l.price), origQty: String(l.qty), reduceOnly: true }))
   }
   async fills(_s: string, start: number) {
     return this.log.filter((f) => f.time >= start)
@@ -908,7 +917,8 @@ test('positions: after its own orders a trader re-reads its market, not the shar
   ex.failStop = true
   await t.tick(true, Date.now())
   assert.equal(book.reads, 1)
-  assert.equal(ex.positionCalls, 1, 'one fresh read of this market after the failed stop')
+  // One fresh read before the entry (the stale-order check) and one after the failed stop.
+  assert.equal(ex.positionCalls, 2, 'fresh reads of this market around its own orders')
   assert.equal(ex.pos.amt, 0, 'no unprotected position')
   assert.ok(ex.log.length >= 2, 'entered, then closed')
   assert.equal(snapshot.amt, 0, 'the stale snapshot was not used for the close')
@@ -1602,4 +1612,62 @@ test('stop: duplicates are cancelled — the stored one kept, else the tightest;
   ex.ops = []
   for (let k = 0; k < 3; k++) await t.tick(true, Date.now())
   assert.deepEqual(ex.ops, [], 'nothing more to do')
+})
+
+// ---- stale orders: an entry never starts beside orders of an earlier trade ----
+
+test('stale orders: a leftover stop and target on a flat market are cancelled, then the entry goes ahead', async () => {
+  const { store, ex, t, pg } = await f1Only()
+  ex.algo.push({ algoId: 9001, side: 'SELL', trigger: 50 })
+  ex.limits.push({ orderId: 9002, side: 'SELL', qty: 1, price: 500 })
+  await t.tick(true, Date.now())
+  const open = (await store.openTrade('BTCUSDT'))!
+  assert.ok(open, 'entered')
+  assert.deepEqual(ex.algo.map((a) => a.algoId), [open.slAlgoId], 'only the new trade’s stop')
+  assert.equal(ex.limits.length, 0)
+  const ev = (await pg.query<{ level: string; msg: string }>('select level, msg from bot_events order by id')).rows
+  assert.ok(ev.some((e) => e.level === 'warn' && /stale orders before entry: 1 regular, 1 stop/.test(e.msg)))
+})
+
+test('stale orders: a cancel that fails, or orders still there after it, means no entry', async () => {
+  for (const how of ['fail', 'sticky'] as const) {
+    const { store, ex, t, pg } = await f1Only()
+    ex.algo.push({ algoId: 9001, side: 'SELL', trigger: 50 })
+    if (how === 'fail') ex.failCancel = true
+    else ex.stickyOrders = true
+    await t.tick(true, Date.now())
+    assert.equal(await store.openTrade('BTCUSDT'), null, how + ': no trade')
+    assert.equal(ex.pos.amt, 0, how + ': no order sent')
+    const ev = (await pg.query<{ level: string; msg: string }>('select level, msg from bot_events order by id')).rows
+    const why = how === 'fail' ? /no trade: stale-order check failed \(simulated cancel failure\)/ : /no trade: stale orders still open after cancelling \(0 regular, 1 stop/
+    assert.ok(ev.some((e) => e.level === 'warn' && why.test(e.msg)), how)
+    const plan = await store.getState<TradePlan | null>('plan:BTCUSDT', null)
+    assert.equal(plan?.status, 'skipped')
+  }
+})
+
+test('stale orders: the stop of a position the tick-start snapshot missed is never cancelled', async () => {
+  // The shared snapshot says flat, but the market holds a position with its stop.
+  const book = new PositionBook(async () => [{ symbol: 'BTCUSDT', amt: 0, entry: 0, mark: 100, unrealized: 0 }])
+  const { store, ex, t, pg } = await trendTrader({ strategies: [{ id: 'f1', state: 'live' }], positions: book })
+  ex.pos = { amt: 1, entry: 100 }
+  ex.algo.push({ algoId: 9001, side: 'SELL', trigger: 50 })
+  await t.tick(true, Date.now())
+  assert.deepEqual(ex.algo.map((a) => a.algoId), [9001], 'its stop stays')
+  assert.equal(ex.pos.amt, 1, 'nothing entered beside it')
+  assert.equal(await store.openTrade('BTCUSDT'), null)
+  const ev = (await pg.query<{ msg: string }>('select msg from bot_events order by id')).rows
+  assert.ok(ev.some((e) => /a position of 1 is open on the exchange/.test(e.msg)))
+})
+
+test('leftovers: a cancel that fails after a close is logged, and the trade is still closed', async () => {
+  const { store, ex, t, now, events, pg, id } = await managedMl()
+  ex.failCancel = true
+  ex.move(96) // the stop fills; its target is left on the book
+  await t.tick(true, now)
+  const row = (await pg.query<Record<string, unknown>>('select status from bot_trades where id = $1', [id])).rows[0]
+  assert.equal(row.status, 'closed')
+  assert.equal(await store.openTrade('XAUUSDT'), null)
+  assert.ok((await events()).some((e) => e.level === 'warn' && /leftover orders not cancelled \(simulated cancel failure\)/.test(e.msg)))
+  assert.equal(ex.limits.length, 1, 'the target is still there — the next entry clears it first')
 })
