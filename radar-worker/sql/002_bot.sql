@@ -76,6 +76,8 @@ create index if not exists bot_events_t on bot_events (t desc);
 
 -- The Neural Net page reads with the public anon key. These are testnet
 -- records; drop these policies if you would rather keep them private.
+-- 009_bot_private.sql narrows this (bot_state keys, bot_models columns);
+-- run it again after re-running this file.
 do $$
 declare t text;
 begin

@@ -17,7 +17,7 @@ import type { AccountFill } from './bot/account.ts'
 import { BotStore } from './bot/store.ts'
 import { DEFAULT_LEARN, DEFAULT_TRADER, INTERVAL_DEFAULTS, INTERVAL_MAX_NOTIONAL_X, SymbolTrader, heavyJobs } from './bot/trader.ts'
 import { DEFAULT_SETUP } from './bot/setup.ts'
-import { InitQueue, listedOnly, tickOrder } from './bot/startup.ts'
+import { InitQueue, listedOnly, settle, tickOrder } from './bot/startup.ts'
 import { buildMetrics } from './bot/learning.ts'
 import { BarCache, INTERVAL_MS } from './bot/data.ts'
 import type { TraderConfig } from './bot/trader.ts'
@@ -171,8 +171,9 @@ if (HANDOFF) console.log(new Date().toISOString(), `bot run started · until ${n
 else if (!ONCE) await store.event('info', null, `bot starting on ${ex.base} (${ex.isTestnet ? 'TESTNET' : 'MAINNET'}) · mode ${cfg.mode}${SLOTS ? ' · strategies ' + SLOTS.map((s) => `${s.id}:${s.state}${s.symbols ? `@${s.symbols.length} markets` : "@all"}`).join(', ') : ''} · ${SYMBOLS.join(', ')} · ${cfg.interval} bars · risk ${(cfg.risk.riskPerTrade * 100).toFixed(2)}%/trade · bracket ${BRACKET.slAtr}/${BRACKET.tpAtr} ATR over ${BRACKET.horizon} bars · max ${cfg.setup.maxOpen} open, ${cfg.setup.maxTradesPerDay}/day${cfg.mode === 'hybrid' ? ` · real: ${REAL_SYMBOLS.join(', ')} · heat ≤ ${(cfg.risk.maxSideRisk! * 100).toFixed(1)}%/side, ${(cfg.risk.maxTotalRisk! * 100).toFixed(1)}% total` : ''}`)
 
 // Each market starts on its own: one whose setup fails (a slow link, or a
-// rejection such as -4067) is skipped and retried with a bounded backoff from
-// the trading loop, while the others trade. It never stalls the run.
+// rejection such as -4067) is retried with a bounded backoff from the trading
+// loop, while the others trade; meanwhile it is managed only (open positions
+// keep their stop check, trail and exits; no entries). It never stalls the run.
 // A market dropped from BOT_SYMBOLS while a trade was open on it is never
 // orphaned: a manage-only trader sees that trade through under the rules it
 // was opened with, then idles (no new real or shadow trades, no learning).
@@ -182,12 +183,13 @@ const setupQueue = new InitQueue(
   [...SYMBOLS.map((s) => new SymbolTrader(ex, store, s, cfg)), ...ORPHANS.map((s) => new SymbolTrader(ex, store, s, { ...cfg, manageOnly: true }))],
   {
     onFail: (s, attempt, e, waitMs) =>
-      store.event('warn', s, `setup failed (attempt ${attempt}): ${e.message} — skipped for now, other markets keep trading; retrying in ${Math.round(waitMs / 1000)}s`),
+      store.event('warn', s, `setup failed (attempt ${attempt}): ${e.message} — no entries here for now (an open position is still managed), other markets keep trading; retrying in ${Math.round(waitMs / 1000)}s`),
     onReady: (s, attempts) => (attempts > 1 ? store.event('info', s, `setup succeeded after ${attempts} attempts — trading resumed`) : undefined),
   },
 )
 await setupQueue.run()
-if (ONCE && setupQueue.ready.length === 0) {
+// BOT_ONCE with no market set up still runs its tick when a trade is open: its position is managed.
+if (ONCE && setupQueue.ready.length === 0 && !(await store.openSymbols().catch(() => [])).length) {
   console.error('no market could be set up')
   await db.end().catch(() => {})
   process.exit(1)
@@ -292,19 +294,30 @@ async function tick(): Promise<void> {
   await cfg.barCache?.refreshDue(6).catch((e) => console.error('bars', (e as Error).message))
   positions.clear()
   // Alphabetical: same-bar entries compete for the heat cap in symbol order (startup.ts tickOrder).
-  for (const t of tickOrder(setupQueue.ready)) {
+  // A market whose setup is still failing is ticked too: its open position is
+  // protected and managed, and it opens nothing until the setup succeeds.
+  for (const t of tickOrder(setupQueue.all)) {
     try {
-      await t.tick(canEnter, now)
+      // Once stopping, the tick in flight still manages every position but opens nothing new.
+      await t.tick(canEnter && !stopping, now)
     } catch (e) {
       await store.event('error', t.symbol, 'tick failed: ' + (e as Error).message)
     }
   }
 }
 
+/** The tick in flight, awaited by shutdown() so a stop is never cut off between fill and placement. */
+let current: Promise<void> | null = null
+// BOT_SHUTDOWN_MS: the longest a shutdown waits for that tick before it exits anyway.
+const SHUTDOWN_MS = num(env.BOT_SHUTDOWN_MS, 60_000)
+
 async function loop(): Promise<void> {
   while (!stopping && Date.now() < DEADLINE) {
     const t0 = Date.now()
-    await tick().catch((e) => console.error('tick', e))
+    current = tick().catch((e) => console.error('tick', e))
+    await current
+    current = null
+    if (stopping) return
     await new Promise((r) => setTimeout(r, Math.max(1000, TICK_MS - (Date.now() - t0))))
   }
   if (stopping) return
@@ -318,6 +331,10 @@ async function loop(): Promise<void> {
 async function shutdown(): Promise<void> {
   if (stopping) return
   stopping = true
+  // Let the tick in flight finish first (no new entries start once stopping is
+  // set): exiting mid-tick could leave a filled entry without its stop. The
+  // next run's stop check (trader.ts ensureStop) is the second line of defence.
+  if (!(await settle(current, SHUTDOWN_MS))) console.error(new Date().toISOString(), `shutdown: the tick did not finish in ${SHUTDOWN_MS / 1000}s — exiting anyway`)
   // Open positions keep their exchange-side stop and target; nothing to unwind.
   if (!HANDOFF) await store.event('info', null, 'bot stopping (positions keep their exchange-side stop/target)')
   await db.end().catch(() => {})
@@ -325,10 +342,14 @@ async function shutdown(): Promise<void> {
 }
 // A stray network rejection must not take down a process that guards open positions.
 process.on('unhandledRejection', (e) => console.error(new Date().toISOString(), 'unhandled:', (e as Error)?.message || e))
-process.on('SIGINT', () => void shutdown())
-process.on('SIGTERM', () => void shutdown())
+// The shutdown in progress (one per process); the BOT_ONCE path waits for it rather than exit on its own.
+let exiting: Promise<void> | null = null
+process.on('SIGINT', () => void (exiting ??= shutdown()))
+process.on('SIGTERM', () => void (exiting ??= shutdown()))
 if (ONCE) {
-  await tick()
+  current = tick()
+  await current
+  if (exiting) await exiting // it exits the process
   console.log(new Date().toISOString(), 'tick done')
   await db.end().catch(() => {})
   process.exit(0)

@@ -18,6 +18,12 @@
 // Shadow trades count in every state, so a demoted strategy can earn its way
 // back. A strategy without bands is never moved automatically (no demotion and,
 // above all, no promotion): it stays as configured.
+//
+// Performance makes a strategy *eligible*; only BOT_STRATEGIES *permits* real
+// orders. Health may move a strategy configured live between live, probation
+// and shadow, never above live. A strategy configured shadow stays shadow
+// whatever its results: when it would qualify for live, the record says so
+// (`eligible`) and someone has to approve it in BOT_STRATEGIES.
 
 export type StrategyState = 'live' | 'probation' | 'shadow'
 
@@ -78,6 +84,14 @@ export interface HealthRecord {
   /** Start of the current segment: going live (config or promotion) or the demotion. Probation keeps it. */
   segmentStart: number
   hasBands: boolean
+  /**
+   * Configured shadow only: its shadow trades meet the promotion test, but it
+   * stays shadow until BOT_STRATEGIES says live. Absent in older records.
+   */
+  eligible?: boolean
+  /** Why it is eligible, and since when (kept while it stays eligible). */
+  eligibleReason?: string
+  eligibleSince?: number
   stats: HealthStats
   /** Newest last, at most HEALTH.historyMax. */
   history: Transition[]
@@ -91,6 +105,11 @@ export const riskScale = (s: StrategyState): number => (s === 'probation' ? HEAL
 
 /** May a strategy in this state place real orders? */
 export const isLive = (s: StrategyState): boolean => s === 'live' || s === 'probation'
+
+const RANK: Record<StrategyState, number> = { shadow: 0, probation: 1, live: 2 }
+
+/** The state, but never more permissive than the configured one (shadow < probation < live). */
+export const clampState = (s: StrategyState, configured: 'live' | 'shadow'): StrategyState => (RANK[s] > RANK[configured] ? configured : s)
 
 const mean = (r: number[]) => (r.length ? r.reduce((a, x) => a + x, 0) / r.length : null)
 
@@ -138,6 +157,12 @@ export function evaluateHealth(
     cur.since = now
   }
   if (cur.state !== slot.state && (!prev || prev.configured !== slot.state)) move(slot.state, `configured ${slot.state} (BOT_STRATEGIES)`)
+  // A stored state above the configured one (e.g. a record from before promotion was capped): back down.
+  else if (clampState(cur.state, slot.state) !== cur.state) {
+    move(clampState(cur.state, slot.state), `configured ${slot.state} (BOT_STRATEGIES): real orders need explicit approval there`)
+    cur.segmentStart = now
+  }
+  let eligible: string | null = null
   const r = all.map((o) => o.r)
   const roll30 = rollingExp(r)
   const seg = all.filter((o) => o.t > cur.segmentStart).map((o) => o.r)
@@ -167,8 +192,11 @@ export function evaluateHealth(
       // Not straight back out: the rolling window must also clear the demotion line.
       !(roll30 != null && roll30 < bands.roll30P1)
     ) {
-      move('live', `${seg.length} shadow trades since ${prev?.history.at(-1)?.to === 'shadow' ? 'the demotion' : 'it started'}: ${f(segExp)}/trade, max drawdown ${dd.max.toFixed(1)}R ≤ p95 ${bands.ddP95}R`)
-      cur.segmentStart = now
+      const why = `${seg.length} shadow trades since ${prev?.history.at(-1)?.to === 'shadow' ? 'the demotion' : 'it started'}: ${f(segExp)}/trade, max drawdown ${dd.max.toFixed(1)}R ≤ p95 ${bands.ddP95}R`
+      if (slot.state === 'live') {
+        move('live', why)
+        cur.segmentStart = now
+      } else eligible = `would qualify for live — needs explicit approval in BOT_STRATEGIES (${why})`
     }
   }
   const segNow = all.filter((o) => o.t > cur.segmentStart).map((o) => o.r)
@@ -180,6 +208,8 @@ export function evaluateHealth(
     since: cur.since,
     segmentStart: cur.segmentStart,
     hasBands: !!bands,
+    eligible: !!eligible,
+    ...(eligible ? { eligibleReason: eligible, eligibleSince: prev?.eligible && prev.eligibleSince != null ? prev.eligibleSince : now } : {}),
     stats: {
       real: all.filter((o) => o.kind === 'real').length,
       shadow: all.filter((o) => o.kind === 'shadow').length,

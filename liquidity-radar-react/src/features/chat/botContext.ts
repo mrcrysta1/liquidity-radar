@@ -14,7 +14,7 @@ import { READINESS, computeReadiness } from '../selflearn/readiness.ts'
 
 export interface BotSnapshot {
   now: number
-  account?: { account: BinanceAccount | null; heartbeat: { t: number; mode: string; venue: string } | null } | null
+  account?: { account: BinanceAccount | null; heartbeat: { t: number; mode: string; venue: string } | null; unavailable?: string } | null
   strategies?: BotStrategy[] | null
   plans?: BotPlan[] | null
   /** Real and shadow trades, newest first (serverBot loadJournal). */
@@ -59,7 +59,7 @@ function accountLines(x: BotSnapshot): string[] {
     out.push(
       `ACCOUNT (testnet USDT, read ${ago(x.now - acc.t)} ago): equity ${fUsd(acc.marginBalance)} | wallet ${fUsd(acc.walletBalance)} | unrealized ${fUsd(acc.unrealizedPnl)} | available ${fUsd(acc.availableBalance)} | ${acc.positions?.length ?? 0} positions, ${acc.orders?.length ?? 0} open orders.`,
     )
-  } else out.push('ACCOUNT: no snapshot recorded.')
+  } else out.push(a.unavailable ? 'ACCOUNT: account view unavailable on this deployment.' : 'ACCOUNT: no snapshot recorded.')
   return out
 }
 

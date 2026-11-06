@@ -22,7 +22,8 @@
 // the 95th / 99th percentile of the drawdown in R over 100 trades. health.ts
 // puts a live strategy outside p5 / p95 on probation (half risk), demotes it
 // outside p1 / p99 and promotes it back only on fresh shadow evidence; a
-// strategy without bands is never promoted automatically.
+// strategy without bands is never promoted automatically, and one configured
+// shadow never goes live on its own (its record is flagged `eligible` instead).
 import type { Bar, Costs } from './features.ts'
 import { costR } from './features.ts'
 import { excursion } from './journal.ts'
@@ -533,6 +534,8 @@ export async function refreshHealth(store: BotStore, slots: StrategySlot[], now:
       const worse = transition.to === 'shadow' || transition.to === 'probation'
       await store.event(worse ? 'warn' : 'info', null, `strategy ${slot.id}: ${transition.from} → ${transition.to} — ${transition.reason}`)
     }
+    // Once, when a configured-shadow strategy first qualifies: a person decides whether it goes live.
+    if (record.eligible && !prev?.eligible) await store.event('info', null, `strategy ${slot.id}: eligible — ${record.eligibleReason}`)
     out[slot.id] = record.state
   }
   return out

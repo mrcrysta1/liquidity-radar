@@ -2780,6 +2780,9 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('strategies: last transition', [f1.last.from, f1.last.to, f1.last.t], ['probation', 'shadow', 5])
   eq('strategies: no history, no transition; bands flag', [ml.last, ml.hasBands, f1.hasBands], [null, false, true])
   eq('strategies: missing fields fall back', [x2.name, x2.real, x2.roll30, x2.priority], ['X2', 0, null, null])
+  eq('strategies: eligible flag, absent in older records', [x2.eligible, x2.eligibleReason, f1.eligible], [false, null, false])
+  const [c2] = S.normalizeStrategies([{ id: 'c2', state: 'shadow', configured: 'shadow', hasBands: true, eligible: true, eligibleReason: 'would qualify for live', stats: {} }])
+  eq('strategies: eligible configured-shadow', [c2.state, c2.eligible, c2.eligibleReason], ['shadow', true, 'would qualify for live'])
 }
 
 // ---- server bot: model metrics ------------------------------------------------------
@@ -2998,6 +3001,8 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
 
   const stale = B.summarizeBot({ ...snap, account: { ...account, heartbeat: { ...account.heartbeat, t: now - 2 * H } } })
   ok('botctx: an old heartbeat reads STALE', stale.includes('STALE'))
+  const noAcct = B.summarizeBot({ ...snap, account: { account: null, heartbeat: account.heartbeat, unavailable: 'not configured' } })
+  ok('botctx: an unavailable account view says so and keeps the heartbeat', noAcct.includes('ACCOUNT: account view unavailable') && noAcct.includes('HEARTBEAT: 1 min ago'))
   const failed = B.summarizeBot({ now, account: null, strategies: null, plans: null, journal: null, events: null, readiness: null })
   ok('botctx: failed loaders are marked unavailable, not thrown', ['ACCOUNT: unavailable', 'STRATEGIES: unavailable', 'GO-LIVE READINESS: unavailable', 'TRADES: unavailable', 'LATEST PLANS: unavailable'].every((x) => failed.includes(x)), failed)
 

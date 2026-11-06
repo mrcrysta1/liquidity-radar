@@ -34,6 +34,32 @@ export class BinanceError extends Error {
 }
 
 /**
+ * Binance's request-weight budget is 2400 per minute per IP (USDⓈ-M). Above
+ * softWeight used (X-MBX-USED-WEIGHT-1M), reads that can wait (deferrable) are
+ * held until the next minute. A 429 / -1003 backs off for Retry-After, else
+ * exponentially with jitter up to maxBackoffMs; a 418 is an IP ban for
+ * Retry-After, and the client sends nothing at all until it is over.
+ */
+export const RATE_LIMIT = { softWeight: 2000, maxBackoffMs: 60_000, getAttempts: 3 }
+
+/** Too many requests (HTTP 429, -1003) or an IP ban (HTTP 418); retryAfterMs: how long the client holds off. */
+export class RateLimitError extends BinanceError {
+  retryAfterMs: number
+  constructor(status: number, code: number, msg: string, retryAfterMs: number) {
+    super(status, code, msg)
+    this.name = 'RateLimitError'
+    this.retryAfterMs = retryAfterMs
+  }
+}
+
+/** Reads that can wait for the next weight minute: the account mirror's (account.ts) and the exchange listing. Positions, stops and fills never wait. */
+/** Params of the account-mirror read: deferrable, unlike balanceUsdt's read of the same endpoint (risk checks must not wait). */
+const MIRROR = new WeakSet<Params>()
+function deferrable(method: string, path: string, p: Params): boolean {
+  return method === 'GET' && (MIRROR.has(p) || path === '/fapi/v1/exchangeInfo' || (path === '/fapi/v1/openOrders' && p.symbol === undefined))
+}
+
+/**
  * Setup rejections that mean "already so" or "cannot change right now while
  * orders or a position are open" — the current setting stays and the bot goes on:
  * -4046 no need to change margin type, -4059 no need to change position side,
@@ -79,6 +105,17 @@ export interface Fill {
   commissionAsset: string
 }
 
+/** A working algo (conditional) order, as /fapi/v1/openAlgoOrders lists it. */
+export interface AlgoOrder {
+  algoId: number
+  clientAlgoId?: string
+  orderType?: string
+  side?: 'BUY' | 'SELL'
+  triggerPrice?: string
+  closePosition?: boolean | string
+  algoStatus?: string
+}
+
 interface ExchangeInfo {
   symbols: Array<{ symbol: string; status?: string; pricePrecision: number; quantityPrecision: number; filters: Array<Record<string, string>> }>
 }
@@ -88,11 +125,18 @@ export class Futures {
   private key: string
   private secret: string
   private offset = 0
+  private sleep: (ms: number) => Promise<void>
+  private clock: () => number
+  private random: () => number
 
-  constructor(key: string, secret: string, base = TESTNET) {
+  /** o: a clock, sleep and random source for the rate limiter (tests); default the real ones. */
+  constructor(key: string, secret: string, base = TESTNET, o: { sleep?: (ms: number) => Promise<void>; now?: () => number; random?: () => number } = {}) {
     this.base = assertTestnetBase(base)
     this.key = key
     this.secret = secret
+    this.sleep = o.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)))
+    this.clock = o.now ?? Date.now
+    this.random = o.random ?? Math.random
   }
 
   /** Always true: the constructor refuses any base URL that is not an allowed testnet. */
@@ -121,62 +165,134 @@ export class Futures {
 
   private lastSync = 0
 
+  // ---- rate limits, shared by every request of this client ----
+  /** No request goes out before this (a 429 back-off or a 418 ban). */
+  private holdUntil = 0
+  /** The hold is an IP ban: requests fail at once instead of waiting it out. */
+  private banned = false
+  /** 429s in a row, for the exponential back-off. */
+  private strikes = 0
+  /** Last X-MBX-USED-WEIGHT-1M seen, and the exchange minute it belongs to. */
+  usedWeight = 0
+  private weightMinute = -1
+
+  /**
+   * Before a request: wait out a short 429 back-off; fail at once during an IP
+   * ban or a long hold (the caller's next tick tries again); hold a deferrable
+   * read until the next minute when the weight budget is nearly used up.
+   */
+  private async respectLimits(method: string, path: string, p: Params): Promise<void> {
+    let left = this.holdUntil - this.clock()
+    if (left <= 0) this.banned = false
+    else if (this.banned || left > RATE_LIMIT.maxBackoffMs)
+      throw new RateLimitError(this.banned ? 418 : 429, -1003, `${method} ${path} not sent: ${this.banned ? 'IP banned' : 'rate limited'} by the exchange for ${Math.ceil(left / 1000)}s more`, left)
+    else await this.sleep(left)
+    const t = this.clock() + this.offset
+    if (deferrable(method, path, p) && this.usedWeight >= RATE_LIMIT.softWeight && Math.floor(t / 60_000) === this.weightMinute) {
+      left = 60_000 - (t % 60_000) + 500
+      await this.sleep(left)
+    }
+  }
+
+  /** A 429 / 418 / -1003 answer: set the shared hold and return its length. Logged once per streak / ban. */
+  private limited(r: Response, method: string, path: string): number {
+    const ban = r.status === 418
+    const ra = Number(r.headers.get('retry-after'))
+    this.strikes++
+    const backoff = Math.min(RATE_LIMIT.maxBackoffMs, 1000 * 2 ** (this.strikes - 1)) * (0.5 + 0.5 * this.random())
+    const wait = ra > 0 ? ra * 1000 : ban ? RATE_LIMIT.maxBackoffMs : backoff
+    this.holdUntil = Math.max(this.holdUntil, this.clock() + wait)
+    if (ban && !this.banned) console.warn(`[futures] IP banned by the exchange (418, ${method} ${path}): every request paused for ${Math.ceil(wait / 1000)}s`)
+    else if (!ban && this.strikes === 1) console.warn(`[futures] rate limited (${r.status}, ${method} ${path}): backing off ${Math.ceil(wait / 1000)}s`)
+    if (ban) this.banned = true
+    return wait
+  }
+
+  private noteWeight(r: Response): void {
+    const w = Number(r.headers.get('x-mbx-used-weight-1m') ?? NaN)
+    if (!Number.isFinite(w)) return
+    this.usedWeight = w
+    this.weightMinute = Math.floor((this.clock() + this.offset) / 60_000)
+  }
+
+  /**
+   * One request. Reads (GET) retry network failures and 429s a few times,
+   * after the back-off. Writes (POST / DELETE: orders, cancels, settings) are
+   * sent once and never repeated: a timed-out order may still have filled, and
+   * on a 429 / 418 it was refused. The caller does not resend either; the next
+   * tick's reconciliation reads what the exchange holds instead — an unrecorded
+   * position is closed, a lost or missing stop is found (and adopted) or placed
+   * by the stop check (trader.ts ensureStop), stale orders are cleared before
+   * an entry. Error messages carry the method, path and Binance's reason, never
+   * the query string (signature) or the key.
+   */
   async request(method: string, path: string, p: Params = {}, signed = true, retried = false): Promise<unknown> {
     // Drift builds up over hours; re-measure every 10 minutes.
     if (signed && Date.now() - this.lastSync > 600_000) await this.syncTime().catch(() => {})
-    const qs = new URLSearchParams()
-    for (const [k, v] of Object.entries(p)) if (v !== undefined) qs.set(k, String(v))
-    if (signed) {
-      // Binance rejects a timestamp more than 1s ahead of its clock, but
-      // accepts one up to recvWindow behind. So stamp a second behind the
-      // best estimate and allow a wide window for slow links.
-      qs.set('recvWindow', '10000')
-      qs.set('timestamp', String(Date.now() + this.offset - 1000))
-      qs.set('signature', sign(qs.toString(), this.secret))
-    }
-    // Defence in depth: never sign or send anything to a host off the allowlist.
-    const url = assertTestnetBase(this.base) + path + (qs.size ? '?' + qs.toString() : '')
-    const send = () =>
-      fetch(url, {
-        method,
-        headers: signed ? { 'X-MBX-APIKEY': this.key } : {},
-        signal: AbortSignal.timeout(20_000),
-      })
-    let r: Response
-    if (method === 'GET') {
-      // Reads are safe to repeat: retry network failures a few times.
-      let attempt = 0
-      for (;;) {
-        try {
-          r = await send()
-          break
-        } catch (e) {
-          if (++attempt >= 3) throw e
-          await new Promise((res) => setTimeout(res, 1500 * attempt))
+    const write = method !== 'GET'
+    for (let attempt = 1; ; attempt++) {
+      await this.respectLimits(method, path, p)
+      const qs = new URLSearchParams()
+      for (const [k, v] of Object.entries(p)) if (v !== undefined) qs.set(k, String(v))
+      if (signed) {
+        // Binance rejects a timestamp more than 1s ahead of its clock, but
+        // accepts one up to recvWindow behind. So stamp a second behind the
+        // best estimate and allow a wide window for slow links.
+        qs.set('recvWindow', '10000')
+        qs.set('timestamp', String(Date.now() + this.offset - 1000))
+        qs.set('signature', sign(qs.toString(), this.secret))
+      }
+      // Defence in depth: never sign or send anything to a host off the allowlist.
+      const url = assertTestnetBase(this.base) + path + (qs.size ? '?' + qs.toString() : '')
+      const send = () =>
+        fetch(url, {
+          method,
+          headers: signed ? { 'X-MBX-APIKEY': this.key } : {},
+          signal: AbortSignal.timeout(20_000),
+        })
+      let r: Response
+      if (!write) {
+        // Reads are safe to repeat: retry network failures a few times.
+        let tries = 0
+        for (;;) {
+          try {
+            r = await send()
+            break
+          } catch (e) {
+            if (++tries >= 3) throw e
+            await this.sleep(1500 * tries)
+          }
         }
+      } else {
+        // Never repeat a write blindly: a timed-out order may still have filled.
+        // The trader reconciles positions it has no record of on the next tick.
+        r = await send()
       }
-    } else {
-      // Never repeat a write blindly: a timed-out order may still have filled.
-      // The trader reconciles positions it has no record of on the next tick.
-      r = await send()
-    }
-    const text = await r.text()
-    let body: unknown
-    try {
-      body = JSON.parse(text)
-    } catch {
-      body = text
-    }
-    if (!r.ok) {
+      this.noteWeight(r)
+      const text = await r.text()
+      let body: unknown
+      try {
+        body = JSON.parse(text)
+      } catch {
+        body = text
+      }
       const e = body as { code?: number; msg?: string }
-      if (e?.code === -1021 && signed && !retried) {
-        // Clock out of step: re-measure and send once more with a fresh stamp.
-        await this.syncTime().catch(() => {})
-        return this.request(method, path, p, signed, true)
+      if (r.status === 429 || r.status === 418 || e?.code === -1003) {
+        const wait = this.limited(r, method, path)
+        if (!write && r.status !== 418 && wait <= RATE_LIMIT.maxBackoffMs && attempt < RATE_LIMIT.getAttempts) continue
+        throw new RateLimitError(r.status, e?.code ?? -1003, `${method} ${path}: ${e?.msg ?? 'too many requests'} (held off ${Math.ceil(wait / 1000)}s${write ? ', not resent' : ''})`, wait)
       }
-      throw new BinanceError(r.status, e?.code ?? 0, e?.msg ?? String(text).slice(0, 200))
+      this.strikes = 0
+      if (!r.ok) {
+        if (e?.code === -1021 && signed && !retried) {
+          // Clock out of step: re-measure and send once more with a fresh stamp.
+          await this.syncTime().catch(() => {})
+          return this.request(method, path, p, signed, true)
+        }
+        throw new BinanceError(r.status, e?.code ?? 0, e?.msg ?? String(text).slice(0, 200))
+      }
+      return body
     }
-    return body
   }
 
   /** exchangeInfo, kept for 10 minutes: every market's setup reads it, and it is large. */
@@ -214,13 +330,14 @@ export class Futures {
     }
   }
 
-  /** USDT equity (wallet + unrealized), or null when the USDT row is missing or unreadable — never a false 0. */
+  /**
+   * USDT equity: wallet balance + the unrealized P&L of every USDT position,
+   * cross and isolated; null when it cannot be read reliably — never a false 0
+   * (see usdtEquity). Feeds sizing, the daily loss limit and the drawdown kill
+   * switch.
+   */
   async balanceUsdt(): Promise<number | null> {
-    const rows = (await this.request('GET', '/fapi/v2/balance')) as Array<{ asset: string; balance: string; crossUnPnl: string }>
-    const u = Array.isArray(rows) ? rows.find((x) => x.asset === 'USDT') : undefined
-    if (!u) return null
-    const v = Number(u.balance) + Number(u.crossUnPnl || 0)
-    return Number.isFinite(v) ? v : null
+    return usdtEquity(await this.request('GET', '/fapi/v2/account'))
   }
 
   async position(symbol: string): Promise<Position> {
@@ -319,12 +436,17 @@ export class Futures {
     })) as { orderId: number; status: string }
   }
 
+  /**
+   * Cancel every open regular order of the symbol. Throws on failure: each
+   * caller decides whether passing over it is safe (and logs it) or not.
+   */
   async cancelAllOrders(symbol: string): Promise<void> {
-    await this.request('DELETE', '/fapi/v1/allOpenOrders', { symbol }).catch(() => {})
+    await this.request('DELETE', '/fapi/v1/allOpenOrders', { symbol })
   }
 
+  /** Cancel every open algo order (stop) of the symbol. Throws on failure, like cancelAllOrders. */
   async cancelAllAlgo(symbol: string): Promise<void> {
-    await this.request('DELETE', '/fapi/v1/algoOpenOrders', { symbol }).catch(() => {})
+    await this.request('DELETE', '/fapi/v1/algoOpenOrders', { symbol })
   }
 
   /** Cancel one algo order (a stop being replaced by a trailed one). Throws on failure, so the caller can log it. */
@@ -334,17 +456,32 @@ export class Futures {
 
   /** Whole account, as the Binance panel shows it (balances and positions). */
   async account(): Promise<unknown> {
-    return this.request('GET', '/fapi/v2/account')
+    const p: Params = {}
+    MIRROR.add(p)
+    return this.request('GET', '/fapi/v2/account', p)
   }
 
-  /** Every open regular order (limits, take-profits), all symbols. */
-  async openOrders(): Promise<unknown> {
-    return this.request('GET', '/fapi/v1/openOrders')
+  /**
+   * Every open regular order (limits, take-profits): all symbols, or one
+   * symbol's. One symbol's answer must be a list (the pre-entry check reads
+   * "none" from it), else it throws.
+   */
+  async openOrders(symbol?: string): Promise<unknown> {
+    const r = await this.request('GET', '/fapi/v1/openOrders', symbol ? { symbol } : {})
+    if (symbol && !Array.isArray(r)) throw new Error('openOrders: unexpected response')
+    return r
   }
 
-  async openAlgo(symbol: string): Promise<Array<{ algoId: number; orderType: string; triggerPrice: string; clientAlgoId: string }>> {
+  /**
+   * This symbol's working algo orders (stops). An answer that is not a list
+   * throws rather than reading as "none": the stop check (trader.ts) would
+   * otherwise place a new stop on every tick.
+   */
+  async openAlgo(symbol: string): Promise<AlgoOrder[]> {
     const r = (await this.request('GET', '/fapi/v1/openAlgoOrders', { symbol })) as unknown
-    return Array.isArray(r) ? (r as never) : ((r as { orders?: never[] })?.orders ?? [])
+    const list = Array.isArray(r) ? r : (r as { orders?: unknown })?.orders
+    if (!Array.isArray(list)) throw new Error('openAlgoOrders: unexpected response')
+    return list as AlgoOrder[]
   }
 
   async fills(symbol: string, startTime: number): Promise<Fill[]> {
@@ -371,6 +508,55 @@ function toPosition(symbol: string, p: Record<string, string>): Position {
     mark: Number(p.markPrice || 0),
     unrealized: Number(p.unRealizedProfit || 0),
   }
+}
+
+const finite = (v: unknown): number | null => {
+  if (v == null || v === '') return null
+  const x = Number(v)
+  return Number.isFinite(x) ? x : null
+}
+
+/** A USDT-margined contract: perpetual (BTCUSDT) or dated (BTCUSDT_250328). */
+const USDT_SYMBOL = /USDT(_\d+)?$/
+
+/**
+ * USDT equity from one /fapi/v2/account response, or null when any part is
+ * missing, non-finite or inconsistent.
+ *
+ * Why this endpoint: /fapi/v2/balance only carries `crossUnPnl`, the P&L of
+ * CROSS positions, and every bot position is ISOLATED, so its open losses never
+ * showed. /fapi/v2/account's per-asset USDT row has `walletBalance` (which
+ * already holds the isolated margin: no double count) and `unrealizedProfit`
+ * (every USDT position, cross and isolated), in the same snapshot as its
+ * `positions`. The per-asset row is used, not totalWalletBalance /
+ * totalUnrealizedProfit, which in multi-assets mode are USD sums over every
+ * asset. The open positions' own unrealizedProfit is the cross-check: each must
+ * be readable and together they must match the asset's figure (within 0.5
+ * USDT + 0.01% of the wallet), otherwise the P&L is not trusted. Null makes
+ * risk.ts checkLimits pause new entries for the tick; open positions are still
+ * managed.
+ */
+export function usdtEquity(raw: unknown): number | null {
+  const a = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null
+  if (!a || !Array.isArray(a.assets) || !Array.isArray(a.positions)) return null
+  const u = (a.assets as Array<Record<string, unknown>>).find((x) => x?.asset === 'USDT')
+  const wallet = finite(u?.walletBalance)
+  const upnl = finite(u?.unrealizedProfit)
+  if (wallet == null || upnl == null) return null
+  let sum = 0
+  for (const p of a.positions as Array<Record<string, unknown>>) {
+    if (!p || typeof p !== 'object') return null
+    if (!USDT_SYMBOL.test(String(p.symbol ?? ''))) continue
+    const amt = finite(p.positionAmt)
+    if (amt == null) return null
+    if (amt === 0) continue
+    const pnl = finite(p.unrealizedProfit ?? p.unRealizedProfit)
+    if (pnl == null) return null
+    sum += pnl
+  }
+  if (Math.abs(sum - upnl) > 0.5 + 1e-4 * Math.abs(wallet)) return null
+  const v = wallet + upnl
+  return Number.isFinite(v) ? v : null
 }
 
 /**

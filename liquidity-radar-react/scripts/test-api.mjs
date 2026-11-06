@@ -1,4 +1,5 @@
-// Tests for the serverless proxies (api/chat.mjs, api/fetch.mjs) and the Pro
+// Tests for the serverless functions (api/chat.mjs, api/fetch.mjs,
+// api/bot-account.mjs) and the Pro
 // terminal's standalone feed proxy (pro-terminal/server/*).
 //
 // Dependency-free like test-engines.mjs. No network: global fetch is replaced
@@ -15,7 +16,9 @@ const mod = (p) => pathToFileURL(resolve(__dirname, '..', p)).href
 delete process.env.ALLOWED_ORIGINS
 for (const k of ['GROQ_API_KEY', 'GEMINI_API_KEY', 'OPENROUTER_API_KEY', 'LLM_PROVIDERS', 'GROQ_MODEL', 'GEMINI_MODEL', 'OPENROUTER_MODEL']) delete process.env[k]
 const chat = await import(mod('api/chat.mjs'))
+for (const k of ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'VITE_WHALE_DB_URL']) delete process.env[k]
 const feed = await import(mod('api/fetch.mjs'))
+const acct = await import(mod('api/bot-account.mjs'))
 const pro = await import(mod('pro-terminal/server/allowlist.mjs'))
 const proServer = await import(mod('pro-terminal/server/proxy.mjs'))
 
@@ -341,7 +344,8 @@ ok(!pro.allowedUrl('https://api.allorigins.win/raw?url=x'), 'pro allow: allorigi
   const RSS = '<?xml version="1.0"?><rss><channel></channel></rss>'
   const vercel = async (url) => {
     const res = mockRes()
-    await feed.default({ query: { url } }, res)
+    // A same-origin browser fetch: no Origin on a GET, Sec-Fetch-Site set.
+    await feed.default({ method: 'GET', query: { url }, headers: { 'sec-fetch-site': 'same-origin', 'x-forwarded-for': '192.0.2.' + Math.floor(Math.random() * 250) } }, res)
     return res
   }
   const node = async (url) => {
@@ -425,6 +429,136 @@ ok(!pro.allowedUrl('https://api.allorigins.win/raw?url=x'), 'pro allow: allorigi
     res = await call('not a url')
     ok(res.statusCode === 400, name + ' handler: bad url -> 400')
   }
+}
+
+// -------------------------------------------------------- fetch: gate + input
+{
+  const FEED = 'https://cointelegraph.com/rss'
+  const RSS = '<rss></rss>'
+  const call = async (query, headers = { 'sec-fetch-site': 'same-origin' }, method = 'GET', ip = '192.0.2.' + Math.floor(Math.random() * 250)) => {
+    const res = mockRes()
+    await feed.default({ method, query, headers: { 'x-forwarded-for': ip, ...headers } }, res)
+    return res
+  }
+  mockFetch({ [FEED]: () => new Response(RSS, { headers: { 'content-type': 'application/rss+xml' } }) })
+  let res = await call({ url: FEED }, { origin: 'https://evil.example.com' })
+  ok(res.statusCode === 403 && calls.length === 0, 'fetch gate: foreign origin -> 403, no upstream call')
+  res = await call({ url: FEED }, { 'sec-fetch-site': 'cross-site' })
+  ok(res.statusCode === 403, 'fetch gate: cross-site without origin -> 403')
+  res = await call({ url: FEED }, {})
+  ok(res.statusCode === 403, 'fetch gate: no origin and no sec-fetch-site -> 403')
+  res = await call({ url: FEED }, { origin: 'https://liquidity-radar-seven.vercel.app' })
+  ok(res.statusCode === 200 && res.body === RSS, 'fetch gate: production origin allowed')
+  res = await call({ url: FEED }, { origin: 'https://radar.example.org', host: 'radar.example.org' })
+  ok(res.statusCode === 200, 'fetch gate: same host (custom domain) allowed')
+  res = await call({ url: FEED }, { origin: 'http://localhost:5174' })
+  ok(res.statusCode === 200, 'fetch gate: localhost dev allowed')
+  res = await call({ url: FEED }, undefined, 'POST')
+  ok(res.statusCode === 405, 'fetch: POST -> 405')
+
+  mockFetch({})
+  res = await call({})
+  ok(res.statusCode === 400 && res.body === 'missing url', 'fetch input: missing url -> 400')
+  res = await call({ url: '   ' })
+  ok(res.statusCode === 400, 'fetch input: blank url -> 400')
+  res = await call({ url: [FEED, FEED] })
+  ok(res.statusCode === 400, 'fetch input: repeated url -> 400')
+  res = await call({ url: FEED + '?q=' + 'x'.repeat(feed.MAX_URL) })
+  ok(res.statusCode === 414, 'fetch input: over-long url -> 414')
+  res = await call({ url: 'http://cointelegraph.com/rss' })
+  ok(res.statusCode === 403, 'fetch input: plain http refused (https only, as before)')
+  res = await call({ url: 'https://user:pw@evil.example.com/' })
+  ok(res.statusCode === 403, 'fetch input: foreign host refused')
+  ok(calls.length === 0, 'fetch input: rejected inputs never reach upstream')
+  mockFetch({ [FEED]: () => new Response(RSS, { headers: { 'content-type': 'application/rss+xml' } }) })
+
+  // Rate limit: one IP, 180 a minute; the 181st is refused with retry-after.
+  let last
+  for (let i = 0; i < 181; i++) last = await call({ url: FEED }, undefined, 'GET', '203.0.113.77')
+  ok(last.statusCode === 429 && Number(last.headers['retry-after']) >= 1, 'fetch rate limit: 181st request in a minute -> 429 + retry-after')
+  res = await call({ url: FEED }, undefined, 'GET', '203.0.113.78')
+  ok(res.statusCode === 200, 'fetch rate limit: per IP')
+
+  // Logs name the host only, never the query string.
+  const logged = []
+  console.error = (...a) => logged.push(a.join(' '))
+  const TOK = 'https://www.okx.com/feed?token=SECRET123'
+  mockFetch({ [TOK]: new Error('boom') })
+  res = await call({ url: TOK })
+  console.error = () => {}
+  ok(res.statusCode === 502 && logged.length === 1 && logged[0].includes('www.okx.com') && !logged[0].includes('SECRET123'), 'fetch log: host only, no query')
+}
+
+// -------------------------------------------------------- bot-account
+{
+  const SECRET = 'eyJ.service-role-SECRET'
+  const URL0 = 'https://abcd.supabase.co'
+  const READ = URL0 + '/rest/v1/bot_state?select=value&key=eq.account'
+  const SNAP = {
+    t: 1_790_000_000_000,
+    venue: 'https://demo-fapi.binance.com',
+    asset: 'USDT',
+    walletBalance: 5000,
+    unrealizedPnl: 12.5,
+    marginBalance: 5012.5,
+    availableBalance: 4800,
+    apiKey: 'binance-KEY',
+    positions: [{ symbol: 'SOLUSDT', side: 'LONG', size: 2.5, entry: 150, mark: 151, unrealized: 2.5, leverage: 3, liquidation: 0, margin: 125, notional: 377, isolatedWallet: 9 }],
+    orders: [{ symbol: 'SOLUSDT', side: 'SELL', type: 'STOP_MARKET', price: 141, qty: 2.5, reduceOnly: true, clientOrderId: 'x-SECRET', orderId: 42 }],
+    fills: Array.from({ length: 30 }, (_, i) => ({ symbol: 'SOLUSDT', time: i, side: 'BUY', price: 150, qty: 1, realizedPnl: 0, commission: 0.1, orderId: 7, buyer: true })),
+  }
+  const get = async (headers = { 'sec-fetch-site': 'same-origin' }, method = 'GET', ip = '198.51.100.' + Math.floor(Math.random() * 250)) => {
+    const res = mockRes()
+    await acct.default({ method, headers: { 'x-forwarded-for': ip, ...headers } }, res)
+    return res
+  }
+
+  mockFetch({})
+  let res = await get()
+  ok(res.statusCode === 503 && JSON.parse(res.body).error === 'not_configured' && calls.length === 0, 'bot-account: no env -> 503 not_configured, no upstream call')
+  process.env.SUPABASE_SERVICE_ROLE_KEY = SECRET
+  res = await get()
+  ok(res.statusCode === 503, 'bot-account: key without a URL -> 503')
+  process.env.VITE_WHALE_DB_URL = URL0 + '/'
+  ok(acct.dbConfig()?.url === URL0, 'bot-account: URL falls back to VITE_WHALE_DB_URL, trailing slash trimmed')
+
+  res = await get({ origin: 'https://evil.example.com' })
+  ok(res.statusCode === 403 && calls.length === 0, 'bot-account: foreign origin -> 403')
+  res = await get({})
+  ok(res.statusCode === 403, 'bot-account: no origin and no sec-fetch-site -> 403')
+  res = await get(undefined, 'POST')
+  ok(res.statusCode === 405, 'bot-account: POST -> 405')
+
+  mockFetch({ [READ]: () => new Response(JSON.stringify([{ value: SNAP }]), { headers: { 'content-type': 'application/json' } }) })
+  res = await get({ origin: 'https://liquidity-radar-seven.vercel.app' })
+  const a = JSON.parse(res.body).account
+  ok(res.statusCode === 200 && a.walletBalance === 5000 && a.positions[0].symbol === 'SOLUSDT', 'bot-account: allowed origin -> 200 with the snapshot')
+  ok(calls[0].init.headers.apikey === SECRET && calls[0].init.headers.authorization === 'Bearer ' + SECRET, 'bot-account: JWT key sent as apikey + bearer')
+  ok(!res.body.includes('SECRET') && !res.body.includes('binance-KEY'), 'bot-account: no keys or extra ids in the response')
+  ok(!('notional' in a.positions[0]) && !('isolatedWallet' in a.positions[0]) && !('asset' in a), 'bot-account: fields the card does not show are stripped')
+  ok(!('orderId' in a.orders[0]) && !('clientOrderId' in a.orders[0]) && a.orders[0].reduceOnly === true, 'bot-account: order ids stripped, flags kept')
+  ok(a.fills.length === 20 && !('orderId' in a.fills[0]), 'bot-account: fills capped at the 20 the card shows')
+  ok(res.headers['cache-control'] === 'no-store', 'bot-account: no-store')
+
+  process.env.SUPABASE_SERVICE_ROLE_KEY = 'sb_secret_abc'
+  mockFetch({ [READ]: () => new Response('[]', { headers: { 'content-type': 'application/json' } }) })
+  res = await get()
+  ok(res.statusCode === 200 && JSON.parse(res.body).account === null, 'bot-account: no snapshot row -> account null')
+  ok(calls[0].init.headers.apikey === 'sb_secret_abc' && !calls[0].init.headers.authorization, 'bot-account: sb_secret key only in apikey')
+
+  mockFetch({ [READ]: () => new Response('nope', { status: 401 }) })
+  res = await get()
+  ok(res.statusCode === 502 && !res.body.includes('sb_secret'), 'bot-account: upstream error -> 502, generic')
+  mockFetch({ [READ]: new Error('getaddrinfo ENOTFOUND abcd.supabase.co') })
+  res = await get()
+  ok(res.statusCode === 502 && !res.body.includes('ENOTFOUND'), 'bot-account: network error -> 502, generic')
+
+  ok(acct.publicAccount('{"t":1,"positions":[{"side":"WEIRD"}]}').positions[0].side === 'LONG', 'bot-account: stored JSON string parsed, enums clamped')
+  let lim
+  for (let i = 0; i < 61; i++) lim = await get(undefined, 'GET', '198.51.100.250')
+  ok(lim.statusCode === 429 && lim.headers['retry-after'], 'bot-account: 61st request in a minute from one IP -> 429')
+  ok(acct.publicAccount({ venue: 'x' }) === null && acct.publicAccount('nope') === null, 'bot-account: unusable snapshot -> null')
+  for (const k of ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'VITE_WHALE_DB_URL']) delete process.env[k]
 }
 
 globalThis.fetch = realFetch
