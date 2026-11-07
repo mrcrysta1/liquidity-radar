@@ -5,6 +5,7 @@
 // nothing else). Without those two variables the Neural Net page simply
 // shows the in-browser engine alone.
 import type { Outcome } from './onTrack'
+import { cachedGet } from './cachedGet'
 import { buildJournal } from './journal'
 import type { JournalRow } from './journal'
 import { normalizeStrategies } from './botStrategies'
@@ -61,14 +62,14 @@ export interface BotEvent {
   msg: string
 }
 
-async function rest<T>(path: string): Promise<T> {
-  const r = await fetch(DB_URL + '/rest/v1/' + path, {
-    headers: { apikey: DB_KEY!, Authorization: 'Bearer ' + DB_KEY },
-    signal: AbortSignal.timeout(15_000),
-  })
-  if (!r.ok) throw new Error('bot records: HTTP ' + r.status)
-  return (await r.json()) as T
-}
+/** A fresh answer is reused this long: the cards that read the same rows at once (status bar, account, strategies) share one request. */
+export const REST_TTL_MS = 10_000
+
+/** GET from the bot tables, through the shared cache with one retry (cachedGet.ts). */
+const rest = cachedGet(
+  (path) => fetch(DB_URL + '/rest/v1/' + path, { headers: { apikey: DB_KEY!, Authorization: 'Bearer ' + DB_KEY }, signal: AbortSignal.timeout(15_000) }),
+  { ttl: REST_TTL_MS },
+)
 
 export async function loadBot(): Promise<{ trades: BotTrade[]; events: BotEvent[] } | null> {
   if (!SERVER_BOT) return null
