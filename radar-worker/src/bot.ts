@@ -26,6 +26,7 @@ import type { StrategySlot } from './bot/strategies.ts'
 import { c6Tick } from './bot/c6.ts'
 import { contextTick } from './context/collect.ts'
 import { newsTick } from './news/collect.ts'
+import { mlEvalTick } from './research/calib.ts'
 import { Alerts } from './bot/alerts.ts'
 
 if (existsSync('.env')) process.loadEnvFile('.env')
@@ -275,6 +276,8 @@ async function tick(): Promise<void> {
   if (!ONCE && env.BOT_CONTEXT !== '0') contextTick(store, db, SYMBOLS, now)
   // Economic calendar, the one-off FRED backfill (with FRED_API_KEY) and market reactions, hourly in the background.
   if (!ONCE && env.BOT_NEWS !== '0') newsTick(store, db, { fredKey: env.FRED_API_KEY || undefined }, now)
+  // The model's calibration study (research/calib.ts), daily in the background → bot_state 'ml:eval'. Report only.
+  if (!ONCE) mlEvalTick(store, db, now)
   void dailyAlert().catch((e) => console.error('daily summary', (e as Error).message))
   await mirrorAccount(now).catch((e) => console.error('account mirror', (e as Error).message))
   if (ONCE || now - lastMetricsAt >= 3_600_000) {

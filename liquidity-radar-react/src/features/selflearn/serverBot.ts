@@ -17,6 +17,8 @@ import { normalizeAudit } from './audit'
 import { normalizeContext } from './marketContext'
 import type { ContextView } from './marketContext'
 import { TRACKED_NEWS } from './newsIntel'
+import { normalizeMlEval } from './mlEval'
+import type { MlEval } from './mlEval'
 import type { Context4h, NewsEvent, NewsTrade, ReactionRow } from './newsIntel'
 import type { AuditReport } from './audit'
 
@@ -391,4 +393,11 @@ export async function loadNewsIntel(limit = 50_000): Promise<NewsIntelData | nul
     trades: trades.sort((a, b) => a.entryTime - b.entryTime),
     missing,
   }
+}
+
+/** The model calibration study (radar-worker/src/research/calib.ts), refreshed daily by the bot; null before the first. */
+export async function loadMlEval(): Promise<MlEval | null> {
+  if (!SERVER_BOT) return null
+  const rows = await rest<Array<{ value: unknown }>>('bot_state?select=value&key=eq.ml:eval')
+  return rows.length ? normalizeMlEval(rows[0].value) : null
 }
