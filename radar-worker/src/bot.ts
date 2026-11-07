@@ -24,6 +24,7 @@ import type { TraderConfig } from './bot/trader.ts'
 import { STRATEGIES, parseStrategies, refreshHealth } from './bot/strategies.ts'
 import type { StrategySlot } from './bot/strategies.ts'
 import { c6Tick } from './bot/c6.ts'
+import { contextTick } from './context/collect.ts'
 import { Alerts } from './bot/alerts.ts'
 
 if (existsSync('.env')) process.loadEnvFile('.env')
@@ -269,6 +270,8 @@ async function tick(): Promise<void> {
     await store.equity(now - (now % 3_600_000), read)
   }
   await store.setState('heartbeat', { t: now, equity, mode: cfg.mode, venue: ex.base })
+  // Market context (BTC on 15m/1h/4h, correlations, gold, regime) every 15 min, in the background: never delays trading.
+  if (!ONCE && env.BOT_CONTEXT !== '0') contextTick(store, db, SYMBOLS, now)
   void dailyAlert().catch((e) => console.error('daily summary', (e as Error).message))
   await mirrorAccount(now).catch((e) => console.error('account mirror', (e as Error).message))
   if (ONCE || now - lastMetricsAt >= 3_600_000) {
