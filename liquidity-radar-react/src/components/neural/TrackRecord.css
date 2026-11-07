@@ -1,0 +1,13 @@
+/* "Track record" card (components/neural/TrackRecord.tsx). Own file so it never
+   collides with edits to index.css; the table reuses .nn-tbl / .lab-table. */
+.tr-copy{border:1px solid var(--hair-2);background:var(--sunk-2);color:var(--txt);border-radius:8px;padding:4px 10px;font-size:var(--text-xs);cursor:pointer}
+.tr-lede{margin:0 0 10px;font-size:var(--text-sm);color:var(--muted);line-height:1.5}
+.tr-lede b{color:var(--txt)}
+.tr-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr));gap:8px;margin-bottom:8px}
+.tr-tiles>div{display:flex;flex-direction:column;gap:2px;padding:8px 10px;border-radius:10px;background:var(--sunk-2);border:1px solid var(--hair-2)}
+.tr-tiles small{font-size:var(--text-xs);color:var(--dim)}
+.tr-tiles b{font-size:var(--text-lg)}
+.tr-tiles em{font-style:normal;font-size:var(--text-xs);color:var(--dim)}
+.tr-note{margin:6px 0 12px;font-size:var(--text-xs);color:var(--muted);line-height:1.5}
+.tr-table td.tr-say{white-space:normal;min-width:180px;color:var(--muted);font-family:inherit}
+.tr-caveats{margin:10px 0 0;padding-left:18px;font-size:var(--text-xs);color:var(--muted);line-height:1.6}

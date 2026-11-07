@@ -80,6 +80,7 @@ const AiAssistant = lazy(() => import('./chat/AiAssistant').then((m) => ({ defau
 const OnboardingTour = lazy(() => import('./onboarding/OnboardingTour').then((m) => ({ default: m.OnboardingTour })))
 const EconomicCalendar = lazy(() => loadCalendar().then((m) => ({ default: m.EconomicCalendar })))
 import { useEffect, useRef } from 'react'
+import { switchTab } from '../features/actions/userActions'
 const w = window as any
 
 export function Shell() {
@@ -87,6 +88,10 @@ export function Shell() {
   // loads that user's settings. A no-op until sign-in is configured.
   useEffect(() => {
     initAuth()
+  }, [])
+  // A shared track-record link (…/#track-record) opens Self Learning; the sub-tab is chosen there.
+  useEffect(() => {
+    if (location.hash === '#track-record') switchTab('selflearn')
   }, [])
   // The self-learning engine trades on its own, whichever tab is open. It is
   // started once the page has settled so it never competes with first paint.

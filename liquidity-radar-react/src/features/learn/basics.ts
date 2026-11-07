@@ -165,6 +165,7 @@ export const WHATS_NEW: Array<{ date: string; items: string[] }> = [
   {
     date: '2026-11-07',
     items: [
+      'Track record sub-tab on Self Learning, with a link to share (…/#track-record): the demo account over time and every strategy’s live result next to its tested history and audit verdict, losses included.',
       'A five-step tour for first-time visitors; take it again any time from Settings → Learning (“Take the tour”).',
       'Phones: wide tables on the Self Learning tab keep their first column pinned while the rest scrolls.',
       'Faster, steadier bot data: cards that need the same records share one request (10-second cache), and a failed request is retried once before a card shows an error.',
