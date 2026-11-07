@@ -2825,6 +2825,52 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('context: groups on 4h', M.corrGroups(c.coins, '4h'), { strong: 1, moderate: 0, independent: 1 })
 }
 
+// ---- server bot: news trading intelligence -------------------------------------------
+{
+  const N = await import(src('features/selflearn/newsIntel.ts'))
+  const H = 3_600_000
+  const ev = (time, category, o = {}) => ({ time, category, title: category.toUpperCase(), source: 'ff', impact: 'High', forecast: null, actual: null, previous: null, revisedPrevious: null, surprise: null, decision: null, unit: null, ...o })
+  // NFP and the unemployment rate at one time are one event; the row with the surprise names it.
+  const g = N.groupEvents([ev(10 * H, 'nfp', { title: 'Unemployment Rate' }), ev(10 * H, 'nfp', { title: 'Non-Farm', surprise: 100, forecast: 65, actual: 165 }), ev(20 * H, 'cpi')])
+  eq('news: one event per category and time, the headline row kept', [g.length, g[0].title, g[0].surprise], [2, 'Non-Farm', 100])
+  eq('news: reliability bands', [0, 3, 10, 30, 80].map(N.reliability), ['none', 'anecdotal', 'weak', 'moderate', 'usable'])
+  const m = N.meanCI([1, 2, 3, 4].map((v, i) => ({ v, g: i })))
+  eq('news: no interval under 5 events', [m.mean, m.lo], [2.5, null])
+  ok('news: an interval with enough events', N.meanCI(Array.from({ length: 30 }, (_, i) => ({ v: i % 3, g: i }))).lo != null)
+  // Reactions per category.
+  const evs = Array.from({ length: 10 }, (_, i) => ev(i * 100 * H, 'cpi', { surprise: i % 2 ? 0.2 : -0.1 }))
+  const re = evs.flatMap((e, i) => [
+    { time: e.time, asset: 'BTCUSDT', horizon: 60, ret: i % 2 ? 1.2 : -0.8, z: i % 2 ? 3 : -2.5, range: 2 },
+    { time: e.time, asset: 'XAUUSDT', horizon: 60, ret: 0.1, z: 0.5, range: 0.3 },
+  ])
+  const cr = N.categoryReactions(evs, re)[0]
+  eq('news: reactions per release', [cr.events, cr.assets.BTCUSDT[60].n, cr.assets.BTCUSDT[60].bigShare, cr.assets.BTCUSDT[60].upShare], [10, 10, 1, 0.5])
+  near('news: mean absolute move', cr.assets.BTCUSDT[60].absRet.mean, 1.0)
+  near('news: surprise and BTC move line up', cr.surpriseCorr, 1, 1e-9)
+  // Attribution needs evidence, not just timing.
+  const t = (o) => ({ key: 'k', strategy: 'ml', kind: 'shadow', symbol: 'ETHUSDT', side: 1, entryTime: 100 * H + H, r: 1, ...o })
+  const a1 = N.attribute(t(), evs, re, [])
+  eq('news: with the 3σ rise, entered after → news-driven', [a1.kind, a1.event?.time], ['news', 100 * H])
+  eq('news: against the move → not news', N.attribute(t({ side: -1 }), evs, re, []).kind, 'none')
+  eq('news: after a quiet release → not news', N.attribute(t({ entryTime: 0 + H }), evs, re.map((r) => ({ ...r, z: 0.5 })), []).kind, 'none')
+  ok('news: and it says why', /no evidence/.test(N.attribute(t({ entryTime: H }), evs, re.map((r) => ({ ...r, z: 0.5 })), []).why))
+  const ctx = [{ time: 0, regime: 'strong-bull', btcDir4h: 'up' }]
+  eq('news: a trend strategy with the regime and news → mixed', N.attribute(t({ strategy: 'f1' }), evs, re, ctx).kind, 'mixed')
+  eq('news: trend strategy far from news → trend', N.attribute(t({ strategy: 'f1', entryTime: 50 * H }), evs, re, ctx).kind, 'trend')
+  eq('news: an alt with BTC → btc', N.attribute(t({ entryTime: 50 * H }), evs, re, ctx).kind, 'btc')
+  // Win chance is shrunk toward the base rate.
+  const w = N.winChance(3, 3, 0.4)
+  ok('news: 3 of 3 is not 100%', w.p < 0.6 && w.raw === 1 && w.lo < w.p && w.hi > w.p, w)
+  // Performance per category: trades from the release to 24 h after.
+  const trades = [t(), t({ key: 'b', entryTime: 100 * H + 30 * H, r: -1 }), t({ key: 'c', entryTime: 300 * H + 2 * H, r: -0.5, side: -1 })]
+  const pf = N.categoryPerformance(evs, trades, re)[0]
+  eq('news: trades within 24 h only, events with trades counted', [pf.trades, pf.eventsWithTrades, pf.wins, pf.losses, pf.long.n, pf.short.n, pf.reliability], [2, 2, 1, 1, 1, 1, 'anecdotal'])
+  // Comparable events: same regime first.
+  const next = ev(2000 * H, 'cpi', { surprise: 0.3 })
+  const comps = N.comparables(next, [...evs, next], re, [{ time: 0, regime: 'weak-bear', btcDir4h: 'down' }, { time: 500 * H, regime: 'weak-bull', btcDir4h: 'up' }], 'weak-bull', 3)
+  eq('news: comparables, same regime first, then same surprise sign', comps.map((c) => [c.event.time / H, c.sameRegime, c.sameSurprise]), [[900, true, true], [700, true, true], [500, true, true]])
+}
+
 // ---- server bot: trade journal ------------------------------------------------------
 {
   const J = await import(src('features/selflearn/journal.ts'))

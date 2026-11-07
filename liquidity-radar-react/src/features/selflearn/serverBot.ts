@@ -16,6 +16,8 @@ import { jget } from '../../api/client'
 import { normalizeAudit } from './audit'
 import { normalizeContext } from './marketContext'
 import type { ContextView } from './marketContext'
+import { TRACKED_NEWS } from './newsIntel'
+import type { Context4h, NewsEvent, NewsTrade, ReactionRow } from './newsIntel'
 import type { AuditReport } from './audit'
 
 const DB_URL = (import.meta.env.VITE_WHALE_DB_URL as string | undefined)?.replace(/\/+$/, '')
@@ -329,4 +331,64 @@ export async function loadContext(): Promise<ContextView | null> {
   if (!SERVER_BOT) return null
   const rows = await rest<Array<{ value: unknown }>>('bot_state?select=value&key=eq.context:latest')
   return rows.length ? normalizeContext(rows[0].value) : null
+}
+
+export interface NewsIntelData {
+  now: number
+  events: NewsEvent[]
+  reactions: ReactionRow[]
+  context: Context4h[]
+  trades: NewsTrade[]
+  /** Tables the bot has not created yet (it does on its next run). */
+  missing: string[]
+}
+
+/** Everything the News trading intelligence card needs (newsIntel.ts). A table not created yet reads as empty. */
+export async function loadNewsIntel(limit = 50_000): Promise<NewsIntelData | null> {
+  if (!SERVER_BOT) return null
+  const missing: string[] = []
+  const soft = <T,>(name: string, p: Promise<T[]>) => p.catch(() => (missing.push(name), [] as T[]))
+  const n = (v: unknown) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v))
+  const [ev, re, cx, real, shadow] = await Promise.all([
+    soft('econ_events', restAll<Record<string, unknown>>(`econ_events?select=category,title,source,impact,event_time,unit,forecast_num,actual_num,previous_num,revised_previous_num,surprise,decision&country=eq.USD&category=in.(${TRACKED_NEWS.join(',')})&order=event_time.asc`, limit)),
+    soft('econ_reactions', restAll<Record<string, unknown>>('econ_reactions?select=event_time,asset,horizon_min,ret_pct,z,range_pct&order=event_time.asc', limit)),
+    soft('market_context', restAll<Record<string, unknown>>('market_context?select=bar_time,regime,btc_dir_4h&order=bar_time.asc', limit)),
+    restAll<Record<string, unknown>>('bot_trades?select=id,strategy,mode,symbol,side,opened_at,r_multiple&status=eq.closed&order=id.asc', limit),
+    restAll<Record<string, unknown>>('bot_shadow_trades?select=id,strategy,symbol,side,bar_time,interval,r_net&status=eq.closed&order=id.asc', limit),
+  ])
+  const STEP: Record<string, number> = { '5m': 300_000, '15m': 900_000, '1h': 3_600_000, '4h': 14_400_000 }
+  const trades: NewsTrade[] = []
+  for (const x of real) {
+    const r = n(x.r_multiple)
+    const t = Date.parse(String(x.opened_at))
+    if (r == null || !Number.isFinite(t)) continue
+    trades.push({ key: 'r' + x.id, strategy: typeof x.strategy === 'string' && x.strategy ? x.strategy : x.mode === 'trend' ? 'f1' : 'ml', kind: 'real', symbol: String(x.symbol), side: Number(x.side) > 0 ? 1 : -1, entryTime: t, r })
+  }
+  for (const x of shadow) {
+    const r = n(x.r_net)
+    const t = Date.parse(String(x.bar_time))
+    if (r == null || !Number.isFinite(t)) continue
+    trades.push({ key: 's' + x.id, strategy: typeof x.strategy === 'string' && x.strategy ? x.strategy : 'ml', kind: 'shadow', symbol: String(x.symbol), side: Number(x.side) > 0 ? 1 : -1, entryTime: t + (STEP[String(x.interval)] ?? STEP['4h']), r })
+  }
+  return {
+    now: Date.now(),
+    events: ev.map((x) => ({
+      time: Date.parse(String(x.event_time)),
+      category: String(x.category),
+      title: String(x.title),
+      source: String(x.source),
+      impact: typeof x.impact === 'string' ? x.impact : null,
+      unit: typeof x.unit === 'string' ? x.unit : null,
+      forecast: n(x.forecast_num),
+      actual: n(x.actual_num),
+      previous: n(x.previous_num),
+      revisedPrevious: n(x.revised_previous_num),
+      surprise: n(x.surprise),
+      decision: typeof x.decision === 'string' ? x.decision : null,
+    })).filter((e) => Number.isFinite(e.time)),
+    reactions: re.map((x) => ({ time: Date.parse(String(x.event_time)), asset: String(x.asset), horizon: Number(x.horizon_min), ret: Number(x.ret_pct), z: n(x.z), range: n(x.range_pct) })).filter((r) => Number.isFinite(r.time) && Number.isFinite(r.ret)),
+    context: cx.map((x) => ({ time: Date.parse(String(x.bar_time)), regime: String(x.regime), btcDir4h: typeof x.btc_dir_4h === 'string' ? x.btc_dir_4h : null })).filter((c) => Number.isFinite(c.time)),
+    trades: trades.sort((a, b) => a.entryTime - b.entryTime),
+    missing,
+  }
 }
