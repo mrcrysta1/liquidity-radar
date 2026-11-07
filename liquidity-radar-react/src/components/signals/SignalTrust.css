@@ -1,0 +1,4 @@
+/* Evidence line under a Signals card (components/signals/SignalTrust.tsx).
+   Own file so it never collides with edits to index.css. */
+.sg-trust{display:flex;flex-direction:column;gap:2px;margin:6px 0 0;padding:6px 8px;border-radius:8px;background:var(--sunk-2);border:1px solid var(--hair-2);font-size:var(--text-xs);color:var(--muted);line-height:1.4}
+.sg-trust-bot{color:var(--txt)}

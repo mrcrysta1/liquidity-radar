@@ -2911,6 +2911,24 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('status: age text', [B.ageText(12), B.ageText(240), B.ageText(3 * 3600)], ['12 s', '4 min', '3 h'])
 }
 
+// ---- signals: trust line -----------------------------------------------------------------
+{
+  const T = await import(src('features/signals/trust.ts'))
+  eq('trust: no record', T.recordText(null, 'Scanner'), 'Scanner: no graded calls yet')
+  eq('trust: too few', T.recordText({ rate: 0.6, wins: 3, losses: 2, expired: 1, n: 5 }, 'Scanner'), 'Scanner: 3 of 5 reached target (too few to judge)')
+  eq('trust: enough', T.recordText({ rate: 0.55, wins: 22, losses: 18, expired: 3, n: 40 }, 'Strong calls'), 'Strong calls: 55% (22 of 40 reached target)')
+  const now = 100 * 3_600_000
+  const plans = [
+    { symbol: 'BTCUSDT', t: now - 3_600_000, side: 'LONG', status: 'paper', strategy: 'trend', strategyId: 'f1' },
+    { symbol: 'ETHUSDT', t: now - 3_600_000, side: 'SHORT', status: 'skipped', strategy: 'ml' },
+    { symbol: 'SOLUSDT', t: now - 20 * 3_600_000, side: 'LONG', status: 'opened', strategy: 'ml' },
+    { symbol: '1000PEPEUSDT', t: now, side: 'LONG', status: 'opened', strategy: 'ml' },
+  ]
+  eq('trust: the bot plan on the same coin, with its audit verdict', T.botViewFor('BTCUSDT', plans, { f1: 'keep' }, now), { strategy: 'f1', side: 'LONG', status: 'paper', verdict: 'keep' })
+  eq('trust: skipped and stale plans are not signals', [T.botViewFor('ETHUSDT', plans, {}, now), T.botViewFor('SOLUSDT', plans, {}, now)], [null, null])
+  eq('trust: 1000-unit contracts match the coin', T.botViewFor('PEPEUSDT', plans, {}, now)?.strategy, 'ml')
+}
+
 // ---- server bot: trade journal ------------------------------------------------------
 {
   const J = await import(src('features/selflearn/journal.ts'))
