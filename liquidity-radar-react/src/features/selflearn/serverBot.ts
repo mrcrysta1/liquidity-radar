@@ -91,6 +91,7 @@ export async function loadAccount(): Promise<{ account: BinanceAccount | null; h
  * explore mode since PR #142 — same bracket and model, so both modes count.
  */
 export const STRATEGY_SINCE = Date.parse('2026-10-31T06:12:00Z')
+const BAR_4H = 4 * 3_600_000
 
 /** Closed real (gated or explore) and shadow trades of the current strategy, for the "Is it on track?" panel. */
 export async function loadOutcomes(): Promise<{ real: Outcome[]; shadow: Outcome[] } | null> {
@@ -106,8 +107,13 @@ export async function loadOutcomes(): Promise<{ real: Outcome[]; shadow: Outcome
     ),
   ])
   return {
-    real: real.filter((x) => x.r_multiple != null).map((x) => ({ p: x.p_win, r: x.r_multiple!, t: Date.parse(x.opened_at), exit: x.exit_reason })),
-    shadow: shadow.filter((x) => x.r_net != null).map((x) => ({ p: x.p_cal, r: x.r_net!, t: Date.parse(x.bar_time), exit: x.exit_reason })),
+    // Cluster on the decision candle: a shadow's bar_time is that candle's open;
+    // a real trade opens at its close, one 4h candle later.
+    real: real.filter((x) => x.r_multiple != null).map((x) => {
+      const t = Date.parse(x.opened_at)
+      return { p: x.p_win, r: x.r_multiple!, t, exit: x.exit_reason, bar: Math.floor(t / BAR_4H) * BAR_4H - BAR_4H }
+    }),
+    shadow: shadow.filter((x) => x.r_net != null).map((x) => ({ p: x.p_cal, r: x.r_net!, t: Date.parse(x.bar_time), exit: x.exit_reason, bar: Date.parse(x.bar_time) })),
   }
 }
 
