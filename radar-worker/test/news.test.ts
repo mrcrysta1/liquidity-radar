@@ -6,11 +6,12 @@ import { PGlite } from '@electric-sql/pglite'
 import type { Db } from '../src/db.ts'
 import type { Bar } from '../src/bot/features.ts'
 import { BotStore } from '../src/bot/store.ts'
-import { categorize, eventKey, fomcDecisions, fredRows, FRED_RELEASES, mergeActuals, newYorkToUtc, parseAgency, parseForexFactory, parseValue, reaction } from '../src/news/events.ts'
+import { categorize, eventKey, fomcDecisions, fomcRows, mergeActuals, newYorkToUtc, parseAgency, parseFomcCalendar, parseForexFactory, parseValue, reaction } from '../src/news/events.ts'
 import { AGENCY_URL, FF_URL, backfillFred, collectCalendars, computeReactions, keep, pendingReleases } from '../src/news/collect.ts'
 import type { NewsFetchers } from '../src/news/collect.ts'
 
 const M15 = 900_000
+const NAMES: Record<string, string> = { 50: 'Employment Situation', 10: 'Consumer Price Index', 46: 'Producer Price Index', 53: 'Gross Domestic Product', 180: 'Unemployment Insurance Weekly Claims Report', 9: 'Advance Monthly Sales for Retail and Food Services', 54: 'Personal Income and Outlays' }
 const DAY = 86_400_000
 
 test('categories from titles; positive or negative is never assumed', () => {
@@ -55,12 +56,25 @@ test('New York release times across daylight saving', () => {
   assert.equal(newYorkToUtc('2026-03-18', 14, 0), Date.UTC(2026, 2, 18, 18, 0), 'after the March switch')
 })
 
+test('FOMC meetings from the Fed calendar page: last day, month crossings, cancelled and notation votes skipped', () => {
+  const html = `<h4>2026 FOMC Meetings</h4>
+    <div class="fomc-meeting__month col"><strong>January</strong></div><div class="fomc-meeting__date col">27-28</div>
+    <div class="fomc-meeting__month col"><strong>March</strong></div><div class="fomc-meeting__date col">17-18*</div>
+    <div class="fomc-meeting__month col"><strong>Apr/May</strong></div><div class="fomc-meeting__date col">30-1</div>
+    <div class="fomc-meeting__month col"><strong>October</strong></div><div class="fomc-meeting__date col">14 (notation vote)</div>
+    <div class="fomc-meeting__month col"><strong>June</strong></div><div class="fomc-meeting__date col">Cancelled</div>
+    <h4>2025 FOMC Meetings</h4>
+    <div class="fomc-meeting__month col"><strong>December</strong></div><div class="fomc-meeting__date col">9-10*</div>`
+  assert.deepEqual(parseFomcCalendar(html), ['2025-12-10', '2026-01-28', '2026-03-18', '2026-05-01'])
+  assert.deepEqual(parseFomcCalendar('<html>nothing</html>'), [])
+})
+
 test('FOMC decisions from the target series; FRED rows are dates only', () => {
   const tgt = [{ date: '2026-01-27', value: 4.5 }, { date: '2026-01-29', value: 4.25 }, { date: '2026-03-17', value: 4.25 }, { date: '2026-03-19', value: 4.25 }]
   const d = fomcDecisions(['2026-01-28', '2026-03-18', '2030-01-01'], tgt)
   assert.deepEqual([...d.entries()], [['2026-01-28', 'cut → 4.25%'], ['2026-03-18', 'hold → 4.25%']])
-  const rows = fredRows(FRED_RELEASES.find((r) => r.category === 'fomc')!, ['2026-01-28'], d)
-  assert.deepEqual([rows[0].eventTime, rows[0].decision, rows[0].forecast, rows[0].surprise], [Date.UTC(2026, 0, 28, 19, 0), 'cut → 4.25%', null, null])
+  const rows = fomcRows(['2026-01-28'], d)
+  assert.deepEqual([rows[0].source, rows[0].eventTime, rows[0].decision, rows[0].forecast, rows[0].surprise], ['fed', Date.UTC(2026, 0, 28, 19, 0), 'cut → 4.25%', null, null])
 })
 
 /** 15m bars: a calm random-ish walk, then a jump of `jump` at time `t`. */
@@ -100,12 +114,14 @@ test('collect → store → pending → reactions, de-duplicated; FRED guarded b
   const { db, pg } = await freshDb()
   const t = Date.UTC(2026, 10, 6, 13, 30)
   const f: NewsFetchers = {
+    async text() {
+      return '<h4>2026 FOMC Meetings</h4><div class="fomc-meeting__month"><strong>January</strong></div><div class="fomc-meeting__date">27-28</div>'
+    },
     async json(url) {
       if (url === FF_URL) return [{ title: 'Non-Farm Employment Change', country: 'USD', date: '2026-11-06T08:30:00-05:00', impact: 'High', forecast: '65K', previous: '29K' }]
       if (url === AGENCY_URL) throw new Error('HTTP 503')
       if (url.includes('series/observations')) return { observations: [{ date: '2026-01-27', value: '4.5' }, { date: '2026-01-29', value: '4.25' }] }
-      if (url.includes('release?release_id=50')) return { releases: [{ name: 'Employment Situation' }] }
-      if (url.includes('release?release_id=')) return { releases: [{ name: 'Something else' }] }
+      if (url.includes('release?release_id=')) return { releases: [{ name: NAMES[url.match(/release_id=(\d+)/)![1]] ?? 'Something else' }] }
       if (url.includes('release/dates')) return { release_dates: [{ date: '2026-11-06' }, { date: '2026-10-03' }] }
       throw new Error('unexpected ' + url)
     },
@@ -119,13 +135,17 @@ test('collect → store → pending → reactions, de-duplicated; FRED guarded b
   assert.match(c.errors[0], /agency calendar/)
   await collectCalendars(db, f)
   assert.equal((await pg.query('select * from econ_events')).rows.length, 1, 'collected twice, stored once')
-  // FRED: the first release id passes its name check, the second does not → stop, rows of the first kept.
-  await assert.rejects(backfillFred(db, 'k', f), /FRED release 10 is "Something else"/)
-  const fred = (await pg.query<{ source: string; event_time: Date }>(`select source, event_time from econ_events where source = 'fred' order by event_time`)).rows
-  assert.deepEqual(fred.map((x) => x.event_time.toISOString()), ['2026-10-03T12:30:00.000Z', '2026-11-06T13:30:00.000Z'])
+  // FRED: a release whose name does not match stops the backfill (rows before it kept).
+  await assert.rejects(backfillFred(db, 'k', { ...f, json: async (u) => (u.includes('release_id=10') && !u.includes('dates') ? { releases: [{ name: 'Something else' }] } : f.json(u)) }), /FRED release 10 is "Something else"/)
+  const res = await backfillFred(db, 'k', f)
+  assert.equal(res.fomc, 1, 'FOMC from the Fed calendar, not FRED')
+  const fred = (await pg.query<{ source: string; category: string; event_time: Date; decision: string | null }>(`select source, category, event_time, decision from econ_events where source in ('fred', 'fed') and category in ('nfp', 'fomc') order by event_time`)).rows
+  assert.deepEqual(fred.map((x) => [x.source, x.category, x.event_time.toISOString()]), [['fed', 'fomc', '2026-01-28T19:00:00.000Z'], ['fred', 'nfp', '2026-10-03T12:30:00.000Z'], ['fred', 'nfp', '2026-11-06T13:30:00.000Z']])
+  assert.equal(fred[0].decision, 'cut → 4.25%')
   // Pending: release times over 24 h old; the FF row and the FRED row share one time.
   const pend = await pendingReleases(db, t + 2 * DAY, 10)
-  assert.deepEqual(pend, [Date.UTC(2026, 9, 3, 12, 30), t])
+  assert.deepEqual(pend, [Date.UTC(2026, 0, 28, 19, 0), Date.UTC(2026, 9, 3, 12, 30), t])
+  await computeReactions(db, Date.UTC(2026, 0, 28, 19, 0), { ...f, bars: async () => [] })
   assert.equal(await computeReactions(db, t, f), 8, 'BTC and ETH × 4 horizons; gold had no data then')
   const btc = (await pg.query<{ ret_pct: number; z: number }>(`select ret_pct, z from econ_reactions where asset = 'BTCUSDT' and horizon_min = 15`)).rows[0]
   assert.ok(btc.ret_pct < -1 && btc.z < -5)

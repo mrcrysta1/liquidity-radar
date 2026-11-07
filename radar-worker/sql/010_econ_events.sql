@@ -6,7 +6,7 @@
 -- `key` (source | country | title | minute). Forward rows come from the Forex
 -- Factory weekly calendar (forecast, previous; actual when it has it) and the
 -- agency calendar the website already uses (actual, revised previous); past
--- release dates from FRED / ALFRED (no historical consensus forecasts exist
+-- release dates from FRED and FOMC meetings from the Fed's calendar (no historical consensus forecasts exist
 -- for free, so past rows have no forecast and no surprise). Values are kept as
 -- published (text) and parsed (numeric) when they are numbers.
 --
@@ -19,7 +19,7 @@
 create table if not exists econ_events (
   id             bigserial primary key,
   key            text        not null unique,
-  source         text        not null check (source in ('ff', 'agency', 'fred')),
+  source         text        not null,
   category       text        not null,
   title          text        not null,
   country        text        not null,
@@ -41,6 +41,9 @@ create table if not exists econ_events (
   first_seen     timestamptz not null default now(),
   updated        timestamptz not null default now()
 );
+-- Sources: 'ff' (Forex Factory), 'agency' (agency calendar), 'fred' (FRED release dates), 'fed' (the Fed's FOMC calendar).
+alter table econ_events drop constraint if exists econ_events_source_check;
+alter table econ_events add constraint econ_events_source_check check (source in ('ff', 'agency', 'fred', 'fed'));
 create index if not exists econ_events_time on econ_events (event_time);
 create index if not exists econ_events_cat on econ_events (category, event_time);
 
