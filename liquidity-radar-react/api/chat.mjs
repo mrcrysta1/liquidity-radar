@@ -28,8 +28,10 @@ import { knowledge, knowledgeFor, runAgent } from './_brain.mjs'
  *   2 requests a minute per model (40k tokens), no small daily cap like
  *   Gemini's 20 requests a day per model. The limit is per model, so smaller
  *   models follow it (MISTRAL_FALLBACK_MODELS overrides). All support tools.
- * - groq: llama-3.3-70b-versatile (Groq's free tier; its per-minute token
- *   limit is small for the brain's context, hence later in the chain).
+ * - groq: openai/gpt-oss-120b (Groq retired llama-3.3-70b). The free tier
+ *   allows 1000 requests a day but only 8000 tokens a minute, less than one
+ *   brain question with tools, so Groq answers in one round without tools
+ *   from trimmed context (maxInputChars), as the last backup.
  * - openrouter: google/gemma-4-31b-it:free, an instruction model from
  *   OpenRouter's free list (openrouter.ai/api/v1/models, ids ending ':free').
  */
@@ -59,8 +61,11 @@ export const PROVIDERS = {
     endpoint: 'https://api.groq.com/openai/v1/chat/completions',
     keyEnv: 'GROQ_API_KEY',
     modelEnv: 'GROQ_MODEL',
-    model: 'llama-3.3-70b-versatile',
-    maxTokens: 900,
+    model: 'openai/gpt-oss-120b',
+    maxTokens: 1500,
+    tools: false,
+    maxInputChars: 16_000,
+    extra: { reasoning_effort: 'low' },
   },
   openrouter: {
     endpoint: 'https://openrouter.ai/api/v1/chat/completions',
@@ -99,6 +104,7 @@ export function providerChain(env = process.env) {
 
 /** The request one provider gets (OpenAI chat format), with the brain's tools when given. */
 export function providerRequest(p, messages, tools = null) {
+  if (p.maxInputChars) messages = fitMessages(messages, p.maxInputChars)
   return {
     url: p.endpoint,
     headers: { 'content-type': 'application/json', authorization: 'Bearer ' + p.key, ...(p.headers || {}) },
@@ -114,6 +120,29 @@ export function providerRequest(p, messages, tools = null) {
       ...(p.extra || {}),
     },
   }
+}
+
+/**
+ * Trims the data blocks (market context, knowledge, data already fetched)
+ * until the whole request fits `max` characters, largest block first. The
+ * system prompt and the conversation itself are never cut. Unchanged input is
+ * returned as is.
+ */
+export function fitMessages(messages, max) {
+  const size = (ms) => ms.reduce((a, m) => a + (typeof m.content === 'string' ? m.content.length : 0), 0)
+  let over = size(messages) - max
+  if (over <= 0) return messages
+  const out = messages.map((m) => ({ ...m }))
+  const isData = (m) => m.role === 'user' && typeof m.content === 'string' && /^(CONTEXT|KNOWLEDGE|DATA ALREADY FETCHED)/.test(m.content)
+  const note = '\n…(cut to fit this model)'
+  while (over > 0) {
+    const big = out.filter(isData).sort((a, b) => b.content.length - a.content.length)[0]
+    if (!big || big.content.length <= 400) break
+    const keep = Math.max(300, big.content.length - over - note.length)
+    over -= big.content.length - keep - note.length
+    big.content = big.content.slice(0, keep) + note
+  }
+  return out
 }
 
 /**

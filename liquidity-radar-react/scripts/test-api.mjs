@@ -229,7 +229,7 @@ const chatReq = (headers, body) => ({
   ok(models({ GEMINI_FALLBACK_MODELS: ' a, ,b' }) === 'gemini-3.8-flash,a,b' && models({ GEMINI_FALLBACK_MODELS: '' }) === 'gemini-3.8-flash', 'providers: GEMINI_FALLBACK_MODELS overrides, empty means none')
   const all = chat.providerChain({ GROQ_API_KEY: 'q', GEMINI_API_KEY: 'g', OPENROUTER_API_KEY: 'o', MISTRAL_API_KEY: 'm', GEMINI_MODEL: 'gemini-x', GEMINI_FALLBACK_MODELS: '' })
   const by = (id) => all.find((p) => p.id === id)
-  ok(by('groq').model === 'llama-3.3-70b-versatile', 'providers: groq default model')
+  ok(by('groq').model === 'openai/gpt-oss-120b' && by('groq').tools === false, 'providers: groq default model, one round without tools')
   ok(by('gemini').model === 'gemini-x', 'providers: *_MODEL overrides the default')
   ok(by('openrouter').model.endsWith(':free'), 'providers: openrouter default is a free model')
   ok(by('mistral').model === 'mistral-medium-latest' && by('openrouter').tools === false && by('mistral').tools !== false, 'providers: mistral default model; openrouter free models asked without tools')
@@ -244,7 +244,12 @@ const chatReq = (headers, body) => ({
   ok(rq.headers.authorization === 'Bearer q' && rg.headers.authorization === 'Bearer g' && ro.headers.authorization === 'Bearer o', 'payload: each provider gets its own key')
   ok([rq, rg, ro].every((r) => r.body.stream === true && r.body.messages === msgs && r.body.temperature === 0.4 && r.body.max_tokens > 0), 'payload: OpenAI chat shape, streaming')
   ok([rq, rg, ro].every((r) => !JSON.stringify(r.body).includes('Bearer')), 'payload: no key in the body')
-  ok(rg.body.reasoning_effort === 'low' && rq.body.reasoning_effort === undefined, 'payload: gemini thinking effort low, others untouched')
+  ok(rg.body.reasoning_effort === 'low' && rq.body.reasoning_effort === 'low' && ro.body.reasoning_effort === undefined, 'payload: reasoning models think briefly, others untouched')
+  const fat = [{ role: 'system', content: 's'.repeat(5000) }, { role: 'user', content: 'KNOWLEDGE ' + 'k'.repeat(6000) }, { role: 'user', content: 'CONTEXT ' + 'c'.repeat(20000) }, { role: 'user', content: 'q?' }]
+  const fit = chat.fitMessages(fat, 16000)
+  const total = fit.reduce((a, m) => a + m.content.length, 0)
+  ok(total <= 16000 && fit[0].content === fat[0].content && fit[3].content === 'q?' && fit[2].content.endsWith('(cut to fit this model)') && fat[2].content.length === 20008, 'payload: data blocks trimmed to fit, prompt and question kept, input untouched')
+  ok(chat.fitMessages(msgs, 16000) === msgs && chat.providerRequest(by('groq'), fat).body.messages.reduce((a, m) => a + m.content.length, 0) <= 16000, 'payload: groq requests fit its budget')
   ok(rg.body.max_tokens > rq.body.max_tokens, 'payload: gemini budget leaves room for thinking')
   ok(ro.headers['x-title'] === 'Liquidity Radar' && rq.headers['x-title'] === undefined, 'payload: openrouter attribution headers only there')
 }
@@ -615,7 +620,7 @@ ok(!pro.allowedUrl('https://api.allorigins.win/raw?url=x'), 'pro allow: allorigi
     if (href.startsWith('https://db.test/rest/v1/econ_events')) throw new Error('down')
     if (href.startsWith('https://api.groq.com')) {
       const b = JSON.parse(init.body)
-      ok(b.stream === true && b.tools?.length > 5 && b.messages[0].role === 'system', 'discord: the brain asks with the system prompt and the tools')
+      ok(b.stream === true && b.tools === undefined && b.messages[0].role === 'system', 'discord: the brain asks with the system prompt (groq: one round, no tools)')
       ok(/101234\.5/.test(b.messages[1].content) && /"verdict":"keep"/.test(b.messages[1].content) && /DOGEUSDT/.test(b.messages[1].content), 'discord: context has prices, the audit and named coins')
       ok(/US ECONOMIC RELEASES: unavailable/.test(b.messages[1].content), 'discord: a failed source is marked unavailable')
       return new Response('data: ' + JSON.stringify({ choices: [{ delta: { content: 'BTC is down 1.2% today.\n[[open:BTC]]' } }] }) + '\n\ndata: [DONE]\n\n', { status: 200 })
