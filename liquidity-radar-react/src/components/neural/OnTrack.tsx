@@ -1,6 +1,7 @@
 // "Is it on track?" — the server bot's learning, judged by its own record:
 // do stops cost ~1R, are its win chances honest, is there a real edge, and how
-// many more trades (and days, at the pace so far) each answer needs.
+// many more trades (and days, at the pace so far) each answer needs. Counts are
+// of independent outcomes: trades decided on the same candle move together.
 // Statistics in features/selflearn/onTrack.ts; data from the bot database.
 import { useEffect, useState } from 'react'
 import { SERVER_BOT, STRATEGY_SINCE, loadOutcomes } from '../../features/selflearn/serverBot'
@@ -20,7 +21,7 @@ const pct = (v: number) => (v * 100).toFixed(0) + '%'
 const sgn = (v: number) => (v >= 0 ? '+' : '') + v.toFixed(2) + 'R'
 const eta = (d: number | null) => (d == null ? 'pace not known yet' : d === 0 ? 'reached' : `~${d} day${d === 1 ? '' : 's'} at this pace`)
 
-function Progress({ label, have, need, days }: { label: string; have: number; need: number; days: number | null }) {
+function Progress({ label, have, need, days, note }: { label: string; have: number; need: number; days: number | null; note?: string }) {
   return (
     <div className="ot-prog">
       <div className="ot-prog-top">
@@ -28,7 +29,7 @@ function Progress({ label, have, need, days }: { label: string; have: number; ne
         <b>{Math.min(have, need)} / {need}</b>
       </div>
       <div className="ot-bar"><i style={{ width: Math.min(100, (have / need) * 100) + '%' }} /></div>
-      <small>{eta(days)}</small>
+      <small>{note ? `${note} · ` : ''}{eta(days)}</small>
     </div>
   )
 }
@@ -82,8 +83,20 @@ export function OnTrackPanel() {
             </div>
           </div>
           <div className="ot-progs">
-            <Progress label="Win chances checked (real + shadow)" have={rep.cal.n} need={rep.cal.need} days={rep.days.cal} />
-            <Progress label="Edge proven (real trades)" have={rep.edge.n} need={rep.edge.need} days={rep.days.edge} />
+            <Progress
+              label="Win chances checked (independent outcomes)"
+              have={rep.cal.eff}
+              need={rep.cal.need}
+              days={rep.days.cal}
+              note={rep.cal.n ? `${rep.cal.n} outcomes on ${rep.cal.bars} candles` : undefined}
+            />
+            <Progress
+              label="Edge proven (independent real trades)"
+              have={rep.edge.eff}
+              need={rep.edge.need}
+              days={rep.days.edge}
+              note={rep.edge.n !== rep.edge.eff ? `${rep.edge.n} real trades` : undefined}
+            />
           </div>
           {rep.cal.buckets.length > 0 && (
             <>

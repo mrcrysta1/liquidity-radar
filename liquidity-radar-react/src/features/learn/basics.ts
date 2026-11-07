@@ -163,6 +163,12 @@ export const TECH: LearnSection = {
 /** Newest first. Add a line here whenever a feature ships. */
 export const WHATS_NEW: Array<{ date: string; items: string[] }> = [
   {
+    date: '2026-11-07',
+    items: [
+      '"Is it on track?" now counts independent outcomes: trades decided on the same candle move together and count roughly as one, so a single market-wide day can no longer make the bot look proven (or broken).',
+    ],
+  },
+  {
     date: '2026-11-01',
     items: [
       'The testnet bot takes demo trades again: explore mode on 4-hour candles, entering when the expected value is at least +0.1R after fees, without waiting for the walk-forward test that no market had passed yet.',

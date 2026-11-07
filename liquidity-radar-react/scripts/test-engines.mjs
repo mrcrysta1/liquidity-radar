@@ -2688,22 +2688,23 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
 
 // ---- server bot: "is it on track?" ---------------------------------------------------
 {
-  const { onTrack, phi, calibration, CAL_NEED } = await import(src('features/selflearn/onTrack.ts'))
+  const { onTrack, phi, calibration, clustered, CAL_NEED } = await import(src('features/selflearn/onTrack.ts'))
   near('ontrack: phi(0) = 0.5', phi(0), 0.5)
   near('ontrack: phi(1.96) ≈ 0.975', phi(1.96), 0.975, 1e-3)
   near('ontrack: phi is symmetric', phi(-1.2) + phi(1.2), 1, 1e-9)
   const day = 86_400_000
-  const mk = (p, r, exit) => ({ p, r, t: 0, exit })
+  const H4 = 4 * 3_600_000
+  const mk = (p, r, exit, bar = 0) => ({ p, r, t: bar * H4, exit })
   eq('ontrack: nothing yet is "early"', onTrack([], [], 0, day).verdict, 'early')
-  // Honest 55% calls, 1:1.5 bracket: 55 wins of +1.5R, 45 losses of −1R per 100.
-  const honest = (k) => Array.from({ length: k }, (_, i) => mk(0.55, i % 20 < 11 ? 1.5 : -1, i % 20 < 11 ? 'tp' : 'sl'))
-  const good = onTrack(honest(200), honest(200), 0, 20 * day)
+  // Honest 55% calls, 1:1.5 bracket: 55 wins of +1.5R, 45 losses of −1R per 100, one per candle.
+  const honest = (k, off = 0) => Array.from({ length: k }, (_, i) => mk(0.55, i % 20 < 11 ? 1.5 : -1, i % 20 < 11 ? 'tp' : 'sl', off + i))
+  const good = onTrack(honest(200), honest(200, 200), 0, 20 * day)
   eq('ontrack: honest probabilities and a real edge are on track', good.verdict, 'on-track')
   near('ontrack: calibration gap of honest 55% calls is 0', good.cal.gap, 0, 1e-9)
   ok('ontrack: edge interval clears zero', good.edge.lo > 0, good.edge.lo)
   eq('ontrack: calibration reached needs no more days', good.days.cal, 0)
   // The 5m explore record: predicted ~53%, won ~20%, stops at −1.65R.
-  const bad = Array.from({ length: 100 }, (_, i) => (i % 5 === 0 ? mk(0.53, 1.8, 'tp') : mk(0.53, -1.65, 'sl')))
+  const bad = Array.from({ length: 100 }, (_, i) => (i % 5 === 0 ? mk(0.53, 1.8, 'tp', i) : mk(0.53, -1.65, 'sl', i)))
   const b = onTrack(bad, [], 0, 25 * day)
   eq('ontrack: the old 5m record is off track', b.verdict, 'off-track')
   ok('ontrack: it names the oversized stops', b.reasons.some((r) => r.includes('stop-outs')), b.reasons)
@@ -2712,6 +2713,19 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('ontrack: days left at the pace so far', onTrack([], honest(40), 0, 2 * day).days.cal, Math.ceil((CAL_NEED - 40) / 20))
   eq('ontrack: no pace before a day has passed', onTrack([], honest(40), 0, day / 2).days.cal, null)
   eq('ontrack: buckets split on 0.5', calibration([mk(0.48, 1), mk(0.52, -1)]).map((x) => x.n), [1, 1])
+  // Correlated candles: on each of 8 candles all 20 markets win or all lose together.
+  const herd = Array.from({ length: 160 }, (_, i) => { const c = Math.floor(i / 20); return mk(0.47, c % 2 ? 1.5 : -1, c % 2 ? 'tp' : 'sl', c) })
+  const cw = clustered(herd, (x) => (x.r > 0 ? 1 : 0))
+  eq('ontrack: 160 outcomes moving together on 8 candles are worth 8', [cw.n, cw.bars, cw.eff], [160, 8, 8])
+  eq('ontrack: unrelated outcomes keep their full count', clustered(honest(100), (x) => (x.r > 0 ? 1 : 0)).eff, 100)
+  const hr = onTrack([], herd, 0, 2 * day)
+  eq('ontrack: a herd of same-candle outcomes is still too early', [hr.verdict, hr.cal.eff, hr.cal.n], ['early', 8, 160])
+  ok('ontrack: it says the outcomes moved together', hr.reasons.some((r) => r.includes('moved together')), hr.reasons)
+  // One market-wide day: 40 real winners on one candle plus 30 ordinary losers do not prove an edge.
+  const day1 = [...Array.from({ length: 40 }, () => mk(0.6, 1.5, 'tp', 0)), ...Array.from({ length: 30 }, (_, i) => mk(0.5, -0.4, 'signal', i + 1))]
+  const d1 = onTrack(day1, [], 0, 6 * day)
+  ok('ontrack: one big candle cannot make it on track', d1.verdict !== 'on-track' && d1.edge.lo < 0, [d1.verdict, d1.edge.lo, d1.edge.eff])
+  ok('ontrack: the edge interval widens when trades cluster', d1.edge.hi - d1.edge.lo > 2 * 1.96 * Math.sqrt(day1.reduce((s, x) => s + (x.r - d1.edge.meanR) ** 2, 0) / 69 / 70), d1.edge)
 }
 
 // ---- server bot: trade journal ------------------------------------------------------
