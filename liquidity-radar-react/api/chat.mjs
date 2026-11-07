@@ -24,9 +24,10 @@ import { knowledge, knowledgeFor, runAgent } from './_brain.mjs'
  *   The newest model is often "experiencing high demand" (503) on the free
  *   tier, so the older free flash models follow it in the chain
  *   (GEMINI_FALLBACK_MODELS overrides them, comma-separated; empty = none).
- * - mistral: mistral-medium-latest on Mistral's free "Experiment" plan, whose
- *   limits are far larger than Gemini's free 20 requests a day per model;
- *   supports tool calls.
+ * - mistral: mistral-medium-latest on Mistral's free "Experiment" plan:
+ *   2 requests a minute per model (40k tokens), no small daily cap like
+ *   Gemini's 20 requests a day per model. The limit is per model, so smaller
+ *   models follow it (MISTRAL_FALLBACK_MODELS overrides). All support tools.
  * - groq: llama-3.3-70b-versatile (Groq's free tier; its per-minute token
  *   limit is small for the brain's context, hence later in the chain).
  * - openrouter: google/gemma-4-31b-it:free, an instruction model from
@@ -49,6 +50,8 @@ export const PROVIDERS = {
     keyEnv: 'MISTRAL_API_KEY',
     modelEnv: 'MISTRAL_MODEL',
     model: 'mistral-medium-latest',
+    fallbackEnv: 'MISTRAL_FALLBACK_MODELS',
+    fallbackModels: ['mistral-small-latest', 'ministral-14b-latest', 'ministral-8b-latest'],
     maxTokens: 2000,
   },
   groq: {

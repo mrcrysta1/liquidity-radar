@@ -225,6 +225,7 @@ const chatReq = (headers, body) => ({
   const models = (env) => chat.providerChain({ GEMINI_API_KEY: 'g', ...env }).map((p) => p.model).join()
   ok(models({}) === 'gemini-3.8-flash,gemini-3.6-flash,gemini-3.5-flash', 'providers: gemini falls back to older free models when the newest is busy')
   ok(models({ GEMINI_MODEL: 'gemini-3.6-flash' }) === 'gemini-3.6-flash,gemini-3.5-flash', 'providers: a fallback equal to the main model is not tried twice')
+  ok(chat.providerChain({ MISTRAL_API_KEY: 'm' }).map((p) => p.model).join() === 'mistral-medium-latest,mistral-small-latest,ministral-14b-latest,ministral-8b-latest', 'providers: mistral backs up with its smaller models (per-model minute limits)')
   ok(models({ GEMINI_FALLBACK_MODELS: ' a, ,b' }) === 'gemini-3.8-flash,a,b' && models({ GEMINI_FALLBACK_MODELS: '' }) === 'gemini-3.8-flash', 'providers: GEMINI_FALLBACK_MODELS overrides, empty means none')
   const all = chat.providerChain({ GROQ_API_KEY: 'q', GEMINI_API_KEY: 'g', OPENROUTER_API_KEY: 'o', MISTRAL_API_KEY: 'm', GEMINI_MODEL: 'gemini-x', GEMINI_FALLBACK_MODELS: '' })
   const by = (id) => all.find((p) => p.id === id)
