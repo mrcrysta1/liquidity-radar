@@ -62,7 +62,7 @@ export function parseValue(s: string | null | undefined): number | null {
 
 export interface EventRow {
   key: string
-  source: 'ff' | 'agency' | 'fred'
+  source: 'ff' | 'agency' | 'fred' | 'fed'
   category: Category
   title: string
   country: string
@@ -217,14 +217,57 @@ export const FRED_RELEASES: Array<{ id: number; name: RegExp; category: Category
   { id: 180, name: /unemployment insurance weekly claims/i, category: 'claims', title: 'Unemployment Insurance Weekly Claims', hh: 8, mm: 30 },
   { id: 9, name: /retail/i, category: 'retail', title: 'Advance Retail Sales', hh: 8, mm: 30 },
   { id: 54, name: /personal income and outlays/i, category: 'pce', title: 'Personal Income and Outlays', hh: 8, mm: 30 },
-  { id: 101, name: /fomc press release/i, category: 'fomc', title: 'FOMC Press Release (rate decision)', hh: 14, mm: 0 },
 ]
 
-/** FRED release dates → rows (dates only: values, forecasts and surprises are not backfilled). */
-export function fredRows(rel: (typeof FRED_RELEASES)[number], dates: string[], decisions: Map<string, string> = new Map()): EventRow[] {
-  return dates.map((d) =>
-    row({ source: 'fred', category: rel.category, title: rel.title, country: 'USD', impact: 'High', eventTime: newYorkToUtc(d, rel.hh, rel.mm), decision: decisions.get(d) ?? null }),
+/**
+ * FOMC decisions are not taken from FRED: its "FOMC Press Release" release
+ * (101) lists every day the target series updates, not the meetings. The
+ * meetings come from the Fed's own calendar page (fomccalendars.htm, the
+ * current year and the five before), the decision on the last meeting day at
+ * 2:00 pm New York time. Cancelled meetings and notation votes are skipped.
+ */
+export const FOMC_CALENDAR_URL = 'https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm'
+export const FOMC_RELEASE = { category: 'fomc' as Category, title: 'FOMC rate decision', hh: 14, mm: 0 }
+const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december']
+
+/** The Fed calendar page → decision days (YYYY-MM-DD), ascending. */
+export function parseFomcCalendar(html: string): string[] {
+  const re = /(\d{4}) FOMC Meetings|fomc-meeting__month[^>]*>\s*<strong>([^<]+)<\/strong>|fomc-meeting__date[^>]*>([^<]+)</g
+  const out = new Set<string>()
+  let year: number | null = null
+  let month: string | null = null
+  for (const m of html.matchAll(re)) {
+    if (m[1]) year = Number(m[1])
+    else if (m[2]) month = m[2].trim().toLowerCase()
+    else if (m[3] && year && month) {
+      const raw = m[3].trim()
+      // Not a rate decision at 2 pm: cancelled meetings and notation votes (e.g. the Aug 2025 strategy statement).
+      if (/cancel|notation/i.test(raw)) continue
+      const days = raw.replace(/[^0-9-]/g, '').split('-').filter(Boolean).map(Number)
+      if (!days.length) continue
+      // "Apr/May" with "30-1": the decision falls in the second month.
+      const names = month.split('/').map((x) => x.trim())
+      const last = days[days.length - 1]
+      const crosses = names.length > 1 && days.length > 1 && last < days[0]
+      const name = crosses ? names[names.length - 1] : names[0]
+      const mi = MONTHS.findIndex((x) => x.startsWith(name.slice(0, 3)))
+      if (mi < 0 || !(last >= 1 && last <= 31)) continue
+      out.add(`${year}-${String(mi + 1).padStart(2, '0')}-${String(last).padStart(2, '0')}`)
+    }
+  }
+  return [...out].sort()
+}
+
+/** FOMC decision days → rows (with the decision when the target series has it). */
+export function fomcRows(days: string[], decisions: Map<string, string> = new Map()): EventRow[] {
+  return days.map((d) =>
+    row({ source: 'fed', category: 'fomc', title: FOMC_RELEASE.title, country: 'USD', impact: 'High', eventTime: newYorkToUtc(d, FOMC_RELEASE.hh, FOMC_RELEASE.mm), decision: decisions.get(d) ?? null }),
   )
+}
+
+/** FRED release dates → rows (dates only: values, forecasts and surprises are not backfilled). */
+export function fredRows(rel: (typeof FRED_RELEASES)[number], dates: string[]): EventRow[] {
+  return dates.map((d) => row({ source: 'fred', category: rel.category, title: rel.title, country: 'USD', impact: 'High', eventTime: newYorkToUtc(d, rel.hh, rel.mm) }))
 }
 
 /**

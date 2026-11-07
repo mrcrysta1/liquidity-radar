@@ -14,7 +14,7 @@ import type { Bar } from '../bot/features.ts'
 import { barsRange } from '../bot/data.ts'
 import type { BotStore } from '../bot/store.ts'
 import type { Db } from '../db.ts'
-import { FRED_RELEASES, TRACKED, fomcDecisions, fredRows, mergeActuals, parseAgency, parseForexFactory, reaction } from './events.ts'
+import { FOMC_CALENDAR_URL, FRED_RELEASES, TRACKED, fomcDecisions, fomcRows, fredRows, mergeActuals, parseAgency, parseFomcCalendar, parseForexFactory, reaction } from './events.ts'
 import type { EventRow } from './events.ts'
 
 export const FF_URL = 'https://nfs.faireconomy.media/ff_calendar_thisweek.json'
@@ -25,6 +25,7 @@ const DAY = 86_400_000
 
 export interface NewsFetchers {
   json: (url: string) => Promise<unknown>
+  text: (url: string) => Promise<string>
   bars: (symbol: string, interval: string, start: number, end: number) => Promise<Bar[]>
 }
 
@@ -34,7 +35,13 @@ export async function getJson(url: string): Promise<unknown> {
   return r.json()
 }
 
-export const LIVE: NewsFetchers = { json: getJson, bars: barsRange }
+export async function getText(url: string): Promise<string> {
+  const r = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 (radar-worker)' }, signal: AbortSignal.timeout(20_000) })
+  if (!r.ok) throw new Error(`${url} → HTTP ${r.status}`)
+  return r.text()
+}
+
+export const LIVE: NewsFetchers = { json: getJson, text: getText, bars: barsRange }
 
 /** Rows worth keeping: US rows of a tracked category, and high-impact rows of any country. */
 export function keep(r: EventRow): boolean {
@@ -74,7 +81,11 @@ export async function collectCalendars(db: Db, f: NewsFetchers = LIVE): Promise<
   return { ff: a, agency: b, errors }
 }
 
-/** FRED release dates (and FOMC decisions) since BACKFILL_FROM → econ_events. Throws on a wrong release id. */
+/**
+ * FRED release dates since BACKFILL_FROM and the FOMC meetings on the Fed's
+ * calendar (with each decision from DFEDTARU) → econ_events. Throws on a
+ * wrong release id or an FOMC page that yields no meetings.
+ */
 export async function backfillFred(db: Db, key: string, f: NewsFetchers = LIVE): Promise<Record<string, number>> {
   const api = (path: string) => f.json(`https://api.stlouisfed.org/fred/${path}${path.includes('?') ? '&' : '?'}api_key=${key}&file_type=json`)
   const out: Record<string, number> = {}
@@ -87,9 +98,11 @@ export async function backfillFred(db: Db, key: string, f: NewsFetchers = LIVE):
     if (!rel.name.test(name)) throw new Error(`FRED release ${rel.id} is "${name}", expected ${rel.name}`)
     const d = (await api(`release/dates?release_id=${rel.id}&realtime_start=${BACKFILL_FROM}&realtime_end=${today}&include_release_dates_with_no_data=false&limit=10000&sort_order=asc`)) as { release_dates?: Array<{ date: string }> }
     const dates = [...new Set((d.release_dates ?? []).map((x) => x.date))].filter((x) => x >= BACKFILL_FROM && x <= today)
-    const decisions = rel.category === 'fomc' ? fomcDecisions(dates, tgt) : new Map<string, string>()
-    out[rel.category] = await upsertEvents(db, fredRows(rel, dates, decisions))
+    out[rel.category] = await upsertEvents(db, fredRows(rel, dates))
   }
+  const meetings = parseFomcCalendar(await f.text(FOMC_CALENDAR_URL)).filter((d) => d >= BACKFILL_FROM && d <= today)
+  if (!meetings.length) throw new Error('the Fed calendar page gave no FOMC meetings (layout changed?)')
+  out.fomc = await upsertEvents(db, fomcRows(meetings, fomcDecisions(meetings, tgt)))
   return out
 }
 
