@@ -52,6 +52,7 @@ export const MODELS: LearnSection = {
         ] },
         { formula: 'Win rate = wins ÷ (wins + losses)   — shown once 10 calls are decided' },
         { p: 'For each indicator the app keeps how often the calls it **agreed with** were won. An indicator whose calls win more often than calls overall gets more weight; one that does worse gets less. The rate is smoothed toward the overall rate, it needs at least 20 such calls before it moves, and it stays between 0.5× and 1.5× of its default, so one bad week cannot switch an indicator off. It is recalculated from the whole record each time, so it does not drift.' },
+        { p: '**Evidence on each card**: every BUY or SELL card shows how the scanner’s own graded calls have done on that market and for that conviction tier (“too few to judge” under 10 decided calls), and — when the server bot has a signal of its own on the same coin in the last 8 hours — which strategy, its side, whether it became a demo or paper trade, and that strategy’s audit verdict. It is context, not a second opinion that confirms the signal.' },
         { warn: 'A win rate means little on its own: a 40% win rate can be profitable with 1 : 2 trades, and 60% can lose money with small wins and big losses. Read it with the plan\'s risk-to-reward.' },
       ],
     },

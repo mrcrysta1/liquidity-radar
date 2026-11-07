@@ -20,6 +20,8 @@ import { TRACKED_NEWS } from './newsIntel'
 import { normalizeMlEval } from './mlEval'
 import { normalizeDaily, normalizeWeekly } from './reports'
 import { botStatus } from './botStatus'
+import { reactionMap, releaseHistory } from '../news/calendarEvidence'
+import type { HistoryRow, ReactionMap } from '../news/calendarEvidence'
 import type { BotStatus } from './botStatus'
 import type { DayReport, WeekReport } from './reports'
 import type { MlEval } from './mlEval'
@@ -435,4 +437,28 @@ export async function loadBotStatus(now = Date.now()): Promise<BotStatus | null>
     strategies,
     todayR: today.map((x) => Number(x.r_multiple)).filter(Number.isFinite),
   })
+}
+
+/** BTC's and gold's 1 h reaction to releases between two times (the calendar's "BTC 1h" column). */
+export async function loadCalendarReactions(from: number, to: number): Promise<ReactionMap | null> {
+  if (!SERVER_BOT) return null
+  const a = new Date(from - 600_000).toISOString()
+  const b = new Date(to + 600_000).toISOString()
+  const rows = await restAll<Record<string, unknown>>(`econ_reactions?select=event_time,asset,ret_pct,z&horizon_min=eq.60&asset=in.(BTCUSDT,XAUUSDT)&event_time=gte.${a}&event_time=lte.${b}&order=event_time.asc`, 5000)
+  return reactionMap(rows.map((x) => ({ time: Date.parse(String(x.event_time)), asset: String(x.asset), ret: Number(x.ret_pct), z: x.z == null ? null : Number(x.z) })).filter((r) => Number.isFinite(r.time) && Number.isFinite(r.ret)))
+}
+
+/** The last 12 releases of a category before `before`, with reactions and the regime then (the calendar's history panel). */
+export async function loadReleaseHistory(category: string, before: number, limit = 12): Promise<HistoryRow[] | null> {
+  if (!SERVER_BOT) return null
+  const iso = new Date(before).toISOString()
+  const ev = await rest<Array<Record<string, unknown>>>(`econ_events?select=event_time,title,surprise,decision&country=eq.USD&category=eq.${encodeURIComponent(category)}&event_time=lt.${iso}&order=event_time.desc&limit=${limit * 5}`)
+  const events = ev.map((x) => ({ time: Date.parse(String(x.event_time)), title: String(x.title), surprise: x.surprise == null ? null : Number(x.surprise), decision: typeof x.decision === 'string' ? x.decision : null })).filter((e) => Number.isFinite(e.time))
+  if (!events.length) return []
+  const oldest = Math.min(...events.map((e) => e.time))
+  const [rx, cx] = await Promise.all([
+    loadCalendarReactions(oldest, before),
+    rest<Array<Record<string, unknown>>>(`market_context?select=bar_time,regime&bar_time=gte.${new Date(oldest - 14_400_000).toISOString()}&bar_time=lte.${iso}&order=bar_time.asc&limit=20000`).catch(() => []),
+  ])
+  return releaseHistory(events, rx ?? new Map(), cx.map((c) => ({ time: Date.parse(String(c.bar_time)), regime: String(c.regime) })), before, limit)
 }
