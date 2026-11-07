@@ -2929,6 +2929,23 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('trust: 1000-unit contracts match the coin', T.botViewFor('PEPEUSDT', plans, {}, now)?.strategy, 'ml')
 }
 
+// ---- news: calendar evidence ----------------------------------------------------------
+{
+  const C = await import(src('features/news/calendarEvidence.ts'))
+  eq('calendar: US releases the bot follows', [C.releaseCategory('Non-Farm Employment Change', 'USD'), C.releaseCategory('Core CPI m/m', 'USD'), C.releaseCategory('CPI m/m', 'EUR'), C.releaseCategory('Building Permits', 'USD')], ['nfp', 'cpi', null, null])
+  const m = C.reactionMap([{ time: 1000 * 60_000, asset: 'BTCUSDT', ret: -1.2, z: -3.4 }, { time: 1000 * 60_000, asset: 'XAUUSDT', ret: 0.3, z: 1 }, { time: 2000 * 60_000, asset: 'ETHUSDT', ret: 1, z: 1 }])
+  eq('calendar: reaction matched within 5 minutes', [C.reactionFor(m, 1002 * 60_000)?.btc.ret, C.reactionFor(m, 1010 * 60_000), C.reactionFor(m, 2000 * 60_000)], [-1.2, null, null])
+  const H = 3_600_000
+  const ev = [
+    { time: 30 * H, title: 'NFP', surprise: null, decision: null }, { time: 30 * H, title: 'Non-Farm', surprise: 100, decision: null },
+    { time: 10 * H, title: 'NFP', surprise: -20, decision: null }, { time: 90 * H, title: 'future', surprise: 1, decision: null },
+  ]
+  const rm = C.reactionMap([{ time: 30 * H, asset: 'BTCUSDT', ret: 0.8, z: 2.5 }, { time: 10 * H, asset: 'BTCUSDT', ret: -0.4, z: -1 }])
+  const h = C.releaseHistory(ev, rm, [{ time: 0, regime: 'weak-bear' }, { time: 20 * H, regime: 'weak-bull' }], 50 * H)
+  eq('calendar: history newest first, one per time, surprise row kept, regime then', h.map((x) => [x.time / H, x.surprise, x.btc?.ret, x.regime]), [[30, 100, 0.8, 'weak-bull'], [10, -20, -0.4, 'weak-bear']])
+  eq('calendar: summary', C.historySummary(h), { n: 2, up: 1, avgAbs: 0.6000000000000001, big: 1 })
+}
+
 // ---- server bot: trade journal ------------------------------------------------------
 {
   const J = await import(src('features/selflearn/journal.ts'))

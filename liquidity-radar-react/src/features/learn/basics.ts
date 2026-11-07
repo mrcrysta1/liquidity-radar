@@ -165,6 +165,8 @@ export const WHATS_NEW: Array<{ date: string; items: string[] }> = [
   {
     date: '2026-11-07',
     items: [
+      'News tab calendar: a BTC 1h column shows how BTC moved after each past US release, and clicking a release lists its last 12 occurrences with the surprise, BTC’s and gold’s move and the regime then.',
+      'Signals cards now show the evidence behind them: the scanner’s graded record on that market and conviction tier, and the server bot’s own signal on the same coin with its audit verdict.',
       'Self Learning is now split into sub-tabs (Overview, Strategies, Market & News, Model, Journal, Browser engine) under a bot status bar; only the open sub-tab loads its data, so the page opens faster.',
       'Two experimental strategies paper-trade beside the others: X1 (F1 only while BTC is above its EMA 300) and X2 (F1 only on a volume surge). The strategy audit now also checks whether a filter really removes worse trades — for C6, X1 and X2 it is not proven yet.',
       'Daily & weekly report on the Self Learning tab (and to the chat webhook when set): releases and reactions, regime, strategies, the model, errors, anomalies and what to look at, plus this week against last.',

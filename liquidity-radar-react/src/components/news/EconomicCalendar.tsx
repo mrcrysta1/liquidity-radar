@@ -1,6 +1,8 @@
 // Economic calendar for the News tab — the advanced Forex Factory feed
 // (last/this/next week, topped up to a month) with the filter set the basic
 // card never had: search, date range, impact, currency and upcoming-only.
+// With the server bot's record: a "BTC 1h" column for past US releases and,
+// on a click, the last releases of that kind (CalendarEvidence.tsx).
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useProNews } from '../../features/news/pro/useNews'
 import {
@@ -10,6 +12,9 @@ import {
   type CalendarEvent,
   type Impact,
 } from '../../features/news/pro/forexFactory'
+import { releaseCategory } from '../../features/news/calendarEvidence'
+import { HAS_BOT, useReactions } from '../../features/news/useCalendarEvidence'
+import { ReactionCell, ReleaseHistory } from './CalendarEvidence'
 
 const IMPACTS: Impact[] = ['High', 'Medium', 'Low', 'Holiday']
 const CCY = ['USD', 'EUR', 'GBP', 'JPY', 'AUD', 'CAD', 'CHF', 'NZD', 'CNY']
@@ -106,6 +111,13 @@ export function EconomicCalendar() {
       preImpact.filter((e) => imp.has(e.impact) || (e.impact === 'Non-Economic' && imp.has('Low'))),
     [preImpact, imp],
   )
+  // Market evidence: BTC's reaction to past US releases in view, and the history of a clicked release.
+  const span = useMemo(() => {
+    const ts = shown.filter((e) => e.ts < now).map((e) => e.ts)
+    return ts.length ? { from: Math.min(...ts), to: Math.max(...ts) } : { from: NaN, to: NaN }
+  }, [shown, now])
+  const reactions = useReactions(span.from, span.to)
+  const [pick, setPick] = useState<{ category: string; title: string; ts: number } | null>(null)
   const days = useMemo(() => groupByDay(shown), [shown])
   const nextEvent = useMemo(
     () => calendar.find((e) => e.ts > now && e.impact !== 'Holiday'),
@@ -301,6 +313,7 @@ export function EconomicCalendar() {
               <th className="ff-num">Actual</th>
               <th className="ff-num">Forecast</th>
               <th className="ff-num">Previous</th>
+              {HAS_BOT && <th className="ff-num" title="How BTC moved in the hour after a past US release (bot record)">BTC 1h</th>}
             </tr>
           </thead>
           <tbody>
@@ -309,7 +322,7 @@ export function EconomicCalendar() {
               let lastTime = ''
               return [
                 <tr key={g.day} className={'ff-day ' + (isToday ? 'today' : '')}>
-                  <td colSpan={7}>
+                  <td colSpan={HAS_BOT ? 8 : 7}>
                     {g.date.toLocaleDateString(undefined, {
                       weekday: 'short',
                       month: 'short',
@@ -332,11 +345,14 @@ export function EconomicCalendar() {
                   const tone = actualTone(e)
                   const isNext = nextEvent?.id === e.id
                   const past = e.ts < now
+                  const cat = HAS_BOT ? releaseCategory(e.title, e.currency) : null
+                  const on = pick != null && pick.ts === e.ts && pick.title === e.title
                   return (
                     <tr
                       key={e.id}
-                      className={'ff-row ' + (isNext ? 'next ' : '') + (past ? 'past' : '')}
-                      title={e.title + ' · ' + e.currency + ' · ' + e.impact + ' impact'}
+                      className={'ff-row ' + (isNext ? 'next ' : '') + (past ? 'past' : '') + (cat ? ' ce-click' : '') + (on ? ' ce-on' : '')}
+                      title={e.title + ' · ' + e.currency + ' · ' + e.impact + ' impact' + (cat ? ' · click for past releases and market reactions' : '')}
+                      onClick={cat ? () => setPick(on ? null : { category: cat, title: e.title, ts: e.ts }) : undefined}
                     >
                       <td className="ff-time">
                         {showTime ? t : ''}
@@ -352,6 +368,7 @@ export function EconomicCalendar() {
                       <td className={'ff-num ' + tone}>{e.actual ?? ''}</td>
                       <td className="ff-num">{e.forecast ?? ''}</td>
                       <td className="ff-num">{e.previous ?? ''}</td>
+                      {HAS_BOT && (past && cat ? <ReactionCell m={reactions} ts={e.ts} /> : <td className="ff-num ce-cell empty" />)}
                     </tr>
                   )
                 }),
@@ -359,6 +376,7 @@ export function EconomicCalendar() {
             })}
           </tbody>
         </table>
+        {pick && <ReleaseHistory category={pick.category} title={pick.title} before={pick.ts} onClose={() => setPick(null)} />}
         {calendarStatus === 'ok' && days.length === 0 && (
           <div className="fc-note">No events match these filters.</div>
         )}
