@@ -13,8 +13,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const mod = (p) => pathToFileURL(resolve(__dirname, '..', p)).href
 
 delete process.env.ALLOWED_ORIGINS
-for (const k of ['GROQ_API_KEY', 'GEMINI_API_KEY', 'OPENROUTER_API_KEY', 'LLM_PROVIDERS', 'GROQ_MODEL', 'GEMINI_MODEL', 'OPENROUTER_MODEL']) delete process.env[k]
+for (const k of ['GROQ_API_KEY', 'GEMINI_API_KEY', 'OPENROUTER_API_KEY', 'MISTRAL_API_KEY', 'LLM_PROVIDERS', 'GROQ_MODEL', 'GEMINI_MODEL', 'GEMINI_FALLBACK_MODELS', 'OPENROUTER_MODEL', 'MISTRAL_MODEL', 'VITE_WHALE_DB_URL', 'VITE_WHALE_DB_KEY']) delete process.env[k]
 const chat = await import(mod('api/chat.mjs'))
+const brain = await import(mod('api/_brain.mjs'))
+// No knowledge pack unless a test sets one, whatever api/_knowledge.json holds locally.
+brain.setKnowledge([])
 const feed = await import(mod('api/fetch.mjs'))
 const pro = await import(mod('pro-terminal/server/allowlist.mjs'))
 const proServer = await import(mod('pro-terminal/server/proxy.mjs'))
@@ -211,7 +214,7 @@ const chatReq = (headers, body) => ({
   const ids = (env) => [...new Set(chat.providerChain(env).map((p) => p.id))]
   ok(ids({}).length === 0, 'providers: no key, no provider')
   ok(ids({ GEMINI_API_KEY: 'g' }).join() === 'gemini', 'providers: only the keyed one')
-  ok(ids({ OPENROUTER_API_KEY: 'o', GROQ_API_KEY: 'q', GEMINI_API_KEY: 'g' }).join() === 'groq,gemini,openrouter', 'providers: default order')
+  ok(ids({ OPENROUTER_API_KEY: 'o', GROQ_API_KEY: 'q', GEMINI_API_KEY: 'g', MISTRAL_API_KEY: 'm' }).join() === 'gemini,mistral,groq,openrouter', 'providers: default order')
   ok(
     ids({ LLM_PROVIDERS: ' OpenRouter, gemini,openrouter,nope', OPENROUTER_API_KEY: 'o', GROQ_API_KEY: 'q', GEMINI_API_KEY: 'g' }).join() === 'openrouter,gemini',
     'providers: LLM_PROVIDERS order, deduped, unknown ids and unlisted ones dropped',
@@ -223,13 +226,17 @@ const chatReq = (headers, body) => ({
   ok(models({}) === 'gemini-3.8-flash,gemini-3.6-flash,gemini-3.5-flash', 'providers: gemini falls back to older free models when the newest is busy')
   ok(models({ GEMINI_MODEL: 'gemini-3.6-flash' }) === 'gemini-3.6-flash,gemini-3.5-flash', 'providers: a fallback equal to the main model is not tried twice')
   ok(models({ GEMINI_FALLBACK_MODELS: ' a, ,b' }) === 'gemini-3.8-flash,a,b' && models({ GEMINI_FALLBACK_MODELS: '' }) === 'gemini-3.8-flash', 'providers: GEMINI_FALLBACK_MODELS overrides, empty means none')
-  const all = chat.providerChain({ GROQ_API_KEY: 'q', GEMINI_API_KEY: 'g', OPENROUTER_API_KEY: 'o', GEMINI_MODEL: 'gemini-x', GEMINI_FALLBACK_MODELS: '' })
-  ok(all[0].model === 'llama-3.3-70b-versatile', 'providers: groq default model')
-  ok(all[1].model === 'gemini-x', 'providers: *_MODEL overrides the default')
-  ok(all[2].model.endsWith(':free'), 'providers: openrouter default is a free model')
+  const all = chat.providerChain({ GROQ_API_KEY: 'q', GEMINI_API_KEY: 'g', OPENROUTER_API_KEY: 'o', MISTRAL_API_KEY: 'm', GEMINI_MODEL: 'gemini-x', GEMINI_FALLBACK_MODELS: '' })
+  const by = (id) => all.find((p) => p.id === id)
+  ok(by('groq').model === 'llama-3.3-70b-versatile', 'providers: groq default model')
+  ok(by('gemini').model === 'gemini-x', 'providers: *_MODEL overrides the default')
+  ok(by('openrouter').model.endsWith(':free'), 'providers: openrouter default is a free model')
+  ok(by('mistral').model === 'mistral-medium-latest' && by('openrouter').tools === false && by('mistral').tools !== false, 'providers: mistral default model; openrouter free models asked without tools')
 
   const msgs = [{ role: 'user', content: 'hi' }]
-  const [rq, rg, ro] = all.map((p) => chat.providerRequest(p, msgs))
+  const [rq, rg, ro] = ['groq', 'gemini', 'openrouter'].map((id) => chat.providerRequest(by(id), msgs))
+  const rm = chat.providerRequest(by('mistral'), msgs, [{ type: 'function', function: { name: 't' } }])
+  ok(rm.url === 'https://api.mistral.ai/v1/chat/completions' && rm.headers.authorization === 'Bearer m' && rm.body.tools.length === 1 && rq.body.tools === undefined, 'payload: mistral endpoint; tools only when given')
   ok(rq.url === 'https://api.groq.com/openai/v1/chat/completions', 'payload: groq endpoint')
   ok(rg.url === 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', 'payload: gemini OpenAI-compatible endpoint')
   ok(ro.url === 'https://openrouter.ai/api/v1/chat/completions', 'payload: openrouter endpoint')
@@ -260,36 +267,41 @@ const chatReq = (headers, body) => ({
   const router = 'https://openrouter.ai/api/v1/chat/completions'
   const stream = (text) => () => new Response(text, { status: 200, headers: { 'content-type': 'text/event-stream' } })
   const status = (s, body = '{"error":"x"}') => () => new Response(body, { status: s })
-  const go = async () => {
+  const frame = (t) => 'data: ' + JSON.stringify({ choices: [{ delta: { content: t } }] }) + '\n\n'
+  const DONE = 'data: [DONE]\n\n'
+  const go = async (body) => {
+    // Each case starts with no model cooling down from the one before.
+    brain.resetCooldown()
     const res = mockRes()
-    await chat.default(chatReq({ origin: 'http://localhost:5173' }), res)
+    await chat.default(chatReq({ origin: 'http://localhost:5173' }, body), res)
     return res
   }
   process.env.GROQ_API_KEY = 'gq-SECRET'
   process.env.GEMINI_API_KEY = 'gm-SECRET'
   process.env.OPENROUTER_API_KEY = 'or-SECRET'
 
-  // Gemini's newest model busy: the next Gemini model answers before OpenRouter is tried.
+  // Gemini's newest model busy: the next Gemini model answers before Groq is tried.
   let geminiCalls = 0
-  mockFetch({ [groq]: status(429), [gemini]: () => (++geminiCalls === 1 ? status(503)() : stream('data: {"choices":[{"delta":{"content":"g2"}}]}\n\n')()) })
+  mockFetch({ [gemini]: () => (++geminiCalls === 1 ? status(503)() : stream('data: {"choices":[{"delta":{"content":"g2"}}]}\n\n')()) })
   let res = await go()
-  ok(res.statusCode === 200 && calls.length === 3 && JSON.parse(calls[2].init.body).model === 'gemini-3.6-flash' && res.body.includes('g2'), 'failover: a busy gemini model falls back to the next gemini model')
+  ok(res.statusCode === 200 && calls.length === 2 && JSON.parse(calls[1].init.body).model === 'gemini-3.6-flash' && res.body === frame('g2') + DONE, 'failover: a busy gemini model falls back to the next gemini model')
   // The rest checks one model per provider.
   process.env.GEMINI_FALLBACK_MODELS = ''
 
-  mockFetch({ [groq]: status(429), [gemini]: status(503), [router]: stream('data: {"choices":[{"delta":{"content":"ok"}}]}\n\n') })
+  mockFetch({ [gemini]: status(429), [groq]: status(503), [router]: stream('data: {"choices":[{"delta":{"content":"ok"}}]}\n\n') })
   res = await go()
-  ok(res.statusCode === 200 && calls.map((c) => c.href).join() === [groq, gemini, router].join(), 'failover: 429 then 5xx moves on to the next provider')
-  ok(res.body === 'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n', 'failover: the answer streams through')
+  ok(res.statusCode === 200 && calls.map((c) => c.href).join() === [gemini, groq, router].join(), 'failover: 429 then 5xx moves on to the next provider')
+  ok(res.body === frame('ok') + DONE, 'failover: the answer streams through in the client format')
   ok(JSON.parse(calls[2].init.body).model.endsWith(':free'), 'failover: each attempt uses its own model')
+  ok(JSON.parse(calls[0].init.body).tools?.length > 5 && JSON.parse(calls[2].init.body).tools === undefined, 'failover: tools offered, except to a provider marked tools: false')
   ok(!res.body.includes('SECRET'), 'failover: no key in the response')
 
   const timeout = new DOMException('The operation was aborted due to timeout', 'TimeoutError')
-  mockFetch({ [groq]: timeout, [gemini]: stream('data: {"choices":[{"delta":{"content":"g"}}]}\r\n\r\n') })
+  mockFetch({ [gemini]: timeout, [groq]: stream('data: {"choices":[{"delta":{"content":"g"}}]}\r\n\r\n') })
   res = await go()
-  ok(res.statusCode === 200 && calls.length === 2 && res.body === 'data: {"choices":[{"delta":{"content":"g"}}]}\n\n', 'failover: a timeout moves on; CRLF frames normalized for the client')
+  ok(res.statusCode === 200 && calls.length === 2 && res.body === frame('g') + DONE, 'failover: a timeout moves on; CRLF frames read')
 
-  mockFetch({ [groq]: stream('data: {}\n\n') })
+  mockFetch({ [gemini]: stream('data: {}\n\n') })
   res = await go()
   ok(res.statusCode === 200 && calls.length === 1, 'failover: the first working provider is the only one called')
 
@@ -303,9 +315,25 @@ const chatReq = (headers, body) => ({
   res = await go()
   ok(res.statusCode === 429 && calls.length === 3, 'failover: every provider busy -> 429')
 
-  mockFetch({ [groq]: status(429), [gemini]: new Error('ECONNRESET'), [router]: status(502, 'acct or-SECRET') })
+  mockFetch({ [gemini]: status(429), [groq]: new Error('ECONNRESET'), [router]: status(502, 'acct or-SECRET') })
   res = await go()
   ok(res.statusCode === 502 && !res.body.includes('SECRET') && JSON.parse(res.body).error === 'upstream', 'failover: all down -> generic 502')
+
+  // A tool round: the model asks for knowledge, gets it, then answers.
+  brain.setKnowledge([{ id: 'learn:f1', title: 'F1 trend breakout', source: 'Learning', text: 'F1 enters on a close above EMA(300) and the 20-bar high; stop 3 ATR.' }])
+  let round = 0
+  mockFetch({
+    [gemini]: () =>
+      ++round === 1
+        ? stream('data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","extra_content":{"google":{"thought_signature":"SIG"}},"function":{"name":"search_knowledge","arguments":"{\\"query\\":\\"F1 stop\\"}"}}]}}]}\n\ndata: [DONE]\n\n')()
+        : stream('data: {"choices":[{"delta":{"content":"3 ATR"}}]}\n\n')(),
+  })
+  res = await go({ messages: [{ role: 'user', content: 'what is the F1 stop?' }] })
+  const second = JSON.parse(calls[1].init.body).messages
+  ok(res.statusCode === 200 && res.body === frame('3 ATR') + DONE && calls.length === 2, 'brain: tool round, then the answer')
+  ok(second.at(-2).tool_calls[0].extra_content.google.thought_signature === 'SIG' && second.at(-1).role === 'tool' && second.at(-1).tool_call_id === 'c1' && /stop 3 ATR/.test(second.at(-1).content), 'brain: the tool result goes back with the call and its thought signature')
+  ok(JSON.parse(calls[0].init.body).messages.some((m) => m.role === 'user' && /<knowledge>/.test(m.content) && /20-bar high/.test(m.content)), 'brain: matching knowledge sent up front')
+  brain.setKnowledge([])
 
   delete process.env.GROQ_API_KEY
   delete process.env.GEMINI_API_KEY
@@ -441,6 +469,89 @@ ok(!pro.allowedUrl('https://api.allorigins.win/raw?url=x'), 'pro allow: allorigi
   }
 }
 
+// ---------------------------------------------------------------- api/_brain.mjs
+{
+  // Knowledge search: the section about the asked thing first, titles weigh most.
+  brain.setKnowledge([
+    { id: 'learn:rsi', title: 'RSI', tags: ['momentum'], text: 'RSI measures momentum from 0 to 100; above 70 is overbought.' },
+    { id: 'learn:f1', title: 'F1 trend breakout', text: 'F1 buys a close above EMA(300) and the 20-bar high. Stop 3 ATR, trail 4 ATR.' },
+    { id: 'doc:audit#c6', title: 'C6 — model filter', text: 'C6 takes F1 entries the GBDT model rates above its base rate. +0.188R per trade.' },
+    { id: 'doc:audit#c6-2', title: 'C6 — model filter', text: 'Skipped trades still averaged +0.129R.' },
+  ])
+  ok(brain.searchKnowledge('how does the F1 breakout stop work')[0].id === 'learn:f1', 'brain: search finds the matching section first')
+  ok(brain.searchKnowledge('rsi overbought')[0].id === 'learn:rsi' && brain.searchKnowledge('zzz qqq').length === 0, 'brain: unrelated words find nothing')
+  ok(brain.knowledgeFor('c6 model filter', 200).length <= 200, 'brain: up-front knowledge stays within its cap')
+  const read = JSON.parse(await brain.runTool('read_knowledge', '{"id":"doc:audit#c6"}'))
+  ok(read.length === 2 && read[1].id === 'doc:audit#c6-2', 'brain: reading a section brings the parts that continue it')
+  ok(JSON.parse(await brain.runTool('search_knowledge', { query: 'C6 skipped' }))[0].id.startsWith('doc:audit#c6'), 'brain: the search tool returns sections')
+  ok(/unknown tool/.test(await brain.runTool('nope', '{}')) && /not valid JSON/.test(await brain.runTool('get_prices', '{oops')), 'brain: unknown tools and bad arguments come back as errors')
+  ok(/not configured/.test(await brain.runTool('get_bot_status', '{}')), 'brain: without the bot database a tool says so instead of throwing')
+  brain.setKnowledge([])
+
+  // Chart statistics on a steady uptrend.
+  const k = Array.from({ length: 250 }, (_, i) => [Date.UTC(2026, 0, 1) + i * 3_600_000, 100 + i, 101 + i, 99 + i, 100 + i, i === 249 ? 300 : 100])
+  const st = brain.chartStats(k)
+  ok(st.lastClose === 349 && st.trend.startsWith('up') && st.rsi14 === 100 && st.high20 === 349 && st.low20 === 328 && st.volumeVsAvg20 === 3, 'brain: chart stats (trend, RSI, 20-bar range, volume)')
+  ok(st.atr14 === 2 && st.changePct.last === 0.29, 'brain: ATR and last change')
+
+  // Cooling down: a spent daily quota is skipped until it resets.
+  ok(brain.coolFor(429, 'limit: 20 ... Please retry in 16h6m46.9s.') === Math.round((16 * 3600 + 6 * 60 + 46.9) * 1000), 'brain: quota reset time read from the error')
+  ok(brain.coolFor(429, 'slow down') === 60_000 && brain.coolFor(503) === 60_000 && brain.coolFor(500) === 0 && brain.coolFor(429, 'retry in 99h') === 86_400_000, 'brain: busy one minute, other errors none, at most a day')
+  brain.resetCooldown()
+  const pA = { id: 'gemini', model: 'a' }
+  const pB = { id: 'gemini', model: 'b' }
+  brain.cool(pA, 60_000, 1000)
+  ok(brain.liveChain([pA, pB], 2000).join() === [pB].join() && brain.liveChain([pA, pB], 70_000).length === 2, 'brain: a cooling model is skipped until its time is up')
+  brain.cool(pB, 60_000, 1000)
+  ok(brain.liveChain([pA, pB], 2000).length === 2, 'brain: when every model is cooling, all are tried anyway')
+  brain.resetCooldown()
+
+  // Streamed tool calls arrive in pieces.
+  const sse = (frames) => new Response(frames.map((f) => 'data: ' + JSON.stringify(f) + '\n\n').join('') + 'data: [DONE]\n\n').body
+  const got = []
+  const r1 = await brain.readRound(
+    sse([
+      { choices: [{ delta: { content: 'Let me check. ' } }] },
+      { choices: [{ delta: { tool_calls: [{ index: 0, id: 'x1', function: { name: 'get_prices', arguments: '{"sym' } }] } }] },
+      { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: 'bols":["BTC"]}' } }] } }] },
+      { choices: [{ delta: { tool_calls: [{ index: 1, function: { name: 'get_bot_status', arguments: '{}' } }] } }] },
+    ]),
+    (t) => got.push(t),
+  )
+  ok(r1.text === 'Let me check. ' && got.join() === 'Let me check. ', 'brain: text streams out as it arrives')
+  ok(r1.calls.length === 2 && r1.calls[0].function.arguments === '{"symbols":["BTC"]}' && r1.calls[1].id === 'call_1', 'brain: tool calls assembled from pieces; a missing id gets one')
+
+  // A provider failing after a tool round: the next one gets the plain question plus the data already fetched.
+  const P1 = { id: 'one', model: 'm1' }
+  const P2 = { id: 'two', model: 'm2' }
+  const tools = { echo: { description: 'echo', parameters: { type: 'object', properties: {} }, run: () => ({ value: 42 }) } }
+  const bodies = []
+  let n = 0
+  const realFetch2 = globalThis.fetch
+  globalThis.fetch = async (url, init) => {
+    bodies.push({ url, body: JSON.parse(init.body) })
+    n++
+    if (n === 1) return new Response(sse([{ choices: [{ delta: { tool_calls: [{ index: 0, id: 't1', function: { name: 'echo', arguments: '{}' } }] } }] }]))
+    if (n === 2) return new Response('busy', { status: 503 })
+    return new Response(sse([{ choices: [{ delta: { content: 'It is 42.' } }] }]))
+  }
+  const request = (p, messages, defs) => ({ url: p.id, headers: {}, body: { model: p.model, messages, tools: defs } })
+  const out = await brain.runAgent({ chain: [P1, P2], messages: [{ role: 'user', content: 'q' }], request, tools })
+  globalThis.fetch = realFetch2
+  brain.resetCooldown()
+  ok(out.ok && out.text === 'It is 42.' && bodies.map((b) => b.url).join() === 'one,one,two', 'brain: a provider failing mid-question hands over to the next')
+  const handed = bodies[2].body.messages
+  ok(handed.length === 2 && handed[0].content === 'q' && /DATA ALREADY FETCHED/.test(handed[1].content) && /"value":42/.test(handed[1].content) && !handed.some((m) => m.role === 'tool'), "brain: the handover carries the fetched data, not the other provider's tool messages")
+
+  // The pack builder on the real repository.
+  const kb = await import(mod('scripts/build-knowledge.mjs'))
+  const pack = await kb.buildKnowledge()
+  ok(pack.length > 150 && pack.some((c) => c.id === 'learn:signal-scanner') && pack.some((c) => c.id.startsWith('code:radar-worker/src/bot/c6.ts')), 'knowledge: Learning library and bot code notes are in the pack')
+  ok(pack.every((c) => c.id && c.title && c.text && c.text.length <= 3500) && new Set(pack.map((c) => c.id)).size === pack.length, 'knowledge: every chunk named, within size, ids unique')
+  ok(kb.headerComment('// short\nconst x = 1') === '' && kb.headerComment('\n// ' + 'a'.repeat(250) + '\n// b\nimport x').endsWith('b'), 'knowledge: only real header notes are kept')
+  ok(kb.split('a'.repeat(3000) + '\n\n' + 'b'.repeat(3000)).length === 2, 'knowledge: long text split at paragraphs')
+}
+
 // ---------------------------------------------------------------- api/discord.mjs
 {
   const { generateKeyPairSync, sign } = await import('node:crypto')
@@ -463,8 +574,11 @@ ok(!pro.allowedUrl('https://api.allorigins.win/raw?url=x'), 'pro allow: allorigi
   ok(!d.verifySignature(s.body, 'zz', s.ts) && !d.verifySignature(s.body, s.sig, ''), 'discord: malformed headers fail')
 
   ok(JSON.stringify(d.mentionedCoins('how is doge and SOL vs pepe? is the bot F1 ok')) === '["DOGE","PEPE"]', 'discord: named coins, defaults and words skipped')
-  ok(d.forDiscord('BTC up.\n[[open:BTC]]\n[[tab:selflearn]]') === 'BTC up.', 'discord: action tags removed')
-  ok(d.forDiscord('x'.repeat(3000)).length === 2000, 'discord: cut to the message limit')
+  ok(d.forDiscord('BTC up.\n[[open:BTC]]\n[[tab:selflearn]]').join() === 'BTC up.', 'discord: action tags removed')
+  const long = d.forDiscord('a'.repeat(1500) + '\n\n' + 'b'.repeat(1500))
+  ok(long.length === 2 && long[0] === 'a'.repeat(1500) && long[1] === 'b'.repeat(1500), 'discord: a long answer splits at a paragraph')
+  const huge = d.forDiscord('x'.repeat(20000))
+  ok(huge.length === 4 && huge.every((p) => p.length <= 2000), 'discord: at most 4 messages of 2000 characters')
 
   const req = (x, headers = {}) => {
     const r = (async function* () { yield Buffer.from(x.body) })()
@@ -493,10 +607,10 @@ ok(!pro.allowedUrl('https://api.allorigins.win/raw?url=x'), 'pro allow: allorigi
     if (href.startsWith('https://db.test/rest/v1/econ_events')) throw new Error('down')
     if (href.startsWith('https://api.groq.com')) {
       const b = JSON.parse(init.body)
-      ok(b.stream === false && b.messages[0].role === 'system', 'discord: model asked without streaming, with the system prompt')
+      ok(b.stream === true && b.tools?.length > 5 && b.messages[0].role === 'system', 'discord: the brain asks with the system prompt and the tools')
       ok(/101234\.5/.test(b.messages[1].content) && /"verdict":"keep"/.test(b.messages[1].content) && /DOGEUSDT/.test(b.messages[1].content), 'discord: context has prices, the audit and named coins')
       ok(/US ECONOMIC RELEASES: unavailable/.test(b.messages[1].content), 'discord: a failed source is marked unavailable')
-      return json({ choices: [{ message: { content: 'BTC is down 1.2% today.\n[[open:BTC]]' } }] })
+      return new Response('data: ' + JSON.stringify({ choices: [{ delta: { content: 'BTC is down 1.2% today.\n[[open:BTC]]' } }] }) + '\n\ndata: [DONE]\n\n', { status: 200 })
     }
     if (href.startsWith('https://discord.com/api/v10/webhooks/app1/tok1/messages/@original')) {
       patched = JSON.parse(init.body)

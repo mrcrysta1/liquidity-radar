@@ -1,5 +1,9 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/chat.mjs": { "includeFiles": "api/_knowledge.json" },
+    "api/discord.mjs": { "includeFiles": "api/_knowledge.json" }
+  },
   "headers": [
     {
       "source": "/(.*)",

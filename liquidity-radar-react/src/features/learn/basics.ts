@@ -131,12 +131,32 @@ export const TECH: LearnSection = {
             '**Web Workers**: heavy model training runs in a background thread so scrolling never freezes.',
             '**Exchange APIs and WebSockets**: live prices, order books, trades and liquidations, straight from the source.',
             '**Vercel**: hosting, plus small serverless functions (an AI chat proxy and a fetch proxy for feeds that block browsers).',
-            '**Groq (Llama 3.3)**: the language model behind the AI assistant, given live market context with every question.',
+            '**Free AI models (Google Gemini first, then Mistral, Groq or OpenRouter when one is busy)**: the brain behind Radar AI, with a knowledge pack built from this app\'s own guides, docs and code notes, and read-only tools for live data.',
             '**Supabase (Postgres)**: accounts, saved settings, and the server bot\'s trade records.',
             '**Node.js worker (radar-worker)**: the 24/7 whale-trade collector and the testnet trading bot.',
             '**Service worker (PWA)**: install the app and open it instantly, with a cached shell.',
           ],
         },
+      ],
+    },
+    {
+      id: 'radar-ai',
+      title: 'Radar AI: how the assistant thinks',
+      summary: 'A free AI model that knows how this app and its bot work, reads live data when it needs it, and answers in your own words and language.',
+      inApp: 'The Radar AI chat on every page; /ask in Discord',
+      tags: ['ai', 'assistant', 'chat', 'discord', 'gemini', 'knowledge', 'roman urdu'],
+      body: [
+        { p: 'Radar AI has three parts: a **model** that understands the question, a **knowledge pack** about this project, and **tools** for live data.' },
+        {
+          list: [
+            '**The model**: Google Gemini on its free tier first; when it is busy or its daily allowance is used up, the next free model takes over (Mistral, Groq or OpenRouter, whichever keys the site has).',
+            '**The knowledge pack**: every guide in this Learning library, the bot\'s manual, the strategy audits, and the notes at the top of each source file of the site and the bot. It is rebuilt on every deploy, so a new feature is known as soon as it ships. The closest sections go with each question, and the model can search for more.',
+            '**The tools** (read-only): live prices and chart statistics for any coin, the bot\'s status, real and simulated trades, the strategy audit, the market regime, the daily and weekly reports, the ML calibration study, the US release calendar, and how BTC and gold moved after past releases.',
+          ],
+        },
+        { p: 'Ask the way you talk: casual English, typos, Roman Urdu or Hindi all work ("bot kaisa chal raha hai", "f1 kia hai"). It answers in the same language, explains general ideas such as machine learning in simple steps, and then shows where this project uses them.' },
+        { tip: 'Ask for comparisons ("is C6 better than F1?") to get the audit numbers side by side, or "teach me" for a step-by-step lesson.' },
+        { warn: 'Free models allow a limited number of questions a day, and each question can take two or three model calls when tools are used. Prices, trades and results always come from the data, but explanations can still be wrong: check anything you act on. It is not financial advice, and it can never trade or change a setting.' },
       ],
     },
     {
@@ -165,6 +185,7 @@ export const WHATS_NEW: Array<{ date: string; items: string[] }> = [
   {
     date: '2026-11-07',
     items: [
+      'Radar AI has a brain: it knows how the whole app and bot work (every guide, the bot manual, the audits and the code notes), looks up live prices, chart stats, trades, the audit, reports and past release reactions when it needs them, teaches ideas like machine learning step by step, and answers casual English, Roman Urdu or Hindi in the same language. Same brain in the chat and in Discord.',
       'Radar AI in Discord: type /ask with a question in your server. It answers from live Binance prices, the testnet bot’s records, its audit and the US release calendar (it cannot see the charts on your screen, and it is read-only).',
       'Track record sub-tab on Self Learning, with a link to share (…/#track-record): the demo account over time and every strategy’s live result next to its tested history and audit verdict, losses included.',
       'A five-step tour for first-time visitors; take it again any time from Settings → Learning (“Take the tour”).',
