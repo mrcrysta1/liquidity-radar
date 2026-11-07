@@ -2982,6 +2982,20 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('cache: a failure is not kept', calls.filter((c) => c === 'w').length, 2)
 }
 
+// ---- onboarding tour ---------------------------------------------------------------------
+{
+  const O = await import(src('features/onboarding/tour.ts'))
+  const mem = () => { const m = new Map(); return { get: (k) => m.get(k) ?? null, set: (k, v) => m.set(k, v) } }
+  const kv = mem()
+  eq('tour: shown on a first visit', O.shouldShowTour(kv), true)
+  O.markTourSeen(kv)
+  eq('tour: not again after it was seen', O.shouldShowTour(kv), false)
+  eq('tour: a storage that throws never nags', O.shouldShowTour({ get: () => { throw new Error('blocked') }, set: () => {} }), false)
+  O.markTourSeen({ get: () => null, set: () => { throw new Error('blocked') } })
+  ok('tour: five steps, each with a title and a body, tabs that exist', O.TOUR.length === 5 && O.TOUR.every((s) => s.title && s.body.length > 40 && (!s.tab || ['radar', 'signals', 'selflearn', 'settings'].includes(s.tab))), O.TOUR)
+  ok('tour: says it is not advice and that the bot uses demo money', /does not advise/.test(O.TOUR[0].body) && /practice money/.test(O.TOUR[3].body))
+}
+
 // ---- server bot: trade journal ------------------------------------------------------
 {
   const J = await import(src('features/selflearn/journal.ts'))

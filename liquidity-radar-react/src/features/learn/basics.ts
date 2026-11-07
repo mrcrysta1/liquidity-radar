@@ -165,6 +165,8 @@ export const WHATS_NEW: Array<{ date: string; items: string[] }> = [
   {
     date: '2026-11-07',
     items: [
+      'A five-step tour for first-time visitors; take it again any time from Settings → Learning (“Take the tour”).',
+      'Phones: wide tables on the Self Learning tab keep their first column pinned while the rest scrolls.',
       'Faster, steadier bot data: cards that need the same records share one request (10-second cache), and a failed request is retried once before a card shows an error.',
       'Release alerts to your chat webhook (Discord or Slack, BOT_ALERT_WEBHOOK): a heads-up up to an hour before a high-impact US release with the forecast and how far BTC usually moved, then the result with BTC’s move since.',
       'News tab calendar: a BTC 1h column shows how BTC moved after each past US release, and clicking a release lists its last 12 occurrences with the surprise, BTC’s and gold’s move and the regime then.',

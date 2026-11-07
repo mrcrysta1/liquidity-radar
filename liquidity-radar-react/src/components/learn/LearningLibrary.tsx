@@ -188,6 +188,9 @@ export function LearningLibrary() {
           <button type="button" className="lg-pdf" onClick={() => setPrinting(true)}>
             Download PDF
           </button>
+          <button type="button" className="lg-pdf" onClick={() => window.dispatchEvent(new Event('lr:tour'))}>
+            Take the tour
+          </button>
         </div>
         <div className="lg-chips" role="tablist" aria-label="Sections">
           {[{ id: 'all', title: 'All' }, ...LEARN_SECTIONS].map((s) => (
