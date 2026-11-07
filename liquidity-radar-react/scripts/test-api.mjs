@@ -427,6 +427,85 @@ ok(!pro.allowedUrl('https://api.allorigins.win/raw?url=x'), 'pro allow: allorigi
   }
 }
 
+// ---------------------------------------------------------------- api/discord.mjs
+{
+  const { generateKeyPairSync, sign } = await import('node:crypto')
+  const kp = generateKeyPairSync('ed25519')
+  process.env.DISCORD_PUBLIC_KEY = kp.publicKey.export({ format: 'der', type: 'spki' }).subarray(-32).toString('hex')
+  process.env.DISCORD_APP_ID = 'app1'
+  process.env.VITE_WHALE_DB_URL = 'https://db.test/'
+  process.env.VITE_WHALE_DB_KEY = 'anon'
+  process.env.GROQ_API_KEY = 'gk'
+  const d = await import(mod('api/discord.mjs') + '?discord')
+  const now = Math.floor(Date.now() / 1000)
+  const signed = (body, ts = String(now)) => ({ body, ts, sig: sign(null, Buffer.from(ts + body), kp.privateKey).toString('hex') })
+
+  const s = signed('{"type":1}')
+  ok(d.verifySignature(s.body, s.sig, s.ts), 'discord: a valid signature passes')
+  ok(!d.verifySignature('{"type":2}', s.sig, s.ts), 'discord: a changed body fails')
+  ok(!d.verifySignature(s.body, s.sig.replace(/^./, (c) => (c === 'a' ? 'b' : 'a')), s.ts), 'discord: a changed signature fails')
+  const old = signed('{"type":1}', String(now - 3600))
+  ok(!d.verifySignature(old.body, old.sig, old.ts), 'discord: an old (replayed) request fails')
+  ok(!d.verifySignature(s.body, 'zz', s.ts) && !d.verifySignature(s.body, s.sig, ''), 'discord: malformed headers fail')
+
+  ok(JSON.stringify(d.mentionedCoins('how is doge and SOL vs pepe? is the bot F1 ok')) === '["DOGE","PEPE"]', 'discord: named coins, defaults and words skipped')
+  ok(d.forDiscord('BTC up.\n[[open:BTC]]\n[[tab:selflearn]]') === 'BTC up.', 'discord: action tags removed')
+  ok(d.forDiscord('x'.repeat(3000)).length === 2000, 'discord: cut to the message limit')
+
+  const req = (x, headers = {}) => {
+    const r = (async function* () { yield Buffer.from(x.body) })()
+    r.method = 'POST'
+    r.headers = { 'x-signature-ed25519': x.sig, 'x-signature-timestamp': x.ts, ...headers }
+    return r
+  }
+  let res = mockRes()
+  await d.default(req(s), res)
+  ok(res.statusCode === 200 && JSON.parse(res.body).type === 1, 'discord handler: PING -> PONG')
+  res = mockRes()
+  await d.default(req({ ...s, body: '{"type":1} ' }), res)
+  ok(res.statusCode === 401, 'discord handler: bad signature -> 401')
+
+  // /ask: deferred at once, then the answer edited in with bot context.
+  const seen = []
+  let patched = null
+  globalThis.fetch = async (input, init) => {
+    const href = String(input)
+    seen.push(href)
+    const json = (o) => new Response(JSON.stringify(o), { status: 200, headers: { 'content-type': 'application/json' } })
+    if (href.includes('ticker/24hr') && href.includes('DOGE')) return json([{ symbol: 'DOGEUSDT', lastPrice: '0.2', priceChangePercent: '1', highPrice: '0.21', lowPrice: '0.19', quoteVolume: '1000' }])
+    if (href.includes('ticker/24hr')) return json([{ symbol: 'BTCUSDT', lastPrice: '101234.5', priceChangePercent: '-1.2', highPrice: '103000', lowPrice: '100000', quoteVolume: '123456789' }])
+    if (href.startsWith('https://db.test/rest/v1/bot_state')) return json([{ key: 'heartbeat', value: { t: Date.now(), mode: 'hybrid', venue: 'testnet' } }, { key: 'audit:latest', value: { strategies: [{ id: 'f1', verdict: 'keep', profiles: { conservative: { mean: 0.155, n: 400 } } }] } }])
+    if (href.startsWith('https://db.test/rest/v1/bot_trades')) return json([{ symbol: 'ETHUSDT', side: 1, status: 'open' }])
+    if (href.startsWith('https://db.test/rest/v1/econ_events')) throw new Error('down')
+    if (href.startsWith('https://api.groq.com')) {
+      const b = JSON.parse(init.body)
+      ok(b.stream === false && b.messages[0].role === 'system', 'discord: model asked without streaming, with the system prompt')
+      ok(/101234\.5/.test(b.messages[1].content) && /"verdict":"keep"/.test(b.messages[1].content) && /DOGEUSDT/.test(b.messages[1].content), 'discord: context has prices, the audit and named coins')
+      ok(/US ECONOMIC RELEASES: unavailable/.test(b.messages[1].content), 'discord: a failed source is marked unavailable')
+      return json({ choices: [{ message: { content: 'BTC is down 1.2% today.\n[[open:BTC]]' } }] })
+    }
+    if (href.startsWith('https://discord.com/api/v10/webhooks/app1/tok1/messages/@original')) {
+      patched = JSON.parse(init.body)
+      return new Response(null, { status: 200 })
+    }
+    throw new Error('unexpected fetch ' + href)
+  }
+  const ask = signed(JSON.stringify({ type: 2, token: 'tok1', member: { user: { id: 'u1' } }, data: { name: 'ask', options: [{ name: 'question', value: 'how is BTC and doge?' }] } }))
+  res = mockRes()
+  await d.default(req(ask), res)
+  ok(JSON.parse(res.body).type === 5, 'discord handler: /ask deferred at once')
+  await d.answer('tok1', 'how is BTC and doge?', 'app1')
+  ok(patched && patched.content.startsWith('> how is BTC and doge?') && /down 1\.2%/.test(patched.content) && !patched.content.includes('[['), 'discord: answer edited into the reply')
+  ok(patched && Array.isArray(patched.allowed_mentions.parse) && !patched.allowed_mentions.parse.length, 'discord: the reply can never ping anyone')
+
+  process.env.DISCORD_ALLOWED_USERS = 'owner'
+  res = mockRes()
+  await d.default(req(ask), res)
+  ok(JSON.parse(res.body).data?.flags === 64 && /only answers its owner/.test(res.body), 'discord handler: allow-list refuses others privately')
+  delete process.env.DISCORD_ALLOWED_USERS
+  for (const k of ['DISCORD_PUBLIC_KEY', 'DISCORD_APP_ID', 'VITE_WHALE_DB_URL', 'VITE_WHALE_DB_KEY', 'GROQ_API_KEY']) delete process.env[k]
+}
+
 globalThis.fetch = realFetch
 console.error = realError
 
