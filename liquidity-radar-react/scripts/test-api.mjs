@@ -207,7 +207,8 @@ const chatReq = (headers, body) => ({
 
 // -------------------------------------------------------- chat: providers
 {
-  const ids = (env) => chat.providerChain(env).map((p) => p.id)
+  // One entry per provider: Gemini's fallback models are checked on their own below.
+  const ids = (env) => [...new Set(chat.providerChain(env).map((p) => p.id))]
   ok(ids({}).length === 0, 'providers: no key, no provider')
   ok(ids({ GEMINI_API_KEY: 'g' }).join() === 'gemini', 'providers: only the keyed one')
   ok(ids({ OPENROUTER_API_KEY: 'o', GROQ_API_KEY: 'q', GEMINI_API_KEY: 'g' }).join() === 'groq,gemini,openrouter', 'providers: default order')
@@ -218,7 +219,11 @@ const chatReq = (headers, body) => ({
   ok(ids({ LLM_PROVIDERS: 'gemini,groq', GROQ_API_KEY: 'q' }).join() === 'groq', 'providers: a listed provider without a key is skipped')
   ok(ids({ LLM_PROVIDERS: 'nope', GROQ_API_KEY: 'q' }).join() === 'groq', 'providers: a list of only unknown ids falls back to the default order')
   ok(ids({ GROQ_API_KEY: '   ' }).length === 0, 'providers: a blank key is no key')
-  const all = chat.providerChain({ GROQ_API_KEY: 'q', GEMINI_API_KEY: 'g', OPENROUTER_API_KEY: 'o', GEMINI_MODEL: 'gemini-x' })
+  const models = (env) => chat.providerChain({ GEMINI_API_KEY: 'g', ...env }).map((p) => p.model).join()
+  ok(models({}) === 'gemini-3.8-flash,gemini-3.6-flash,gemini-3.5-flash', 'providers: gemini falls back to older free models when the newest is busy')
+  ok(models({ GEMINI_MODEL: 'gemini-3.6-flash' }) === 'gemini-3.6-flash,gemini-3.5-flash', 'providers: a fallback equal to the main model is not tried twice')
+  ok(models({ GEMINI_FALLBACK_MODELS: ' a, ,b' }) === 'gemini-3.8-flash,a,b' && models({ GEMINI_FALLBACK_MODELS: '' }) === 'gemini-3.8-flash', 'providers: GEMINI_FALLBACK_MODELS overrides, empty means none')
+  const all = chat.providerChain({ GROQ_API_KEY: 'q', GEMINI_API_KEY: 'g', OPENROUTER_API_KEY: 'o', GEMINI_MODEL: 'gemini-x', GEMINI_FALLBACK_MODELS: '' })
   ok(all[0].model === 'llama-3.3-70b-versatile', 'providers: groq default model')
   ok(all[1].model === 'gemini-x', 'providers: *_MODEL overrides the default')
   ok(all[2].model.endsWith(':free'), 'providers: openrouter default is a free model')
@@ -264,8 +269,16 @@ const chatReq = (headers, body) => ({
   process.env.GEMINI_API_KEY = 'gm-SECRET'
   process.env.OPENROUTER_API_KEY = 'or-SECRET'
 
-  mockFetch({ [groq]: status(429), [gemini]: status(503), [router]: stream('data: {"choices":[{"delta":{"content":"ok"}}]}\n\n') })
+  // Gemini's newest model busy: the next Gemini model answers before OpenRouter is tried.
+  let geminiCalls = 0
+  mockFetch({ [groq]: status(429), [gemini]: () => (++geminiCalls === 1 ? status(503)() : stream('data: {"choices":[{"delta":{"content":"g2"}}]}\n\n')()) })
   let res = await go()
+  ok(res.statusCode === 200 && calls.length === 3 && JSON.parse(calls[2].init.body).model === 'gemini-3.6-flash' && res.body.includes('g2'), 'failover: a busy gemini model falls back to the next gemini model')
+  // The rest checks one model per provider.
+  process.env.GEMINI_FALLBACK_MODELS = ''
+
+  mockFetch({ [groq]: status(429), [gemini]: status(503), [router]: stream('data: {"choices":[{"delta":{"content":"ok"}}]}\n\n') })
+  res = await go()
   ok(res.statusCode === 200 && calls.map((c) => c.href).join() === [groq, gemini, router].join(), 'failover: 429 then 5xx moves on to the next provider')
   ok(res.body === 'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n', 'failover: the answer streams through')
   ok(JSON.parse(calls[2].init.body).model.endsWith(':free'), 'failover: each attempt uses its own model')
@@ -296,6 +309,7 @@ const chatReq = (headers, body) => ({
 
   delete process.env.GROQ_API_KEY
   delete process.env.GEMINI_API_KEY
+  delete process.env.GEMINI_FALLBACK_MODELS
   delete process.env.OPENROUTER_API_KEY
   mockFetch({})
   res = await go()

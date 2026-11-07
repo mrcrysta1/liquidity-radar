@@ -20,6 +20,9 @@
  * - gemini: gemini-3.8-flash, stable and "free of charge" on the Gemini API
  *   free tier (ai.google.dev/gemini-api/docs/pricing). Gemini 3 cannot turn
  *   thinking off, so effort is low and the token budget leaves room for it.
+ *   The newest model is often "experiencing high demand" (503) on the free
+ *   tier, so the older free flash models follow it in the chain
+ *   (GEMINI_FALLBACK_MODELS overrides them, comma-separated; empty = none).
  * - openrouter: google/gemma-4-31b-it:free, an instruction model from
  *   OpenRouter's free list (openrouter.ai/api/v1/models, ids ending ':free').
  */
@@ -36,6 +39,8 @@ export const PROVIDERS = {
     keyEnv: 'GEMINI_API_KEY',
     modelEnv: 'GEMINI_MODEL',
     model: 'gemini-3.8-flash',
+    fallbackEnv: 'GEMINI_FALLBACK_MODELS',
+    fallbackModels: ['gemini-3.6-flash', 'gemini-3.5-flash'],
     maxTokens: 2048,
     extra: { reasoning_effort: 'low' },
   },
@@ -52,7 +57,8 @@ export const PROVIDERS = {
 
 /**
  * The providers to try, in order: LLM_PROVIDERS (comma list) when set, else
- * every provider in PROVIDERS order. Only those with a key are kept.
+ * every provider in PROVIDERS order. Only those with a key are kept. A
+ * provider with fallback models appears once per model, its main one first.
  */
 export function providerChain(env = process.env) {
   const listed = String(env.LLM_PROVIDERS || '')
@@ -60,13 +66,15 @@ export function providerChain(env = process.env) {
     .map((s) => s.trim().toLowerCase())
     .filter((id) => Object.hasOwn(PROVIDERS, id))
   const ids = listed.length ? [...new Set(listed)] : Object.keys(PROVIDERS)
-  return ids
-    .map((id) => {
-      const p = PROVIDERS[id]
-      const key = String(env[p.keyEnv] || '').trim()
-      return key ? { id, ...p, key, model: String(env[p.modelEnv] || '').trim() || p.model } : null
-    })
-    .filter(Boolean)
+  return ids.flatMap((id) => {
+    const p = PROVIDERS[id]
+    const key = String(env[p.keyEnv] || '').trim()
+    if (!key) return []
+    const main = String(env[p.modelEnv] || '').trim() || p.model
+    const listed = p.fallbackEnv && env[p.fallbackEnv] != null ? String(env[p.fallbackEnv]).split(',') : p.fallbackModels || []
+    const models = [...new Set([main, ...listed.map((m) => m.trim()).filter(Boolean)])]
+    return models.map((model) => ({ id, ...p, key, model }))
+  })
 }
 
 /** The request one provider gets (OpenAI chat format). */
