@@ -414,7 +414,7 @@ export const SOURCE_GROUPS: SourceGroup[] = [
         cadence: 'On demand, one request per message',
         auth: 'key',
         match: /\/api\/chat/,
-        note: 'GROQ_API_KEY, GEMINI_API_KEY and OPENROUTER_API_KEY (any one is enough; tried in that order) live in the deployment environment and never enter the browser bundle. Shows as unseen until someone actually chats. Replies stream, and the model returns Markdown rather than HTML so nothing it emits can become markup.',
+        note: 'GEMINI_API_KEY, MISTRAL_API_KEY, GROQ_API_KEY and OPENROUTER_API_KEY (any one is enough; tried in that order) live in the deployment environment and never enter the browser bundle. Shows as unseen until someone actually chats. Replies stream, the model can search the project knowledge pack and read live data through read-only tools, and it returns Markdown rather than HTML so nothing it emits can become markup.',
       },
     ],
   },

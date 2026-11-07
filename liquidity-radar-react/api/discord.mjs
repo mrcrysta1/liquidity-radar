@@ -16,6 +16,7 @@
 // Register the command once with scripts/discord-register.mjs.
 import { createPublicKey, verify } from 'node:crypto'
 import { buildMessages, createRateLimiter, providerChain, providerRequest } from './chat.mjs'
+import { runAgent } from './_brain.mjs'
 
 // Both are public by design (the key only verifies Discord's signatures); the
 // env overrides them for another Discord app.
@@ -28,7 +29,7 @@ const MAX_BODY = 64 * 1024
 /** Discord's message limit. */
 const MAX_REPLY = 2000
 const MAX_QUESTION = 500
-const ANSWER_MS = 40_000
+const ANSWER_MS = 55_000
 // Free-tier model quota is shared with the website: a few questions a minute per person.
 const limiter = createRateLimiter({ limit: 8, windowMs: 5 * 60_000 })
 
@@ -133,51 +134,58 @@ export async function discordContext(question, now = Date.now()) {
 
 // ---------------------------------------------------------------- answer
 
-/** The model's answer for Discord: action tags removed, cut to Discord's limit. */
+/** Most Discord messages one answer may take. */
+const MAX_PARTS = 4
+
+/** The model's answer for Discord: action tags removed, in messages of at most 2000 characters, split at paragraphs. */
 export function forDiscord(text) {
   const t = String(text || '').replace(/\[\[[^\]\n]{1,60}\]\]/g, '').replace(/\n{3,}/g, '\n\n').trim()
-  return t.length > MAX_REPLY ? t.slice(0, MAX_REPLY - 1) + '…' : t
-}
-
-/** Ask the model chain (no streaming); the first provider that answers wins. */
-export async function askModel(messages) {
-  for (const p of providerChain()) {
-    const q = providerRequest(p, messages)
-    try {
-      const r = await fetch(q.url, { method: 'POST', headers: q.headers, body: JSON.stringify({ ...q.body, stream: false }), signal: AbortSignal.timeout(ANSWER_MS) })
-      if (!r.ok) {
-        console.error('[api/discord]', p.id, 'status', r.status, (await r.text().catch(() => '')).slice(0, 300))
-        continue
-      }
-      const text = (await r.json())?.choices?.[0]?.message?.content
-      if (text) return text
-    } catch (e) {
-      console.error('[api/discord]', p.id, 'request failed:', (e && e.message) || e)
-    }
+  const parts = []
+  let rest = t
+  while (rest.length > MAX_REPLY && parts.length < MAX_PARTS - 1) {
+    // Cut at a paragraph, else a line, else hard; never in the first half.
+    const para = rest.lastIndexOf('\n\n', MAX_REPLY)
+    const line = rest.lastIndexOf('\n', MAX_REPLY)
+    const at = para > MAX_REPLY / 2 ? para : line > MAX_REPLY / 2 ? line : MAX_REPLY
+    parts.push(rest.slice(0, at).trim())
+    rest = rest.slice(at).trim()
   }
-  return null
+  parts.push(rest.length > MAX_REPLY ? rest.slice(0, MAX_REPLY - 1) + '…' : rest)
+  return parts.filter(Boolean)
 }
 
-/** Answer one question and edit it into the deferred reply. */
+/** Ask the brain (api/_brain.mjs): the model chain with the knowledge and live-data tools. */
+export async function askModel(messages) {
+  const out = await runAgent({ chain: providerChain(), messages, request: providerRequest, signal: AbortSignal.timeout(ANSWER_MS) })
+  return out.ok ? out.text : null
+}
+
+/** Answer one question: the first part edited into the deferred reply, any further parts as follow-up messages. */
 export async function answer(interactionToken, question, appId = APP_ID) {
-  let reply
+  let parts
   try {
     const context = await discordContext(question)
     const messages = buildMessages({ messages: [{ role: 'user', content: question }], context })
     const text = messages && (await askModel(messages))
-    reply = text ? forDiscord(`> ${question.replace(/\n/g, ' ')}\n\n${text}`) : 'The assistant is unavailable right now. Try again in a minute.'
+    parts = text ? forDiscord(`> ${question.replace(/\n/g, ' ')}\n\n${text}`) :['The assistant is unavailable right now. Try again in a minute.']
   } catch (e) {
     console.error('[api/discord] answer failed:', (e && e.message) || e)
-    reply = 'Something went wrong while answering. Try again in a minute.'
+    parts = ['Something went wrong while answering. Try again in a minute.']
   }
-  const r = await fetch(`https://discord.com/api/v10/webhooks/${appId}/${interactionToken}/messages/@original`, {
-    method: 'PATCH',
-    headers: { 'content-type': 'application/json' },
-    // allowed_mentions: a model's text must never ping @everyone or a role.
-    body: JSON.stringify({ content: reply, allowed_mentions: { parse: [] } }),
-    signal: AbortSignal.timeout(8000),
-  }).catch((e) => ({ ok: false, status: (e && e.message) || e }))
-  if (!r.ok) console.error('[api/discord] reply failed:', r.status)
+  const hook = `https://discord.com/api/v10/webhooks/${appId}/${interactionToken}`
+  for (const [i, content] of parts.entries()) {
+    const r = await fetch(i ? hook : hook + '/messages/@original', {
+      method: i ? 'POST' : 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      // allowed_mentions: a model's text must never ping @everyone or a role.
+      body: JSON.stringify({ content, allowed_mentions: { parse: [] } }),
+      signal: AbortSignal.timeout(8000),
+    }).catch((e) => ({ ok: false, status: (e && e.message) || e }))
+    if (!r.ok) {
+      console.error('[api/discord] reply failed:', r.status)
+      return
+    }
+  }
 }
 
 /** Keep the function alive for work after the response (Vercel's request context, as @vercel/functions reads it). */
