@@ -21,6 +21,8 @@ import { TRACKED_NEWS } from './newsIntel'
 import { normalizeMlEval } from './mlEval'
 import { normalizeDaily, normalizeWeekly } from './reports'
 import { botStatus } from './botStatus'
+import { equitySummary, strategyLines } from './trackRecord'
+import type { EquitySummary, StrategyLine } from './trackRecord'
 import { reactionMap, releaseHistory } from '../news/calendarEvidence'
 import type { HistoryRow, ReactionMap } from '../news/calendarEvidence'
 import type { BotStatus } from './botStatus'
@@ -462,4 +464,18 @@ export async function loadReleaseHistory(category: string, before: number, limit
     rest<Array<Record<string, unknown>>>(`market_context?select=bar_time,regime&bar_time=gte.${new Date(oldest - 14_400_000).toISOString()}&bar_time=lte.${iso}&order=bar_time.asc&limit=20000`).catch(() => []),
   ])
   return releaseHistory(events, rx ?? new Map(), cx.map((c) => ({ time: Date.parse(String(c.bar_time)), regime: String(c.regime) })), before, limit)
+}
+
+/** The track record: the demo account's hourly equity, the live ledger and the audit (each optional: a part that fails is left empty). */
+export async function loadTrackRecord(): Promise<{ equity: EquitySummary | null; lines: StrategyLine[] } | null> {
+  if (!SERVER_BOT) return null
+  const [eq, ledger, audit] = await Promise.all([
+    restAll<{ t: string; equity: number }>('bot_equity?select=t,equity&order=t.asc', 20_000).catch(() => []),
+    loadLedger().catch(() => null),
+    loadAudit().catch(() => null),
+  ])
+  return {
+    equity: equitySummary(eq.map((r) => ({ t: Date.parse(r.t), equity: Number(r.equity) }))),
+    lines: strategyLines(ledger ?? [], audit?.strategies ?? []),
+  }
 }

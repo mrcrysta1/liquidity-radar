@@ -33,6 +33,8 @@ import { NewsIntelCard } from './NewsIntel'
 import { MlEvalCard } from './MlEvalCard'
 import { BotReportsCard } from './BotReports'
 import { BotStatusBar } from './BotStatusBar'
+import { TrackRecordCard } from './TrackRecord'
+import { TRACK_HASH } from '../../features/selflearn/trackRecord'
 import './mobileTables.css'
 import { ReadinessCard } from './ReadinessCard'
 import { ModelMetricsCard } from './ModelMetricsCard'
@@ -489,12 +491,15 @@ const LAB_TABS = [
   ['market', 'Market & News'],
   ['model', 'Model'],
   ['journal', 'Journal'],
+  ['track', 'Track record'],
   ['engine', 'Browser engine'],
 ] as const
 type LabTab = (typeof LAB_TABS)[number][0]
 const TAB_KEY = 'lab:tab'
 
 function savedTab(): LabTab {
+  // A shared track-record link opens that sub-tab.
+  if (typeof location !== 'undefined' && location.hash === TRACK_HASH) return 'track'
   try {
     const v = localStorage.getItem(TAB_KEY)
     return LAB_TABS.some(([k]) => k === v) ? (v as LabTab) : 'overview'
@@ -552,6 +557,7 @@ export function LearningLab() {
         </>
       )}
       {tab === 'journal' && <Guard name="Trade journal"><TradeJournal /></Guard>}
+      {tab === 'track' && <Guard name="Track record"><TrackRecordCard /></Guard>}
       {tab === 'engine' && (
         <>
           <Guard name="Lab header"><LabHead /></Guard>

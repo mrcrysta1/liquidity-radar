@@ -2996,6 +2996,27 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   ok('tour: says it is not advice and that the bot uses demo money', /does not advise/.test(O.TOUR[0].body) && /practice money/.test(O.TOUR[3].body))
 }
 
+// ---- server bot: track record -----------------------------------------------------------
+{
+  const R = await import(src('features/selflearn/trackRecord.ts'))
+  const H = 3_600_000
+  const eqRows = [5000, 5100, 4800, 4900, 4229].map((equity, i) => ({ t: (5 - i) * H, equity }))
+  const e = R.equitySummary(eqRows)
+  eq('track: oldest first whatever the order, start and now', [e.start, e.now, e.curve.length, e.curve[0]], [4229, 5000, 5, 1])
+  const fwd = R.equitySummary([...eqRows].map((r, i) => ({ t: i * H, equity: r.equity })))
+  near('track: change', fwd.changePct, (4229 / 5000 - 1) * 100)
+  near('track: worst drawdown from a running peak', fwd.maxDdPct, ((5100 - 4229) / 5100) * 100)
+  eq('track: downsampled, last point kept', R.equitySummary(Array.from({ length: 1000 }, (_, i) => ({ t: i, equity: 100 + i })), 100).curve.at(-1), 1099 / 100)
+  eq('track: too little history', R.equitySummary([{ t: 1, equity: 1 }]), null)
+  const lines = R.strategyLines(
+    [{ id: 'f1', real: 3, shadow: 1, eff: 3, recorded: { avgR: -0.49, totalR: -1.96, win: 0 } }, { id: 'ml', real: 1, shadow: 469, eff: 80, recorded: { avgR: 0.03, totalR: 14, win: 0.44 } }],
+    [{ id: 'f1', verdict: 'keep', profiles: { conservative: { mean: 0.155 } } }, { id: 'c2', verdict: 'watch', profiles: { conservative: { mean: 0.036 } } }],
+  )
+  eq('track: every strategy from the ledger or the audit, sorted', lines.map((l) => l.id), ['c2', 'f1', 'ml'])
+  eq('track: honest notes by sample size', lines.map((l) => l.note), ['no trades since the current setup started', 'only ~3 independent decisions so far: too few to judge', 'a first read, not proof'])
+  eq('track: live and tested side by side', [lines[1].avgR, lines[1].historyR, lines[1].verdict], [-0.49, 0.155, 'keep'])
+}
+
 // ---- server bot: trade journal ------------------------------------------------------
 {
   const J = await import(src('features/selflearn/journal.ts'))
