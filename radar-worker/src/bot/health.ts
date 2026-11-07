@@ -16,7 +16,10 @@
 //              expectancy and a drawdown within the 95th percentile.
 //
 // Shadow trades count in every state, so a demoted strategy can earn its way
-// back. A strategy without bands is never moved automatically (no demotion and,
+// back. `stats.indep` reports the same trades as independent decisions (trades
+// decided on one candle, or one day, ride the same market move); it is a
+// report only and does not move a strategy between states.
+// A strategy without bands is never moved automatically (no demotion and,
 // above all, no promotion): it stays as configured.
 
 export type StrategyState = 'live' | 'probation' | 'shadow'
@@ -40,6 +43,21 @@ export interface Outcome {
   /** R after costs. */
   r: number
   kind: 'real' | 'shadow'
+  /** The decision candle's open time, ms (bar_time); clusters for `independence`. */
+  bar?: number
+}
+
+/** The trades as independent decisions: cluster-robust mean and 95% range. */
+export interface Independence {
+  n: number
+  /** Distinct decision candles and UTC days. */
+  candles: number
+  days: number
+  /** What the trades are worth as independent ones: the smaller of the candle- and day-clustered estimates. */
+  eff: number
+  expR: number | null
+  lo: number | null
+  hi: number | null
 }
 
 export interface Transition {
@@ -62,6 +80,8 @@ export interface HealthStats {
   /** Trades and mean R in the current segment. */
   segN: number
   segExpR: number | null
+  /** Every closed trade as independent decisions (report only). */
+  indep: Independence
 }
 
 export interface HealthRecord {
@@ -110,6 +130,54 @@ export function drawdownR(r: number[]): { current: number; max: number } {
     if (peak - cum > max) max = peak - cum
   }
   return { current: peak - cum, max }
+}
+
+/** Cluster-robust (sandwich, G / (G − 1)) standard error and effective sample size of the mean of r over groups of `key`. */
+function clusterSe(o: Outcome[], key: (x: Outcome) => number, m: number): { groups: number; se: number | null; eff: number } {
+  const n = o.length
+  const g = new Map<number, number>()
+  for (const x of o) g.set(key(x), (g.get(key(x)) ?? 0) + x.r - m)
+  const G = g.size
+  const naive = o.reduce((a, x) => a + (x.r - m) ** 2, 0)
+  let robust = 0
+  for (const s of g.values()) robust += s * s
+  const eff = robust > 0 ? Math.max(1, Math.min(n, Math.round((n * naive) / robust))) : naive > 0 ? n : G
+  const se = G > 1 && robust > 0 ? Math.sqrt((robust / n ** 2) * (G / (G - 1))) : null
+  return { groups: G, se, eff }
+}
+
+const DAY_MS = 86_400_000
+/** Fewer groups than this and a cluster-robust range is too optimistic to show. */
+export const MIN_GROUPS = 10
+
+/**
+ * Closed trades as independent decisions. Trades decided on the same candle
+ * (all markets breaking out on one BTC move) or the same UTC day are grouped;
+ * the more conservative grouping sets the effective count and the 95% range.
+ * A trade without a decision candle is its own group. No range until there
+ * are at least MIN_GROUPS candles and days: with fewer clusters the estimate
+ * understates the uncertainty.
+ */
+export function independence(outcomes: Outcome[]): Independence {
+  const n = outcomes.length
+  if (!n) return { n: 0, candles: 0, days: 0, eff: 0, expR: null, lo: null, hi: null }
+  const m = outcomes.reduce((a, x) => a + x.r, 0) / n
+  let solo = -1
+  const candle = (x: Outcome) => x.bar ?? solo--
+  const byCandle = clusterSe(outcomes, candle, m)
+  solo = -1
+  const byDay = clusterSe(outcomes, (x) => (x.bar != null ? Math.floor(x.bar / DAY_MS) : solo--), m)
+  const worst = [byCandle, byDay].filter((c) => c.se != null).sort((a, b) => b.se! - a.se!)[0]
+  const se = Math.min(byCandle.groups, byDay.groups) >= MIN_GROUPS ? (worst?.se ?? null) : null
+  return {
+    n,
+    candles: byCandle.groups,
+    days: byDay.groups,
+    eff: Math.min(byCandle.eff, byDay.eff),
+    expR: m,
+    lo: se == null ? null : m - 1.96 * se,
+    hi: se == null ? null : m + 1.96 * se,
+  }
 }
 
 const f = (x: number) => (x >= 0 ? '+' : '') + x.toFixed(2) + 'R'
@@ -189,6 +257,7 @@ export function evaluateHealth(
       maxDdR: ddNow.max,
       segN: segNow.length,
       segExpR: mean(segNow),
+      indep: independence(all),
     },
     history: cur.transition ? [...history, cur.transition].slice(-HEALTH.historyMax) : history,
     updated: now,
