@@ -83,8 +83,8 @@
 # every closed real and shadow trade and trains a challenger every 4 h or
 # every 20 closed trades. Clear a tripped kill switch with npm run reset-risk.
 # Requires radar-worker/sql/005_bot_learning.sql, 006_bot_journal.sql,
-# 007_bot_trend.sql, 008_bot_strategies.sql and 009_market_context.sql (all
-# applied by this workflow on every run).
+# 007_bot_trend.sql, 008_bot_strategies.sql, 009_market_context.sql and
+# 010_econ_events.sql (all applied by this workflow on every run).
 #
 # MARKET CONTEXT (src/context/, research plan P3): every 15 min, in the
 # background, BTC's state on 15m / 1h / 4h, its measured correlation with every
@@ -92,6 +92,14 @@
 # the dollar index and Treasury yields (Yahoo), and a 7-class regime → bot_state
 # 'context:latest' and one market_context row per 4h bar. Report only: no
 # strategy reads it. BOT_CONTEXT=0 turns it off.
+#
+# NEWS (src/news/, research plan P4): hourly, in the background, the Forex
+# Factory weekly calendar (forecast, previous) and the agency calendar
+# (actuals, revisions) → econ_events; with the FRED_API_KEY secret, a one-off
+# backfill of US release dates since 2019 and FOMC decisions; for every
+# release over 24 h old, BTC / ETH / gold returns at +15 min, 1 h, 4 h, 24 h
+# and their size against the 30 days before → econ_reactions. Report only.
+# BOT_NEWS=0 turns it off.
 #
 # GitHub's runners are in the US, where Binance's main API is blocked; the
 # futures testnet host and the public market-data mirror are reachable, and the
@@ -181,6 +189,10 @@ jobs:
         run: node scripts/apply-sql.mjs sql/009_market_context.sql
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      - name: Apply the economic-events schema
+        run: node scripts/apply-sql.mjs sql/010_econ_events.sql
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
       - run: echo "BOT_STARTED=$(date +%s)" >> "$GITHUB_ENV"
       # Time budget: the bot stops its loop 330 min after it starts; this step
       # is killed at 345 min if a last tick or shutdown hangs (a step timeout
@@ -247,6 +259,8 @@ jobs:
           BINANCE_API_SECRET: ${{ secrets.BINANCE_API_SECRET }}
           # Optional; empty when the secret is not set = alerts off.
           BOT_ALERT_WEBHOOK: ${{ secrets.BOT_ALERT_WEBHOOK }}
+          # Optional: a free FRED key (fred.stlouisfed.org) for the one-off news backfill since 2019.
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
       # Hand over, even if the bot step failed or hit its step timeout — but not
       # if someone cancelled the run, and not after a crash on startup (that
       # would just loop; the hourly safety net retries instead).

@@ -61,6 +61,28 @@ export async function closedBars(symbol: string, interval: string, count: number
 }
 
 /** A USD-M perpetual funding settlement: time (ms) and rate per 8 h. */
+/**
+ * Closed bars with open times in [start, end), oldest first, paged forward
+ * (research and the news study: a window around a past event). Same hosts as
+ * closedBars; perpetual-only markets from the futures hosts.
+ */
+export async function barsRange(symbol: string, interval: string, start: number, end: number): Promise<Bar[]> {
+  const fut = FUTURES_ONLY.has(symbol)
+  const step = INTERVAL_MS[interval]
+  const out: Bar[] = []
+  let from = start
+  while (from < end) {
+    const q = `?symbol=${symbol}&interval=${interval}&limit=1000&startTime=${from}&endTime=${end - 1}`
+    const rows = fut ? await get('/fapi/v1/klines' + q, FUTURES_HOSTS) : await get('/api/v3/klines' + q)
+    if (!rows.length) break
+    out.push(...rows.map(barFromKline))
+    from = Number(rows[rows.length - 1][0]) + step
+    if (rows.length < 1000) break
+  }
+  const seen = new Set<number>()
+  return out.filter((b) => b.t + step <= Date.now() && !seen.has(b.t) && seen.add(b.t))
+}
+
 export interface Funding {
   t: number
   rate: number

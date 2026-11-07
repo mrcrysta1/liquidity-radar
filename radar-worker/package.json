@@ -13,6 +13,7 @@
     "train": "node src/train.ts",
     "selftest": "node src/selftest.ts",
     "audit": "node scripts/audit.ts",
+    "news": "node scripts/news.ts",
     "reset-risk": "node scripts/reset-risk.mjs",
     "test": "node --test \"test/**/*.test.ts\""
   },
