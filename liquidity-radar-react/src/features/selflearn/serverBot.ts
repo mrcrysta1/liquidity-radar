@@ -10,6 +10,9 @@ import type { JournalRow } from './journal'
 import { normalizeStrategies } from './botStrategies'
 import type { BotStrategy } from './botStrategies'
 import type { ReadinessBands, ReadinessEvent, ReadinessInput, ReadinessTrade } from './readiness'
+import { buildLedger, fromReal, fromShadow } from './ledger'
+import type { Funding, StrategyLedger } from './ledger'
+import { jget } from '../../api/client'
 
 const DB_URL = (import.meta.env.VITE_WHALE_DB_URL as string | undefined)?.replace(/\/+$/, '')
 const DB_KEY = import.meta.env.VITE_WHALE_DB_KEY as string | undefined
@@ -259,4 +262,53 @@ export async function loadReadiness(now = Date.now()): Promise<ReadinessInput | 
     heartbeat: hb && Number.isFinite(Number(hb.t)) ? Number(hb.t) : null,
     strategies: normalizeStrategies(raw).map((s) => ({ id: s.id, state: s.state, configured: s.configured, bands: bandsOf(s.id) })),
   }
+}
+
+const FUNDING_TTL = 30 * 60_000
+const fundingCache = new Map<string, { at: number; from: number; rows: Funding[] }>()
+
+/** A market's funding settlements since `from` (Binance futures, public); [] when it cannot be read. Cached 30 min. */
+async function fundingSince(symbol: string, from: number): Promise<Funding[]> {
+  const c = fundingCache.get(symbol)
+  if (c && c.from <= from && Date.now() - c.at < FUNDING_TTL) return c.rows
+  const rows: Funding[] = []
+  let start = from
+  for (let page = 0; page < 10; page++) {
+    const r = (await jget(`https://fapi.binance.com/fapi/v1/fundingRate?symbol=${symbol}&startTime=${start}&limit=1000`)) as Array<{ fundingTime: number; fundingRate: string }>
+    for (const x of r) if (Number.isFinite(Number(x.fundingRate))) rows.push({ t: Number(x.fundingTime), rate: Number(x.fundingRate) })
+    if (r.length < 1000) break
+    start = Number(r[r.length - 1].fundingTime) + 1
+  }
+  fundingCache.set(symbol, { at: Date.now(), from, rows })
+  return rows
+}
+
+/**
+ * Every strategy's ledger (ledger.ts) from its closed real and shadow trades
+ * since `since`, with each market's real funding (markets whose funding cannot
+ * be read fall back to the default rate, and the ledger says how many trades did).
+ */
+export async function loadLedger(since = STRATEGY_SINCE, limit = 20_000): Promise<StrategyLedger[] | null> {
+  if (!SERVER_BOT) return null
+  const iso = new Date(since).toISOString()
+  const [real, shadow] = await Promise.all([
+    restAll<Record<string, unknown>>(
+      `bot_trades?select=id,symbol,mode,strategy,side,entry,exit,sl,initial_sl,planned_sl,bar_time,opened_at,closed_at,exit_reason,r_multiple,fees_usd,risk_usd,slippage_bps&status=eq.closed&opened_at=gte.${iso}&order=id.asc`,
+      limit,
+    ),
+    restAll<Record<string, unknown>>(
+      `bot_shadow_trades?select=id,symbol,strategy,side,entry,exit,sl,interval,bar_time,closed_at,exit_reason,r_net&status=eq.closed&bar_time=gte.${iso}&order=id.asc`,
+      limit,
+    ),
+  ])
+  const trades = [...fromReal(real), ...fromShadow(shadow)]
+  const symbols = [...new Set(trades.map((t) => t.symbol).filter(Boolean))]
+  const from = Math.min(since, ...trades.map((t) => t.openedAt)) - 8 * 3_600_000
+  const got = await Promise.allSettled(symbols.map((s) => fundingSince(s, from)))
+  const funding: Record<string, Funding[] | undefined> = {}
+  symbols.forEach((s, i) => {
+    const g = got[i]
+    funding[s] = g.status === 'fulfilled' ? g.value : undefined
+  })
+  return buildLedger(trades, funding)
 }
