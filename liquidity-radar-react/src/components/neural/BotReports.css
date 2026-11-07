@@ -1,0 +1,13 @@
+/* "Daily & weekly report" card (components/neural/BotReports.tsx). Own file so it
+   never collides with edits to index.css; tables reuse .nn-tbl / .lab-table. */
+.br-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(160px,100%),1fr));gap:8px;margin:10px 0}
+.br-tiles>div{display:flex;flex-direction:column;gap:2px;padding:8px 10px;border-radius:10px;background:var(--sunk-2);border:1px solid var(--hair-2);min-width:0}
+.br-tiles small{font-size:var(--text-xs);color:var(--dim)}
+.br-tiles b{font-size:var(--text-sm);color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.br-tiles em{font-style:normal;font-size:var(--text-xs);color:var(--dim)}
+.br-list,.br-warn,.br-look{margin:8px 0 0;padding-left:18px;font-size:var(--text-xs);color:var(--muted);line-height:1.5}
+.br-list b{color:var(--txt)}
+.br-warn{color:var(--amber)}
+.br-look li::marker{content:'🔎 '}
+.br-table td small{display:block;font-size:var(--text-xs);color:var(--dim)}
+.br-note{margin:8px 0 0;font-size:var(--text-xs);color:var(--muted);line-height:1.5}

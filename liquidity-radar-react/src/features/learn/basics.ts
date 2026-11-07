@@ -165,6 +165,7 @@ export const WHATS_NEW: Array<{ date: string; items: string[] }> = [
   {
     date: '2026-11-07',
     items: [
+      'Daily & weekly report on the Self Learning tab (and to the chat webhook when set): releases and reactions, regime, strategies, the model, errors, anomalies and what to look at, plus this week against last.',
       'Model calibration study on the Self Learning tab: the model’s win chances checked daily against six alternatives, replayed in time order without look-ahead, longs and shorts apart (a report only).',
       'News trading intelligence on the Self Learning tab: which releases move BTC, ETH and gold, how each strategy did around them (counted per release, with ranges and an evidence label), why each trade is or is not news-driven, and the next release next to comparable past ones.',
       'The bot now keeps a record of US economic releases (NFP, CPI, PPI, FOMC, claims, GDP and more) with forecast, actual and revisions, and measures how BTC, ETH and gold reacted after 15 min, 1 h, 4 h and 24 h.',

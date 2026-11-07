@@ -27,6 +27,7 @@ import { c6Tick } from './bot/c6.ts'
 import { contextTick } from './context/collect.ts'
 import { newsTick } from './news/collect.ts'
 import { mlEvalTick } from './research/calib.ts'
+import { reportTick } from './research/report.ts'
 import { Alerts } from './bot/alerts.ts'
 
 if (existsSync('.env')) process.loadEnvFile('.env')
@@ -278,6 +279,8 @@ async function tick(): Promise<void> {
   if (!ONCE && env.BOT_NEWS !== '0') newsTick(store, db, { fredKey: env.FRED_API_KEY || undefined }, now)
   // The model's calibration study (research/calib.ts), daily in the background → bot_state 'ml:eval'. Report only.
   if (!ONCE) mlEvalTick(store, db, now)
+  // Daily intelligence report for the day that just ended (research/report.ts), in the background; also to the webhook when set.
+  if (!ONCE) reportTick(store, db, alerts.enabled ? alerts : null, now)
   void dailyAlert().catch((e) => console.error('daily summary', (e as Error).message))
   await mirrorAccount(now).catch((e) => console.error('account mirror', (e as Error).message))
   if (ONCE || now - lastMetricsAt >= 3_600_000) {

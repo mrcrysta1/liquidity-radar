@@ -2884,6 +2884,20 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('mleval: header', [v.n, v.warmup, v.better, v.verdict], [470, 50, null, 'No alternative…'])
 }
 
+// ---- server bot: daily and weekly reports ---------------------------------------------
+{
+  const R = await import(src('features/selflearn/reports.ts'))
+  const day = (d, o = {}) => ({ v: 1, day: d, events: [{ time: 1, category: 'nfp', title: 'NFP', surprise: 100, btc1h: { ret: -1.2, z: -3.4 }, gold1h: null }, { title: 'no time' }], regime: { start: 'weak-bull', end: 'weak-bear', changes: 1, snapshots: 6 }, btc: 'down', gold: 'up', corrChanges: [{}, {}], strategies: [{ strategy: 'c2', n: 5, real: 0, wins: 0, sumR: -7.5, avgR: -1.5 }, { n: 2 }], model: { n: 10, meanP: 0.5, winRate: 0.4, brier: 0.24 }, news: { trades: 1, sumR: 1.4, wins: 1 }, wins: 1, losses: 5, errors: { count: 2, top: [{ msg: 'x', n: 2 }] }, anomalies: ['a'], investigate: ['b', 3], ...o })
+  const list = R.normalizeDaily({ latest: day('2026-11-07'), history: [day('2026-11-05'), day('2026-11-07', { wins: 9 }), { day: 'bad' }] })
+  eq('reports: newest first, one per day, the latest wins, junk dropped', list.map((d) => [d.day, d.wins]), [['2026-11-07', 1], ['2026-11-05', 1]])
+  const d = list[0]
+  eq('reports: day parts', [d.events.length, d.events[0].btc1h.z, d.events[0].gold1h, d.corrChanges, d.strategies.length, d.investigate], [1, -3.4, null, 2, 1, ['b']])
+  eq('reports: nothing stored', R.normalizeDaily(null), [])
+  const w = R.normalizeWeekly({ v: 1, week: { from: '2026-11-01', to: '2026-11-07', days: 7 }, previous: null, strategies: [{ strategy: 'f1', n: 3, sumR: 1, avgR: 0.33, prevN: 0, prevSumR: 0, prevAvgR: null }], model: { n: 40, brier: 0.24, prevN: 0, prevBrier: null }, regimes: { 'weak-bear': 5, 'weak-bull': 2 }, events: 4, errors: 1, anomalies: 2 })
+  eq('reports: week', [w.from, w.previous, w.strategies[0].prevAvgR, w.regimes, w.model.prevBrier], ['2026-11-01', null, null, [['weak-bear', 5], ['weak-bull', 2]], null])
+  eq('reports: not a week', R.normalizeWeekly({}), null)
+}
+
 // ---- server bot: trade journal ------------------------------------------------------
 {
   const J = await import(src('features/selflearn/journal.ts'))
