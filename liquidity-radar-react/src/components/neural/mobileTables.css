@@ -1,0 +1,11 @@
+/* Phones: the wide tables on the Self Learning tab (.nn-tbl, 24 of them) keep
+   scrolling sideways, but their first column (the market or strategy) stays
+   pinned so every row stays readable, and a fade on the right edge says there
+   is more. Imported by LearningLab.tsx; index.css is not touched. */
+@media (max-width:640px){
+  .lab-page .nn-tbl{position:relative;-webkit-overflow-scrolling:touch;scroll-snap-type:x proximity}
+  .lab-page .nn-tbl th:first-child,
+  .lab-page .nn-tbl td:first-child{position:sticky;left:0;z-index:1;background:var(--card);box-shadow:6px 0 6px -6px rgba(0,0,0,.45);max-width:42vw;white-space:normal;word-break:break-word}
+  .lab-page .nn-tbl{mask-image:linear-gradient(90deg,#000 calc(100% - 18px),transparent);-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 18px),transparent)}
+  .lab-page .nn-tbl td,.lab-page .nn-tbl th{scroll-snap-align:start}
+}
