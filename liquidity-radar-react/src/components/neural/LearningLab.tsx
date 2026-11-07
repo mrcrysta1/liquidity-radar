@@ -29,6 +29,7 @@ import { StrategyLedgerCard } from './StrategyLedger'
 import { StrategyAuditCard } from './StrategyAudit'
 import { MarketContextCard } from './MarketContext'
 import { NewsIntelCard } from './NewsIntel'
+import { MlEvalCard } from './MlEvalCard'
 import { ReadinessCard } from './ReadinessCard'
 import { ModelMetricsCard } from './ModelMetricsCard'
 import { TradeJournal } from './TradeJournal'
@@ -492,6 +493,7 @@ export function LearningLab() {
       <Guard name="On track"><OnTrackPanel /></Guard>
       <Guard name="Trade journal"><TradeJournal /></Guard>
       <Guard name="Model metrics"><ModelMetricsCard /></Guard>
+      <Guard name="Model calibration study"><MlEvalCard /></Guard>
       <Guard name="Models"><Models /></Guard>
       <div className="lab-row">
         <Guard name="Performance"><Performance /></Guard>

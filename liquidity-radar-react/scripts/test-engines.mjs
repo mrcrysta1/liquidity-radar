@@ -2871,6 +2871,19 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('news: comparables, same regime first, then same surprise sign', comps.map((c) => [c.event.time / H, c.sameRegime, c.sameSurprise]), [[900, true, true], [700, true, true], [500, true, true]])
 }
 
+// ---- server bot: model calibration study ---------------------------------------------
+{
+  const E = await import(src('features/selflearn/mlEval.ts'))
+  eq('mleval: not a study', [E.normalizeMlEval(null), E.normalizeMlEval({ candidates: [] }), E.normalizeMlEval('x')], [null, null, null])
+  const v = E.normalizeMlEval(JSON.stringify({ t: 5, n: 470, warmup: 50, better: null, verdict: 'No alternative…', candidates: [
+    { id: 'cell', label: 'Live', all: { n: 420, logLoss: 0.669, ece: 0.093, auc: 0.62 }, long: { meanP: 0.48, winRate: 0.4 }, short: {}, vsLive: { mean: 0, lo: 0, hi: 0 }, taken: { n: 304, meanR: 0.12 } },
+    { label: 'no id' },
+    { id: 'raw', all: { logLoss: 'x' }, vsLive: { mean: 0.008, lo: -0.002, hi: 0.019 } },
+  ] }))
+  eq('mleval: candidates with an id, scores parsed', [v.candidates.map((c) => c.id), v.candidates[0].long.meanP, v.candidates[1].all.logLoss, v.candidates[1].label, v.candidates[1].taken.n], [['cell', 'raw'], 0.48, null, 'raw', 0])
+  eq('mleval: header', [v.n, v.warmup, v.better, v.verdict], [470, 50, null, 'No alternative…'])
+}
+
 // ---- server bot: trade journal ------------------------------------------------------
 {
   const J = await import(src('features/selflearn/journal.ts'))
