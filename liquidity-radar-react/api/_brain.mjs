@@ -108,7 +108,7 @@ const DB_URL = () => (process.env.VITE_WHALE_DB_URL || '').replace(/\/+$/, '')
 const DB_KEY = () => process.env.VITE_WHALE_DB_KEY || ''
 const SPOT = 'https://data-api.binance.vision/api/v3/'
 /** Every tool result is cut to this, so one large record cannot crowd out the answer. */
-export const TOOL_MAX = 8000
+export const TOOL_MAX = 12000
 
 async function getJson(url, headers = {}) {
   const r = await fetch(url, { headers, signal: AbortSignal.timeout(8000) })
@@ -190,6 +190,67 @@ export function chartStats(k) {
   }
 }
 
+/** A result block (n, mean R, 95% range, ...) cut to what a reader needs. */
+const r3 = (v) => (Number.isFinite(v) ? Number(v.toFixed(3)) : null)
+const slimStat = (x) => (x ? { n: x.n, independent: x.eff, meanR: r3(x.mean), lo95: r3(x.lo), hi95: r3(x.hi), profitFactor: r3(x.pf), winRate: r3(x.win), maxDrawdownR: r3(x.maxDdR) } : null)
+/** The audit's notes were stored with UTF-8 read as Windows-1252 ("â€”" for "—"): put the usual marks back. */
+export const fixText = (s) =>
+  String(s)
+    .replace(/\u00e2\u20ac\u201d/g, '—')
+    .replace(/\u00e2\u20ac\u201c/g, '–')
+    .replace(/\u00e2\u0153\u201c/g, '✓')
+    .replace(/\u00e2\u0153\u2014/g, '✗')
+    .replace(/\u00e2\u0161\u00a0/g, '⚠')
+    .replace(/\u00e2\u02c6\u2019/g, '−')
+
+/**
+ * The audit, one compact line per strategy, best first by mean R at
+ * conservative costs. The stored record is ~66k characters (per-market and
+ * per-year tables); cut whole, only the first strategy would fit.
+ */
+export function auditSummary(a) {
+  if (!a || !Array.isArray(a.strategies)) return { error: 'no audit published' }
+  const strategies = a.strategies
+    .map((s) => ({
+      id: s.id,
+      name: s.name,
+      verdict: s.verdict,
+      conservative: slimStat(s.profiles?.conservative),
+      moderateMeanR: r3(s.profiles?.moderate?.mean),
+      stressMeanR: r3(s.profiles?.stress?.mean),
+      holdout: slimStat(s.holdout),
+      liveSoFar: slimStat(s.live),
+      trades: s.trades,
+      markets: s.markets,
+      marketsPositive: s.marketsPositive,
+      why: (s.why || []).map(fixText),
+      flags: (s.flags || []).map(fixText),
+    }))
+    .sort((x, y) => (y.conservative?.meanR ?? -9) - (x.conservative?.meanR ?? -9))
+  return {
+    generatedAt: a.generatedAt ? new Date(a.generatedAt).toISOString() : null,
+    note: 'Sorted best first by mean R per trade at conservative costs (whole history). R = profit in multiples of the risk taken. "independent" = trades counted as independent decisions (clustered), the honest sample size.',
+    ranking: strategies.map((s) => `${s.id.toUpperCase()} ${s.conservative?.meanR ?? '?'}R (${s.verdict})`).join(' > '),
+    rules: (a.rules || []).map(fixText),
+    strategies,
+  }
+}
+
+/** A strategy's state record without its history and bands. */
+export function strategyState(key, v) {
+  if (!v || typeof v !== 'object') return { key, value: v }
+  const st = v.stats || {}
+  return {
+    id: v.id || key.replace(/^strategy:/, ''),
+    name: v.name,
+    state: v.state,
+    configured: v.configured,
+    priority: v.priority,
+    since: Number.isFinite(v.since) ? iso(v.since) : null,
+    sinceSetup: { realTrades: st.real, shadowTrades: st.shadow, meanR: r3(st.expR), maxDrawdownR: r3(st.maxDdR), independent: st.indep?.eff ?? null },
+  }
+}
+
 const TRADE_COLS = 'id,strategy,mode,symbol,side,status,opened_at,closed_at,entry,exit,sl,exit_reason,r_multiple,pnl_usd'
 const SHADOW_COLS = 'id,strategy,symbol,side,status,bar_time,closed_at,entry,exit,sl,exit_reason,r_net'
 
@@ -247,7 +308,8 @@ export const TOOLS = {
         account: a && { readAt: a.t ? iso(a.t) : null, equity: a.marginBalance, wallet: a.walletBalance, unrealized: a.unrealizedPnl, positions: (a.positions || []).map((p) => ({ symbol: p.symbol, side: p.side, size: p.size, entry: p.entry, mark: p.mark, unrealized: p.unrealized })) },
         control: st.control ?? null,
         risk: st.risk ?? null,
-        strategies: strategies.map((r) => ({ key: r.key, ...(typeof r.value === 'object' ? r.value : { value: r.value }) })),
+        stateMeaning: "live = places orders on the Binance Futures TESTNET (fake money); shadow = simulated trades only, no orders; probation = live at reduced risk; paused/retired = no trades.",
+        strategies: strategies.map((r) => strategyState(r.key, r.value)).sort((x, y) => (x.priority ?? 99) - (y.priority ?? 99)),
         recentWarnings: events,
       }
     },
@@ -268,7 +330,7 @@ export const TOOLS = {
   get_strategy_audit: {
     description: 'The latest backtest audit of every strategy (F1, F1X, C6, C2, ML, X1, X2): verdict (keep, watch, retire), average R per trade after costs, sample sizes, confidence intervals, and caveats.',
     parameters: { type: 'object', properties: {} },
-    run: async () => (await state(['audit:latest']))['audit:latest'] ?? { error: 'no audit published' },
+    run: async () => auditSummary((await state(['audit:latest']))['audit:latest']),
   },
   get_market_context: {
     description: 'The current market regime and context the bot records: BTC trend by timeframe, gold and the dollar, correlations and recent correlation changes.',
