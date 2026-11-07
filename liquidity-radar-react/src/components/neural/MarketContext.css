@@ -1,0 +1,26 @@
+/* "Market context" card (components/neural/MarketContext.tsx). Own file so it
+   never collides with edits to index.css; tables reuse .nn-tbl / .lab-table. */
+.mc-sub{font-size:var(--text-xs);color:var(--dim)}
+.mc-regime{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;padding:10px 12px;border-radius:12px;background:var(--sunk-2);border:1px solid var(--hair-2);border-left:3px solid var(--dim);margin-bottom:12px}
+.mc-regime small{font-size:var(--text-xs);color:var(--dim);width:100%}
+.mc-regime b{font-size:var(--text-lg)}
+.mc-regime span{font-size:var(--text-xs);color:var(--muted)}
+.mc-regime.mc-up{border-left-color:var(--green)}.mc-regime.mc-up b{color:var(--green)}
+.mc-regime.mc-dn{border-left-color:var(--red)}.mc-regime.mc-dn b{color:var(--red)}
+.mc-regime.mc-warn{border-left-color:var(--amber)}.mc-regime.mc-warn b{color:var(--amber)}
+.mc-cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr));gap:14px}
+.mc-cols h4,.mc-h{margin:0 0 6px;font-size:var(--text-sm);color:var(--txt)}
+.mc-h{margin-top:14px}
+.mc-h small{font-weight:400;font-size:var(--text-xs);color:var(--dim)}
+.mc-table td small{color:var(--dim);font-size:var(--text-xs)}
+.mc-dim{color:var(--dim)}
+.mc-gold{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.mc-gold>div{display:flex;flex-direction:column;gap:2px;padding:8px 10px;border-radius:10px;background:var(--sunk-2);border:1px solid var(--hair-2);min-width:0}
+.mc-gold small{font-size:var(--text-xs);color:var(--dim)}
+.mc-gold em{font-style:normal;font-size:var(--text-xs);color:var(--dim)}
+.mc-note{margin:8px 0 0;font-size:var(--text-xs);color:var(--muted);line-height:1.5}
+.mc-note b{color:var(--txt)}
+.mc-corr td.mc-c3{color:var(--txt);font-weight:700}
+.mc-corr td.mc-c2{color:var(--muted)}
+.mc-corr td.mc-c1{color:var(--dim)}
+.mc-chg{font-style:normal;margin-left:3px;color:var(--amber)}

@@ -2800,6 +2800,31 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('audit: missing parts are empty, holdout counts as seen', [rep.strategies[1].profiles.moderate.n, rep.strategies[1].holdoutSeen, rep.strategies[1].replication], [0, true, null])
 }
 
+// ---- server bot: market context -----------------------------------------------------
+{
+  const M = await import(src('features/selflearn/marketContext.ts'))
+  eq('context: not a snapshot', [M.normalizeContext(null), M.normalizeContext({ regime: { regime: 'moon' } }), M.normalizeContext('x')], [null, null, null])
+  const tf = (dir, close) => ({ dir, close, roc20: 1, rsi14: 55, er30: 0.3, atrPct: 1.2, atrRank: 0.6, volRatio: 1 })
+  const c = M.normalizeContext(JSON.stringify({
+    v: 1, t: 9, regime: { regime: 'weak-bear', why: 'below' },
+    btc: { '15m': tf('flat', 1), '1h': tf('down', 1), '4h': { dir: 'sideways', close: 1 } },
+    corr: {
+      TRXUSDT: { '4h': { r: -0.1, prev: 0.2, beta: -0.1, changed: false, group: 'independent' } },
+      ETHUSDT: { '4h': { r: 0.92, prev: 0.84, beta: 1.2, changed: true, group: 'strong' }, '1h': { r: 0.9, group: 'odd' } },
+      XRPUSDT: {},
+    },
+    changes: [{ symbol: 'ETHUSDT', tf: '4h', from: 0.84, to: 0.92, z: 3 }, { symbol: 'X' }],
+    gold: { h4: tf('up', 4082), h1: null, levels: { prevDayHigh: 4100, prevDayLow: 4050, high20d: 4200, low20d: 3900 }, dxy: { last: 102.3, change5: 0.4, change20: 0.1, dir: 'up' }, bill13w: null, yield10y: { last: 4.86, dir: 'sideways' }, goldDxyCorr: 0.19, btcGoldCorr: 'x' },
+    btcVsGold: 'opposite', errors: ['^IRX: timeout', 3],
+  }))
+  eq('context: regime and timeframes; a broken one is dropped', [c.regime, c.why, Object.keys(c.btc)], ['weak-bear', 'below', ['15m', '1h']])
+  eq('context: coins by 4h correlation, strongest first; no data last', c.coins.map((x) => x.symbol), ['ETHUSDT', 'TRXUSDT', 'XRPUSDT'])
+  eq('context: an unknown group is null, the change kept', [c.coins[0].corr['1h'].group, c.coins[0].corr['4h'].changed], [null, true])
+  eq('context: changes need a symbol and both values', c.changes.length, 1)
+  eq('context: gold parts', [c.gold.h4.dir, c.gold.levels.high20d, c.gold.dxy.dir, c.gold.yield10y, c.gold.btcGoldCorr, c.btcVsGold, c.errors], ['up', 4200, 'up', null, null, 'opposite', ['^IRX: timeout']])
+  eq('context: groups on 4h', M.corrGroups(c.coins, '4h'), { strong: 1, moderate: 0, independent: 1 })
+}
+
 // ---- server bot: trade journal ------------------------------------------------------
 {
   const J = await import(src('features/selflearn/journal.ts'))

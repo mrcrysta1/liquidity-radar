@@ -83,8 +83,15 @@
 # every closed real and shadow trade and trains a challenger every 4 h or
 # every 20 closed trades. Clear a tripped kill switch with npm run reset-risk.
 # Requires radar-worker/sql/005_bot_learning.sql, 006_bot_journal.sql,
-# 007_bot_trend.sql and 008_bot_strategies.sql (all applied by this workflow
-# on every run).
+# 007_bot_trend.sql, 008_bot_strategies.sql and 009_market_context.sql (all
+# applied by this workflow on every run).
+#
+# MARKET CONTEXT (src/context/, research plan P3): every 15 min, in the
+# background, BTC's state on 15m / 1h / 4h, its measured correlation with every
+# market (with a 99% change test), gold (XAUUSDT; the testnet host from here),
+# the dollar index and Treasury yields (Yahoo), and a 7-class regime → bot_state
+# 'context:latest' and one market_context row per 4h bar. Report only: no
+# strategy reads it. BOT_CONTEXT=0 turns it off.
 #
 # GitHub's runners are in the US, where Binance's main API is blocked; the
 # futures testnet host and the public market-data mirror are reachable, and the
@@ -168,6 +175,10 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
       - name: Apply the multi-strategy schema
         run: node scripts/apply-sql.mjs sql/008_bot_strategies.sql
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      - name: Apply the market-context schema
+        run: node scripts/apply-sql.mjs sql/009_market_context.sql
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
       - run: echo "BOT_STARTED=$(date +%s)" >> "$GITHUB_ENV"
