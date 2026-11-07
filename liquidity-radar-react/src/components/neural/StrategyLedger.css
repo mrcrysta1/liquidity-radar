@@ -1,0 +1,11 @@
+/* "Strategy ledger" card (components/neural/StrategyLedger.tsx). Own file so it
+   never collides with edits to index.css; the table reuses .nn-tbl / .lab-table. */
+.sl-sub{font-size:var(--text-xs);color:var(--dim)}
+.sl-table td{vertical-align:top}
+.sl-table td b{display:block}
+.sl-table td small{display:block;font-size:var(--text-xs);color:var(--dim);white-space:nowrap}
+.sl-table td small.up{color:var(--green)}
+.sl-table td small.dn{color:var(--red)}
+.sl-dim{color:var(--dim)}
+.sl-note{margin:10px 0 0;font-size:var(--text-xs);color:var(--muted);line-height:1.5}
+.sl-note b{color:var(--txt)}

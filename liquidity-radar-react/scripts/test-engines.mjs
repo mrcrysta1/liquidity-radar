@@ -2729,6 +2729,57 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   ok('ontrack: the edge interval widens when trades cluster', d1.edge.hi - d1.edge.lo > 2 * 1.96 * Math.sqrt(day1.reduce((s, x) => s + (x.r - d1.edge.meanR) ** 2, 0) / 69 / 70), d1.edge)
 }
 
+// ---- server bot: strategy ledger ----------------------------------------------------
+{
+  const L = await import(src('features/selflearn/ledger.ts'))
+  const H = 3_600_000
+  // A long from 100, stop 98 (1R = 2), out at 104 by its exit rule after 24 h: +2R gross.
+  const t = { strategy: 'f1', kind: 'shadow', symbol: 'BTCUSDT', side: 1, entry: 100, exit: 104, dist: 2, bar: 0, openedAt: 4 * H, closedAt: 28 * H, exitReason: 'signal', rRecorded: 1.93 }
+  near('ledger: gross R', L.grossR(t), 2)
+  // Moderate: (0.05% + 0.05%) × 100 / 2 = 0.05R fees, (0.02% + 0.02%) × 50 = 0.02R slippage.
+  const fund = [{ t: 8 * H, rate: 0.0001 }, { t: 16 * H, rate: 0.0002 }, { t: 24 * H, rate: -0.0001 }, { t: 32 * H, rate: 0.0005 }]
+  const c = L.tradeCost(t, L.PROFILES[0], fund)
+  near('ledger: moderate fees in R', c.feeR, 0.05, 1e-12)
+  near('ledger: moderate slippage in R', c.slipR, 0.02, 1e-12)
+  // Settlements at 8, 16, 24 h are inside (4 h, 28 h]: 0.0002 × 50 = 0.01R paid by a long.
+  near('ledger: real funding over the hold, paid by a long', c.fundingR, 0.01, 1e-12)
+  eq('ledger: funding known when the history covers the trade', c.known, true)
+  eq('ledger: history that stops before the exit is not trusted', L.fundingSum(fund.slice(0, 1), 4 * H, 28 * H).known, false)
+  near('ledger: a short receives it', L.tradeCost({ ...t, side: -1, exit: 96 }, L.PROFILES[0], fund).fundingR, -0.01, 1e-12)
+  const d = L.tradeCost(t, L.PROFILES[0], undefined)
+  near('ledger: no history → 0.01% per 8 h (24 h = 0.03% × 50 = 0.015R)', d.fundingR, 0.015, 1e-12)
+  eq('ledger: and it says so', d.known, false)
+  const tp = L.tradeCost({ ...t, strategy: 'ml', exitReason: 'tp' }, L.PROFILES[0], fund)
+  near('ledger: a model take-profit fills as maker under moderate', tp.feeR + tp.slipR, (0.0005 + 0.0002 + 0.0002) * 50, 1e-12)
+  const st = L.tradeCost(t, L.PROFILES[2], fund)
+  near('ledger: stress = 0.15% slippage both legs, double funding', [st.slipR, st.fundingR].reduce((a, x) => a + x), 0.0030 * 50 + 0.02, 1e-12)
+  const p = L.perf([1, -1, -1, 2, -0.5])
+  eq('ledger: perf', [p.n, p.win, p.totalR, p.maxDdR], [5, 0.4, 0.5, 2])
+  near('ledger: profit factor', p.pf, 3 / 2.5)
+  eq('ledger: all winners have no profit factor', L.perf([1, 2]).pf, null)
+  // Two strategies; real F1 trade from an older row (mode 'trend'), junk dropped.
+  const real = L.fromReal([
+    { symbol: 'ETHUSDT', mode: 'trend', side: 1, entry: 10, exit: 9.4, initial_sl: 9.4, sl: 9.8, bar_time: '2026-11-01T00:00:00Z', opened_at: '2026-11-01T04:00:05Z', closed_at: '2026-11-02T04:00:00Z', exit_reason: 'sl', r_multiple: -1.04, fees_usd: 0.6, risk_usd: 30, slippage_bps: 3 },
+    { symbol: 'X', side: 1, entry: null },
+  ])
+  eq('ledger: real rows parsed, junk dropped, old trend rows are F1', [real.length, real[0].strategy], [1, 'f1'])
+  near('ledger: the initial stop is 1R', real[0].dist, 0.6, 1e-12)
+  const sh = L.fromShadow([
+    { symbol: 'BTCUSDT', strategy: null, side: -1, entry: 100, exit: 97, sl: 102, interval: '4h', bar_time: '2026-11-01T00:00:00Z', closed_at: '2026-11-01T12:00:00Z', exit_reason: 'tp', r_net: 1.4 },
+    { symbol: 'BTCUSDT', strategy: 'c2', side: -1, entry: 100, exit: 102, sl: 102, interval: '4h', bar_time: '2026-11-01T04:00:00Z', closed_at: '2026-11-01T12:00:00Z', exit_reason: 'sl', r_net: -1.07 },
+  ])
+  eq('ledger: shadow without a strategy is the model; enters at the candle close', [sh[0].strategy, sh[0].openedAt], ['ml', Date.parse('2026-11-01T04:00:00Z')])
+  const led = L.buildLedger([...real, ...sh], {})
+  eq('ledger: one row per strategy, by id', led.map((x) => x.id), ['c2', 'f1', 'ml'])
+  const f1 = led.find((x) => x.id === 'f1')
+  eq('ledger: counts, long/short split', [f1.real, f1.shadow, f1.long.n, f1.short.n], [1, 0, 1, 0])
+  near('ledger: real fees in R from the exchange', f1.actual.feeR, 0.02)
+  near('ledger: real entry slippage in R', f1.actual.slipR, 0.0003 * 10 / 0.6, 1e-12)
+  ok('ledger: each harsher profile costs more', f1.profiles.moderate.totalR > f1.profiles.conservative.totalR && f1.profiles.conservative.totalR > f1.profiles.stress.totalR, f1.profiles)
+  near('ledger: portfolio dollars = R × $75', f1.profiles.moderate.usd, f1.profiles.moderate.totalR * 75, 1e-9)
+  eq('ledger: no funding history counted as unknown', f1.fundingKnown, 0)
+}
+
 // ---- server bot: trade journal ------------------------------------------------------
 {
   const J = await import(src('features/selflearn/journal.ts'))

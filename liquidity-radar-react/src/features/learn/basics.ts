@@ -165,6 +165,7 @@ export const WHATS_NEW: Array<{ date: string; items: string[] }> = [
   {
     date: '2026-11-07',
     items: [
+      'New Strategy ledger on the Self Learning tab: each strategy as its own paper portfolio, longs vs shorts, fees, slippage and real funding per trade, and every trade re-scored under moderate, conservative and stress costs.',
       'Strategies card: each strategy’s record is also shown as independent decisions (trades on the same candle or day count as one), with a 95% range for its average result.',
       '"Is it on track?" now counts the model’s real trades in every mode (it missed them in hybrid mode).',
       '"Is it on track?" now counts independent outcomes: trades decided on the same candle move together and count roughly as one, so a single market-wide day can no longer make the bot look proven (or broken).',
