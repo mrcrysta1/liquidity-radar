@@ -428,16 +428,21 @@ export class BotStore {
   async strategyOutcomes(strategy: string): Promise<Outcome[]> {
     const r = await this.db.query(
       `select * from (
-         select 'real' as kind, extract(epoch from closed_at) * 1000 as t, r_multiple as r from bot_trades
+         select 'real' as kind, extract(epoch from closed_at) * 1000 as t, r_multiple as r, extract(epoch from bar_time) * 1000 as bar from bot_trades
          where status = 'closed' and r_multiple is not null
            and coalesce(strategy, case when mode = 'trend' then 'f1' else 'ml' end) = $1
          union all
-         select 'shadow', extract(epoch from closed_at) * 1000, r_net from bot_shadow_trades
+         select 'shadow', extract(epoch from closed_at) * 1000, r_net, extract(epoch from bar_time) * 1000 from bot_shadow_trades
          where status = 'closed' and r_net is not null and coalesce(strategy, 'ml') = $1
        ) u order by t`,
       [strategy],
     )
-    return r.rows.map((x) => ({ kind: x.kind === 'real' ? 'real' : 'shadow', t: Math.round(Number(x.t)), r: Number(x.r) }))
+    return r.rows.map((x) => ({
+      kind: x.kind === 'real' ? 'real' : 'shadow',
+      t: Math.round(Number(x.t)),
+      r: Number(x.r),
+      ...(x.bar == null ? {} : { bar: Math.round(Number(x.bar)) }),
+    }))
   }
 
   async closeShadow(

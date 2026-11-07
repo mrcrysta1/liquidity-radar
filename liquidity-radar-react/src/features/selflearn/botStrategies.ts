@@ -34,6 +34,8 @@ export interface BotStrategy {
   maxDdR: number | null
   /** Trades since it went live / was demoted. */
   segN: number | null
+  /** Every closed trade as independent decisions (same candle / same day grouped); null on older records. */
+  indep: { n: number; candles: number; days: number; eff: number; expR: number | null; lo: number | null; hi: number | null } | null
   last: BotStrategyTransition | null
   updated: number | null
 }
@@ -68,11 +70,20 @@ export function normalizeStrategies(values: unknown[]): BotStrategy[] {
       ddR: num(s.ddR),
       maxDdR: num(s.maxDdR),
       segN: num(s.segN),
+      indep: indepOf(s.indep),
       last: h && STATES.includes(h.to as BotStrategyState) ? { t: num(h.t) ?? 0, from: h.from as BotStrategyState, to: h.to as BotStrategyState, reason: String(h.reason ?? '') } : null,
       updated: num(x.updated),
     })
   }
   return out.sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99) || a.id.localeCompare(b.id))
+}
+
+function indepOf(v: unknown): BotStrategy['indep'] {
+  const x = v && typeof v === 'object' ? (v as Raw) : null
+  const n = num(x?.n)
+  const eff = num(x?.eff)
+  if (!x || n == null || eff == null) return null
+  return { n, candles: num(x.candles) ?? 0, days: num(x.days) ?? 0, eff, expR: num(x.expR), lo: num(x.lo), hi: num(x.hi) }
 }
 
 function safeParse(s: string): unknown {

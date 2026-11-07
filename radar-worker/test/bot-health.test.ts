@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs'
 import { PGlite } from '@electric-sql/pglite'
 import type { Db } from '../src/db.ts'
 import { BotStore } from '../src/bot/store.ts'
-import { HEALTH, drawdownR, evaluateHealth, riskScale, rollingExp } from '../src/bot/health.ts'
+import { HEALTH, drawdownR, evaluateHealth, independence, riskScale, rollingExp } from '../src/bot/health.ts'
 import type { HealthBands, HealthRecord, Outcome } from '../src/bot/health.ts'
 import { F1_HEALTH, parseStrategies, refreshHealth, slotRuns } from '../src/bot/strategies.ts'
 
@@ -246,4 +246,48 @@ test('refreshHealth: demotes F1 from its closed trades, logs it, and promotes it
   await closedShadows(pg, 'f1', HEALTH.minRecover, 0.8, demoteAt + 1000)
   assert.equal((await refreshHealth(store, slots, demoteAt + 7_200_000)).f1, 'live')
   assert.equal((await store.getState<HealthRecord | null>('strategy:f1', null))?.history.length, 2)
+})
+
+test('independence: same-candle and same-day trades count as one decision; a report only', () => {
+  const H4 = 4 * 3_600_000
+  const day0 = Date.UTC(2026, 10, 2)
+  // 10 days; on each, 12 markets decide on one candle and all win or all lose together.
+  const herd: Outcome[] = Array.from({ length: 120 }, (_, i) => {
+    const d = Math.floor(i / 12)
+    return { t: day0 + d * 86_400_000 + H4 * 3, r: d % 2 ? 1.5 : -1, kind: 'shadow', bar: day0 + d * 86_400_000 }
+  })
+  const h = independence(herd)
+  assert.deepEqual([h.n, h.candles, h.days, h.eff], [120, 10, 10, 10])
+  assert.ok(h.lo! < 0 && h.hi! > 0, 'ten coin flips prove nothing')
+  // Unrelated trades, one per day: full count.
+  const solo: Outcome[] = Array.from({ length: 60 }, (_, i) => ({ t: day0 + i * 86_400_000, r: i % 3 ? 1 : -1, kind: 'real', bar: day0 + i * 86_400_000 }))
+  assert.equal(independence(solo).eff, 60)
+  // Different candles on one day still ride one move: the day grouping catches it.
+  const sameDay: Outcome[] = Array.from({ length: 60 }, (_, i) => {
+    const d = Math.floor(i / 6)
+    return { t: 0, r: d % 2 ? 1 : -1, kind: 'shadow', bar: day0 + d * 86_400_000 + (i % 6) * H4 }
+  })
+  const sd = independence(sameDay)
+  assert.deepEqual([sd.candles, sd.days, sd.eff], [60, 10, 10])
+  // Too few days for a range: the C2 case, 15 trades on 3 days, says nothing yet.
+  const few = independence(herd.slice(0, 36))
+  assert.deepEqual([few.days, few.lo, few.hi], [3, null, null])
+  // Rows without a candle are each their own decision; nothing at all is empty.
+  assert.equal(independence(run(30, (k) => (k % 2 ? 1 : -1), 0)).eff, 30)
+  assert.deepEqual(independence([]), { n: 0, candles: 0, days: 0, eff: 0, expR: null, lo: null, hi: null })
+  // The verdict does not depend on it: same trades, with or without candles, same state.
+  const losers = run(30, -0.5, day0)
+  const a = evaluateHealth(null, live, losers, BANDS, day0 + 1e8).record
+  const b = evaluateHealth(null, live, losers.map((o) => ({ ...o, bar: day0 })), BANDS, day0 + 1e8).record
+  assert.equal(a.state, b.state)
+  assert.equal(b.stats.indep.eff, 1)
+})
+
+test('strategyOutcomes carries the decision candle for independence', async () => {
+  const { db, pg } = await freshDb()
+  const store = new BotStore(db)
+  const t0 = Date.UTC(2026, 10, 3)
+  await closedShadows(pg, 'f1', 3, 1, t0)
+  const o = await store.strategyOutcomes('f1')
+  assert.deepEqual(o.map((x) => x.bar), [t0, t0 + 60_000, t0 + 120_000])
 })

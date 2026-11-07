@@ -20,4 +20,6 @@
 .sc .up{color:var(--green)}.sc .dn{color:var(--red)}
 .sc-why{margin:0;font-size:var(--text-xs);color:var(--muted);line-height:1.4}
 .sc-note{font-size:var(--text-xs);color:var(--dim);line-height:1.4}
+.sc-indep{margin:0;font-size:var(--text-xs);color:var(--muted);line-height:1.4}
+.sc-indep b{color:var(--txt)}
 @media (max-width:420px){.sc-nums{grid-template-columns:repeat(2,minmax(0,1fr))}}

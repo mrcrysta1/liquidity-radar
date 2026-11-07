@@ -57,6 +57,8 @@ const MIN_CAL = 30
 const MIN_EDGE = 30
 
 const BAR_MS = 4 * 3_600_000
+/** Fewer candles than this and a cluster-robust standard error is too optimistic: none is given. */
+export const MIN_CLUSTERS = 10
 
 /** Outcomes grouped by decision candle. */
 export function clusters(rows: Outcome[]): Outcome[][] {
@@ -86,7 +88,7 @@ export function clustered(rows: Outcome[], v: (x: Outcome) => number): { n: numb
   const naive = rows.reduce((s, x) => s + (v(x) - mean) ** 2, 0)
   const robust = groups.reduce((s, g) => s + g.reduce((a, x) => a + v(x) - mean, 0) ** 2, 0)
   const eff = robust > 0 ? Math.max(1, Math.min(n, Math.round((n * naive) / robust))) : naive > 0 ? n : G
-  const se = G > 1 && robust > 0 ? Math.sqrt((robust / n ** 2) * (G / (G - 1))) : n > 1 && naive > 0 ? Math.sqrt(naive / (n - 1) / n) : null
+  const se = G >= MIN_CLUSTERS && robust > 0 ? Math.sqrt((robust / n ** 2) * (G / (G - 1))) : null
   return { n, bars: G, mean, se, eff }
 }
 

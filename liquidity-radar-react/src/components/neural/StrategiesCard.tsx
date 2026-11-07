@@ -1,7 +1,8 @@
 // "Strategies": every strategy the server bot runs, in priority order, with its
 // health — live (real orders), probation (still real, a warning) or shadow
 // (paper only) — its real and paper trade counts, the rolling 30-trade
-// expectancy, the drawdown in R and its last state change. Data from bot_state
+// expectancy, the drawdown in R, the record as independent decisions (trades
+// on one candle or day count as one) and its last state change. Data from bot_state
 // 'strategy:*' (radar-worker/src/bot/health.ts).
 import { useEffect, useState } from 'react'
 import { SERVER_BOT, loadStrategies } from '../../features/selflearn/serverBot'
@@ -35,6 +36,12 @@ function Strategy({ s }: { s: BotStrategy }) {
         <div><small>Last 30</small><b className={cls(s.roll30)}>{rr(s.roll30)}</b><em>per trade</em></div>
         <div><small>Drawdown</small><b className={s.ddR ? 'dn' : ''}>{s.ddR == null ? dash : s.ddR.toFixed(1) + 'R'}</b><em>worst {s.maxDdR == null ? dash : s.maxDdR.toFixed(1) + 'R'}</em></div>
       </div>
+      {s.indep && s.indep.n > 0 && (
+        <p className="sc-indep" title="Trades decided on the same candle or day ride the same market move, so they count as one decision">
+          {s.indep.n} trades ≈ <b>{s.indep.eff} independent</b> ({s.indep.candles} candles, {s.indep.days} days) · avg {rr(s.indep.expR)}
+          {s.indep.lo != null && s.indep.hi != null ? `, 95% range ${rr(s.indep.lo)} to ${rr(s.indep.hi)}` : ''}
+        </p>
+      )}
       {s.last ? (
         <p className="sc-why">
           {BADGE[s.last.from]?.[0] ?? s.last.from} → {BADGE[s.last.to][0]} {when(s.last.t)}: {s.last.reason}

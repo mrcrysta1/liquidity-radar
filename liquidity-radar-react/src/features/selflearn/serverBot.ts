@@ -93,13 +93,13 @@ export async function loadAccount(): Promise<{ account: BinanceAccount | null; h
 export const STRATEGY_SINCE = Date.parse('2026-10-31T06:12:00Z')
 const BAR_4H = 4 * 3_600_000
 
-/** Closed real (gated or explore) and shadow trades of the current strategy, for the "Is it on track?" panel. */
+/** Closed real and shadow trades of the model (rows with a win chance, in any mode: gated, explore or hybrid), for the "Is it on track?" panel. */
 export async function loadOutcomes(): Promise<{ real: Outcome[]; shadow: Outcome[] } | null> {
   if (!SERVER_BOT) return null
   const since = new Date(STRATEGY_SINCE).toISOString()
   const [real, shadow] = await Promise.all([
     rest<Array<{ p_win: number; r_multiple: number | null; opened_at: string; exit_reason: string | null }>>(
-      `bot_trades?select=p_win,r_multiple,opened_at,exit_reason&status=eq.closed&mode=in.(gated,explore)&opened_at=gte.${since}&order=opened_at.desc&limit=1000`,
+      `bot_trades?select=p_win,r_multiple,opened_at,exit_reason&status=eq.closed&p_win=not.is.null&opened_at=gte.${since}&order=opened_at.desc&limit=1000`,
     ),
     rest<Array<{ p_cal: number; r_net: number | null; bar_time: string; exit_reason: string | null }>>(
       // The model's shadows only: a rule strategy's (008_bot_strategies.sql) have no win chance.
