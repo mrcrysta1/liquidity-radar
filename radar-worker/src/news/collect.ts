@@ -9,7 +9,8 @@
 //              done in bot_state 'news:backfill'
 //   reactions  for each release time in the tracked categories that is over
 //              24 h old and has none yet: BTC, ETH and gold 15-minute bars from
-//              30 days before to 24 h after → econ_reactions (a few per run)
+//              30 days before to 24 h after → econ_reactions (the bot does
+//              40 per hourly run: ~1,000 past releases take about a day)
 import type { Bar } from '../bot/features.ts'
 import { barsRange } from '../bot/data.ts'
 import type { BotStore } from '../bot/store.ts'

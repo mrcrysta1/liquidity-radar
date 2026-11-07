@@ -26,6 +26,7 @@ import type { StrategySlot } from './bot/strategies.ts'
 import { c6Tick } from './bot/c6.ts'
 import { contextTick } from './context/collect.ts'
 import { newsTick } from './news/collect.ts'
+import { newsAlertTick } from './news/alerts.ts'
 import { mlEvalTick } from './research/calib.ts'
 import { reportTick } from './research/report.ts'
 import { Alerts } from './bot/alerts.ts'
@@ -276,7 +277,9 @@ async function tick(): Promise<void> {
   // Market context (BTC on 15m/1h/4h, correlations, gold, regime) every 15 min, in the background: never delays trading.
   if (!ONCE && env.BOT_CONTEXT !== '0') contextTick(store, db, SYMBOLS, now)
   // Economic calendar, the one-off FRED backfill (with FRED_API_KEY) and market reactions, hourly in the background.
-  if (!ONCE && env.BOT_NEWS !== '0') newsTick(store, db, { fredKey: env.FRED_API_KEY || undefined }, now)
+  if (!ONCE && env.BOT_NEWS !== '0') newsTick(store, db, { fredKey: env.FRED_API_KEY || undefined, perRun: 40 }, now)
+  // Release heads-ups and results to the chat webhook (news/alerts.ts), every 5 min in the background; nothing without a webhook.
+  if (!ONCE && env.BOT_NEWS !== '0') void newsAlertTick(store, db, alerts, now)
   // The model's calibration study (research/calib.ts), daily in the background → bot_state 'ml:eval'. Report only.
   if (!ONCE) mlEvalTick(store, db, now)
   // Daily intelligence report for the day that just ended (research/report.ts), in the background; also to the webhook when set.

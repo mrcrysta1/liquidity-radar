@@ -7,6 +7,9 @@
 //   - 'error' events, rate-limited: at most 1 per market per 30 min and 20 per
 //     hour in total (a broken market must not flood the channel)
 //   - a daily summary, once per UTC day (bot.ts, for the day that just ended)
+//   - the daily intelligence report (research/report.ts)
+//   - economic releases: a heads-up within 60 min of a high-impact US release
+//     and its result with BTC's move since (news/alerts.ts)
 // A stale heartbeat cannot be seen from inside the bot: the separate workflow
 // bot-watchdog.yml (scripts/watchdog.mjs) covers that.
 //

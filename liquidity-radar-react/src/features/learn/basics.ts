@@ -165,6 +165,7 @@ export const WHATS_NEW: Array<{ date: string; items: string[] }> = [
   {
     date: '2026-11-07',
     items: [
+      'Release alerts to your chat webhook (Discord or Slack, BOT_ALERT_WEBHOOK): a heads-up up to an hour before a high-impact US release with the forecast and how far BTC usually moved, then the result with BTC’s move since.',
       'News tab calendar: a BTC 1h column shows how BTC moved after each past US release, and clicking a release lists its last 12 occurrences with the surprise, BTC’s and gold’s move and the regime then.',
       'Signals cards now show the evidence behind them: the scanner’s graded record on that market and conviction tier, and the server bot’s own signal on the same coin with its audit verdict.',
       'Self Learning is now split into sub-tabs (Overview, Strategies, Market & News, Model, Journal, Browser engine) under a bot status bar; only the open sub-tab loads its data, so the page opens faster.',
