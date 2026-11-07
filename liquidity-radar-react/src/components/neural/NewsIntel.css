@@ -1,0 +1,26 @@
+/* "News trading intelligence" card (components/neural/NewsIntel.tsx). Own file
+   so it never collides with edits to index.css; tables reuse .nn-tbl / .lab-table,
+   filters .lab-filters. */
+.ni-sub{font-size:var(--text-xs);color:var(--dim)}
+.ni-h{margin:14px 0 6px;font-size:var(--text-sm);color:var(--txt)}
+.ni-h small{font-weight:400;font-size:var(--text-xs);color:var(--dim)}
+.ni-table td{vertical-align:top}
+.ni-table td small{display:block;font-size:var(--text-xs);color:var(--dim);white-space:nowrap}
+.ni-table td small.up{color:var(--green)}
+.ni-table td small.dn{color:var(--red)}
+.ni-dim{color:var(--dim)}
+.ni-bar{display:block;width:72px;height:5px;border-radius:3px;background:var(--hair-2);margin-bottom:3px;overflow:hidden}
+.ni-bar i{display:block;height:100%;background:var(--amber)}
+.ni-rel{font-size:var(--text-xs);font-weight:700;padding:1px 6px;border-radius:6px;background:var(--card);white-space:nowrap}
+.ni-anecdotal,.ni-none{color:var(--dim)}
+.ni-weak{color:var(--amber)}
+.ni-moderate{color:var(--txt)}
+.ni-usable{color:var(--green)}
+.ni-note{margin:8px 0 0;font-size:var(--text-xs);color:var(--muted);line-height:1.5}
+.ni-cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));gap:14px}
+.ni-attr{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
+.ni-attr li{display:flex;justify-content:space-between;gap:8px;padding:6px 10px;border-radius:8px;background:var(--sunk-2);border:1px solid var(--hair-2);font-size:var(--text-xs);color:var(--muted)}
+.ni-attr b{color:var(--txt)}
+.ni-why{margin:8px 0 0;padding-left:18px;font-size:var(--text-xs);color:var(--muted);line-height:1.5}
+.ni-next{margin:0 0 8px;font-size:var(--text-sm);color:var(--txt);line-height:1.5}
+.ni-next small{display:block;font-size:var(--text-xs);color:var(--dim)}
