@@ -18,6 +18,8 @@ import { normalizeContext } from './marketContext'
 import type { ContextView } from './marketContext'
 import { TRACKED_NEWS } from './newsIntel'
 import { normalizeMlEval } from './mlEval'
+import { normalizeDaily, normalizeWeekly } from './reports'
+import type { DayReport, WeekReport } from './reports'
 import type { MlEval } from './mlEval'
 import type { Context4h, NewsEvent, NewsTrade, ReactionRow } from './newsIntel'
 import type { AuditReport } from './audit'
@@ -400,4 +402,12 @@ export async function loadMlEval(): Promise<MlEval | null> {
   if (!SERVER_BOT) return null
   const rows = await rest<Array<{ value: unknown }>>('bot_state?select=value&key=eq.ml:eval')
   return rows.length ? normalizeMlEval(rows[0].value) : null
+}
+
+/** The bot's daily reports (newest first) and the weekly comparison (radar-worker/src/research/report.ts). */
+export async function loadReports(): Promise<{ daily: DayReport[]; weekly: WeekReport | null } | null> {
+  if (!SERVER_BOT) return null
+  const rows = await rest<Array<{ key: string; value: unknown }>>('bot_state?select=key,value&key=in.(report:daily,report:weekly)')
+  const get = (k: string) => rows.find((r) => r.key === k)?.value
+  return { daily: normalizeDaily(get('report:daily')), weekly: normalizeWeekly(get('report:weekly')) }
 }

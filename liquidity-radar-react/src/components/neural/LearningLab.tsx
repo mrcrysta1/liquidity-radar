@@ -30,6 +30,7 @@ import { StrategyAuditCard } from './StrategyAudit'
 import { MarketContextCard } from './MarketContext'
 import { NewsIntelCard } from './NewsIntel'
 import { MlEvalCard } from './MlEvalCard'
+import { BotReportsCard } from './BotReports'
 import { ReadinessCard } from './ReadinessCard'
 import { ModelMetricsCard } from './ModelMetricsCard'
 import { TradeJournal } from './TradeJournal'
@@ -484,6 +485,7 @@ export function LearningLab() {
       <Guard name="Lab header"><LabHead /></Guard>
       <Guard name="Binance account"><BinanceAccount><BotActivity /></BinanceAccount></Guard>
       <Guard name="Planned trades"><PlannedTrades /></Guard>
+      <Guard name="Daily report"><BotReportsCard /></Guard>
       <Guard name="Market context"><MarketContextCard /></Guard>
       <Guard name="News intelligence"><NewsIntelCard /></Guard>
       <Guard name="Strategies"><StrategiesCard /></Guard>
