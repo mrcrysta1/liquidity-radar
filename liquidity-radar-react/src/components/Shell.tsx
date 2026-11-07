@@ -77,6 +77,7 @@ const loadCalendar = () => import('./news/EconomicCalendar')
 const SettingsPage = lazy(() => loadSettings().then((m) => ({ default: m.SettingsPage })))
 const Screener = lazy(() => loadScreener().then((m) => ({ default: m.Screener })))
 const AiAssistant = lazy(() => import('./chat/AiAssistant').then((m) => ({ default: m.AiAssistant })))
+const OnboardingTour = lazy(() => import('./onboarding/OnboardingTour').then((m) => ({ default: m.OnboardingTour })))
 const EconomicCalendar = lazy(() => loadCalendar().then((m) => ({ default: m.EconomicCalendar })))
 import { useEffect, useRef } from 'react'
 const w = window as any
@@ -545,6 +546,7 @@ export function Shell() {
       <div className="toast" id="toast"></div>
 
       <Guard name="Radar AI"><Suspense fallback={null}><AiAssistant /></Suspense></Guard>
+      <Guard name="Tour"><Suspense fallback={null}><OnboardingTour /></Suspense></Guard>
       
       <AlertsModal />
       
