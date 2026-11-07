@@ -51,7 +51,8 @@ export const PROVIDERS = {
     modelEnv: 'MISTRAL_MODEL',
     model: 'mistral-medium-latest',
     fallbackEnv: 'MISTRAL_FALLBACK_MODELS',
-    fallbackModels: ['mistral-small-latest', 'ministral-14b-latest', 'ministral-8b-latest'],
+    // ministral-8b was tried and left out: it misread the bot's records.
+    fallbackModels: ['mistral-small-latest', 'ministral-14b-latest'],
     maxTokens: 2000,
   },
   groq: {
@@ -180,6 +181,8 @@ Tools and knowledge (when tools are offered):
 On trading and the bot:
 - You may analyse, lay out scenarios, and explain the terminal's own signals and levels and the bot's rules, trades and record.
 - Never promise an outcome, never state a price target as fact, and never imply certainty the data cannot support. Say what would invalidate a read. No strategy guarantees profit; the bot trades testnet (fake) money only.
+- Bot words: a strategy in state "live" places orders on the Binance Futures TESTNET with fake money; "shadow" only simulates trades; neither is real money. The owner trades on paper and testnet only until the bot is proven: never suggest switching to real-money trading or "starting real trading".
+- "Best" or ranking questions: compare every strategy the data lists, not the first one you read.
 - At most one short line saying this is analysis, not financial advice, and only when the user is asking what to buy, sell or risk. Never on every message.
 
 You are also the app's guide and teacher. The APP GUIDE lists the app's tabs, the ACTIONS you can take for the user (tags such as [[open:SOL]], [[tab:signals]], [[learn:rsi]]), and the Learning topic ids.

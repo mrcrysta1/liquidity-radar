@@ -225,7 +225,7 @@ const chatReq = (headers, body) => ({
   const models = (env) => chat.providerChain({ GEMINI_API_KEY: 'g', ...env }).map((p) => p.model).join()
   ok(models({}) === 'gemini-3.8-flash,gemini-3.6-flash,gemini-3.5-flash', 'providers: gemini falls back to older free models when the newest is busy')
   ok(models({ GEMINI_MODEL: 'gemini-3.6-flash' }) === 'gemini-3.6-flash,gemini-3.5-flash', 'providers: a fallback equal to the main model is not tried twice')
-  ok(chat.providerChain({ MISTRAL_API_KEY: 'm' }).map((p) => p.model).join() === 'mistral-medium-latest,mistral-small-latest,ministral-14b-latest,ministral-8b-latest', 'providers: mistral backs up with its smaller models (per-model minute limits)')
+  ok(chat.providerChain({ MISTRAL_API_KEY: 'm' }).map((p) => p.model).join() === 'mistral-medium-latest,mistral-small-latest,ministral-14b-latest', 'providers: mistral backs up with its smaller models (per-model minute limits)')
   ok(models({ GEMINI_FALLBACK_MODELS: ' a, ,b' }) === 'gemini-3.8-flash,a,b' && models({ GEMINI_FALLBACK_MODELS: '' }) === 'gemini-3.8-flash', 'providers: GEMINI_FALLBACK_MODELS overrides, empty means none')
   const all = chat.providerChain({ GROQ_API_KEY: 'q', GEMINI_API_KEY: 'g', OPENROUTER_API_KEY: 'o', MISTRAL_API_KEY: 'm', GEMINI_MODEL: 'gemini-x', GEMINI_FALLBACK_MODELS: '' })
   const by = (id) => all.find((p) => p.id === id)
@@ -488,6 +488,13 @@ ok(!pro.allowedUrl('https://api.allorigins.win/raw?url=x'), 'pro allow: allorigi
   ok(/unknown tool/.test(await brain.runTool('nope', '{}')) && /not valid JSON/.test(await brain.runTool('get_prices', '{oops')), 'brain: unknown tools and bad arguments come back as errors')
   ok(/not configured/.test(await brain.runTool('get_bot_status', '{}')), 'brain: without the bot database a tool says so instead of throwing')
   brain.setKnowledge([])
+
+  // The audit, compact and ranked: the stored record is too big to send whole.
+  const big = { generatedAt: 1794000000000, rules: ['KEEP: ...'], strategies: ['f1', 'c6', 'ml'].map((id, i) => ({ id, name: id, verdict: ['keep', 'keep', 'retire'][i], profiles: { conservative: { n: 100, eff: 50, mean: [0.155, 0.188, -0.044][i], lo: 0, hi: 0.3 } }, why: ['\u00e2\u0153\u201c whole history \u00e2\u20ac\u201d fine'], byMarket: 'x'.repeat(20000), years: 'y'.repeat(20000) })) }
+  const sum = brain.auditSummary(big)
+  ok(sum.strategies.map((s) => s.id).join() === 'c6,f1,ml' && sum.ranking.startsWith('C6 0.188R (keep) > F1 0.155R'), 'brain: audit ranked best first, every strategy kept')
+  ok(JSON.stringify(sum).length < 3000 && sum.strategies[0].why[0] === '✓ whole history — fine', 'brain: audit compact, its marks repaired')
+  ok(brain.auditSummary(null).error && brain.strategyState('strategy:f1', { id: 'f1', state: 'live', history: 'h'.repeat(5000), stats: { real: 4, expR: -0.47 } }).sinceSetup.meanR === -0.47, 'brain: strategy states without their history')
 
   // Chart statistics on a steady uptrend.
   const k = Array.from({ length: 250 }, (_, i) => [Date.UTC(2026, 0, 1) + i * 3_600_000, 100 + i, 101 + i, 99 + i, 100 + i, i === 249 ? 300 : 100])
