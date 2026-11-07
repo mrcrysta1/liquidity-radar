@@ -2946,6 +2946,42 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('calendar: summary', C.historySummary(h), { n: 2, up: 1, avgAbs: 0.6000000000000001, big: 1 })
 }
 
+// ---- server bot: request cache -------------------------------------------------------
+{
+  const { cachedGet } = await import(src('features/selflearn/cachedGet.ts'))
+  let t = 0
+  const calls = []
+  const answers = {}
+  const fetcher = async (p) => {
+    calls.push(p)
+    const a = answers[p]?.shift() ?? { ok: true, status: 200, body: [3, 1, 2] }
+    if (a === 'throw') throw new Error('network')
+    return { ok: a.ok, status: a.status, json: async () => a.body }
+  }
+  const get = cachedGet(fetcher, { ttl: 10_000, now: () => t, sleep: async () => {} })
+  const [a, b] = await Promise.all([get('x'), get('x')])
+  eq('cache: two cards at once share one request', calls.length, 1)
+  a.sort()
+  eq('cache: each gets its own array', [a, b], [[1, 2, 3], [3, 1, 2]])
+  t = 5_000
+  await get('x')
+  eq('cache: reused within the TTL', calls.length, 1)
+  t = 20_000
+  await get('x')
+  eq('cache: fetched again after it', calls.length, 2)
+  answers.y = [{ ok: false, status: 503 }, { ok: true, status: 200, body: { v: 1 } }]
+  eq('cache: a 503 is retried once', [await get('y'), calls.filter((c) => c === 'y').length], [{ v: 1 }, 2])
+  answers.z = ['throw', { ok: true, status: 200, body: [1] }]
+  eq('cache: a network blip is retried once', await get('z'), [1])
+  answers.w = [{ ok: false, status: 404 }]
+  let err = ''
+  try { await get('w') } catch (e) { err = e.message }
+  eq('cache: a 404 is not retried, and the error says so', [err, calls.filter((c) => c === 'w').length], ['bot records: HTTP 404', 1])
+  await new Promise((r) => setTimeout(r, 0))
+  await get('w')
+  eq('cache: a failure is not kept', calls.filter((c) => c === 'w').length, 2)
+}
+
 // ---- server bot: trade journal ------------------------------------------------------
 {
   const J = await import(src('features/selflearn/journal.ts'))
