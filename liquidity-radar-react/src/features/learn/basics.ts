@@ -165,6 +165,7 @@ export const WHATS_NEW: Array<{ date: string; items: string[] }> = [
   {
     date: '2026-11-07',
     items: [
+      'Strategy audit card on the Self Learning tab: every strategy re-run on each market’s whole history at three cost levels, by year and BTC regime, with a keep / watch / retire verdict from fixed rules (a report only; nothing is switched automatically). Full report: docs/research/strategy-audit-2026-11-07.md.',
       'New Strategy ledger on the Self Learning tab: each strategy as its own paper portfolio, longs vs shorts, fees, slippage and real funding per trade, and every trade re-scored under moderate, conservative and stress costs.',
       'Strategies card: each strategy’s record is also shown as independent decisions (trades on the same candle or day count as one), with a 95% range for its average result.',
       '"Is it on track?" now counts the model’s real trades in every mode (it missed them in hybrid mode).',

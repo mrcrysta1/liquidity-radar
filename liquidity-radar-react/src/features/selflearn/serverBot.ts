@@ -13,6 +13,8 @@ import type { ReadinessBands, ReadinessEvent, ReadinessInput, ReadinessTrade } f
 import { buildLedger, fromReal, fromShadow } from './ledger'
 import type { Funding, StrategyLedger } from './ledger'
 import { jget } from '../../api/client'
+import { normalizeAudit } from './audit'
+import type { AuditReport } from './audit'
 
 const DB_URL = (import.meta.env.VITE_WHALE_DB_URL as string | undefined)?.replace(/\/+$/, '')
 const DB_KEY = import.meta.env.VITE_WHALE_DB_KEY as string | undefined
@@ -311,4 +313,11 @@ export async function loadLedger(since = STRATEGY_SINCE, limit = 20_000): Promis
     funding[s] = g.status === 'fulfilled' ? g.value : undefined
   })
   return buildLedger(trades, funding)
+}
+
+/** The latest strategy audit (radar-worker/scripts/audit.ts --publish); null when none has been published. */
+export async function loadAudit(): Promise<AuditReport | null> {
+  if (!SERVER_BOT) return null
+  const rows = await rest<Array<{ value: unknown }>>('bot_state?select=value&key=eq.audit:latest')
+  return rows.length ? normalizeAudit(rows[0].value) : null
 }
