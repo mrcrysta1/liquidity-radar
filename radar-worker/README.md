@@ -292,6 +292,9 @@ Actions → "Bot self-test (testnet)" → Run workflow.
 ```bash
 npm test                              # tape reader, model, risk, trading loop, real SQL
 npm run train                         # walk-forward report (no keys needed)
+npm run audit                         # strategy audit: every strategy on the whole history, three cost levels,
+                                      #   keep / watch / retire (--no-ml skips the slow model run; --publish
+                                      #   stores it for the website, needs DATABASE_URL)
 node test/mock-supabase.ts 4790 90    # local stand-in: real Binance data, Supabase-style API
 ```
 

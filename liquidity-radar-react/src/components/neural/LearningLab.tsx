@@ -26,6 +26,7 @@ import { OnTrackPanel } from './OnTrack'
 import { PlannedTrades } from './PlannedTrades'
 import { StrategiesCard } from './StrategiesCard'
 import { StrategyLedgerCard } from './StrategyLedger'
+import { StrategyAuditCard } from './StrategyAudit'
 import { ReadinessCard } from './ReadinessCard'
 import { ModelMetricsCard } from './ModelMetricsCard'
 import { TradeJournal } from './TradeJournal'
@@ -482,6 +483,7 @@ export function LearningLab() {
       <Guard name="Planned trades"><PlannedTrades /></Guard>
       <Guard name="Strategies"><StrategiesCard /></Guard>
       <Guard name="Strategy ledger"><StrategyLedgerCard /></Guard>
+      <Guard name="Strategy audit"><StrategyAuditCard /></Guard>
       <Guard name="Go-live readiness"><ReadinessCard /></Guard>
       <Guard name="On track"><OnTrackPanel /></Guard>
       <Guard name="Trade journal"><TradeJournal /></Guard>

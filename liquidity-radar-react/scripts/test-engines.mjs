@@ -2780,6 +2780,26 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('ledger: no funding history counted as unknown', f1.fundingKnown, 0)
 }
 
+// ---- server bot: strategy audit ------------------------------------------------------
+{
+  const A = await import(src('features/selflearn/audit.ts'))
+  eq('audit: not a report', [A.normalizeAudit(null), A.normalizeAudit({ x: 1 }), A.normalizeAudit('nope')], [null, null, null])
+  const s = { n: 100, eff: 40, mean: 0.1, lo: -0.05, hi: 0.25, pf: 1.3, maxDdR: 9 }
+  const rep = A.normalizeAudit(JSON.stringify({
+    generatedAt: 5, data: { markets: 24, from: 1, to: 2 }, rules: ['r1', 3],
+    strategies: [
+      { id: 'f1', name: 'F1', verdict: 'watch', why: ['✓ a'], flags: ['b'], trades: 100, markets: 24, marketsPositive: 15, profiles: { moderate: s, conservative: s, stress: { ...s, mean: -0.02 } }, dev: s, holdout: s, holdoutSeen: false, live: { n: 2 }, years: { 2024: s }, regimes: { 'bull-calm': s, unknown: s }, neighbours: 0.7, costPerTrade: 0.05, replication: { matched: 3, backtestOnly: 0, liveOnly: 1 } },
+      { id: 'zz', verdict: 'maybe' },
+      { id: 'c2', verdict: 'retire', profiles: {} },
+    ],
+  }))
+  eq('audit: strategies with a known verdict only', rep.strategies.map((x) => x.id), ['f1', 'c2'])
+  eq('audit: header', [rep.generatedAt, rep.markets, rep.rules], [5, 24, ['r1']])
+  const f1 = rep.strategies[0]
+  eq('audit: summaries, regimes without unknown, holdout sealed', [f1.profiles.stress.mean, f1.regimes.map((x) => x[0]), f1.holdoutSeen, f1.live.n, f1.live.mean], [-0.02, ['bull-calm'], false, 2, null])
+  eq('audit: missing parts are empty, holdout counts as seen', [rep.strategies[1].profiles.moderate.n, rep.strategies[1].holdoutSeen, rep.strategies[1].replication], [0, true, null])
+}
+
 // ---- server bot: trade journal ------------------------------------------------------
 {
   const J = await import(src('features/selflearn/journal.ts'))
