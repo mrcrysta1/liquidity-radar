@@ -165,6 +165,7 @@ export const WHATS_NEW: Array<{ date: string; items: string[] }> = [
   {
     date: '2026-11-07',
     items: [
+      'The bot now keeps a record of US economic releases (NFP, CPI, PPI, FOMC, claims, GDP and more) with forecast, actual and revisions, and measures how BTC, ETH and gold reacted after 15 min, 1 h, 4 h and 24 h.',
       'Market context card on the Self Learning tab: BTC on 15m / 1h / 4h, a 7-class market regime with its reason, every coin’s measured correlation with BTC (changes flagged), and gold with the dollar index and Treasury yields — refreshed by the bot every 15 minutes.',
       'Strategy audit card on the Self Learning tab: every strategy re-run on each market’s whole history at three cost levels, by year and BTC regime, with a keep / watch / retire verdict from fixed rules (a report only; nothing is switched automatically). Full report: docs/research/strategy-audit-2026-11-07.md.',
       'New Strategy ledger on the Self Learning tab: each strategy as its own paper portfolio, longs vs shorts, fees, slippage and real funding per trade, and every trade re-scored under moderate, conservative and stress costs.',
