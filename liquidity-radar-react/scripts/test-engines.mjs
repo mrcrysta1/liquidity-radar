@@ -2898,6 +2898,19 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('reports: not a week', R.normalizeWeekly({}), null)
 }
 
+// ---- server bot: status bar ------------------------------------------------------------
+{
+  const B = await import(src('features/selflearn/botStatus.ts'))
+  const now = 1_000_000_000
+  const base = { now, positions: 2, strategies: [{ id: 'f1', state: 'live' }, { id: 'c6', state: 'shadow' }, { id: 'x1', state: 'probation' }], todayR: [0.5, -0.1] }
+  const s = B.botStatus({ ...base, heartbeat: { t: now - 15_000, mode: 'hybrid' } })
+  eq('status: ok, live / probation / paper, positions, today', [s.health, s.ageS, s.live, s.probation, s.shadow, s.positions, s.todayN], ['ok', 15, ['f1'], ['x1'], 1, 2, 2])
+  near('status: today R', s.todayR, 0.4)
+  eq('status: a hand-over gap is not down', B.botStatus({ ...base, heartbeat: { t: now - 6 * 60_000 } }).health, 'handover')
+  eq('status: over 20 min or never is down', [B.botStatus({ ...base, heartbeat: { t: now - 30 * 60_000 } }).health, B.botStatus({ ...base, heartbeat: null }).health], ['down', 'down'])
+  eq('status: age text', [B.ageText(12), B.ageText(240), B.ageText(3 * 3600)], ['12 s', '4 min', '3 h'])
+}
+
 // ---- server bot: trade journal ------------------------------------------------------
 {
   const J = await import(src('features/selflearn/journal.ts'))
