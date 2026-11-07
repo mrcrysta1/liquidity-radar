@@ -17,6 +17,7 @@ import { instrumentOf, isInstrument } from '../../constants/instruments'
 import { signalData, signalHitRate, signalLearning } from '../../features/signals/signals'
 import { useTick } from '../useTick'
 import { CoinBadge } from '../common/CoinBadge'
+import { SignalTrust } from './SignalTrust'
 import { TileSkeleton } from '../home/Skeleton'
 
 type Candle = { t: number; o: number; h: number; l: number; c: number; v: number }
@@ -293,6 +294,7 @@ function SignalCard({ s }: { s: Sig }) {
       ) : (
         <p className="sg-nolv">No trade plan — the score is inside the ±15 dead zone, so the scanner is only watching.</p>
       )}
+      {side !== 'WAIT' && <SignalTrust sym={s.sym} tier={s.conv?.tier} />}
       <div className="sg-foot">
         <ul className="sg-why">
           {reasons.length ? reasons.map((r, i) => (

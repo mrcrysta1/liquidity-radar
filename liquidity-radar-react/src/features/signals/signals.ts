@@ -423,6 +423,11 @@ export function signalHitRate(): (WinRate & { open: number }) | null {
   return w.n >= 10 ? { ...w, open: calls.open.length } : null
 }
 
+/** The scanner's graded record on one market, and for one conviction tier across markets (the Signals cards' evidence line). */
+export function callRecord(sym: string, tier?: string): { market: WinRate; tier: WinRate | null } {
+  return { market: winRate(calls.done.filter((c) => c.sym === sym)), tier: tier ? winRate(calls.done.filter((c) => c.tier === tier)) : null }
+}
+
 /** The record behind the scanner's learning, for the UI and the docs. */
 export function signalLearning() {
   return {
