@@ -165,6 +165,7 @@ export const WHATS_NEW: Array<{ date: string; items: string[] }> = [
   {
     date: '2026-11-07',
     items: [
+      'Two experimental strategies paper-trade beside the others: X1 (F1 only while BTC is above its EMA 300) and X2 (F1 only on a volume surge). The strategy audit now also checks whether a filter really removes worse trades — for C6, X1 and X2 it is not proven yet.',
       'Daily & weekly report on the Self Learning tab (and to the chat webhook when set): releases and reactions, regime, strategies, the model, errors, anomalies and what to look at, plus this week against last.',
       'Model calibration study on the Self Learning tab: the model’s win chances checked daily against six alternatives, replayed in time order without look-ahead, longs and shorts apart (a report only).',
       'News trading intelligence on the Self Learning tab: which releases move BTC, ETH and gold, how each strategy did around them (counted per release, with ranges and an evidence label), why each trade is or is not news-driven, and the next release next to comparable past ones.',

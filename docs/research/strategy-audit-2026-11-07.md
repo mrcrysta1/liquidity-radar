@@ -17,6 +17,8 @@ Costs per market leg: moderate 0.07% (the bot’s own assumption), conservative 
 | F1 | **keep** | 3607 | +0.165 | +0.155 | +0.097 | +0.126 (n 382) |
 | F1X | **keep** | 3440 | +0.184 | +0.174 | +0.114 | +0.136 (n 369) ⚠ |
 | C2 | **watch** | 2959 | +0.045 | +0.036 | +0.005 | -0.191 (n 415) ⚠ |
+| X1 | **keep** | 3099 | +0.197 | +0.187 | +0.126 | +0.155 (n 317) ⚠ |
+| X2 | **keep** | 3044 | +0.194 | +0.184 | +0.124 | +0.173 (n 329) ⚠ |
 | C6 | **keep** | 1570 | +0.199 | +0.188 | +0.130 | +0.353 (n 215) ⚠ |
 | ML | **retire** | 24955 | -0.024 | -0.044 | -0.101 | -0.072 (n 3273) ⚠ |
 
@@ -153,6 +155,95 @@ Costs per market leg: moderate 0.07% (the bot’s own assumption), conservative 
 |---|---|---|
 | short | 2959 | +0.036 |
 
+## X1 — X1 F1 + BTC above EMA(300) (4h, long, experimental): KEEP
+
+- ✓ whole history at conservative costs: +0.187R, 95% range +0.072R to +0.302R
+- ✓ holdout: +0.155R over 317 trades (56 independent)
+- ✓ stress costs: +0.126R
+- ✓ 8 of 9 years positive
+- ✓ parameter neighbours not tested
+
+**Weaknesses found**
+
+- No untouched test period: designed or tuned after the Feb 2026+ holdout had been seen. Only trades from its go-live on are truly new evidence.
+- Filter not proven: the 621 F1 trades it skips averaged +0.052R (95% -0.112R to +0.217R) — not clearly worse than F1's +0.155R. 113 of its entries are ones F1 does not take (a skipped entry frees the market for a later one), which is where much of any difference comes from.
+
+- Conservative, whole history: +0.187R (n 3099, ≈1079 indep., 95% +0.072 to +0.302, PF 1.50); max drawdown 66.5R
+- Design period: +0.191R (n 2782, ≈1074 indep., 95% +0.073 to +0.309, PF 1.52)
+- Holdout: +0.155R (n 317, ≈56 indep., 95% -0.255 to +0.565, PF 1.37)
+- Since go-live (Nov 2026): -0.496R (n 4, ≈4 indep., 95% n/a to n/a, PF 0.00)
+- Costs + funding: 0.062R per trade (conservative); exits: signal 1718, trail 1163, sl 218
+- Markets positive: 19 of 24; best DOGEUSDT 92.7R, BTCUSDT 83.4R, ETHUSDT 58.3R; worst ATOMUSDT -10.8R, APTUSDT -11.0R, OPUSDT -12.7R
+- Filter check: F1 trades skipped +0.052R (n 621, ≈288 indep., 95% -0.112 to +0.217, PF 1.16); kept +0.176R (n 2986, ≈1095 indep., 95% +0.063 to +0.290, PF 1.47); 113 entries F1 does not take
+- Live replication (closed trades since Nov 1): 0 entries matched, 4 only in the backtest, 0 only in the bot
+
+| Year | Trades | Mean (cons.) | 95% range |
+|---|---|---|---|
+| 2018 | 31 | -0.081 | -0.447 to +0.286 |
+| 2019 | 135 | +0.359 | -0.021 to +0.739 |
+| 2020 | 332 | +0.437 | +0.007 to +0.866 |
+| 2021 | 454 | +0.360 | +0.006 to +0.714 |
+| 2022 | 185 | +0.014 | -0.244 to +0.272 |
+| 2023 | 561 | +0.141 | -0.140 to +0.422 |
+| 2024 | 585 | +0.174 | -0.086 to +0.434 |
+| 2025 | 459 | +0.012 | -0.252 to +0.277 |
+| 2026 | 357 | +0.101 | -0.334 to +0.536 |
+
+| BTC regime | Trades | Mean (cons.) | 95% range |
+|---|---|---|---|
+| bull-calm | 1906 | +0.188 | +0.037 to +0.338 |
+| bull-volatile | 1193 | +0.186 | +0.030 to +0.343 |
+
+| Side | Trades | Mean (cons.) |
+|---|---|---|
+| long | 3099 | +0.187 |
+
+## X2 — X2 F1 + breakout volume ≥ 1.5× (4h, long, experimental): KEEP
+
+- ✓ whole history at conservative costs: +0.184R, 95% range +0.066R to +0.302R
+- ✓ holdout: +0.173R over 329 trades (47 independent)
+- ✓ stress costs: +0.124R
+- ✓ 8 of 9 years positive
+- ✓ parameter neighbours not tested
+
+**Weaknesses found**
+
+- No untouched test period: designed or tuned after the Feb 2026+ holdout had been seen. Only trades from its go-live on are truly new evidence.
+- Loses in: bear-volatile (earns in bear-calm, bull-calm, bull-volatile).
+- Filter not proven: the 1132 F1 trades it skips averaged +0.135R (95% +0.002R to +0.269R) — not clearly worse than F1's +0.155R. 569 of its entries are ones F1 does not take (a skipped entry frees the market for a later one), which is where much of any difference comes from.
+
+- Conservative, whole history: +0.184R (n 3044, ≈1054 indep., 95% +0.066 to +0.302, PF 1.49); max drawdown 68.7R
+- Design period: +0.186R (n 2715, ≈1072 indep., 95% +0.067 to +0.304, PF 1.49)
+- Holdout: +0.173R (n 329, ≈47 indep., 95% -0.332 to +0.678, PF 1.43)
+- Since go-live (Nov 2026): -0.424R (n 3, ≈3 indep., 95% n/a to n/a, PF 0.00)
+- Costs + funding: 0.060R per trade (conservative); exits: trail 1152, signal 1638, sl 254
+- Markets positive: 19 of 24; best DOGEUSDT 95.1R, BTCUSDT 80.4R, ETHUSDT 74.0R; worst OPUSDT -7.4R, APTUSDT -8.5R, ATOMUSDT -15.3R
+- Filter check: F1 trades skipped +0.135R (n 1132, ≈721 indep., 95% +0.002 to +0.269, PF 1.38); kept +0.164R (n 2475, ≈880 indep., 95% +0.042 to +0.286, PF 1.45); 569 entries F1 does not take
+- Live replication (closed trades since Nov 1): 0 entries matched, 3 only in the backtest, 0 only in the bot
+
+| Year | Trades | Mean (cons.) | 95% range |
+|---|---|---|---|
+| 2018 | 32 | +0.003 | -0.329 to +0.335 |
+| 2019 | 161 | +0.295 | +0.006 to +0.585 |
+| 2020 | 301 | +0.465 | -0.002 to +0.933 |
+| 2021 | 443 | +0.341 | -0.031 to +0.713 |
+| 2022 | 256 | -0.061 | -0.319 to +0.197 |
+| 2023 | 543 | +0.126 | -0.166 to +0.417 |
+| 2024 | 531 | +0.189 | -0.097 to +0.474 |
+| 2025 | 401 | +0.067 | -0.219 to +0.353 |
+| 2026 | 376 | +0.112 | -0.344 to +0.569 |
+
+| BTC regime | Trades | Mean (cons.) | 95% range |
+|---|---|---|---|
+| bear-calm | 301 | +0.005 | -0.215 to +0.225 |
+| bear-volatile | 168 | -0.019 | -0.213 to +0.174 |
+| bull-calm | 1590 | +0.223 | +0.054 to +0.392 |
+| bull-volatile | 985 | +0.211 | +0.036 to +0.386 |
+
+| Side | Trades | Mean (cons.) |
+|---|---|---|
+| long | 3044 | +0.184 |
+
 ## C6 — C6 F1 + model filter (4h, long): KEEP
 
 - ✓ whole history at conservative costs: +0.188R, 95% range +0.042R to +0.335R
@@ -164,6 +255,7 @@ Costs per market leg: moderate 0.07% (the bot’s own assumption), conservative 
 **Weaknesses found**
 
 - No untouched test period: designed or tuned after the Feb 2026+ holdout had been seen. Only trades from its go-live on are truly new evidence.
+- Filter not proven: the 2037 F1 trades it skips averaged +0.129R (95% +0.021R to +0.237R) — not clearly worse than F1's +0.155R.
 
 - Conservative, whole history: +0.188R (n 1570, ≈598 indep., 95% +0.042 to +0.335, PF 1.47); max drawdown 45.4R
 - Design period: +0.162R (n 1355, ≈610 indep., 95% +0.020 to +0.304, PF 1.41)
@@ -172,6 +264,7 @@ Costs per market leg: moderate 0.07% (the bot’s own assumption), conservative 
 - Costs + funding: 0.058R per trade (conservative); exits: trail 619, signal 807, sl 144
 - Markets positive: 18 of 24; best XRPUSDT 40.4R, ETHUSDT 35.5R, ADAUSDT 33.6R; worst LTCUSDT -7.7R, OPUSDT -12.4R, ATOMUSDT -15.8R
 - Parameter neighbours positive: 100%
+- Filter check: F1 trades skipped +0.129R (n 2037, ≈1124 indep., 95% +0.021 to +0.237, PF 1.38); kept +0.188R (n 1570, ≈598 indep., 95% +0.042 to +0.335, PF 1.47); 0 entries F1 does not take
 - Live replication (closed trades since Nov 1): 3 entries matched, 0 only in the backtest, 0 only in the bot
 
 | Year | Trades | Mean (cons.) | 95% range |

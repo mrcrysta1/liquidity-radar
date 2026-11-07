@@ -47,6 +47,12 @@
 #       market needs ~2 such slots before the model decides there (first run:
 #       ~45 min for all 24); later, the 24-hourly walk-forwards and 4-hourly
 #       challengers are ~30 slots per 4 h, well inside the 5 h 30 min run.
+#   x1  EXPERIMENTAL, shadow, all 24 markets (src/bot/experimental.ts): F1
+#       entries only while BTCUSDT closes above its EMA(300).
+#   x2  EXPERIMENTAL, shadow, all 24 markets: F1 entries only when the
+#       breakout bar's volume is >= 1.5x its 20-bar average.
+#       No health bands: never promoted automatically. They are candidates
+#       to be judged by `npm run audit` and their own paper trades.
 #
 # REAL (demo) TRADES: research strategy F1 (f1:live,
 # radar-worker/src/bot/strategy.ts), long only, on all 24 markets:
@@ -210,7 +216,7 @@ jobs:
           # that leaves its health bands is demoted to shadow (and promoted
           # back after 30 good shadow trades); bot_state 'strategy:<id>'.
           # Hybrid keeps the portfolio heat cap (2.4% per side, 3.15% total).
-          BOT_STRATEGIES: 'f1:live@*;c6:shadow@*;f1x:shadow@*;c2:shadow@*;ml:shadow@*'
+          BOT_STRATEGIES: 'f1:live@*;c6:shadow@*;f1x:shadow@*;c2:shadow@*;ml:shadow@*;x1:shadow@*;x2:shadow@*'
           # The model's walk-forward and training run from the tick loop, one
           # heavy job per minute across all markets, not inside startup.
           BOT_LEARN_BACKGROUND: '1'
