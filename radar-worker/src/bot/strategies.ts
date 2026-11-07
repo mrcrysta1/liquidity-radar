@@ -32,6 +32,7 @@ import { evaluateHealth } from './health.ts'
 import type { HealthBands, HealthRecord, StrategyState } from './health.ts'
 import type { BotStore } from './store.ts'
 import { c6Decide } from './c6.ts'
+import { experimental } from './experimental.ts'
 
 /** An entry on the close of the signal bar. */
 export interface Signal {
@@ -348,8 +349,8 @@ export const C6_STRATEGY: RuleStrategy = {
 
 export const ML_STRATEGY: ModelStrategy = { kind: 'model', id: 'ml', name: 'Model (MLP, bracket)' }
 
-/** Every strategy the bot knows, by id. */
-export const STRATEGIES: Record<string, Strategy> = { f1: F1_STRATEGY, c6: C6_STRATEGY, f1x: F1X_STRATEGY, c2: C2_STRATEGY, ml: ML_STRATEGY }
+/** Every strategy the bot knows, by id; x1 / x2 are the experimental ones (experimental.ts, shadow only, no bands). */
+export const STRATEGIES: Record<string, Strategy> = { f1: F1_STRATEGY, c6: C6_STRATEGY, f1x: F1X_STRATEGY, c2: C2_STRATEGY, ml: ML_STRATEGY, ...experimental(F1_STRATEGY) }
 
 /** The rule strategy behind an open trend-mode trade (rows from before 008_bot_strategies.sql have none: F1). */
 export function ruleStrategy(id: string | null | undefined): RuleStrategy | null {

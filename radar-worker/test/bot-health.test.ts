@@ -160,6 +160,9 @@ test('BOT_STRATEGIES: parsing, the BOT_STRATEGY=trend alias, and the workflow se
     { id: 'f1x', state: 'shadow' },
     { id: 'c2', state: 'shadow' },
     { id: 'ml', state: 'shadow' },
+    // Experimental (src/bot/experimental.ts): paper only, after every established strategy.
+    { id: 'x1', state: 'shadow' },
+    { id: 'x2', state: 'shadow' },
   ])
   // The model on all 24 markets: its heavy jobs must run in the background, not in startup.
   assert.match(wf, /^\s*BOT_LEARN_BACKGROUND:\s*'1'\s*$/m)

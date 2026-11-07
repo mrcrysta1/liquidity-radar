@@ -47,7 +47,7 @@ const MODERATE = { taker: 0.0005, maker: 0.0002, slip: 0.0002, tpMaker: true }
  * no period of theirs is untouched: their holdout is reported but flagged.
  */
 const HOLDOUT_FROM = Date.UTC(2026, 1, 1)
-const SEEN_HOLDOUT: Record<string, boolean> = { f1: false, f1x: true, c2: true, c6: true, ml: true }
+const SEEN_HOLDOUT: Record<string, boolean> = { f1: false, f1x: true, c2: true, c6: true, ml: true, x1: true, x2: true }
 const LIVE_FROM = Date.UTC(2026, 10, 1)
 
 async function cached<T>(name: string, get: () => Promise<T>): Promise<T> {
@@ -175,6 +175,27 @@ interface StrategyReport {
   verdict: 'keep' | 'watch' | 'retire'
   why: string[]
   replication?: { matched: number; backtestOnly: number; liveOnly: number; liveOnlyEntries: string[] }
+  /** For a filtered F1 (C6, X1, X2): F1's trades it skips vs keeps (conservative), and its entries F1 does not take. */
+  filter?: { skipped: Summary; kept: Summary; newEntries: number; helps: boolean }
+}
+
+/** Does a filter on F1 remove worse trades? Proven only if the skipped trades' 95% range is below F1's mean. */
+function filterCheck(r: StrategyReport, f1: AuditTrade[], own: AuditTrade[]): void {
+  const cons = (x: AuditTrade) => ({ t: x.t, r: netR(x, PROFILES[1]) })
+  const keep = new Set(own.map((x) => x.symbol + ':' + x.t))
+  const base = new Set(f1.map((x) => x.symbol + ':' + x.t))
+  const skipped = summarize(f1.filter((x) => !keep.has(x.symbol + ':' + x.t)).map(cons))
+  const kept = summarize(f1.filter((x) => keep.has(x.symbol + ':' + x.t)).map(cons))
+  const f1Mean = summarize(f1.map(cons)).mean ?? 0
+  const helps = skipped.hi != null && skipped.hi < f1Mean
+  r.filter = { skipped, kept, newEntries: own.filter((x) => !base.has(x.symbol + ':' + x.t)).length, helps }
+  const f = (v: number | null) => (v == null ? 'n/a' : (v >= 0 ? '+' : '') + v.toFixed(3) + 'R')
+  r.flags.push(
+    helps
+      ? `Filter helps: the ${skipped.n} F1 trades it skips averaged ${f(skipped.mean)} (95% up to ${f(skipped.hi)}), below F1's ${f(f1Mean)}.`
+      : `Filter not proven: the ${skipped.n} F1 trades it skips averaged ${f(skipped.mean)} (95% ${f(skipped.lo)} to ${f(skipped.hi)}) — not clearly worse than F1's ${f(f1Mean)}.` +
+          (r.filter.newEntries ? ` ${r.filter.newEntries} of its entries are ones F1 does not take (a skipped entry frees the market for a later one), which is where much of any difference comes from.` : ''),
+  )
 }
 
 function report(id: string, name: string, ts: AuditTrade[], neighbours: number | null): StrategyReport {
@@ -291,6 +312,7 @@ function md(rep: { generatedAt: number; data: { markets: number; from: number; t
     out.push(`- Costs + funding: ${s.costPerTrade.toFixed(3)}R per trade (conservative); exits: ${Object.entries(s.exits).map(([k, v]) => `${k} ${v}`).join(', ')}`)
     out.push(`- Markets positive: ${s.marketsPositive} of ${s.byMarket.length}; best ${s.byMarket.slice(0, 3).map((m) => `${m.symbol} ${m.totalR.toFixed(1)}R`).join(', ')}; worst ${s.byMarket.slice(-3).map((m) => `${m.symbol} ${m.totalR.toFixed(1)}R`).join(', ')}`)
     if (s.neighbours != null) out.push(`- Parameter neighbours positive: ${Math.round(s.neighbours * 100)}%`)
+    if (s.filter) out.push(`- Filter check: F1 trades skipped ${line(s.filter.skipped)}; kept ${line(s.filter.kept)}; ${s.filter.newEntries} entries F1 does not take`)
     if (s.replication) {
       out.push(`- Live replication (closed trades since Nov 1): ${s.replication.matched} entries matched, ${s.replication.backtestOnly} only in the backtest, ${s.replication.liveOnly} only in the bot${s.replication.liveOnly ? ` (${s.replication.liveOnlyEntries.join(', ')}: check whether the backtest was still in a trade opened before the bot started)` : ''}`)
     }
@@ -311,7 +333,7 @@ async function main() {
   const btc = bars.BTCUSDT
   const reg = btcRegimes(btc)
   const trades: Record<string, AuditTrade[]> = {}
-  for (const id of ['f1', 'f1x', 'c2']) {
+  for (const id of ['f1', 'f1x', 'c2', 'x1', 'x2']) {
     const s = STRATEGIES[id] as RuleStrategy
     trades[id] = SYMBOLS.flatMap((sym) => ruleTrades(id, s, sym, bars[sym], btc, fund[sym], reg))
     log(id, trades[id].length, 'trades')
@@ -329,8 +351,9 @@ async function main() {
   log('parameter neighbours…')
   const nF1 = neighbourShare(bars, fund, { entryLen: 20, exitLen: 10, slAtr: 3 })
   const nF1x = neighbourShare(bars, fund, { entryLen: 20, exitLen: 15, slAtr: 3 })
-  const neighbours: Record<string, number | null> = { f1: nF1.share, f1x: nF1x.share, c6: nF1.share, c2: null, ml: null }
+  const neighbours: Record<string, number | null> = { f1: nF1.share, f1x: nF1x.share, c6: nF1.share, c2: null, ml: null, x1: null, x2: null }
   const reports = Object.keys(trades).map((id) => report(id, STRATEGIES[id]?.name ?? id, trades[id], neighbours[id]))
+  for (const r of reports) if (['c6', 'x1', 'x2'].includes(r.id)) filterCheck(r, trades.f1, trades[r.id])
   await replication(reports, trades).catch((e) => log('replication skipped:', (e as Error).message))
   const ends = Object.values(bars).filter((b) => b.length)
   const rep = {
