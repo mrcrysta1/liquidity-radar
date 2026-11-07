@@ -19,6 +19,8 @@ import type { ContextView } from './marketContext'
 import { TRACKED_NEWS } from './newsIntel'
 import { normalizeMlEval } from './mlEval'
 import { normalizeDaily, normalizeWeekly } from './reports'
+import { botStatus } from './botStatus'
+import type { BotStatus } from './botStatus'
 import type { DayReport, WeekReport } from './reports'
 import type { MlEval } from './mlEval'
 import type { Context4h, NewsEvent, NewsTrade, ReactionRow } from './newsIntel'
@@ -410,4 +412,27 @@ export async function loadReports(): Promise<{ daily: DayReport[]; weekly: WeekR
   const rows = await rest<Array<{ key: string; value: unknown }>>('bot_state?select=key,value&key=in.(report:daily,report:weekly)')
   const get = (k: string) => rows.find((r) => r.key === k)?.value
   return { daily: normalizeDaily(get('report:daily')), weekly: normalizeWeekly(get('report:weekly')) }
+}
+
+/** The status bar: heartbeat, open positions, strategy states and today's closed demo trades (three small requests). */
+export async function loadBotStatus(now = Date.now()): Promise<BotStatus | null> {
+  if (!SERVER_BOT) return null
+  const day = new Date(now - (now % 86_400_000)).toISOString()
+  // The same queries the account panel and the Strategies card use.
+  const [st, strats, today] = await Promise.all([
+    rest<Array<{ key: string; value: unknown }>>('bot_state?select=key,value&key=in.(account,heartbeat)'),
+    loadStrategies().catch(() => null),
+    rest<Array<{ r_multiple: number | null }>>(`bot_trades?select=r_multiple&status=eq.closed&closed_at=gte.${day}`),
+  ])
+  const get = (k: string) => st.find((r) => r.key === k)?.value as Record<string, unknown> | undefined
+  const hb = get('heartbeat')
+  const acct = get('account') as { positions?: unknown[] } | undefined
+  const strategies = (strats ?? []).map((x) => ({ id: x.id, state: x.state }))
+  return botStatus({
+    now,
+    heartbeat: hb && Number.isFinite(Number(hb.t)) ? { t: Number(hb.t), mode: typeof hb.mode === 'string' ? hb.mode : undefined } : null,
+    positions: Array.isArray(acct?.positions) ? acct.positions.length : 0,
+    strategies,
+    todayR: today.map((x) => Number(x.r_multiple)).filter(Number.isFinite),
+  })
 }

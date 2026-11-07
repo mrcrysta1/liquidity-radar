@@ -22,7 +22,7 @@ export const START: LearnSection = {
             '**Signals**: the scanner across 19 markets and three timeframes, with trade plans and a graded win rate.',
             '**Analysis**: the liquidation heatmap, volume profile, order flow, liquidation levels and Fibonacci zones.',
             '**Neural Net**: the models\' live predictions, AI insights and market sentiment.',
-            '**Self Learning**: the paper-trading engine, its models, trades and learning log, and the server bot.',
+            '**Self Learning**: the server bot, with a status bar (running, live strategies, open positions, today) and sub-tabs: Overview, Strategies, Market & News, Model, Journal, and the in-browser paper engine.',
             '**Market**, **Bubbles**, **News**: the wider market, a visual map of movers, and news with sentiment plus the economic calendar.',
             '**Settings**: data sources, appearance, and this Learning library.',
           ],
@@ -165,6 +165,7 @@ export const WHATS_NEW: Array<{ date: string; items: string[] }> = [
   {
     date: '2026-11-07',
     items: [
+      'Self Learning is now split into sub-tabs (Overview, Strategies, Market & News, Model, Journal, Browser engine) under a bot status bar; only the open sub-tab loads its data, so the page opens faster.',
       'Two experimental strategies paper-trade beside the others: X1 (F1 only while BTC is above its EMA 300) and X2 (F1 only on a volume surge). The strategy audit now also checks whether a filter really removes worse trades — for C6, X1 and X2 it is not proven yet.',
       'Daily & weekly report on the Self Learning tab (and to the chat webhook when set): releases and reactions, regime, strategies, the model, errors, anomalies and what to look at, plus this week against last.',
       'Model calibration study on the Self Learning tab: the model’s win chances checked daily against six alternatives, replayed in time order without look-ahead, longs and shorts apart (a report only).',

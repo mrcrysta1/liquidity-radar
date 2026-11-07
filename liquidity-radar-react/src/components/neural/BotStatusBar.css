@@ -1,0 +1,14 @@
+/* Bot status bar (components/neural/BotStatusBar.tsx) and the Self Learning
+   sub-tabs (LearningLab.tsx). Own file so it never collides with index.css. */
+.bs-bar{display:flex;flex-wrap:wrap;align-items:center;gap:4px 14px;padding:8px 12px;border-radius:12px;background:var(--sunk-2);border:1px solid var(--hair-2);border-left:3px solid var(--dim);font-size:var(--text-xs);color:var(--muted)}
+.bs-bar>b{display:flex;align-items:center;gap:6px;font-size:var(--text-sm);color:var(--txt)}
+.bs-bar span b{color:var(--txt)}
+.bs-dot{width:8px;height:8px;border-radius:50%;background:var(--dim);display:inline-block}
+.bs-ok{border-left-color:var(--green)}.bs-ok .bs-dot{background:var(--green);box-shadow:0 0 0 3px rgba(34,197,94,.18)}
+.bs-wait{border-left-color:var(--amber)}.bs-wait .bs-dot{background:var(--amber)}
+.bs-down{border-left-color:var(--red)}.bs-down .bs-dot{background:var(--red)}
+.bs-demo{margin-left:auto;color:var(--dim)}
+.lab-tabs{padding:2px 0}
+.lab-tabs .nn-seg{overflow-x:auto;flex-wrap:nowrap;scrollbar-width:none}
+.lab-tabs .nn-seg button{white-space:nowrap}
+@media (max-width:520px){.bs-demo{margin-left:0}}

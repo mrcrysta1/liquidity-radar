@@ -1,8 +1,9 @@
-// The Self Learning tab: everything behind the Neural Net dashboard, in full.
-// Two markets only (BTC and Gold perpetuals). Engine controls, the Binance Demo
-// account with the server bot's trades and activity, every model with its
-// unseen-data record and live read, performance across all trades, the trade
-// records with export, the full learning log and (folded) the backtest lab.
+// The Self Learning tab: the server bot's status bar, then sub-tabs — Overview
+// (Binance Demo account and activity, planned trades, daily report),
+// Strategies (health, ledger, audit, readiness), Market & News (context, news
+// intelligence), Model (on track, metrics, calibration study), Journal, and the
+// in-browser paper engine (controls, models, performance, log, records,
+// backtest lab). Only the open sub-tab is mounted, so only its cards load.
 import { useEffect, useState } from 'react'
 import { pfmt } from '../../utils/format'
 import { STRATS, stats } from '../../features/selflearn/strategy'
@@ -31,6 +32,7 @@ import { MarketContextCard } from './MarketContext'
 import { NewsIntelCard } from './NewsIntel'
 import { MlEvalCard } from './MlEvalCard'
 import { BotReportsCard } from './BotReports'
+import { BotStatusBar } from './BotStatusBar'
 import { ReadinessCard } from './ReadinessCard'
 import { ModelMetricsCard } from './ModelMetricsCard'
 import { TradeJournal } from './TradeJournal'
@@ -479,33 +481,91 @@ function BotActivity() {
   )
 }
 
+// Sub-tabs: only the open one is mounted, so only its cards fetch data.
+const LAB_TABS = [
+  ['overview', 'Overview'],
+  ['strategies', 'Strategies'],
+  ['market', 'Market & News'],
+  ['model', 'Model'],
+  ['journal', 'Journal'],
+  ['engine', 'Browser engine'],
+] as const
+type LabTab = (typeof LAB_TABS)[number][0]
+const TAB_KEY = 'lab:tab'
+
+function savedTab(): LabTab {
+  try {
+    const v = localStorage.getItem(TAB_KEY)
+    return LAB_TABS.some(([k]) => k === v) ? (v as LabTab) : 'overview'
+  } catch {
+    return 'overview'
+  }
+}
+
 export function LearningLab() {
+  const [tab, setTab] = useState<LabTab>(savedTab)
+  const pick = (t: LabTab) => {
+    setTab(t)
+    try {
+      localStorage.setItem(TAB_KEY, t)
+    } catch {
+      // Private mode: the tab is just not remembered.
+    }
+  }
   return (
     <div className="nn-page lab-page">
-      <Guard name="Lab header"><LabHead /></Guard>
-      <Guard name="Binance account"><BinanceAccount><BotActivity /></BinanceAccount></Guard>
-      <Guard name="Planned trades"><PlannedTrades /></Guard>
-      <Guard name="Daily report"><BotReportsCard /></Guard>
-      <Guard name="Market context"><MarketContextCard /></Guard>
-      <Guard name="News intelligence"><NewsIntelCard /></Guard>
-      <Guard name="Strategies"><StrategiesCard /></Guard>
-      <Guard name="Strategy ledger"><StrategyLedgerCard /></Guard>
-      <Guard name="Strategy audit"><StrategyAuditCard /></Guard>
-      <Guard name="Go-live readiness"><ReadinessCard /></Guard>
-      <Guard name="On track"><OnTrackPanel /></Guard>
-      <Guard name="Trade journal"><TradeJournal /></Guard>
-      <Guard name="Model metrics"><ModelMetricsCard /></Guard>
-      <Guard name="Model calibration study"><MlEvalCard /></Guard>
-      <Guard name="Models"><Models /></Guard>
-      <div className="lab-row">
-        <Guard name="Performance"><Performance /></Guard>
-        <Guard name="Learning log"><FullLog /></Guard>
-      </div>
-      <Guard name="Trade records"><Records /></Guard>
-      <details className="lab-adv">
-        <summary><Ico d={NI.flask} size={14} /> Advanced · Backtest lab <small>replay BTC or Gold history through the engine</small></summary>
-        <Guard name="Backtest lab"><BacktestLab /></Guard>
-      </details>
+      <Guard name="Bot status"><BotStatusBar /></Guard>
+      <nav className="lab-tabs" aria-label="Self Learning sections">
+        <div className="nn-seg" role="tablist">
+          {LAB_TABS.map(([k, label]) => (
+            <button key={k} type="button" role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => pick(k)}>{label}</button>
+          ))}
+        </div>
+      </nav>
+      {tab === 'overview' && (
+        <>
+          <Guard name="Binance account"><BinanceAccount><BotActivity /></BinanceAccount></Guard>
+          <Guard name="Planned trades"><PlannedTrades /></Guard>
+          <Guard name="Daily report"><BotReportsCard /></Guard>
+        </>
+      )}
+      {tab === 'strategies' && (
+        <>
+          <Guard name="Strategies"><StrategiesCard /></Guard>
+          <Guard name="Strategy ledger"><StrategyLedgerCard /></Guard>
+          <Guard name="Strategy audit"><StrategyAuditCard /></Guard>
+          <Guard name="Go-live readiness"><ReadinessCard /></Guard>
+        </>
+      )}
+      {tab === 'market' && (
+        <>
+          <Guard name="Market context"><MarketContextCard /></Guard>
+          <Guard name="News intelligence"><NewsIntelCard /></Guard>
+        </>
+      )}
+      {tab === 'model' && (
+        <>
+          <Guard name="On track"><OnTrackPanel /></Guard>
+          <Guard name="Model metrics"><ModelMetricsCard /></Guard>
+          <Guard name="Model calibration study"><MlEvalCard /></Guard>
+        </>
+      )}
+      {tab === 'journal' && <Guard name="Trade journal"><TradeJournal /></Guard>}
+      {tab === 'engine' && (
+        <>
+          <Guard name="Lab header"><LabHead /></Guard>
+          <Guard name="Models"><Models /></Guard>
+          <div className="lab-row">
+            <Guard name="Performance"><Performance /></Guard>
+            <Guard name="Learning log"><FullLog /></Guard>
+          </div>
+          <Guard name="Trade records"><Records /></Guard>
+          <details className="lab-adv">
+            <summary><Ico d={NI.flask} size={14} /> Advanced · Backtest lab <small>replay BTC or Gold history through the engine</small></summary>
+            <Guard name="Backtest lab"><BacktestLab /></Guard>
+          </details>
+        </>
+      )}
     </div>
   )
 }
