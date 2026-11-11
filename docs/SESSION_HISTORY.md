@@ -42,8 +42,22 @@ Entry format:
 - Plan (one PR each): 1 bug fixes → 2 comparison study (F1 / F1+C6 / F1+BTC /
   both, exit variants, giveback, per regime) → 3 one regime + correlation
   history → 4 news strategy N1 (paper) → 5 dashboard cards.
-- Done: PR 1 (B1–B4 fixes + tests + self-test check for the trailed stop).
-- Open: PRs 2–5.
+- Done: PR 1 #181 merged (B1–B4 fixes + tests). Testnet self-test 10/10,
+  incl. "trailed stop replaces the old one" — the -4130 fix works on Binance.
+- PR 2 (study, `npm run study`, docs/research/study-2026-11-11.md), 3,610 F1
+  trades 2019–2026, conservative costs, day-clustered:
+  - F1 alone +0.151R (95% +0.039..+0.262). F1+C6 +0.188 (rejected +0.118),
+    F1+BTC +0.170 (rejected +0.053), F1+C6+BTC +0.196 (rejected +0.120).
+    No filter proven: what each turns down is still positive on average.
+    Holdout (Feb 2026+) is not independent for C6 / the BTC rule.
+  - Exits vs current (A +0.155): trail 3 ATR −0.099 (sig. worse), trail 2
+    −0.141, partial at 1.5R −0.064, at 2R −0.056, break-even at 1R −0.031,
+    EMA(20) exit −0.086; EMA(50) exit +0.019 (not significant). A trend
+    strategy's profit is in the rare long runs; protecting early cuts them.
+    Under A, 321 of 1,371 trades that reached +1R closed at a loss.
+  - Live since Nov 1: ml 1,087 paper trades on 59 candles, per-candle mean
+    +0.078R (95% −0.171..+0.327) — not significant. Others too few.
+- Open: PRs 3–5.
 
 ## 2026-11-11 — history file + trading bot status
 - Asked: keep a separate history file updated on every order; give the status

@@ -13,6 +13,7 @@
     "train": "node src/train.ts",
     "selftest": "node src/selftest.ts",
     "audit": "node scripts/audit.ts",
+    "study": "node scripts/study.ts",
     "news": "node scripts/news.ts",
     "mleval": "node scripts/ml-eval.ts",
     "reset-risk": "node scripts/reset-risk.mjs",
