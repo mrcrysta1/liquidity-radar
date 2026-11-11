@@ -66,7 +66,17 @@ Entry format:
   weak-bear +0.01, uncertain +0.40 (many cells, some will look good by
   chance); downside beta > beta for 22 of 23 coins; correlation changes
   significantly in 17–37% of 30-day windows (not a constant).
-- Open: PRs 4–5.
+- PR 3 #183 merged.
+- PR 4 (N1 news strategy, paper only): src/news/n1.ts, sql/011
+  news_signals (applied by the bot workflow), recordN1 after each release's
+  reactions (from 2026-11-11), `npm run news-study`. Pre-registered rule:
+  60-min reaction |z| ≥ 2 → trade with it (continue) or against (fade), exit
+  release + 24 h, 0.10%/leg. Mode chosen on 2019–2024 only: continue
+  (+0.086%, n 127, 95% −0.91..+1.08); test 2025+: −0.227% (n 68, 95%
+  −0.88..+0.43). Fade −0.49% design. Baseline (every release, long 24 h)
+  −0.30%. No measurable information from the first-hour reaction. No
+  consensus forecasts in free history → actual vs forecast untestable.
+- Open: PR 5 (dashboard cards); publish study:latest / news:study.
 
 ## 2026-11-11 — history file + trading bot status
 - Asked: keep a separate history file updated on every order; give the status
