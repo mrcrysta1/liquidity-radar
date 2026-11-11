@@ -183,6 +183,12 @@ export const TECH: LearnSection = {
 /** Newest first. Add a line here whenever a feature ships. */
 export const WHATS_NEW: Array<{ date: string; items: string[] }> = [
   {
+    date: '2026-11-11',
+    items: [
+      'Testnet bot fixes from the 11 Nov audit: the trailing stop now really moves on Binance (before, every raise was refused with error -4130, so trades kept their first stop); trades record the real entry fill instead of the candle close (the testnet reports an average price of 0); funding paid or received is now part of each trade’s profit; the Strategy ledger no longer adds modelled slippage to real trades whose prices are already the fills.',
+    ],
+  },
+  {
     date: '2026-11-07',
     items: [
       'Radar AI has a brain: it knows how the whole app and bot work (every guide, the bot manual, the audits and the code notes), looks up live prices, chart stats, trades, the audit, reports and past release reactions when it needs them, teaches ideas like machine learning step by step, and answers casual English, Roman Urdu or Hindi in the same language. Same brain in the chat and in Discord.',

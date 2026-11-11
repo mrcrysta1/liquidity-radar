@@ -35,9 +35,14 @@ class FakeExchange implements Exchange {
   pos = { amt: 0, entry: 0 }
   balance: number | null = 10_000
   log: Fill[] = []
-  algo: Array<{ algoId: number; side: 'BUY' | 'SELL'; trigger: number }> = []
+  /** Stops on the exchange; qty null = closePosition (Binance allows one per direction). */
+  algo: Array<{ algoId: number; side: 'BUY' | 'SELL'; trigger: number; qty: number | null }> = []
   limits: Array<{ orderId: number; side: 'BUY' | 'SELL'; qty: number; price: number }> = []
   failStop = false
+  /** Market orders answered with avgPrice 0 (as the testnet does); the fills hold the price. */
+  zeroAvgPrice = false
+  /** Funding over a trade, USDT (negative = paid). */
+  fundingUsd = 0
   /** Reduce-only market orders that fail (a timeout) before one goes through. */
   failFlatten = 0
   /** Post-only target rejected as it would cross (Binance -5022). */
@@ -81,12 +86,14 @@ class FakeExchange implements Exchange {
     const orderId = this.id++
     const q = reduceOnly ? Math.min(Number(quantity), Math.abs(this.pos.amt)) : Number(quantity)
     if (q > 0) this.exec(side, q, this.price, false, orderId)
-    return { orderId, avgPrice: String(this.price), executedQty: String(q) }
+    return { orderId, avgPrice: this.zeroAvgPrice ? '0.00' : String(this.price), executedQty: String(q) }
   }
-  async bracketLeg(_s: string, side: 'BUY' | 'SELL', _t: string, triggerPrice: string) {
+  async bracketLeg(_s: string, side: 'BUY' | 'SELL', _t: string, triggerPrice: string, _c: string, quantity?: string) {
     if (this.failStop) throw new Error('simulated rejection')
+    if (!quantity && this.algo.some((a) => a.side === side && a.qty == null))
+      throw new Error('Binance 400 -4130: An open stop or take profit order with GTE and closePosition in the direction is existing.')
     const algoId = this.id++
-    this.algo.push({ algoId, side, trigger: Number(triggerPrice) })
+    this.algo.push({ algoId, side, trigger: Number(triggerPrice), qty: quantity ? Number(quantity) : null })
     this.ops.push('place:' + algoId)
     return { algoId }
   }
@@ -111,13 +118,16 @@ class FakeExchange implements Exchange {
   async fills(_s: string, start: number) {
     return this.log.filter((f) => f.time >= start)
   }
+  async funding() {
+    return this.fundingUsd
+  }
   move(p: number) {
     this.price = p
     for (const a of [...this.algo]) {
       const hit = a.side === 'SELL' ? p <= a.trigger : p >= a.trigger
       if (hit && this.pos.amt !== 0) {
         this.algo = this.algo.filter((x) => x !== a)
-        this.exec(a.side, Math.abs(this.pos.amt), a.trigger, false, a.algoId)
+        this.exec(a.side, Math.min(a.qty ?? Infinity, Math.abs(this.pos.amt)), a.trigger, false, a.algoId)
       }
     }
     for (const l of [...this.limits]) {
@@ -1405,4 +1415,32 @@ test('trend: a model trade open from before the switch keeps its bracket — tim
   await t.tick(true, Date.now())
   const row = (await pg.query<Record<string, unknown>>('select * from bot_trades where id = $1', [id])).rows[0]
   assert.equal(row.exit_reason, 'time')
+})
+
+test('trend: with avgPrice 0 from the exchange, the entry is the order fill, not the bar close', async () => {
+  const { ex, t, row, h, state } = await trendTrader()
+  const close = h.hist[state.idx - 1].c
+  ex.price = +(close * 1.003).toFixed(2)
+  ex.zeroAvgPrice = true
+  await t.tick(true, Date.now())
+  const r = await row()
+  assert.equal(Number(r.entry), ex.price, 'entry from the fills')
+  assert.equal(Number(r.planned_entry), close)
+  assert.ok(Number(r.slippage_bps) > 25 && Number(r.slippage_bps) < 35, 'about 30 bps paid: ' + r.slippage_bps)
+  assert.ok(Math.abs(Number(r.risk_usd) - Number(r.qty) * (Number(r.entry) - Number(r.sl))) < 1e-6, 'risk from the real fill')
+})
+
+test('trend: funding settled while open is in the trade P&L', async () => {
+  const { ex, t, row } = await trendTrader()
+  await t.tick(true, Date.now())
+  const open = await row()
+  ex.fundingUsd = -1.5
+  ex.move(Number(open.sl) - 1)
+  await t.tick(true, Date.now())
+  const r = await row()
+  assert.equal(r.status, 'closed')
+  const exits = ex.log.filter((f) => f.side === 'SELL')
+  const gross = exits.reduce((a, f) => a + f.realizedPnl, 0)
+  const fees = ex.log.reduce((a, f) => a + f.commission, 0)
+  assert.ok(Math.abs(Number(r.pnl_usd) - (gross - fees - 1.5)) < 1e-6, `pnl ${r.pnl_usd} = gross − fees − funding`)
 })

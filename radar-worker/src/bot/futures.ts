@@ -285,15 +285,20 @@ export class Futures {
     })) as { orderId: number; avgPrice: string; executedQty: string; status: string; updateTime: number }
   }
 
-  /** Exchange-side stop or target that closes the whole position (Algo Order API). */
-  async bracketLeg(symbol: string, side: 'BUY' | 'SELL', type: 'STOP_MARKET' | 'TAKE_PROFIT_MARKET', triggerPrice: string, clientAlgoId: string) {
+  /**
+   * Exchange-side stop or target (Algo Order API): closes the whole position,
+   * or, with `quantity`, a reduce-only order of that size. Binance allows one
+   * closePosition stop per direction (-4130 on a second), so a replacement
+   * stop placed before the old one is cancelled must be sized.
+   */
+  async bracketLeg(symbol: string, side: 'BUY' | 'SELL', type: 'STOP_MARKET' | 'TAKE_PROFIT_MARKET', triggerPrice: string, clientAlgoId: string, quantity?: string) {
     return (await this.request('POST', '/fapi/v1/algoOrder', {
       algoType: 'CONDITIONAL',
       symbol,
       side,
       type,
       triggerPrice,
-      closePosition: 'true',
+      ...(quantity ? { quantity, reduceOnly: 'true' } : { closePosition: 'true' }),
       workingType: 'MARK_PRICE',
       priceProtect: 'true',
       clientAlgoId,
@@ -345,6 +350,12 @@ export class Futures {
   async openAlgo(symbol: string): Promise<Array<{ algoId: number; orderType: string; triggerPrice: string; clientAlgoId: string }>> {
     const r = (await this.request('GET', '/fapi/v1/openAlgoOrders', { symbol })) as unknown
     return Array.isArray(r) ? (r as never) : ((r as { orders?: never[] })?.orders ?? [])
+  }
+
+  /** Funding paid (negative) or received (positive) on `symbol` in [startTime, endTime], USDT. */
+  async funding(symbol: string, startTime: number, endTime: number): Promise<number> {
+    const rows = (await this.request('GET', '/fapi/v1/income', { symbol, incomeType: 'FUNDING_FEE', startTime, endTime, limit: 1000 })) as Array<{ income: string; asset: string }>
+    return rows.filter((x) => x.asset === 'USDT').reduce((a, x) => a + Number(x.income), 0)
   }
 
   async fills(symbol: string, startTime: number): Promise<Fill[]> {

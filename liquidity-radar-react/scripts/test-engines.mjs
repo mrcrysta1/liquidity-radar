@@ -2775,7 +2775,11 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   eq('ledger: counts, long/short split', [f1.real, f1.shadow, f1.long.n, f1.short.n], [1, 0, 1, 0])
   near('ledger: real fees in R from the exchange', f1.actual.feeR, 0.02)
   near('ledger: real entry slippage in R', f1.actual.slipR, 0.0003 * 10 / 0.6, 1e-12)
-  ok('ledger: each harsher profile costs more', f1.profiles.moderate.totalR > f1.profiles.conservative.totalR && f1.profiles.conservative.totalR > f1.profiles.stress.totalR, f1.profiles)
+  // A real trade's prices are its fills: no modelled slippage, so only stress's double funding costs more.
+  near('ledger: no modelled slippage on a real trade', L.tradeCost(real[0], L.PROFILES[2], undefined).slipR, 0)
+  ok('ledger: real trade — moderate = conservative > stress', Math.abs(f1.profiles.moderate.totalR - f1.profiles.conservative.totalR) < 1e-12 && f1.profiles.conservative.totalR > f1.profiles.stress.totalR, f1.profiles)
+  const c2 = led.find((x) => x.id === 'c2')
+  ok('ledger: shadow trade — each harsher profile costs more', c2.profiles.moderate.totalR > c2.profiles.conservative.totalR && c2.profiles.conservative.totalR > c2.profiles.stress.totalR, c2.profiles)
   near('ledger: portfolio dollars = R × $75', f1.profiles.moderate.usd, f1.profiles.moderate.totalR * 75, 1e-9)
   eq('ledger: no funding history counted as unknown', f1.fundingKnown, 0)
 }

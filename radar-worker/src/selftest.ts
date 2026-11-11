@@ -80,6 +80,17 @@ try {
   const tp = roundTick(fill * (1 + dir * 0.01), rules.tickSize, rules.pricePrecision)
   const slOrder = await ex.bracketLeg(SYMBOL, exit, 'STOP_MARKET', sl, `rb-test-sl-${t0}`)
   check('stop-loss placed on Binance', !!slOrder.algoId, `stop @ ${sl}`)
+  // 2b. A trailed stop, as the bot places it: sized and reduce-only, before the old one is cancelled.
+  const sl2 = roundTick(fill * (1 - dir * 0.008), rules.tickSize, rules.pricePrecision)
+  try {
+    const sl2Order = await ex.bracketLeg(SYMBOL, exit, 'STOP_MARKET', sl2, `rb-test-sl2-${t0}`, qty)
+    await ex.cancelAlgo(SYMBOL, slOrder.algoId)
+    // The target is a regular limit order: every open algo order here is a stop.
+    const stops = await ex.openAlgo(SYMBOL)
+    check('trailed stop replaces the old one', !!sl2Order.algoId && stops.length === 1 && Number(stops[0].triggerPrice) === Number(sl2), `stop now @ ${stops.map((o) => o.triggerPrice).join(', ')}`)
+  } catch (e) {
+    check('trailed stop replaces the old one', false, (e as Error).message)
+  }
   const tpOrder = await ex.takeProfitLimit(SYMBOL, exit, qty, tp, `rb-test-tp-${t0}`)
   check('take-profit placed on Binance', !!tpOrder.orderId && tpOrder.status !== 'EXPIRED', `target @ ${tp} (${tpOrder.status})`)
 
