@@ -30,6 +30,8 @@ import { StrategyLedgerCard } from './StrategyLedger'
 import { StrategyAuditCard } from './StrategyAudit'
 import { MarketContextCard } from './MarketContext'
 import { NewsIntelCard } from './NewsIntel'
+import { NewsStudyCard } from './NewsStudy'
+import { StrategyStudyCard } from './StrategyStudy'
 import { MlEvalCard } from './MlEvalCard'
 import { BotReportsCard } from './BotReports'
 import { BotStatusBar } from './BotStatusBar'
@@ -540,6 +542,7 @@ export function LearningLab() {
           <Guard name="Strategies"><StrategiesCard /></Guard>
           <Guard name="Strategy ledger"><StrategyLedgerCard /></Guard>
           <Guard name="Strategy audit"><StrategyAuditCard /></Guard>
+          <Guard name="Strategy study"><StrategyStudyCard /></Guard>
           <Guard name="Go-live readiness"><ReadinessCard /></Guard>
         </>
       )}
@@ -547,6 +550,7 @@ export function LearningLab() {
         <>
           <Guard name="Market context"><MarketContextCard /></Guard>
           <Guard name="News intelligence"><NewsIntelCard /></Guard>
+          <Guard name="News reaction study"><NewsStudyCard /></Guard>
         </>
       )}
       {tab === 'model' && (

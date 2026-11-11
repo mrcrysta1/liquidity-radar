@@ -1,0 +1,18 @@
+/* "Strategy study" and "News reaction study" cards (StrategyStudy.tsx,
+   NewsStudy.tsx). Own file so it never collides with edits to index.css;
+   tables reuse .nn-tbl / .lab-table. */
+.ss-sub{font-size:var(--text-xs);color:var(--dim)}
+.ss-intro{margin:0 0 10px;font-size:var(--text-xs);color:var(--muted);line-height:1.5}
+.ss-h{margin:14px 0 6px;font-size:var(--text-sm);color:var(--txt)}
+.ss-h small{font-weight:400;color:var(--dim);margin-left:6px}
+.ss-note{margin:6px 0 0;font-size:var(--text-xs);color:var(--muted);line-height:1.5}
+.ss .up{color:var(--green)}.ss .dn{color:var(--red)}
+.ss td small{display:block;color:var(--dim);font-size:var(--text-2xs);white-space:nowrap}
+.ss td.ss-few{opacity:.55}
+.ss-tag{display:inline-block;font-size:var(--text-2xs);font-weight:800;padding:1px 6px;border-radius:6px;background:var(--sunk-2);white-space:nowrap}
+.ss-tag.up{color:var(--green)}.ss-tag.dn{color:var(--red)}
+.ss-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr));gap:8px;margin:8px 0}
+.ss-tiles>div{display:flex;flex-direction:column;gap:2px;padding:8px 10px;border-radius:10px;background:var(--sunk-2);border:1px solid var(--hair-2);min-width:0}
+.ss-tiles small{font-size:var(--text-xs);color:var(--dim)}
+.ss-tiles b{font-size:var(--text-sm)}
+.ss-tiles em{font-style:normal;font-size:var(--text-xs);color:var(--dim)}

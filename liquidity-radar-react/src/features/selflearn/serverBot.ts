@@ -30,6 +30,8 @@ import type { DayReport, WeekReport } from './reports'
 import type { MlEval } from './mlEval'
 import type { Context4h, NewsEvent, NewsTrade, ReactionRow } from './newsIntel'
 import type { AuditReport } from './audit'
+import { normalizeNewsStudy, normalizeSignals, normalizeStudy } from './study'
+import type { NewsSignal, NewsStudyView, StudyView } from './study'
 
 const DB_URL = (import.meta.env.VITE_WHALE_DB_URL as string | undefined)?.replace(/\/+$/, '')
 const DB_KEY = import.meta.env.VITE_WHALE_DB_KEY as string | undefined
@@ -335,6 +337,23 @@ export async function loadAudit(): Promise<AuditReport | null> {
   if (!SERVER_BOT) return null
   const rows = await rest<Array<{ value: unknown }>>('bot_state?select=value&key=eq.audit:latest')
   return rows.length ? normalizeAudit(rows[0].value) : null
+}
+
+/** The latest strategy study (radar-worker/scripts/study.ts --publish); null when none has been published. */
+export async function loadStudy(): Promise<StudyView | null> {
+  if (!SERVER_BOT) return null
+  const rows = await rest<Array<{ value: unknown }>>('bot_state?select=value&key=eq.study:latest')
+  return rows.length ? normalizeStudy(rows[0].value) : null
+}
+
+/** The news reaction study (scripts/news-study.ts --publish) and N1's latest paper decisions (news_signals; empty before its table exists). */
+export async function loadNewsStudy(): Promise<{ study: NewsStudyView | null; signals: NewsSignal[] }> {
+  if (!SERVER_BOT) return { study: null, signals: [] }
+  const [rows, sig] = await Promise.all([
+    rest<Array<{ value: unknown }>>('bot_state?select=value&key=eq.news:study'),
+    rest<unknown[]>('news_signals?select=event_time,asset,category,side,reason,z60,net_pct&order=event_time.desc&limit=60').catch(() => []),
+  ])
+  return { study: rows.length ? normalizeNewsStudy(rows[0].value) : null, signals: normalizeSignals(sig) }
 }
 
 /** The bot's latest market context (radar-worker/src/context/); null when none is stored yet. */

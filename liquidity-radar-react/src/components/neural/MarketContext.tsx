@@ -82,7 +82,7 @@ export function MarketContextCard() {
           <div className={'mc-regime ' + rc}>
             <small>Market regime (BTC)</small>
             <b>{rl}</b>
-            <span>{c.why}</span>
+            <span>{c.why}{c.volume && ` · volume ${c.volume === 'confirming' ? 'behind the move' : c.volume === 'fading' ? 'fading' : 'normal'}`}</span>
           </div>
           <div className="mc-cols">
             <section>
@@ -124,11 +124,11 @@ export function MarketContextCard() {
           </h4>
           <div className="nn-tbl">
             <table className="lab-table mc-table mc-corr">
-              <thead><tr><th>Market</th>{TFS.map((k) => <th key={k}>{k}</th>)}<th title="A 1% BTC move goes with this % move (4h)">Beta</th></tr></thead>
+              <thead><tr><th>Market</th>{TFS.map((k) => <th key={k}>{k}</th>)}<th title="A 1% BTC move goes with this % move (4h)">Beta</th><th title="The same, on BTC's falling bars only (4h)">Down beta</th></tr></thead>
               <tbody>
                 {c.coins.map((x) => (
                   <tr key={x.symbol}>
-                    <td><b>{x.symbol.replace(/USDT$/, '')}</b></td>
+                    <td><b>{x.symbol.replace(/USDT$/, '')}</b>{TFS.some((k) => x.corr[k]?.decoupled) && <i className="mc-chg" title={'moving on its own on ' + TFS.filter((k) => x.corr[k]?.decoupled).join(', ')}> own</i>}</td>
                     {TFS.map((k) => {
                       const v = x.corr[k]
                       return (
@@ -138,13 +138,14 @@ export function MarketContextCard() {
                       )
                     })}
                     <td>{n2(x.corr['4h']?.beta)}</td>
+                    <td>{n2(x.corr['4h']?.downBeta)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
           <p className="mc-note">
-            ≥ 0.7 moves with BTC, 0.4–0.7 partly, below 0.4 on its own. ↑↓ marks a correlation that changed against the window before it (99% test). {c.changes.length} change{c.changes.length === 1 ? '' : 's'} right now.
+            ≥ 0.7 moves with BTC, 0.4–0.7 partly, below 0.4 on its own. ↑↓ marks a correlation that changed against the window before it (99% test). Down beta: the move per 1% BTC fall only — above beta means it falls harder than it rises. “own”: its last 6 bars moved beyond what BTC explains. {c.changes.length} change{c.changes.length === 1 ? '' : 's'} right now.
             {c.errors.length > 0 && ` Missing sources: ${c.errors.length}.`}
           </p>
         </>
