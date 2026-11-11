@@ -185,6 +185,7 @@ export const WHATS_NEW: Array<{ date: string; items: string[] }> = [
   {
     date: '2026-11-11',
     items: [
+      'Strategy study (npm run study): F1’s 3,610 historical trades re-run with confirmation filters and with other exits, at conservative costs. Filters: C6, a BTC-above-EMA(300) rule and both raise the average trade (+0.151R → +0.188 / +0.170 / +0.196R), but the trades they turn down were still profitable on average, so none is proven to help. Exits: tighter trailing stops, break-even stops and taking half the profit early all did worse than F1’s current exit or no better (a 3 ATR trail −0.10R per trade); trend strategies earn from the few long runs, and protecting profit early cuts those runs short. Nothing in the bot was changed.',
       'Testnet bot fixes from the 11 Nov audit: the trailing stop now really moves on Binance (before, every raise was refused with error -4130, so trades kept their first stop); trades record the real entry fill instead of the candle close (the testnet reports an average price of 0); funding paid or received is now part of each trade’s profit; the Strategy ledger no longer adds modelled slippage to real trades whose prices are already the fills.',
     ],
   },

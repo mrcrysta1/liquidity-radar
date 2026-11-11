@@ -12,33 +12,19 @@
 // (needs DATABASE_URL); with DATABASE_URL it also compares the bot's recorded
 // entries since 2026-11-01 with the backtest's on the same bars.
 // Writes .scratch/audit/report.json and docs/research/strategy-audit-<date>.md.
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import type { Bar } from '../src/bot/features.ts'
-import { costR, indicators, outcomeAt } from '../src/bot/features.ts'
-import { closedBars, fundingRates, INTERVAL_MS } from '../src/bot/data.ts'
 import type { Funding } from '../src/bot/data.ts'
 import { F1, trendBacktest } from '../src/bot/strategy.ts'
-import { STRATEGIES, ruleBacktest } from '../src/bot/strategies.ts'
+import { STRATEGIES } from '../src/bot/strategies.ts'
 import type { RuleStrategy } from '../src/bot/strategies.ts'
-import { c6Rows, c6Verdict, fitC6, fundingR } from '../src/bot/c6.ts'
-import type { C6Row } from '../src/bot/c6.ts'
-import { DEFAULT_WF, walkForward } from '../src/bot/walkforward.ts'
+import { c6Rows, fundingR } from '../src/bot/c6.ts'
 import { connect } from '../src/db.ts'
 import { BotStore } from '../src/bot/store.ts'
-import { PROFILES, VERDICT_RULES, breakdown, btcRegimes, netR, regimeAt, summarize, verdict } from '../src/research/audit.ts'
+import { PROFILES, VERDICT_RULES, breakdown, btcRegimes, netR, summarize, verdict } from '../src/research/audit.ts'
 import type { AuditTrade, Summary } from '../src/research/audit.ts'
-
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const CACHE = resolve(ROOT, '.scratch/audit')
-const args = new Set(process.argv.slice(2))
-if (existsSync(resolve(ROOT, '.env'))) process.loadEnvFile(resolve(ROOT, '.env'))
-const STEP = INTERVAL_MS['4h']
-const SYMBOLS = 'BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,AAVEUSDT,ADAUSDT,ARBUSDT,AVAXUSDT,BCHUSDT,DOTUSDT,ETCUSDT,INJUSDT,NEARUSDT,UNIUSDT,APTUSDT,ATOMUSDT,DOGEUSDT,FILUSDT,LINKUSDT,LTCUSDT,OPUSDT,SUIUSDT,TRXUSDT,XRPUSDT'.split(',')
-/** The bot's model bracket and EV bar (.github/workflows/trading-bot.yml). */
-const ML_WF = { ...DEFAULT_WF, bracket: { slAtr: 1.5, tpAtr: 2.25, horizon: 12 }, minEvR: 0.1 }
-const MODERATE = { taker: 0.0005, maker: 0.0002, slip: 0.0002, tpMaker: true }
+import { CACHE, MODERATE, ROOT, STEP, SYMBOLS, args, c6Trades, load, log, mlTrades, ruleTrades, sortFund } from './research-data.ts'
 
 /**
  * Where each strategy's design data ends. F1's holdout (Feb 2026 on) was
@@ -49,41 +35,6 @@ const MODERATE = { taker: 0.0005, maker: 0.0002, slip: 0.0002, tpMaker: true }
 const HOLDOUT_FROM = Date.UTC(2026, 1, 1)
 const SEEN_HOLDOUT: Record<string, boolean> = { f1: false, f1x: true, c2: true, c6: true, ml: true, x1: true, x2: true }
 const LIVE_FROM = Date.UTC(2026, 10, 1)
-
-async function cached<T>(name: string, get: () => Promise<T>): Promise<T> {
-  const p = resolve(CACHE, name + '.json')
-  if (!args.has('--refresh') && existsSync(p) && Date.now() - statSync(p).mtimeMs < 86_400_000) return JSON.parse(readFileSync(p, 'utf8')) as T
-  const v = await get()
-  mkdirSync(CACHE, { recursive: true })
-  writeFileSync(p, JSON.stringify(v))
-  return v
-}
-
-const log = (...a: unknown[]) => console.log(new Date().toISOString().slice(11, 19), ...a)
-
-async function load() {
-  const bars: Record<string, Bar[]> = {}
-  const fund: Record<string, Funding[]> = {}
-  for (const s of SYMBOLS) {
-    bars[s] = await cached(`bars-${s}-4h`, () => closedBars(s, '4h', 40_000))
-    fund[s] = await cached(`funding-${s}`, () => fundingRates(s, Date.UTC(2019, 0, 1)).catch(() => []))
-    log(s, bars[s].length, 'bars from', new Date(bars[s][0]?.t ?? 0).toISOString().slice(0, 10), '·', fund[s].length, 'funding rows')
-  }
-  return { bars, fund }
-}
-
-function sortFund(f: Funding[]) {
-  return [...f].sort((a, b) => a.t - b.t)
-}
-
-/** A rule strategy on one market, as audit trades. */
-function ruleTrades(id: string, s: RuleStrategy, sym: string, b: Bar[], btc: Bar[], fund: Funding[], reg: Map<number, string>): AuditTrade[] {
-  return ruleBacktest(s, b, { BTCUSDT: btc }).map((x) => {
-    const t = b[x.i + 1].t
-    const tExit = x.why === 'signal' ? (b[x.exitBar + 1]?.t ?? b[x.exitBar].t + STEP) : b[x.exitBar].t + STEP
-    return { strategy: id, symbol: sym, side: x.side, t, tExit, entry: x.entry, exit: x.exit, dist: x.dist, r: x.r, exitWhy: x.why, fundLongR: fundingR(fund, t, tExit, x.entry, x.dist), regime: regimeAt(reg, t, STEP) }
-  })
-}
 
 /** Pooled conservative mean of F1-family parameter sets (sensitivity). */
 function neighbourShare(bars: Record<string, Bar[]>, fund: Record<string, Funding[]>, centre: { entryLen: number; exitLen: number; slAtr: number }): { share: number; grid: Array<{ p: string; mean: number; n: number }> } {
@@ -111,44 +62,6 @@ function neighbourShare(bars: Record<string, Bar[]>, fund: Record<string, Fundin
   const self = `entry ${centre.entryLen} / exit ${centre.exitLen} / stop ${centre.slAtr} ATR`
   const others = grid.filter((g) => g.p !== self)
   return { share: others.filter((g) => g.mean > 0).length / others.length, grid }
-}
-
-/** C6: F1's trades on every market, each half-year filtered by a GBDT trained only on trades closed before it (as the bot retrains every 182 days). */
-function c6Trades(f1: AuditTrade[], rows: C6Row[]): AuditTrade[] {
-  const byKey = new Map(rows.map((r) => [r.sym + ':' + r.tEntry, r]))
-  const out: AuditTrade[] = []
-  for (let y = 2020; y <= 2026; y++) {
-    for (const h of [0, 6]) {
-      const from = Date.UTC(y, h, 1)
-      const to = Date.UTC(y, h + 6, 1)
-      const m = fitC6(rows, from)
-      if (!m) continue
-      for (const t of f1) {
-        if (t.t < from || t.t >= to) continue
-        const row = byKey.get(t.symbol + ':' + t.t)
-        if (row && c6Verdict(m, row.x).take) out.push({ ...t, strategy: 'c6' })
-      }
-    }
-  }
-  return out
-}
-
-/** The model's walk-forward on one market (every fold trained on the past only), as audit trades. */
-function mlTrades(sym: string, b: Bar[], fund: Funding[], reg: Map<number, string>): AuditTrade[] {
-  const ind = indicators(b)
-  const out: AuditTrade[] = []
-  for (const w of walkForward(b, ML_WF).trades) {
-    const o = outcomeAt(b, ind, w.i, w.side, ML_WF.bracket)
-    if (!o) continue
-    const entry = b[w.i].c
-    const dist = ML_WF.bracket.slAtr * ind.atr[w.i]
-    const t = b[w.i].t + STEP
-    const tExit = b[o.end].t + STEP
-    // Gross R from the recorded net: the walk-forward charged the bot's own (moderate) costs.
-    const r = w.r + costR(entry, dist, MODERATE, o.exit)
-    out.push({ strategy: 'ml', symbol: sym, side: w.side, t, tExit, entry, exit: entry + w.side * r * dist, dist, r, exitWhy: o.exit, fundLongR: fundingR(fund, t, tExit, entry, dist), regime: regimeAt(reg, t, STEP) })
-  }
-  return out
 }
 
 interface StrategyReport {
