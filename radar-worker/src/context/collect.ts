@@ -12,7 +12,7 @@ import type { Bar } from '../bot/features.ts'
 import { closedBars, INTERVAL_MS } from '../bot/data.ts'
 import type { BotStore } from '../bot/store.ts'
 import type { Db } from '../db.ts'
-import { CORR_WINDOW, correlation, dailyCorrelation, dailyTrend, keyLevels, regimeOf, tfState } from './market.ts'
+import { CORR_WINDOW, correlation, dailyCorrelation, dailyTrend, keyLevels, regimeOf, tfState, volumeNote } from './market.ts'
 import type { Corr, DailyPoint, Regime, TfState } from './market.ts'
 
 const TFS = ['15m', '1h', '4h'] as const
@@ -22,7 +22,8 @@ const BTC_BARS = 720
 export interface MarketContext {
   v: 1
   t: number
-  regime: { regime: Regime; why: string }
+  /** volume: is BTC's 4h volume behind the move (descriptive; it does not change the regime). */
+  regime: { regime: Regime; why: string; volume?: ReturnType<typeof volumeNote> }
   btc: Record<Tf, TfState | null>
   /** Per coin and timeframe: correlation with BTC. */
   corr: Record<string, Partial<Record<Tf, Corr>>>
@@ -128,7 +129,7 @@ export async function collectContext(symbols: string[], f: Fetchers = LIVE_FETCH
   return {
     v: 1,
     t: now,
-    regime: regimeOf(btcState['4h'], btcState['1h']),
+    regime: { ...regimeOf(btcState['4h'], btcState['1h']), volume: volumeNote(btcState['4h']) },
     btc: btcState,
     corr,
     changes,

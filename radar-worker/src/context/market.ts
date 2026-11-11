@@ -23,7 +23,16 @@
 //               bars ≈ 2 days, 1h: 168 ≈ 7 days, 4h: 180 ≈ 30 days), the
 //               beta, and a change test against the window before it (Fisher
 //               z; |z| ≥ 2.58 is a change at 99%). Groups: ≥ 0.7 strong,
-//               0.4–0.7 moderate, < 0.4 independent.
+//               0.4–0.7 moderate, < 0.4 independent. Also the downside beta
+//               (only bars where BTC fell), the trend of the correlation
+//               (strengthening / weakening = that 99% change) and whether the
+//               coin is moving on its own right now: its last 6 bars' return
+//               not explained by beta × BTC, against that residual's spread
+//               (|z| ≥ 2.58 = decoupled).
+//   volume      BTC's 4h volume over the last 20 bars vs the last 100: shown
+//               with the regime as confirming (≥ 1.2), fading (≤ 0.8) or
+//               normal. It does not change the regime: no threshold on it was
+//               tested, so it only describes.
 import type { Bar } from '../bot/features.ts'
 
 export type Dir = 'up' | 'down' | 'flat'
@@ -47,6 +56,8 @@ export interface TfState {
   atrRank: number
   /** Last bar's volume vs the 20-bar average. */
   volRatio: number
+  /** Average volume of the last 20 bars vs the last 100. */
+  volTrend: number
 }
 
 export function ema(xs: number[], n: number): number[] {
@@ -113,6 +124,8 @@ export function tfState(b: Bar[], stepMs: number): TfState | null {
   const dir: Dir = above && slope > 0 ? 'up' : below && slope < 0 ? 'down' : 'flat'
   const vols = b.slice(-21, -1).map((x) => x.v)
   const avgVol = vols.reduce((a, v) => a + v, 0) / (vols.length || 1)
+  const mean = (xs: Bar[]) => xs.reduce((a, x) => a + x.v, 0) / (xs.length || 1)
+  const v100 = mean(b.slice(-100))
   return {
     t: b[i].t + stepMs,
     close: c[i],
@@ -125,7 +138,65 @@ export function tfState(b: Bar[], stepMs: number): TfState | null {
     atrPct: pct[i] * 100,
     atrRank,
     volRatio: avgVol > 0 ? b[i].v / avgVol : 1,
+    volTrend: v100 > 0 ? mean(b.slice(-20)) / v100 : 1,
   }
+}
+
+/** Is volume behind the move? From volTrend (20 vs 100 bars). Descriptive only. */
+export function volumeNote(s: TfState | null): 'confirming' | 'fading' | 'normal' | null {
+  if (!s || !Number.isFinite(s.volTrend)) return null
+  return s.volTrend >= 1.2 ? 'confirming' : s.volTrend <= 0.8 ? 'fading' : 'normal'
+}
+
+/**
+ * The 7-class regime at every 4h bar of a long BTC history, with the same
+ * rules as regimeOf (1h confirmation from the 1h bar closing with it, when
+ * given). Keyed by the 4h bar's open time; from data up to that bar only.
+ * Bars before 220 of history are 'uncertain'.
+ */
+export function regimeSeries(h4: Bar[], h1?: Bar[]): Map<number, Regime> {
+  const out = new Map<number, Regime>()
+  const S4 = 4 * 3_600_000
+  const S1 = 3_600_000
+  const series = (b: Bar[]) => {
+    const c = b.map((x) => x.c)
+    const e50 = ema(c, 50)
+    const e200 = ema(c, 200)
+    const atr = atrSeries(b)
+    const dir = (i: number): Dir => {
+      if (i < 10) return 'flat'
+      const slope = (e50[i] - e50[i - 10]) / atr[i]
+      return c[i] > e50[i] && c[i] > e200[i] && slope > 0 ? 'up' : c[i] < e50[i] && c[i] < e200[i] && slope < 0 ? 'down' : 'flat'
+    }
+    return { c, e200, atr, dir }
+  }
+  const a = series(h4)
+  let h1Dir: ((closeT: number) => Dir | null) | null = null
+  if (h1?.length) {
+    const s1 = series(h1)
+    const at = new Map(h1.map((x, k) => [x.t + S1, k]))
+    h1Dir = (t) => {
+      const k = at.get(t)
+      return k == null || k < 220 ? null : s1.dir(k)
+    }
+  }
+  const pct = a.atr.map((x, k) => x / a.c[k])
+  for (let i = 0; i < h4.length; i++) {
+    if (i < 220) {
+      out.set(h4[i].t, 'uncertain')
+      continue
+    }
+    const past = pct.slice(Math.max(0, i - 500), i)
+    const rank = past.filter((x) => x < pct[i]).length / past.length
+    let path = 0
+    for (let k = i - 29; k <= i; k++) path += Math.abs(a.c[k] - a.c[k - 1])
+    const er = path > 0 ? Math.abs(a.c[i] - a.c[i - 30]) / path : 0
+    const st = { t: h4[i].t + S4, close: a.c[i], dir: a.dir(i), ema50: 0, ema200: a.e200[i], roc20: 0, rsi14: 50, er30: er, atrPct: pct[i] * 100, atrRank: rank, volRatio: 1, volTrend: 1 }
+    const d1 = h1Dir ? h1Dir(h4[i].t + S4) : null
+    const s1 = d1 ? { ...st, dir: d1 } : null
+    out.set(h4[i].t, regimeOf(st, s1).regime)
+  }
+  return out
 }
 
 /** The 7-class regime from BTC's 4h state, confirmed by 1h; the reason in words. */
@@ -201,7 +272,17 @@ export interface Corr {
   z: number | null
   changed: boolean
   group: 'strong' | 'moderate' | 'independent' | null
+  /** Beta on the bars where BTC fell only (downside exposure). */
+  downBeta: number | null
+  /** The correlation's direction of change, when the change is significant (99%). */
+  trend: 'strengthening' | 'weakening' | 'stable' | null
+  /** The last 6 bars' return beyond beta × BTC, in units of its own spread; |z| ≥ 2.58 = moving on its own. */
+  residualZ: number | null
+  decoupled: boolean
 }
+
+/** Bars of the "own move" test. */
+export const RESIDUAL_BARS = 6
 
 export const CORR_WINDOW: Record<string, number> = { '15m': 192, '1h': 168, '4h': 180 }
 
@@ -225,14 +306,36 @@ export function correlation(btc: Bar[], coin: Bar[], window: number): Corr {
   const n2 = before.x.length
   const clip = (v: number) => Math.max(-0.999999, Math.min(0.999999, v))
   const z = r != null && prev != null && n1 > 3 && n2 > 3 ? (Math.atanh(clip(r)) - Math.atanh(clip(prev))) / Math.sqrt(1 / (n1 - 3) + 1 / (n2 - 3)) : null
+  let downBeta: number | null = null
+  const dn = now.x.map((v, k) => [v, now.y[k]]).filter(([v]) => v < 0)
+  if (dn.length >= 10) {
+    const mx = dn.reduce((a, [v]) => a + v, 0) / dn.length
+    const my = dn.reduce((a, [, w]) => a + w, 0) / dn.length
+    const sxx = dn.reduce((a, [v]) => a + (v - mx) ** 2, 0)
+    downBeta = sxx > 0 ? dn.reduce((a, [v, w]) => a + (v - mx) * (w - my), 0) / sxx : null
+  }
+  // Own move: the window's residuals (coin − beta × BTC) set the spread; the last RESIDUAL_BARS are tested against it.
+  let residualZ: number | null = null
+  if (beta != null && n1 >= 3 * RESIDUAL_BARS) {
+    const res = now.y.map((w, k) => w - beta! * now.x[k])
+    const m = res.reduce((a, v) => a + v, 0) / res.length
+    const sd = Math.sqrt(res.reduce((a, v) => a + (v - m) ** 2, 0) / (res.length - 1))
+    const recent = res.slice(-RESIDUAL_BARS).reduce((a, v) => a + v - m, 0)
+    residualZ = sd > 0 ? recent / (sd * Math.sqrt(RESIDUAL_BARS)) : null
+  }
+  const changed = z != null && Math.abs(z) >= 2.58
   return {
     r,
     prev,
     beta,
     n: n1,
     z,
-    changed: z != null && Math.abs(z) >= 2.58,
+    changed,
     group: r == null ? null : r >= 0.7 ? 'strong' : r >= 0.4 ? 'moderate' : 'independent',
+    downBeta,
+    trend: z == null ? null : changed ? (z > 0 ? 'strengthening' : 'weakening') : 'stable',
+    residualZ,
+    decoupled: residualZ != null && Math.abs(residualZ) >= 2.58,
   }
 }
 

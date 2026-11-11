@@ -11,6 +11,11 @@
 //    compared trade by trade with A, clustered by entry day.
 // 3. Live paper results per strategy since go-live, clustered by decision
 //    candle and day, and the real trades' best point vs result (with DATABASE_URL).
+// 4. Every rule strategy by the 7-class market regime (src/context/market.ts,
+//    rebuilt bar by bar from BTC's 4h and 1h history, past data only).
+// 5. BTC correlation per coin over its whole history: rolling 180-bar (about
+//    30 days) windows of 4h returns, every 30 bars: how strong, how stable,
+//    downside beta, and how often a coin moved on its own.
 //
 // Costs: conservative (0.10% per market leg) plus each market's real funding.
 // "Design" = before Feb 2026, "Holdout" = Feb 2026 on (C6 was designed after
@@ -21,7 +26,10 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { Bar } from '../src/bot/features.ts'
 import { F1, trendIndicators } from '../src/bot/strategy.ts'
-import { F1_STRATEGY } from '../src/bot/strategies.ts'
+import { F1_STRATEGY, STRATEGIES } from '../src/bot/strategies.ts'
+import type { RuleStrategy } from '../src/bot/strategies.ts'
+import { closedBars } from '../src/bot/data.ts'
+import { REGIMES, correlation, regimeSeries } from '../src/context/market.ts'
 import { c6Rows, fundingR } from '../src/bot/c6.ts'
 import { btcAbove } from '../src/bot/experimental.ts'
 import { connect } from '../src/db.ts'
@@ -30,7 +38,7 @@ import { PROFILES, breakdown, btcRegimes, netR, summarize } from '../src/researc
 import type { AuditTrade, Summary } from '../src/research/audit.ts'
 import { EXIT_VARIANTS, compareFilter, ema, exitNetR, giveback, paired, simulateExit } from '../src/research/study.ts'
 import type { FilterReport, Giveback } from '../src/research/study.ts'
-import { CACHE, MODERATE, ROOT, STEP, SYMBOLS, args, c6Verdicts, load, log, ruleTrades, sortFund } from './research-data.ts'
+import { CACHE, MODERATE, ROOT, STEP, SYMBOLS, args, c6Verdicts, cached, load, log, ruleTrades, sortFund } from './research-data.ts'
 
 const HOLDOUT_FROM = Date.UTC(2026, 1, 1)
 const LIVE_FROM = Date.UTC(2026, 10, 1)
@@ -243,7 +251,109 @@ function md(rep: Awaited<ReturnType<typeof run>>): string {
     }
     o.push('')
   }
+  o.push('## 4. Strategies by market regime (7 classes)', '')
+  o.push('Regime at the signal bar, rebuilt from BTC’s 4h bars (1h to confirm) with the live rules of `src/context/market.ts`, past data only. Mean net R per trade (conservative); cells with fewer than 30 trades are in brackets: too few to read.', '')
+  o.push('Share of 4h bars since 2019: ' + REGIMES.map((r) => `${r} ${(rep.regimes.share[r] * 100).toFixed(0)}%`).join(', '), '')
+  o.push('| Strategy | ' + REGIMES.join(' | ') + ' |', '|---|' + REGIMES.map(() => '---').join('|') + '|')
+  for (const s of rep.regimes.strategies) {
+    const cell = (r: string) => {
+      const x = s.regimes[r]
+      if (!x) return '—'
+      const v = `${r3(x.mean)} (n ${x.n})`
+      return x.n < 30 ? `[${v}]` : x.lo != null && x.lo > 0 ? `**${v}**` : x.hi != null && x.hi < 0 ? `_${v}_` : v
+    }
+    o.push(`| ${s.id.toUpperCase()} | ` + REGIMES.map(cell).join(' | ') + ' |')
+  }
+  o.push('', 'Bold: the 95% range is above zero in that regime; italic: below zero. A strategy is never switched off by this table alone.', '')
+  o.push('## 5. BTC correlation, measured per coin', '')
+  o.push('Rolling 180 × 4h-bar windows (about 30 days) every 30 bars over each coin’s whole history. Correlation of log returns; beta = % move per 1% BTC move; downside beta = the same on BTC’s falling bars only; “changed” = significantly different from the window before (99%); “own move” = the last 6 bars’ return not explained by beta × BTC, beyond 2.58 of its own spread.', '')
+  o.push('| Coin | Windows | Median r | 10–90% range | Strong (≥ 0.7) | Changed | Own move | Beta | Downside beta | Latest r / trend |', '|---|---|---|---|---|---|---|---|---|---|')
+  const pc = (x: number) => `${(x * 100).toFixed(0)}%`
+  const f2 = (x: number | null) => (x == null ? 'n/a' : x.toFixed(2))
+  for (const c of rep.correlation) {
+    o.push(`| ${c.symbol} | ${c.windows} | ${f2(c.median)} | ${f2(c.p10)}–${f2(c.p90)} | ${pc(c.strongShare)} | ${pc(c.changedShare)} | ${pc(c.decoupledShare)} | ${f2(c.beta)} | ${f2(c.downBeta)} | ${f2(c.latest?.r ?? null)} ${c.latest?.trend ?? ''}${c.latest?.decoupled ? ' · own move' : ''} |`)
+  }
+  o.push('')
   return o.join('\n')
+}
+
+interface RegimeReport {
+  /** Share of 4h bars in each regime since 2019. */
+  share: Record<string, number>
+  strategies: Array<{ id: string; regimes: Record<string, Summary> }>
+}
+
+/** Rule strategies (and C6 = F1 filtered) by the 7-class regime at the signal bar. */
+function regimes(trades: Record<string, AuditTrade[]>, reg: Map<number, string>, from: number): RegimeReport {
+  const bars = [...reg].filter(([t]) => t >= from)
+  const share: Record<string, number> = {}
+  for (const r of REGIMES) share[r] = bars.filter(([, x]) => x === r).length / (bars.length || 1)
+  const strategies = Object.entries(trades).map(([id, ts]) => ({
+    id,
+    regimes: breakdown(ts, (x) => reg.get(x.t - STEP) ?? 'uncertain', (x) => netR(x, CONS)),
+  }))
+  return { share, strategies }
+}
+
+interface CorrHistory {
+  symbol: string
+  windows: number
+  median: number | null
+  p10: number | null
+  p90: number | null
+  /** Share of windows with r >= 0.7. */
+  strongShare: number
+  /** Share of windows whose correlation changed significantly from the window before. */
+  changedShare: number
+  /** Share of windows ending in a 6-bar move of its own (|residual z| >= 2.58). */
+  decoupledShare: number
+  beta: number | null
+  downBeta: number | null
+  latest: { r: number | null; beta: number | null; downBeta: number | null; trend: string | null; decoupled: boolean } | null
+}
+
+/** Rolling 180-bar correlation with BTC every 30 bars over a coin's history. */
+function corrHistory(btc: Bar[], bars: Record<string, Bar[]>): CorrHistory[] {
+  const W = 180
+  const q = (xs: number[], p: number) => (xs.length ? [...xs].sort((a, b) => a - b)[Math.min(xs.length - 1, Math.floor(p * xs.length))] : null)
+  const btcAt = new Map(btc.map((x, k) => [x.t, k]))
+  return SYMBOLS.filter((s) => s !== 'BTCUSDT').map((symbol) => {
+    const b = bars[symbol]
+    const rs: number[] = []
+    const betas: number[] = []
+    const downs: number[] = []
+    let changed = 0
+    let decoupled = 0
+    let latest: CorrHistory['latest'] = null
+    for (let end = 2 * W + 1; end <= b.length; end += 30) {
+      const win = b.slice(end - 2 * W - 1, end)
+      const k0 = btcAt.get(win[0].t)
+      const k1 = btcAt.get(win[win.length - 1].t)
+      if (k0 == null || k1 == null) continue
+      const c = correlation(btc.slice(k0, k1 + 1), win, W)
+      if (c.r == null) continue
+      rs.push(c.r)
+      if (c.beta != null) betas.push(c.beta)
+      if (c.downBeta != null) downs.push(c.downBeta)
+      if (c.changed) changed++
+      if (c.decoupled) decoupled++
+      latest = { r: c.r, beta: c.beta, downBeta: c.downBeta, trend: c.trend, decoupled: c.decoupled }
+    }
+    const n = rs.length
+    return {
+      symbol,
+      windows: n,
+      median: q(rs, 0.5),
+      p10: q(rs, 0.1),
+      p90: q(rs, 0.9),
+      strongShare: n ? rs.filter((r) => r >= 0.7).length / n : 0,
+      changedShare: n ? changed / n : 0,
+      decoupledShare: n ? decoupled / n : 0,
+      beta: q(betas, 0.5),
+      downBeta: q(downs, 0.5),
+      latest,
+    }
+  })
 }
 
 async function run() {
@@ -261,6 +371,15 @@ async function run() {
   const ex = exitsStudy(f1, bars, fund)
   log('exits done')
   const lv = await live().catch((e) => (log('live results skipped:', (e as Error).message), null))
+  const btc1h = await cached('bars-BTCUSDT-1h', () => closedBars('BTCUSDT', '1h', 80_000))
+  const reg7 = regimeSeries(btc, btc1h)
+  const rule: Record<string, AuditTrade[]> = { f1 }
+  for (const id of ['f1x', 'c2', 'x1', 'x2']) rule[id] = SYMBOLS.flatMap((sym) => ruleTrades(id, STRATEGIES[id] as RuleStrategy, sym, bars[sym], btc, fund[sym], reg))
+  rule.c6 = f1.filter((t) => c6.get(t.symbol + ':' + t.t) === true)
+  const rg = regimes(rule, reg7, Date.UTC(2019, 0, 1))
+  log('regimes done')
+  const ch = corrHistory(btc, bars)
+  log('correlation history done')
   const ends = Object.values(bars).filter((b) => b.length)
   return {
     v: 1,
@@ -272,6 +391,8 @@ async function run() {
     filters: fl,
     exits: ex,
     live: lv,
+    regimes: rg,
+    correlation: ch,
   }
 }
 
