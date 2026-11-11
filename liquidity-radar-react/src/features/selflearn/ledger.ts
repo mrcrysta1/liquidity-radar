@@ -121,12 +121,16 @@ export function fundingSum(fund: Funding[] | undefined, t0: number, t1: number):
   return { sum, known: true }
 }
 
-/** One trade's cost in R under a profile: fees, slippage and funding (positive = cost). */
+/**
+ * One trade's cost in R under a profile: fees, slippage and funding (positive
+ * = cost). A real trade's entry and exit are its fills, so their slippage is
+ * already in the price: no modelled slippage on top.
+ */
 export function tradeCost(t: LedgerTrade, p: CostProfile, fund: Funding[] | undefined): { feeR: number; slipR: number; fundingR: number; known: boolean } {
   const perR = t.entry / t.dist
   const makerExit = p.tpMaker != null && t.exitReason === 'tp'
   const feeR = (p.taker + (makerExit ? p.tpMaker! : p.taker)) * perR
-  const slipR = (p.slip + (makerExit ? 0 : p.slip)) * perR
+  const slipR = t.kind === 'real' ? 0 : (p.slip + (makerExit ? 0 : p.slip)) * perR
   const f = fundingSum(fund, t.openedAt, t.closedAt)
   return { feeR, slipR, fundingR: t.side * f.sum * perR * p.fundingX, known: f.known }
 }

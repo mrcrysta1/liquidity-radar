@@ -78,13 +78,16 @@ export interface Exchange {
   position(symbol: string): Promise<Position>
   setup(symbol: string, leverage: number): Promise<void>
   marketOrder(symbol: string, side: 'BUY' | 'SELL', quantity: string, reduceOnly?: boolean, clientId?: string): Promise<{ orderId: number; avgPrice: string; executedQty: string }>
-  bracketLeg(symbol: string, side: 'BUY' | 'SELL', type: 'STOP_MARKET' | 'TAKE_PROFIT_MARKET', triggerPrice: string, clientAlgoId: string): Promise<{ algoId: number }>
+  /** `quantity`: a sized reduce-only leg instead of one that closes the whole position. */
+  bracketLeg(symbol: string, side: 'BUY' | 'SELL', type: 'STOP_MARKET' | 'TAKE_PROFIT_MARKET', triggerPrice: string, clientAlgoId: string, quantity?: string): Promise<{ algoId: number }>
   takeProfitLimit(symbol: string, side: 'BUY' | 'SELL', quantity: string, price: string, clientId: string): Promise<{ orderId: number; status: string }>
   cancelAllOrders(symbol: string): Promise<void>
   cancelAllAlgo(symbol: string): Promise<void>
   /** Cancel one exchange-side stop / target by id (the trend trail replaces its stop). */
   cancelAlgo(symbol: string, algoId: number): Promise<void>
   fills(symbol: string, startTime: number): Promise<Fill[]>
+  /** Funding paid (negative) or received over [startTime, endTime], USDT; optional (0 without it). */
+  funding?(symbol: string, startTime: number, endTime: number): Promise<number>
 }
 
 export interface TraderConfig {
@@ -636,7 +639,8 @@ export class SymbolTrader {
     )
     const fees = await this.feesUsdt(open.id, [...entries, ...exits])
     const gross = exits.reduce((a, f) => a + f.realizedPnl, 0)
-    const pnl = gross - fees
+    const funding = await this.fundingUsdt(open, exits[exits.length - 1].time)
+    const pnl = gross - fees + funding
     const stored = await this.store.getState<ClosingReason | null>('closing:' + open.id, null)
     // A trend trade hit by the exchange stop: 'trail' once that stop was raised, else 'sl'.
     const byExchange =
@@ -657,7 +661,40 @@ export class SymbolTrader {
     this.closing.delete(open.id)
     this.finalizeTries.delete(open.id)
     this.marks.delete(open.id)
-    await this.store.event('info', this.symbol, `trade #${open.id} closed by ${reason}: ${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)} USDT (${r.toFixed(2)}R)`)
+    const fundNote = funding ? ` · funding ${funding >= 0 ? '+' : ''}${funding.toFixed(2)}` : ''
+    await this.store.event('info', this.symbol, `trade #${open.id} closed by ${reason}: ${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)} USDT (${r.toFixed(2)}R)${fundNote}`)
+  }
+
+  /** Funding settled on this market while the trade was open (in its P&L; 0 when unreadable). */
+  private async fundingUsdt(open: OpenTrade, closedAt: number): Promise<number> {
+    if (!this.ex.funding) return 0
+    try {
+      return await this.ex.funding(this.symbol, open.openedAt, closedAt)
+    } catch (e) {
+      await this.store.event('warn', this.symbol, `trade #${open.id}: funding unreadable (${(e as Error).message}) — left out of its P&L`)
+      return 0
+    }
+  }
+
+  /**
+   * The entry's average fill. The testnet answers a market order with
+   * avgPrice 0, so read the order's own fills; the bar close only when there
+   * are none.
+   */
+  private async entryFill(o: { orderId: number; avgPrice: string }, fallback: number): Promise<number> {
+    const p = Number(o.avgPrice)
+    if (p > 0) return p
+    for (let k = 0; k < 3; k++) {
+      try {
+        const v = vwap((await this.ex.fills(this.symbol, Date.now() - 300_000)).filter((f) => f.orderId === o.orderId))
+        if (v > 0) return v
+      } catch {
+        // retried below, then the fallback
+      }
+      await new Promise((res) => setTimeout(res, 500))
+    }
+    await this.store.event('warn', this.symbol, `order ${o.orderId}: fill price unavailable — the bar close ${fallback} is recorded as the entry`)
+    return fallback
   }
 
   /**
@@ -859,7 +896,7 @@ export class SymbolTrader {
       }
     }
     const o = await this.ex.marketOrder(this.symbol, buy ? 'BUY' : 'SELL', sz.qty, false, `rb-in-${now}`)
-    const fill = Number(o.avgPrice) || last.c
+    const fill = await this.entryFill(o, last.c)
     const qty = Number(o.executedQty) || Number(sz.qty)
     const sl = Number(roundTick(fill - side * slDist, this.rules.tickSize, this.rules.pricePrecision))
     const tp = Number(roundTick(fill + side * tpDist, this.rules.tickSize, this.rules.pricePrecision))
@@ -1139,7 +1176,9 @@ export class SymbolTrader {
         return
       }
       try {
-        algo = (await this.ex.bracketLeg(this.symbol, exitSide, 'STOP_MARKET', String(next), `rb-sl-${open.id}-${Math.round(b[lastJ].t / 1000)}`)).algoId
+        // Sized and reduce-only: a second closePosition stop is refused (-4130) while the old one stands.
+        const qty = roundStep(open.qty, this.rules.stepSize, this.rules.quantityPrecision)
+        algo = (await this.ex.bracketLeg(this.symbol, exitSide, 'STOP_MARKET', String(next), `rb-sl-${open.id}-${Math.round(b[lastJ].t / 1000)}`, qty)).algoId
         sl = next
       } catch (e) {
         // Keep the stop that is in place; not marked as seen, so the next bar retries these closes.
@@ -1250,7 +1289,7 @@ export class SymbolTrader {
       return [hot]
     }
     const o = await this.ex.marketOrder(this.symbol, side > 0 ? 'BUY' : 'SELL', sz.qty, false, `rb-in-${now}`)
-    const fill = Number(o.avgPrice) || last.c
+    const fill = await this.entryFill(o, last.c)
     const qty = Number(o.executedQty) || Number(sz.qty)
     const sl = Number(roundTick(fill - side * slDist, this.rules.tickSize, this.rules.pricePrecision))
     const id = await this.store.insertTrade({

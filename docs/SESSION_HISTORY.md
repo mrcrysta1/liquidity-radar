@@ -18,6 +18,33 @@ Entry format:
 
 ---
 
+## 2026-11-11 — bot audit (F1/C6, news, BTC correlation, regime, profit protection)
+- Asked: two pasted specs — audit why the bot underperforms; F1 vs F1+C6;
+  news signals; F1 exit mismatch; BTC correlation engine; regime detection;
+  profit-protection exit experiments; dashboard; all paper-only, no live changes
+  without evidence. Owner: "start pr 1 and continue all".
+- Audit findings (read-only, replayed on real candles):
+  - BUG B1: trailed stop never reached Binance (-4130: a second closePosition
+    stop is refused); live trades kept their first stop. UNI #114 lost ~0.15R.
+  - BUG B2: entry recorded as the bar close (testnet avgPrice 0); real fills
+    differed −3..+37 bps; slippage always showed 0.
+  - BUG B3: funding not in real-trade P&L. B4: ledger would double-count
+    slippage on real trades.
+  - F1 exits match the backtest exactly (no code mismatch): 4 of 5 early exits
+    were close ≤ EMA(300) on entries 0.15–1.6 ATR above a flat EMA (chop).
+  - C2 0/23: resolver correct; 23 trades ≈ 3 market events; edge negative
+    every year since 2024 (2,696-trade backtest, +0.033R overall).
+  - ML +0.21R: 1,020 outcomes on 53 candles / 9 days; per-day +0.17 ± 0.11R
+    (not significant); shorts +0.54R, longs −0.42R in a falling week.
+  - Existing: BTC correlations (23 coins, 3 TFs, not used in decisions, 4 days
+    history); 3 different regime schemes; news = analytics + alerts only, no
+    news signal engine; MFE/MAE stored; X1 = F1 + BTC filter (shadow).
+- Plan (one PR each): 1 bug fixes → 2 comparison study (F1 / F1+C6 / F1+BTC /
+  both, exit variants, giveback, per regime) → 3 one regime + correlation
+  history → 4 news strategy N1 (paper) → 5 dashboard cards.
+- Done: PR 1 (B1–B4 fixes + tests + self-test check for the trailed stop).
+- Open: PRs 2–5.
+
 ## 2026-11-11 — history file + trading bot status
 - Asked: keep a separate history file updated on every order; give the status
   of the self-learning bot and suggestions.
