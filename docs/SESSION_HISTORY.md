@@ -76,7 +76,16 @@ Entry format:
   −0.88..+0.43). Fade −0.49% design. Baseline (every release, long 24 h)
   −0.30%. No measurable information from the first-hour reaction. No
   consensus forecasts in free history → actual vs forecast untestable.
-- Open: PR 5 (dashboard cards); publish study:latest / news:study.
+- PR 4 #184 merged. Published bot_state study:latest and news:study
+  (npm run study --publish / news-study --publish, 2026-11-11 12:43 UTC).
+- PR 5 (dashboard): Strategy study card (Strategies tab), News reaction
+  study card (Market tab), Market context: down beta, own-move, volume.
+  Covers Part 7 items 1–10 (1–3 in Market context, 9 in News study, the
+  rest in Strategy study).
+- Follow-ups (not done): re-run `npm run study -- --publish` and
+  `npm run news-study -- --publish` from time to time (not scheduled);
+  N1 paper record needs months (≈8 releases/month); C6/X1/F1X live samples
+  still tiny; no strategy settings were changed.
 
 ## 2026-11-11 — history file + trading bot status
 - Asked: keep a separate history file updated on every order; give the status

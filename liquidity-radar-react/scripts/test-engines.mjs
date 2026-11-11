@@ -2729,6 +2729,60 @@ plotchar(bar_index == 5, "c", "x", location.abovebar)`, c)
   ok('ontrack: the edge interval widens when trades cluster', d1.edge.hi - d1.edge.lo > 2 * 1.96 * Math.sqrt(day1.reduce((s, x) => s + (x.r - d1.edge.meanR) ** 2, 0) / 69 / 70), d1.edge)
 }
 
+// ---- server bot: strategy study and news study ------------------------------------------
+{
+  const S = await import(src('features/selflearn/study.ts'))
+  eq('study: not a report', [S.normalizeStudy(null), S.normalizeStudy({ filters: {} }), S.normalizeStudy('x')], [null, null, null])
+  const sum = (mean, n = 50, lo = mean - 0.1, hi = mean + 0.1) => ({ n, eff: n / 2, mean, lo, hi, win: 0.3, pf: 1.4, maxDdR: 10 })
+  const raw = {
+    generatedAt: 5, data: { markets: 24, from: 1, to: 2 },
+    filters: { covered: 100, from: 3, variants: [
+      { id: 'f1', label: 'F1 alone', all: { taken: sum(0.15), rejected: { n: 0, mean: null }, falsePositives: 70, missed: 0, helps: false }, holdout: { taken: sum(0.1, 10) } },
+      { id: 'f1+c6', label: 'F1 + C6 model', all: { taken: sum(0.19), rejected: sum(0.12), falsePositives: 30, missed: 15, helps: false }, holdout: { taken: sum(0.35, 5) } },
+      { label: 'no id' },
+    ] },
+    exits: [
+      { id: 'A', kind: 'f1', n: 3610, all: sum(0.155), vsA: null, giveback: { avgMfeR: 1.44, avgGivebackR: 1.23, reached1R: 1371, reached1RLost: 321 }, exits: { trail: 1263, signal: 2114, sl: 233 } },
+      { id: 'B-trail3', kind: 'trail', n: 3610, all: sum(0.056), vsA: { mean: -0.099, lo: -0.155, hi: -0.043, better: false, worse: true }, giveback: {}, exits: {} },
+    ],
+    regimes: { share: { 'weak-bear': 0.24, 'strong-bull': 0.13 }, strategies: [{ id: 'f1', regimes: { 'weak-bear': sum(0.01, 322), 'strong-bull': sum(0.19, 898) } }] },
+    correlation: [{ symbol: 'ETHUSDT', windows: 663, median: 0.85, p10: 0.73, p90: 0.91, strongShare: 0.94, changedShare: 0.3, decoupledShare: 0.02, beta: 1.1, downBeta: 1.15 }, { nope: 1 }],
+    live: { strategies: [{ strategy: 'ml', n: 1087, candles: 59, days: 11, byTrade: sum(0.169), byCandle: sum(0.078, 59, -0.171, 0.327) }], real: [{ id: '113', symbol: 'INJUSDT', strategy: 'f1', exit_reason: 'signal', mfe_r: '1.37', mae_r: '-0.03', r: '0.16' }, { id: 1 }] },
+  }
+  const st = S.normalizeStudy(JSON.stringify(raw))
+  eq('study: variants with an id; F1 + C6 rejected kept', [st.filters.variants.map((v) => v.id), st.filters.variants[1].rejected.mean, st.filters.variants[1].missed], [['f1', 'f1+c6'], 0.12, 15])
+  eq('study: exits, worse flagged, exit reasons most first', [st.exits.length, st.exits[1].vsA.worse, st.exits[0].exits[0]], [2, true, ['signal', 2114]])
+  eq('study: missing giveback is zeros, not a crash', st.exits[1].giveback, { avgMfeR: 0, avgGivebackR: 0, reached1R: 0, reached1RLost: 0 })
+  eq('study: regimes in market order', [st.regimes.share.map(([k]) => k), st.regimes.strategies[0].cells.map(([k]) => k)], [['strong-bull', 'weak-bear'], ['strong-bull', 'weak-bear']])
+  eq('study: correlation rows need a symbol', st.correlation.map((c) => [c.symbol, c.downBeta]), [['ETHUSDT', 1.15]])
+  eq('study: real trades parsed from strings, junk dropped', st.live.real.map((t) => [t.id, t.mfeR, t.r]), [[113, 1.37, 0.16]])
+  near('study: profit given back = best − result', S.givenBack(st.live.real[0]), 1.21)
+  eq('study: given back is never negative', S.givenBack({ mfeR: 0.2, r: 0.5 }), 0)
+  eq('study: no live part without the database', S.normalizeStudy({ ...raw, live: null }).live, null)
+
+  eq('news study: not one', [S.normalizeNewsStudy(null), S.normalizeNewsStudy({ grid: 'x' })], [null, null])
+  const ns = S.normalizeNewsStudy({
+    generatedAt: 1, releases: 594, evaluated: 1251, rejected: 1056, chosen: 'continue', liveMode: 'continue', rule: { minZ: 2 },
+    grid: [{ mode: 'continue', minZ: 2, design: sum(0.086, 127), test: sum(-0.227, 68) }, { mode: 'x' }],
+    base: sum(-0.3, 1251), byCategory: { cpi: sum(-0.3, 60) }, byAsset: { BTCUSDT: sum(-0.19, 88) }, byRegime: {},
+  })
+  eq('news study: grid rows need a mode and z; groups flattened', [ns.grid.length, ns.groups.map((g) => g.group + ':' + g.key), ns.minZ], [1, ['category:cpi', 'asset:BTCUSDT'], 2])
+  const sig = S.normalizeSignals([
+    { event_time: '2026-11-12T13:30:00Z', asset: 'BTCUSDT', category: 'cpi', side: 1, reason: 'big move', z60: 2.4, net_pct: '0.5' },
+    { event_time: '2026-11-13T13:30:00Z', asset: 'ETHUSDT', category: 'ppi', side: 0, reason: 'ordinary', z60: 0.4, net_pct: null },
+    { event_time: 'never', side: 1 },
+    { event_time: '2026-11-13T13:30:00Z', side: 2 },
+  ])
+  eq('news signals: newest first, traded or not, junk dropped', sig.map((x) => [x.asset, x.side, x.netPct]), [['ETHUSDT', 0, null], ['BTCUSDT', 1, 0.5]])
+  eq('news signals: not an array', S.normalizeSignals({ x: 1 }), [])
+
+  const M = await import(src('features/selflearn/marketContext.ts'))
+  const mc = M.normalizeContext({ v: 1, t: 9, regime: { regime: 'weak-bear', why: 'below', volume: 'fading' }, btc: {}, corr: { SOLUSDT: { '4h': { r: 0.9, beta: 1.3, downBeta: 1.5, decoupled: true, group: 'strong' } } }, gold: {} })
+  eq('context: volume note, downside beta and own move', [mc.volume, mc.coins[0].corr['4h'].downBeta, mc.coins[0].corr['4h'].decoupled], ['fading', 1.5, true])
+  const old = M.normalizeContext({ v: 1, t: 9, regime: { regime: 'weak-bear', why: 'below' }, btc: {}, corr: { SOLUSDT: { '4h': { r: 0.9 } } }, gold: {} })
+  eq('context: older snapshots have no volume / downside beta', [old.volume, old.coins[0].corr['4h'].downBeta, old.coins[0].corr['4h'].decoupled], [null, null, false])
+}
+
 // ---- server bot: strategy ledger ----------------------------------------------------
 {
   const L = await import(src('features/selflearn/ledger.ts'))

@@ -25,6 +25,10 @@ export interface CorrView {
   beta: number | null
   changed: boolean
   group: 'strong' | 'moderate' | 'independent' | null
+  /** Beta on BTC's falling bars only (null on snapshots from before it was measured). */
+  downBeta: number | null
+  /** Moving on its own right now (last 6 bars beyond beta × BTC). */
+  decoupled: boolean
 }
 
 export interface DailyView {
@@ -38,6 +42,8 @@ export interface ContextView {
   t: number
   regime: string
   why: string
+  /** Is BTC's volume behind the move (descriptive). */
+  volume: 'confirming' | 'fading' | 'normal' | null
   btc: Partial<Record<Tf, TfView>>
   /** Coins by 4h correlation with BTC, strongest first. */
   coins: Array<{ symbol: string; corr: Partial<Record<Tf, CorrView>> }>
@@ -81,7 +87,7 @@ function corr(v: unknown): CorrView | null {
   const x = obj(v)
   if (!x) return null
   const g = x.group
-  return { r: num(x.r), prev: num(x.prev), beta: num(x.beta), changed: x.changed === true, group: g === 'strong' || g === 'moderate' || g === 'independent' ? g : null }
+  return { r: num(x.r), prev: num(x.prev), beta: num(x.beta), changed: x.changed === true, group: g === 'strong' || g === 'moderate' || g === 'independent' ? g : null, downBeta: num(x.downBeta), decoupled: x.decoupled === true }
 }
 
 /** bot_state value → view; null when it is not a context snapshot. */
@@ -120,6 +126,7 @@ export function normalizeContext(value: unknown): ContextView | null {
     t: num(v.t) ?? 0,
     regime: String(reg.regime),
     why: typeof reg.why === 'string' ? reg.why : '',
+    volume: reg.volume === 'confirming' || reg.volume === 'fading' || reg.volume === 'normal' ? reg.volume : null,
     btc,
     coins,
     changes,
