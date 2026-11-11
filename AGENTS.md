@@ -44,6 +44,18 @@ Git:
 
 
 
+\# Session History
+
+
+
+Read docs/SESSION_HISTORY.md before starting work. Every new order from the owner gets an entry there (newest first) in the same PR as the work.
+
+
+
+\---
+
+
+
 \# Core Rules
 
 
