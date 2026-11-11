@@ -6,7 +6,7 @@ import { PGlite } from '@electric-sql/pglite'
 import type { Db } from '../src/db.ts'
 import type { Bar } from '../src/bot/features.ts'
 import { BotStore } from '../src/bot/store.ts'
-import { alignedReturns, correlation, dailyCorrelation, dailyTrend, efficiency, keyLevels, pearson, regimeOf, tfState } from '../src/context/market.ts'
+import { alignedReturns, correlation, dailyCorrelation, dailyTrend, efficiency, keyLevels, pearson, regimeOf, regimeSeries, tfState, volumeNote } from '../src/context/market.ts'
 import type { TfState } from '../src/context/market.ts'
 import { collectContext, saveContext } from '../src/context/collect.ts'
 import type { Fetchers } from '../src/context/collect.ts'
@@ -36,7 +36,7 @@ test('tfState: direction, efficiency, volatility rank from closed bars', () => {
 })
 
 test('regimeOf: the seven classes', () => {
-  const s = (o: Partial<TfState>): TfState => ({ t: 0, close: 100, dir: 'flat', ema50: 100, ema200: 100, roc20: 0, rsi14: 50, er30: 0.2, atrPct: 1, atrRank: 0.5, volRatio: 1, ...o })
+  const s = (o: Partial<TfState>): TfState => ({ t: 0, close: 100, dir: 'flat', ema50: 100, ema200: 100, roc20: 0, rsi14: 50, er30: 0.2, atrPct: 1, atrRank: 0.5, volRatio: 1, volTrend: 1, ...o })
   assert.equal(regimeOf(s({ atrRank: 0.95 }), null).regime, 'high-volatility')
   assert.equal(regimeOf(s({ dir: 'up', er30: 0.4 }), s({ dir: 'up' })).regime, 'strong-bull')
   assert.equal(regimeOf(s({ dir: 'down', er30: 0.4 }), s({ dir: 'flat' })).regime, 'strong-bear')
@@ -128,4 +128,52 @@ test('collectContext + saveContext: a failing source leaves its part empty; one 
   const rows = (await pg.query<{ regime: string; btc_dir_4h: string }>('select regime, btc_dir_4h from market_context')).rows
   assert.deepEqual(rows, [{ regime: 'sideways', btc_dir_4h: 'up' }], 'the same bar is replaced, not duplicated')
   assert.equal((await store.getState<{ v: number } | null>('context:latest', null))?.v, 1)
+})
+
+test('correlation: downside beta, trend of the correlation, and a coin moving on its own', () => {
+  const n = 400
+  const btcC = [100]
+  for (let i = 1; i < n; i++) btcC.push(btcC[i - 1] * (1 + 0.01 * wig(i, 1.3)))
+  const btc = bars(btcC)
+  // Falls 3× BTC's falls, rises 1× its rises: downside beta ≈ 3, above the plain beta.
+  const asym = [50]
+  for (let i = 1; i < n; i++) {
+    const m = btcC[i] / btcC[i - 1] - 1
+    asym.push(asym[i - 1] * (1 + (m < 0 ? 3 * m : m)))
+  }
+  const a = correlation(btc, bars(asym), 180)
+  assert.ok(a.downBeta! > 2.7 && a.downBeta! < 3.3 && a.downBeta! > a.beta!, JSON.stringify(a))
+  // A follower that jumps on its own in the last 6 bars: decoupled.
+  const fol = [50]
+  for (let i = 1; i < n; i++) fol.push(fol[i - 1] * (1 + 0.02 * wig(i, 1.3) + 0.001 * wig(i, 5.3) + (i >= n - 6 ? 0.03 : 0)))
+  const d = correlation(btc, bars(fol), 180)
+  assert.ok(d.decoupled && d.residualZ! > 2.58, JSON.stringify(d))
+  const tight = [50]
+  for (let i = 1; i < n; i++) tight.push(tight[i - 1] * (1 + 0.02 * wig(i, 1.3) + 0.001 * wig(i, 5.3)))
+  assert.equal(correlation(btc, bars(tight), 180).decoupled, false)
+  // Follows, then goes its own way: weakening; the reverse: strengthening.
+  const sw = [20]
+  for (let i = 1; i < n; i++) sw.push(sw[i - 1] * (1 + 0.01 * (i < n - 180 ? wig(i, 1.3) : wig(i, 7.1))))
+  assert.equal(correlation(btc, bars(sw), 180).trend, 'weakening')
+  const back = [20]
+  for (let i = 1; i < n; i++) back.push(back[i - 1] * (1 + 0.01 * (i < n - 180 ? wig(i, 7.1) : wig(i, 1.3))))
+  assert.equal(correlation(btc, bars(back), 180).trend, 'strengthening')
+})
+
+test('regimeSeries: the live rules at every bar, from the past only', () => {
+  const path = Array.from({ length: 700 }, (_, i) => (i < 350 ? 100 + i * 0.4 : 240 - (i - 350) * 0.4) + wig(i))
+  const b = bars(path)
+  const ser = regimeSeries(b)
+  // Each bar's regime equals regimeOf on the bars up to it (no 1h): no look-ahead.
+  for (const k of [300, 349, 420, 699]) assert.equal(ser.get(b[k].t), regimeOf(tfState(b.slice(0, k + 1), H4), null).regime, 'bar ' + k)
+  assert.equal(ser.get(b[100].t), 'uncertain', 'not enough history yet')
+  assert.ok([...ser.values()].includes('strong-bull') && [...ser.values()].includes('strong-bear'))
+})
+
+test('volumeNote: describes volume behind the move', () => {
+  const st = tfState(bars(Array.from({ length: 400 }, (_, i) => 100 + i * 0.5 + wig(i))), H4)!
+  assert.equal(volumeNote(st), 'normal')
+  assert.equal(volumeNote({ ...st, volTrend: 1.5 }), 'confirming')
+  assert.equal(volumeNote({ ...st, volTrend: 0.5 }), 'fading')
+  assert.equal(volumeNote(null), null)
 })

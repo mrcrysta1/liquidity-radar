@@ -57,7 +57,16 @@ Entry format:
     Under A, 321 of 1,371 trades that reached +1R closed at a loss.
   - Live since Nov 1: ml 1,087 paper trades on 59 candles, per-candle mean
     +0.078R (95% −0.171..+0.327) — not significant. Others too few.
-- Open: PRs 3–5.
+- PR 2 #182 merged.
+- PR 3 (regime + correlation): Corr gains downside beta, trend
+  (strengthening / weakening at 99%), own-move test (6-bar residual z ≥ 2.58);
+  regime gets a volume note (descriptive only); regimeSeries rebuilds the
+  7-class regime at every past 4h bar (tested: equals the live rule, past
+  data only). Study §4–5: F1 by regime — strong-bull +0.19, weak-bull +0.09,
+  weak-bear +0.01, uncertain +0.40 (many cells, some will look good by
+  chance); downside beta > beta for 22 of 23 coins; correlation changes
+  significantly in 17–37% of 30-day windows (not a constant).
+- Open: PRs 4–5.
 
 ## 2026-11-11 — history file + trading bot status
 - Asked: keep a separate history file updated on every order; give the status
