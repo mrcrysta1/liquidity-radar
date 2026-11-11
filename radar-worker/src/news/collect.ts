@@ -11,12 +11,15 @@
 //              24 h old and has none yet: BTC, ETH and gold 15-minute bars from
 //              30 days before to 24 h after → econ_reactions (the bot does
 //              40 per hourly run: ~1,000 past releases take about a day)
+//   N1         then the experimental news strategy's paper decision on each of
+//              those releases (n1.ts → news_signals), from 2026-11-11 on
 import type { Bar } from '../bot/features.ts'
 import { barsRange } from '../bot/data.ts'
 import type { BotStore } from '../bot/store.ts'
 import type { Db } from '../db.ts'
 import { FOMC_CALENDAR_URL, FRED_RELEASES, TRACKED, fomcDecisions, fomcRows, fredRows, mergeActuals, parseAgency, parseFomcCalendar, parseForexFactory, reaction } from './events.ts'
 import type { EventRow } from './events.ts'
+import { N1, evaluateN1 } from './n1.ts'
 
 export const FF_URL = 'https://nfs.faireconomy.media/ff_calendar_thisweek.json'
 export const AGENCY_URL = 'https://xoomar.com/api/markets/calendar'
@@ -146,6 +149,38 @@ export async function computeReactions(db: Db, t: number, f: NewsFetchers = LIVE
   return n
 }
 
+/** N1's paper record starts here: earlier releases are history (scripts/news-study.ts), not paper trades. */
+export const N1_LIVE_FROM = Date.UTC(2026, 10, 11)
+
+/**
+ * N1 (n1.ts) on one release time once its reactions are in (over 24 h after
+ * it, so the result is known too): one news_signals row per tracked asset,
+ * traded or not, decided on the 60-minute reaction only. Returns rows written.
+ */
+export async function recordN1(db: Db, t: number): Promise<number> {
+  if (t < N1_LIVE_FROM) return 0
+  const ev = await db.query<{ category: string }>(`select category from econ_events where event_time = $1 and country = 'USD' and category = any($2) limit 1`, [new Date(t).toISOString(), N1.categories])
+  if (!ev.rows.length) return 0
+  const rx = await db.query<{ asset: string; horizon_min: number; ret_pct: number; z: number | null }>(
+    `select asset, horizon_min, ret_pct, z from econ_reactions where event_time = $1 and horizon_min in (60, 1440)`,
+    [new Date(t).toISOString()],
+  )
+  let n = 0
+  for (const asset of N1.assets) {
+    const r60 = rx.rows.find((x) => x.asset === asset && Number(x.horizon_min) === 60)
+    const r1440 = rx.rows.find((x) => x.asset === asset && Number(x.horizon_min) === 1440)
+    const e = evaluateN1({ eventTime: t, category: ev.rows[0].category, asset, ret60: r60 ? Number(r60.ret_pct) : null, z60: r60?.z == null ? null : Number(r60.z), ret1440: r1440 ? Number(r1440.ret_pct) : null })
+    await db.query(
+      `insert into news_signals (event_time, asset, category, mode, side, reason, z60, ret60_pct, gross_pct, net_pct, decided_at) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       on conflict (event_time, asset) do update set side = excluded.side, reason = excluded.reason, z60 = excluded.z60, ret60_pct = excluded.ret60_pct,
+         gross_pct = excluded.gross_pct, net_pct = excluded.net_pct, evaluated = now()`,
+      [new Date(t).toISOString(), asset, e.category, e.mode, e.side, e.reason, e.z60, e.ret60, e.grossPct, e.netPct, new Date(t + N1.decideMin * 60_000).toISOString()],
+    )
+    n++
+  }
+  return n
+}
+
 let inFlight = false
 let lastAt = 0
 /**
@@ -165,7 +200,10 @@ export function newsTick(store: BotStore, db: Db, opts: { fredKey?: string; perR
       await store.setState('news:backfill', { done: Date.now(), from: BACKFILL_FROM, rows: res })
       await store.event('info', null, `news backfill from FRED: ${Object.entries(res).map(([k, v]) => `${k} ${v}`).join(', ')}`)
     }
-    for (const t of await pendingReleases(db, now, opts.perRun ?? 10)) await computeReactions(db, t)
+    for (const t of await pendingReleases(db, now, opts.perRun ?? 10)) {
+      await computeReactions(db, t)
+      await recordN1(db, t).catch((e) => console.error('news N1', (e as Error).message))
+    }
   })()
     .catch((e) => console.error('news', (e as Error).message))
     .finally(() => {

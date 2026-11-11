@@ -89,8 +89,9 @@
 # every closed real and shadow trade and trains a challenger every 4 h or
 # every 20 closed trades. Clear a tripped kill switch with npm run reset-risk.
 # Requires radar-worker/sql/005_bot_learning.sql, 006_bot_journal.sql,
-# 007_bot_trend.sql, 008_bot_strategies.sql, 009_market_context.sql and
-# 010_econ_events.sql (all applied by this workflow on every run).
+# 007_bot_trend.sql, 008_bot_strategies.sql, 009_market_context.sql,
+# 010_econ_events.sql and 011_news_signals.sql (all applied by this workflow
+# on every run).
 #
 # MARKET CONTEXT (src/context/, research plan P3): every 15 min, in the
 # background, BTC's state on 15m / 1h / 4h, its measured correlation with every
@@ -197,6 +198,10 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
       - name: Apply the economic-events schema
         run: node scripts/apply-sql.mjs sql/010_econ_events.sql
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      - name: Apply the news-signals schema (N1, paper only)
+        run: node scripts/apply-sql.mjs sql/011_news_signals.sql
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
       - run: echo "BOT_STARTED=$(date +%s)" >> "$GITHUB_ENV"
