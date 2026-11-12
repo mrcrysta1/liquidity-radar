@@ -284,3 +284,31 @@ jobs:
           echo "bot ran ${ran}s"
           if [ "$ran" -lt 600 ]; then echo "too short, not chaining; the hourly run will retry"; exit 0; fi
           gh workflow run trading-bot.yml -R "$GITHUB_REPOSITORY" --ref master -f chained=true
+
+  # The hand-over above cannot run when GitHub loses the bot's runner
+  # (2026-11-11 23:51 UTC: "The hosted runner lost communication with the
+  # server" — the job fails mid-step and the chain stops until the hourly
+  # safety net, which GitHub fired only 4 h later). This job runs on a fresh
+  # runner after the bot job ends: if that job failed after running at least
+  # 10 min and no other run is going or queued, it starts the next one. Not
+  # after a cancel (stopping the bot on purpose) and not after a quick crash
+  # (that would loop; the hourly run retries instead).
+  relay:
+    needs: bot
+    if: ${{ always() && needs.bot.result == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          job=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/${{ github.run_id }}/jobs" -q '.jobs[] | select(.name == "bot") | [.started_at, .completed_at] | @tsv')
+          start=$(date -d "$(echo "$job" | cut -f1)" +%s)
+          end=$(date -d "$(echo "$job" | cut -f2)" +%s)
+          ran=$(( end - start ))
+          echo "bot job ran ${ran}s and failed"
+          if [ "$ran" -lt 600 ]; then echo "too short, not chaining; the hourly run will retry"; exit 0; fi
+          n=$(gh run list -R "$GITHUB_REPOSITORY" --workflow trading-bot.yml --limit 20             --json databaseId,status             -q '[.[] | select(.status != "completed") | select(.databaseId != ${{ github.run_id }})] | length')
+          if [ "$n" -gt 0 ]; then echo "another run is already going or queued: nothing to do"; exit 0; fi
+          echo "starting the next run"
+          gh workflow run trading-bot.yml -R "$GITHUB_REPOSITORY" --ref master -f chained=true
