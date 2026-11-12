@@ -18,6 +18,20 @@ Entry format:
 
 ---
 
+## 2026-11-12 — "my bot is not running" diagnosis
+- Asked: diagnose why the bot is not running.
+- Found (04:41 UTC): the bot IS running (run 43151056475 since 03:52,
+  heartbeat 04:43, decided every market at the 04:00 bar). No trades because
+  every coin closes below its EMA(300): F1 has no entry in this market.
+- Real outage 2026-11-11 23:51 → 2026-11-12 03:52 UTC (~4 h): run
+  43078073557 failed with "The hosted runner lost communication with the
+  server" (GitHub side) in the bot step, so its hand-over step never ran;
+  the hourly safety-net cron then fired only at 03:52 (GitHub skips crons).
+- Fix: `relay` job in trading-bot.yml — runs on a fresh runner when the bot
+  job fails after ≥ 10 min and no run is going/queued, and starts the next
+  run. Not after a cancel or a quick crash.
+- Open: applies from the next run that starts after the merge.
+
 ## 2026-11-11 — bot audit (F1/C6, news, BTC correlation, regime, profit protection)
 - Asked: two pasted specs — audit why the bot underperforms; F1 vs F1+C6;
   news signals; F1 exit mismatch; BTC correlation engine; regime detection;
