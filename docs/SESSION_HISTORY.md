@@ -18,6 +18,19 @@ Entry format:
 
 ---
 
+## 2026-11-21 — ML2 research plan (design only)
+- Asked: keep ml paper-only, C2 paper (verify the switch), keep all backups,
+  plan ML2 (BTC trend, breadth, funding, fewer independent inputs), paper
+  only, must beat the constant baseline and BTC EMA(200) on unseen data; no
+  implementation until the design and criteria are approved.
+- Done: docs/research/ml2-plan-2026-11-21.md — same target as ml; 12 inputs
+  (4 coin, 3 BTC, 2 breadth, 2 relative-to-BTC, 1 funding); pooled models M0
+  constant, M1 logistic, M2 small MLP, M3 GBDT; walk-forward with purge +
+  embargo; design 2018-07…2024-12 picks one, holdout 2025-01…2026-11 once;
+  6 pass criteria; stages A (inputs) and B (evaluation), then stop for review.
+- Open: owner approves or edits the plan; C2 switch check after the 13:46
+  UTC hand-over.
+
 ## 2026-11-21 — C2 back to paper; plan steps 1–3 (backup, skill test, inputs)
 - Asked: approved plan steps 1, 2, 3 only (no ML2, no PENDING_ENTRY, no
   changes to ML / F1 / C2 / C6 logic); move C2 back to paper safely, keep
