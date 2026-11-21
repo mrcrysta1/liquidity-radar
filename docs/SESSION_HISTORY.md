@@ -39,7 +39,11 @@ Entry format:
   constant, −0.061R/trade (−0.272 … +0.151), vs BTC EMA(200) −0.058, vs coin
   flip −0.026; 5 of 7 checks failed → NOT PASSED, ML2 stops (as planned).
 - Open: owner decides what next (new question / horizon, or a filter on F1
-  as C6 does, or stop ML for direction). C2 switch check after 13:46 UTC.
+  as C6 does, or stop ML for direction).
+- C2 confirmed: 13:47:28 UTC (first run on the new code) strategy:c2 live →
+  shadow, event logged. Open real shorts #122 BTC, #123 AAVE, #124 ADA each
+  hold one Binance stop (checked read-only on the testnet); no new C2 real
+  trades since #124.
 
 ## 2026-11-21 — C2 back to paper; plan steps 1–3 (backup, skill test, inputs)
 - Asked: approved plan steps 1, 2, 3 only (no ML2, no PENDING_ENTRY, no
