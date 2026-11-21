@@ -105,6 +105,25 @@ test('no recovery with a non-positive expectancy or a drawdown past p95', () => 
   assert.ok(deep.record.stats.maxDdR >= 16)
 })
 
+test('configured shadow is never promoted; one promoted before goes back to paper', () => {
+  const t0 = 1_000_000
+  const c2 = { id: 'c2', state: 'shadow' as const }
+  const rec = evaluateHealth(null, c2, [], BANDS, t0).record
+  const good = evaluateHealth(rec, c2, run(60, 0.8, t0 + 1), BANDS, t0 + 1e9)
+  assert.equal(good.record.state, 'shadow', '60 good shadow trades: still paper')
+  assert.equal(good.transition, null)
+  // A record from the old rule: promoted to live while configured shadow.
+  const promoted: HealthRecord = { ...good.record, state: 'live', since: t0 + 2e9, segmentStart: t0 + 2e9 }
+  const back = evaluateHealth(promoted, c2, run(60, 0.8, t0 + 1), BANDS, t0 + 3e9)
+  assert.equal(back.record.state, 'shadow')
+  assert.equal(back.record.configured, 'shadow')
+  assert.equal(back.record.segmentStart, t0 + 3e9)
+  assert.match(back.transition!.reason, /configured shadow \(BOT_STRATEGIES\): paper only/)
+  assert.equal(evaluateHealth({ ...promoted, state: 'probation' }, c2, [], BANDS, t0 + 3e9).record.state, 'shadow')
+  // And it stays there.
+  assert.equal(evaluateHealth(back.record, c2, run(90, 0.8, t0 + 1), BANDS, t0 + 4e9).transition, null)
+})
+
 test('never promoted (nor demoted) without health bands', () => {
   const t0 = 1_000_000
   const ml = { id: 'ml', state: 'shadow' as const }

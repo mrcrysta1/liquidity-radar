@@ -183,6 +183,12 @@ export const TECH: LearnSection = {
 /** Newest first. Add a line here whenever a feature ships. */
 export const WHATS_NEW: Array<{ date: string; items: string[] }> = [
   {
+    date: '2026-11-21',
+    items: [
+      'Testnet bot: C2 (bear breakdown, short) is back to paper trading. It was set to paper but went live on 17 Nov by itself, because the health rule promoted any paper strategy after 30 good paper trades (it had 35, at +0.03R each). Now only a strategy you set live can be promoted; one set to paper stays paper. C2’s open trades keep their stops and exit rules until they close, and its records are kept.',
+    ],
+  },
+  {
     date: '2026-11-11',
     items: [
       'Self Learning → Strategies has a new Strategy study card: F1 vs F1 + C6 (with false positives and missed winners), the profit-protection exits with how much profit trades gave back, every strategy by market regime, each coin’s BTC correlation over its history, and the paper results counted per decision candle. Market has a News reaction study card with N1’s tests and its paper record. Market context now shows downside beta, coins moving on their own, and whether volume is behind the regime.',
