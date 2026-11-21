@@ -186,6 +186,7 @@ export const WHATS_NEW: Array<{ date: string; items: string[] }> = [
     date: '2026-11-21',
     items: [
       'Testnet bot: C2 (bear breakdown, short) is back to paper trading. It was set to paper but went live on 17 Nov by itself, because the health rule promoted any paper strategy after 30 good paper trades (it had 35, at +0.03R each). Now only a strategy you set live can be promoted; one set to paper stays paper. C2’s open trades keep their stops and exit rules until they close, and its records are kept.',
+      'Testnet bot: the model’s learning is now backed up. One command saves every market’s two networks, every probability correction and the learning settings (C6’s model too) to the database and to a file, and another puts them back exactly — checked on a scratch copy first. The first backup was taken on 21 Nov, before any research on the model.',
     ],
   },
   {
