@@ -18,7 +18,9 @@
     "news": "node scripts/news.ts",
     "mleval": "node scripts/ml-eval.ts",
     "reset-risk": "node scripts/reset-risk.mjs",
-    "test": "node --test \"test/**/*.test.ts\""
+    "test": "node --test \"test/**/*.test.ts\"",
+    "backup-models": "node scripts/backup-models.ts",
+    "restore-models": "node scripts/restore-models.ts"
   },
   "dependencies": {
     "pg": "^8.23.0"

@@ -31,6 +31,17 @@ Entry format:
   trades (#122 BTC, #123 AAVE, #124 ADA shorts) keep their exchange stop and
   C2 exit rules until they close (ruleBar manages by the trade's strategy,
   whatever its state). Takes effect at the next bot run after merge.
+- Done: C2 fix PR #189 merged.
+- Step 1 (backup): src/bot/backup.ts, sql/012 bot_backups (RLS, no anon
+  read), `npm run backup-models` / `npm run restore-models` (dry run on a
+  scratch DB by default; --apply only on the owner's go-ahead). Backup #1
+  "original before ML research (2026-11-21)" at 12:01 UTC: 31 champion
+  markets = 62 networks (24 bot coins × 2 = 48 on 4h, plus PAXG/XAU 4h and 5
+  old 5m), 145 calibration rows, 64 learning state keys (incl. c6:model),
+  digest 8e98679c…; local copy radar-worker/backups/ (not in git). Restore
+  dry runs from the file and from the DB copy: every network and calibration
+  row matches. Model rows are never deleted (3,446 kept); calibration is
+  overwritten per trade, so the snapshot is its only copy.
 
 ## 2026-11-21 — technical audit + plan (ML intelligence directive)
 - Asked: Q&A on the ML (algorithm, training, target, timeframe); opinion on a
