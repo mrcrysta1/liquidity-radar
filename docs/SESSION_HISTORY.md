@@ -28,8 +28,18 @@ Entry format:
   constant, M1 logistic, M2 small MLP, M3 GBDT; walk-forward with purge +
   embargo; design 2018-07…2024-12 picks one, holdout 2025-01…2026-11 once;
   6 pass criteria; stages A (inputs) and B (evaluation), then stop for review.
-- Open: owner approves or edits the plan; C2 switch check after the 13:46
-  UTC hand-over.
+- Owner: "ok ... start the learning" → plan approved; stages A + B run.
+- Stage A: src/research/ml2.ts (12 inputs, breadth only from coins trading
+  then, funding settled by the close; logistic IRLS), 5 tests incl.
+  "later bars never change an earlier input".
+- Stage B: `npm run ml2-eval`, docs/research/ml2-eval-2026-11-21.md. 356k
+  rows, 44 design blocks (2019-12 → 2024-12), 17 holdout blocks (2025-01 →
+  2026-11), run once. No model beat the constant in design (M1 −0.0015,
+  M2 −0.0005, M3 −0.0011); rule picked M2. Holdout: log loss −0.0024 vs
+  constant, −0.061R/trade (−0.272 … +0.151), vs BTC EMA(200) −0.058, vs coin
+  flip −0.026; 5 of 7 checks failed → NOT PASSED, ML2 stops (as planned).
+- Open: owner decides what next (new question / horizon, or a filter on F1
+  as C6 does, or stop ML for direction). C2 switch check after 13:46 UTC.
 
 ## 2026-11-21 — C2 back to paper; plan steps 1–3 (backup, skill test, inputs)
 - Asked: approved plan steps 1, 2, 3 only (no ML2, no PENDING_ENTRY, no
