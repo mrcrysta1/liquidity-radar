@@ -23,7 +23,8 @@
     "restore-models": "node scripts/restore-models.ts",
     "ml-skill": "node scripts/ml-skill.ts",
     "ml-inputs": "node scripts/ml-inputs.ts",
-    "ml2-eval": "node scripts/ml2-eval.ts"
+    "ml2-eval": "node scripts/ml2-eval.ts",
+    "f1-filter": "node scripts/f1-filter.ts"
   },
   "dependencies": {
     "pg": "^8.23.0"

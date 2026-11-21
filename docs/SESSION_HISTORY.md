@@ -18,6 +18,21 @@ Entry format:
 
 ---
 
+## 2026-11-21 — option 2: ML filter on F1 (research)
+- Asked: "do option 2, ML as a filter on F1 … best possible … live my bot …
+  fully advanced that can learn and adapt"; more enhancements: ask first.
+- Done: src/research/f1filter.ts (+5 tests), `npm run f1-filter`,
+  docs/research/f1-filter-2026-11-21.md. 3,611 F1 trades, 0.10%/leg +
+  funding; 16 inputs (ML2's 12 + 4 breakout); logistic vs GBDT, half-year
+  refit, 7-day embargo; design < 2025 picked logistic; holdout 2025+ once.
+- Holdout: taken 48%, +0.134R vs F1 +0.033R, skipped −0.058R, total 61R vs
+  32R, return/DD 1.86 vs 0.48 (C6 similar: +0.120 / −0.058). NOT PASSED:
+  gap range −0.20 … +0.58; design skipped +0.142R (filter cut 434R → 253R).
+- Not made live (pre-registered rule). Offered: paper-trade it next to C6
+  to collect independent evidence — needs owner approval.
+
+---
+
 ## 2026-11-21 — ML2 research plan (design only)
 - Asked: keep ml paper-only, C2 paper (verify the switch), keep all backups,
   plan ML2 (BTC trend, breadth, funding, fewer independent inputs), paper
