@@ -18,6 +18,22 @@ Entry format:
 
 ---
 
+## 2026-11-21 — technical audit + plan (ML intelligence directive)
+- Asked: Q&A on the ML (algorithm, training, target, timeframe); opinion on a
+  "trade management engine" proposal; then a directive: keep execution, F1
+  exits and the ML 1.5R bracket as they are; produce an audit and a plan
+  before any structural change.
+- Facts given: ML = 48 small MLPs (24 coins × long/short, 18 → 6 → 1),
+  hourly challengers, online correction per trade, 4h. ML bracket is
+  1.5 / 2.25 ATR = 1.5R (BOT_SL_ATR / BOT_TP_ATR), not 3R.
+- Early-exit check on 2,533 ML paper trades: current +0.47R/candle (win
+  65%), close at 1.2R +0.39 (67%), at 1R +0.34 (69%); 37 of 654 stopped
+  trades had reached 1.2R.
+- Done: docs/research/ml-audit-2026-11-21.md (no code changes). Since Nov 1:
+  2,744 challengers, 245 promotions (~10 per coin), 5% passed the
+  walk-forward gate.
+- Open: owner reviews the plan (steps 1–9); C2 auto-promotion decision.
+
 ## 2026-11-21 — ML "ratio down" analysis (read-only)
 - Asked: check status; owner thinks past breakouts/breakdowns made the ML
   noisy / distorted and its ratio is down; what to add or repair.
