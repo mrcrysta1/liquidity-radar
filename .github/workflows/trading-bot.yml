@@ -220,6 +220,8 @@ jobs:
           # F1X, C2 and the model paper-trade everywhere. A live strategy
           # that leaves its health bands is demoted to shadow (and promoted
           # back after 30 good shadow trades); bot_state 'strategy:<id>'.
+          # A strategy configured shadow is never promoted automatically
+          # (C2 went live that way on 2026-11-17; back to paper 2026-11-21).
           # Hybrid keeps the portfolio heat cap (2.4% per side, 3.15% total).
           BOT_STRATEGIES: 'f1:live@*;c6:shadow@*;f1x:shadow@*;c2:shadow@*;ml:shadow@*;x1:shadow@*;x2:shadow@*'
           # The model's walk-forward and training run from the tick loop, one

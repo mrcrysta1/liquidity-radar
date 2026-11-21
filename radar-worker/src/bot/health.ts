@@ -14,6 +14,9 @@
 //              drawdown passes the 99th. It is promoted back only after at
 //              least 30 new shadow trades since the demotion with a positive
 //              expectancy and a drawdown within the 95th percentile.
+//              Only a strategy configured live is ever promoted: one
+//              configured shadow (BOT_STRATEGIES) stays paper-only until the
+//              owner changes the setting, and is moved back if it went live.
 //
 // Shadow trades count in every state, so a demoted strategy can earn its way
 // back. `stats.indep` reports the same trades as independent decisions (trades
@@ -206,6 +209,11 @@ export function evaluateHealth(
     cur.since = now
   }
   if (cur.state !== slot.state && (!prev || prev.configured !== slot.state)) move(slot.state, `configured ${slot.state} (BOT_STRATEGIES)`)
+  else if (slot.state === 'shadow' && isLive(cur.state)) {
+    // Promoted by an older rule while configured shadow: back to paper.
+    move('shadow', 'configured shadow (BOT_STRATEGIES): paper only, never promoted automatically')
+    cur.segmentStart = now
+  }
   const r = all.map((o) => o.r)
   const roll30 = rollingExp(r)
   const seg = all.filter((o) => o.t > cur.segmentStart).map((o) => o.r)
@@ -228,6 +236,7 @@ export function evaluateHealth(
         else if (!warn.length && cur.state === 'probation') move('live', 'back within its bands')
       }
     } else if (
+      slot.state === 'live' &&
       seg.length >= HEALTH.minRecover &&
       segExp != null &&
       segExp > 0 &&

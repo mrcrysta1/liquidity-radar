@@ -18,6 +18,20 @@ Entry format:
 
 ---
 
+## 2026-11-21 — C2 back to paper; plan steps 1–3 (backup, skill test, inputs)
+- Asked: approved plan steps 1, 2, 3 only (no ML2, no PENDING_ENTRY, no
+  changes to ML / F1 / C2 / C6 logic); move C2 back to paper safely, keep
+  its records. "start one by one without asking me ... think about C2".
+- C2: agreed, paper. Its 2,696-trade backtest earns +0.033R and has been
+  negative every year since 2024; it went live on 35 paper trades. Cause:
+  the health rule promoted any banded strategy after 30 good paper trades,
+  including one configured shadow (C6 could have followed). Fix: only a
+  strategy configured live is promoted; one configured shadow that went live
+  is moved back ("configured shadow (BOT_STRATEGIES): paper only"). Open C2
+  trades (#122 BTC, #123 AAVE, #124 ADA shorts) keep their exchange stop and
+  C2 exit rules until they close (ruleBar manages by the trade's strategy,
+  whatever its state). Takes effect at the next bot run after merge.
+
 ## 2026-11-21 — technical audit + plan (ML intelligence directive)
 - Asked: Q&A on the ML (algorithm, training, target, timeframe); opinion on a
   "trade management engine" proposal; then a directive: keep execution, F1
