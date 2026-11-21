@@ -187,6 +187,7 @@ export const WHATS_NEW: Array<{ date: string; items: string[] }> = [
     items: [
       'Testnet bot: C2 (bear breakdown, short) is back to paper trading. It was set to paper but went live on 17 Nov by itself, because the health rule promoted any paper strategy after 30 good paper trades (it had 35, at +0.03R each). Now only a strategy you set live can be promoted; one set to paper stays paper. C2’s open trades keep their stops and exit rules until they close, and its records are kept.',
       'Testnet bot: the model’s learning is now backed up. One command saves every market’s two networks, every probability correction and the learning settings (C6’s model too) to the database and to a file, and another puts them back exactly — checked on a scratch copy first. The first backup was taken on 21 Nov, before any research on the model.',
+      'Model skill test (research, nothing changed): the model replayed over 2018–2026 on 24 markets (25,157 trades, each period trained only on earlier data, same costs and funding) loses 0.02R per trade and picks sides no better than simply following BTC’s trend or a coin flip. Its strong November paper record comes from the crash. Trades against BTC’s trend and its longs lose clearly. Report: docs/research/ml-skill-2026-11-21.md.',
     ],
   },
   {
