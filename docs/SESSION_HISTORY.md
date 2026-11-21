@@ -18,6 +18,36 @@ Entry format:
 
 ---
 
+## 2026-11-21 — ML "ratio down" analysis (read-only)
+- Asked: check status; owner thinks past breakouts/breakdowns made the ML
+  noisy / distorted and its ratio is down; what to add or repair.
+- Status: bot chain healthy (heartbeat 10:41 UTC, 5h30 runs, relay #186 in
+  place). Testnet equity 4,291. F1: no entries since Nov 11 (coins below
+  EMA300). C2 was auto-promoted shadow → live on ~Nov 17 by the health rule
+  (35 shadow trades, +0.03R/trade): real #120 +1.91R, #121 +1.60R, 3 open shorts.
+- ML paper record Nov 1–21 (2,533 closed, 118 candles, per-candle clustered):
+  - Overall win 65%, +0.49R/trade; weekly win 53% → 66% → 81%.
+  - 81% of trades short. Shorts +0.72R (win 75%), longs −0.45R (win 25%).
+  - BTC fell 81.3k → 57.9k (−29%) in the same three weeks: the result is the
+    crash, not proven skill. Per candle most coins take the same side
+    (mean |net side| 0.64) → 24 trades ≈ one bet on market direction.
+  - Losing days = bounce days: Nov 2–3 (win 28–30%), Nov 15–16 (40–51%);
+    newest open trades (Nov 21 00:00/04:00) 32 of 45 underwater.
+  - Trades with the last 12-bar move +0.47R/candle; against it +0.01 (no edge
+    on reversals). Market moves before vs after: corr −0.22 (4h mean-reverts).
+  - Shock candles (|mean ret12| > 3 ATR or ATR rank > 0.85): win 53% vs 66%
+    (9 candles, weak evidence).
+  - Calibration drifts with the trend: predicted p 0.49 → 0.65 by week, actual
+    0.46 → 0.81 — learns "short wins" from its own recent shadow trades.
+- Causes found in code: features are the coin's own chart only (no BTC,
+  breadth, EMA200/300, funding, open interest); regime label is EMA20/50
+  only; challengers train on bars plus the model's own shadow outcomes (the
+  same recent weeks counted twice); no per-candle same-side cap.
+- Open (owner to choose, nothing changed): BTC/breadth/long-trend/funding
+  features; stop double-counting shadow outcomes; same-side cap per candle;
+  skill-vs-"short everything" baseline; full-cycle walk-forward 2022–2026;
+  keep or revert C2 auto-promotion.
+
 ## 2026-11-12 — "my bot is not running" diagnosis
 - Asked: diagnose why the bot is not running.
 - Found (04:41 UTC): the bot IS running (run 43151056475 since 03:52,
