@@ -50,7 +50,18 @@ Entry format:
   coin flip +0.014 (−0.012 … +0.040): no measurable skill. Against BTC's
   trend (55% of trades) −0.051 (below zero); longs −0.041 (below zero). Last
   30 days +0.256 = the crash (vs BTC rule +0.076, range −0.16 … +0.31).
-  Trend rules alone ≈ 0 with this bracket (BTC EMA200 +0.002).
+  Trend rules alone ≈ 0 with this bracket (BTC EMA200 +0.002). PR #191.
+- Step 3 (inputs): `npm run ml-inputs`, src/research/inputs.ts,
+  docs/research/ml-inputs-2026-11-21.md. 1,269 walk-forward test blocks
+  (same folds/seeds as the gate), 628k labelled outcomes. Model log loss
+  0.698 vs constant base rate 0.687 (−0.011, −0.013 … −0.009; better in 31%
+  of blocks; every period and regime) → the net is worse than no inputs.
+  24 input pairs |r| ≥ 0.7 → ~3 signals. Only steady signal: reversal (trend
+  inputs IC long −0.08 … −0.11, 71–76% same sign). No use: hour_sin/cos,
+  taker_buy_share (1 bar), atr_rank_200 since 2023. Last 30 days trend inputs
+  −0.8 … −1.0 SD from history.
+- Open: owner reviews steps 1–3; next steps (4–9, ML2) wait for approval.
+  C2 → paper takes effect at the 13:46 UTC hand-over (check strategy:c2).
 
 ## 2026-11-21 — technical audit + plan (ML intelligence directive)
 - Asked: Q&A on the ML (algorithm, training, target, timeframe); opinion on a
