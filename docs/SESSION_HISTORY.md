@@ -41,7 +41,16 @@ Entry format:
   digest 8e98679c…; local copy radar-worker/backups/ (not in git). Restore
   dry runs from the file and from the DB copy: every network and calibration
   row matches. Model rows are never deleted (3,446 kept); calibration is
-  overwritten per trade, so the snapshot is its only copy.
+  overwritten per trade, so the snapshot is its only copy. PR #190 merged.
+- Step 2 (skill): `npm run ml-skill`, src/research/skill.ts,
+  docs/research/ml-skill-2026-11-21.md. Walk-forward model 2018-07 → 2026-11,
+  24 markets, 25,157 trades, own bracket, bot costs + real funding,
+  clustered ranges: −0.022R/trade (−0.047 … +0.004), PF 0.96, 6 of 9 years
+  negative. Same bars vs follow-BTC EMA(50) −0.017 (−0.064 … +0.030), vs
+  coin flip +0.014 (−0.012 … +0.040): no measurable skill. Against BTC's
+  trend (55% of trades) −0.051 (below zero); longs −0.041 (below zero). Last
+  30 days +0.256 = the crash (vs BTC rule +0.076, range −0.16 … +0.31).
+  Trend rules alone ≈ 0 with this bracket (BTC EMA200 +0.002).
 
 ## 2026-11-21 — technical audit + plan (ML intelligence directive)
 - Asked: Q&A on the ML (algorithm, training, target, timeframe); opinion on a
