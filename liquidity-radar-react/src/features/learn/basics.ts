@@ -185,6 +185,7 @@ export const WHATS_NEW: Array<{ date: string; items: string[] }> = [
   {
     date: '2026-11-23',
     items: [
+      'The old model (ML, the 48 small networks that picked long or short for a 2-day trade) no longer paper-trades: over 2018–2026 it showed no skill, and its strong November came from the crash. Its networks and probability corrections are saved (two backups) and it can be switched back on. Machine learning now works where it helped: judging F1’s breakouts (F1F and C6).',
       'New paper strategy F1F: F1’s breakouts, taken only when a model reading the whole market (BTC’s trend, how many coins are rising, the coin against BTC, funding, the breakout itself) rates them better than usual. It never places real orders and is never promoted automatically; its paper trades show in Self Learning → Strategies next to C6 so the two filters can be compared live. Background: docs/research/f1-filter-2026-11-21.md.',
     ],
   },
