@@ -223,7 +223,8 @@ jobs:
           # A strategy configured shadow is never promoted automatically
           # (C2 went live that way on 2026-11-17; back to paper 2026-11-21).
           # Hybrid keeps the portfolio heat cap (2.4% per side, 3.15% total).
-          BOT_STRATEGIES: 'f1:live@*;c6:shadow@*;f1x:shadow@*;c2:shadow@*;ml:shadow@*;x1:shadow@*;x2:shadow@*'
+          # F1F (2026-11-23): F1 + market-input logistic filter, paper only.
+          BOT_STRATEGIES: 'f1:live@*;c6:shadow@*;f1f:shadow@*;f1x:shadow@*;c2:shadow@*;ml:shadow@*;x1:shadow@*;x2:shadow@*'
           # The model's walk-forward and training run from the tick loop, one
           # heavy job per minute across all markets, not inside startup.
           BOT_LEARN_BACKGROUND: '1'

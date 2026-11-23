@@ -24,6 +24,7 @@ import type { TraderConfig } from './bot/trader.ts'
 import { STRATEGIES, parseStrategies, refreshHealth } from './bot/strategies.ts'
 import type { StrategySlot } from './bot/strategies.ts'
 import { c6Tick } from './bot/c6.ts'
+import { f1fTick } from './bot/f1f.ts'
 import { contextTick } from './context/collect.ts'
 import { newsTick } from './news/collect.ts'
 import { newsAlertTick } from './news/alerts.ts'
@@ -81,6 +82,8 @@ const HANDOFF = RUN_MS > 0
 const INTERVAL = INTERVAL_MS[env.BOT_INTERVAL || ''] ? (env.BOT_INTERVAL as string) : DEFAULT_TRADER.interval
 // C6 (4h) trains its model only when it runs.
 const C6_ON = !!SLOTS?.some((s) => s.id === 'c6') && STRATEGIES.c6.kind === 'rule' && STRATEGIES.c6.interval === INTERVAL
+// F1F (4h, paper only) likewise.
+const F1F_ON = !!SLOTS?.some((s) => s.id === 'f1f') && STRATEGIES.f1f.kind === 'rule' && STRATEGIES.f1f.interval === INTERVAL
 // BOT_MIN_EV: the expected-value bar (R, after fees) a side must clear. "any"
 // = no extra bar in the walk-forward test. Live entries always also need a
 // calibrated EV > 0 (setup rules); ideas below the bar become shadow trades.
@@ -301,6 +304,9 @@ async function tick(): Promise<void> {
     await c6Tick(store, SYMBOLS, { costs: cfg.wf.costs, interval: cfg.interval, stepMs: INTERVAL_MS[cfg.interval], heavy: heavyJobs }).catch((e) =>
       console.error('c6', (e as Error).message),
     )
+  // F1F's model (bot/f1f.ts): the same, on the heavyJobs spacing.
+  if (F1F_ON)
+    await f1fTick(store, SYMBOLS, { stepMs: INTERVAL_MS[cfg.interval], heavy: heavyJobs }).catch((e) => console.error('f1f', (e as Error).message))
   // Retry any market whose setup failed earlier (each on its own backoff).
   if (!ONCE && setupQueue.pending.length) await setupQueue.run(now)
   // Due bars for every market at once (6 requests at a time), not one market after another inside the loop.

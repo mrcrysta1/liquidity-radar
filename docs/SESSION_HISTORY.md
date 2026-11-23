@@ -18,6 +18,20 @@ Entry format:
 
 ---
 
+## 2026-11-23 — F1F paper strategy; owner's ML "fix" prompt reviewed
+- Asked: "yes start paper trading the filter"; also fix the ML (noisy,
+  overfitting, no regime understanding) — pasted an 8-point prompt.
+- Done: src/bot/f1f.ts + F1F_STRATEGY (strategies.ts) + f1fTick (bot.ts) +
+  `f1f:shadow@*` in BOT_STRATEGIES. Logistic filter on 16 inputs (research
+  ml2.ts + f1filter.ts), label net R > 0 at 0.10%/leg + funding, take if
+  p ≥ training win rate, retrain 182 days, 7-day embargo, ≥ 300 trades,
+  bot_state 'f1f:model'. Live breadth reads the other markets' last 400
+  bars on a signal. No health bands → never promoted. Tests: 4 new (incl.
+  live p = research p on the same bars); worker 240/240.
+- ML prompt: reviewed point by point (see the chat reply); no ML code
+  changed — retiring ml's paper trading or slowing its retraining offered,
+  waiting for the owner.
+
 ## 2026-11-21 — option 2: ML filter on F1 (research)
 - Asked: "do option 2, ML as a filter on F1 … best possible … live my bot …
   fully advanced that can learn and adapt"; more enhancements: ask first.

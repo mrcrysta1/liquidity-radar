@@ -1,6 +1,6 @@
 // F1 trade filter research (option 2): a model that only says "take" or
-// "skip" to F1's own entries, as C6 does. Research only — the bot does not
-// import this file. Tested in test/research-f1filter.test.ts; run by
+// "skip" to F1's own entries, as C6 does. f1Inputs is also used live by the
+// paper strategy F1F (src/bot/f1f.ts). Tested in test/research-f1filter.test.ts; run by
 // scripts/f1-filter.ts.
 //
 //   f1Inputs     the extra inputs about the breakout itself, at the signal bar.
