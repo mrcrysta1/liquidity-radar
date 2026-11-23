@@ -18,6 +18,18 @@ Entry format:
 
 ---
 
+## 2026-11-23 — ML retired from paper trading
+- Asked: "1" (retire the old ML from paper trading).
+- Done: backup #2 "ml retired from paper trading (2026-11-23)" 02:39 UTC
+  (62 networks, 145 corrections, 64 state keys, digest 9d7cb511…, verified;
+  local file radar-worker/backups/models-2026-11-23T02-39-32-536Z.json).
+  `ml:shadow@*` removed from BOT_STRATEGIES → no new ML paper trades, no
+  hourly challengers / walk-forward / online calibration. Open ML paper
+  trades still resolve (shadowTick resolves every open shadow). F1 live, C6 /
+  F1F / F1X / C2 / X1 / X2 paper unchanged. Restart = add 'ml:shadow@*'.
+
+---
+
 ## 2026-11-23 — F1F paper strategy; owner's ML "fix" prompt reviewed
 - Asked: "yes start paper trading the filter"; also fix the ML (noisy,
   overfitting, no regime understanding) — pasted an 8-point prompt.

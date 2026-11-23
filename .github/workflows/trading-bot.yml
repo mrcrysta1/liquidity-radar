@@ -39,7 +39,9 @@
 #       breaks the 20-bar low; 3 ATR stop, 4 ATR trail; exit above the 10-bar
 #       high or EMA(300)). Thin edge (dev +0.047R, PF 1.15, t = 1.08): paper
 #       only; bands p5 -0.38R / p1 -0.47R, drawdown p95 26.1R / p99 31.3R.
-#   ml  shadow, all 24 markets (6 bars a day each: ~144 shadow decisions a
+#   ml  RETIRED from paper trading 2026-11-23 (no measurable skill over
+#       2018-2026; networks kept in bot_backups #1/#2). When enabled it ran
+#       shadow on all 24 markets (6 bars a day each: ~144 shadow decisions a
 #       day of learning data). Its walk-forward (~4-7 s per market) and
 #       training are heavy, so with BOT_LEARN_BACKGROUND they never run inside
 #       startup: the tick loop runs them one at a time, at least 60 s apart
@@ -224,7 +226,11 @@ jobs:
           # (C2 went live that way on 2026-11-17; back to paper 2026-11-21).
           # Hybrid keeps the portfolio heat cap (2.4% per side, 3.15% total).
           # F1F (2026-11-23): F1 + market-input logistic filter, paper only.
-          BOT_STRATEGIES: 'f1:live@*;c6:shadow@*;f1f:shadow@*;f1x:shadow@*;c2:shadow@*;ml:shadow@*;x1:shadow@*;x2:shadow@*'
+          # The model ('ml') was retired from paper trading on 2026-11-23 (no
+          # skill 2018-2026, docs/research/ml-skill-2026-11-21.md); its networks
+          # and corrections are kept (bot_backups #1, #2). Add 'ml:shadow@*'
+          # back to restart it.
+          BOT_STRATEGIES: 'f1:live@*;c6:shadow@*;f1f:shadow@*;f1x:shadow@*;c2:shadow@*;x1:shadow@*;x2:shadow@*'
           # The model's walk-forward and training run from the tick loop, one
           # heavy job per minute across all markets, not inside startup.
           BOT_LEARN_BACKGROUND: '1'

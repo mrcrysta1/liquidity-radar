@@ -179,7 +179,7 @@ test('BOT_STRATEGIES: parsing, the BOT_STRATEGY=trend alias, and the workflow se
     { id: 'f1f', state: 'shadow' },
     { id: 'f1x', state: 'shadow' },
     { id: 'c2', state: 'shadow' },
-    { id: 'ml', state: 'shadow' },
+    // The model ('ml') retired from paper trading on 2026-11-23.
     // Experimental (src/bot/experimental.ts): paper only, after every established strategy.
     { id: 'x1', state: 'shadow' },
     { id: 'x2', state: 'shadow' },
@@ -188,12 +188,10 @@ test('BOT_STRATEGIES: parsing, the BOT_STRATEGY=trend alias, and the workflow se
   assert.match(wf, /^\s*BOT_LEARN_BACKGROUND:\s*'1'\s*$/m)
   assert.ok(F1_HEALTH.roll30P1 < F1_HEALTH.roll30P5 && F1_HEALTH.ddP95 < F1_HEALTH.ddP99)
   // Which strategy runs where.
-  const [f1, c6, , f1x, , ml] = parseStrategies(m![1].replace(/['"]/g, ''))!
+  const [f1, c6, , f1x] = parseStrategies(m![1].replace(/['"]/g, ''))!
   assert.equal(slotRuns(f1, 'XRPUSDT'), true)
   assert.equal(slotRuns(c6, 'XRPUSDT'), true)
   assert.equal(slotRuns(f1x, 'XRPUSDT'), true)
-  assert.equal(slotRuns(ml, 'XRPUSDT'), true, 'the model paper-trades all 24 markets')
-  assert.equal(slotRuns(ml, 'SOLUSDT'), true)
 })
 
 test('probation halves the risk per trade; live and shadow keep it', () => {
