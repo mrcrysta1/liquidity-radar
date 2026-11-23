@@ -1,6 +1,6 @@
 // ML2 research (docs/research/ml2-plan-2026-11-21.md, stages A and B): the 12
-// inputs and the logistic-regression candidate. Research only — the bot does
-// not import this file. Tested in test/research-ml2.test.ts.
+// inputs and the logistic-regression candidate. Also used live by the paper
+// strategy F1F (src/bot/f1f.ts). Tested in test/research-ml2.test.ts.
 //
 // Every input at bar i uses only what was known at that bar's close
 // (t_i + step): the coin's bars 0..i, BTC's and the other coins' bars that

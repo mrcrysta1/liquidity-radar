@@ -407,9 +407,9 @@ export interface StrategyMetrics extends Breakdown<RuleReport> {
   id: string
 }
 
-/** One entry per rule strategy, most trades first; F1, C6, F1X, C2 lead when present. */
+/** One entry per rule strategy, most trades first; F1, C6, F1F, F1X, C2 lead when present. */
 export function strategyMetrics(rows: RuleRow[]): StrategyMetrics[] {
-  const order = ['f1', 'c6', 'f1x', 'c2']
+  const order = ['f1', 'c6', 'f1f', 'f1x', 'c2']
   const ids = [...new Set(rows.map((r) => r.strategy))].sort((a, b) => {
     const ia = order.indexOf(a)
     const ib = order.indexOf(b)

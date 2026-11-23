@@ -183,6 +183,12 @@ export const TECH: LearnSection = {
 /** Newest first. Add a line here whenever a feature ships. */
 export const WHATS_NEW: Array<{ date: string; items: string[] }> = [
   {
+    date: '2026-11-23',
+    items: [
+      'New paper strategy F1F: F1’s breakouts, taken only when a model reading the whole market (BTC’s trend, how many coins are rising, the coin against BTC, funding, the breakout itself) rates them better than usual. It never places real orders and is never promoted automatically; its paper trades show in Self Learning → Strategies next to C6 so the two filters can be compared live. Background: docs/research/f1-filter-2026-11-21.md.',
+    ],
+  },
+  {
     date: '2026-11-21',
     items: [
       'Testnet bot: C2 (bear breakdown, short) is back to paper trading. It was set to paper but went live on 17 Nov by itself, because the health rule promoted any paper strategy after 30 good paper trades (it had 35, at +0.03R each). Now only a strategy you set live can be promoted; one set to paper stays paper. C2’s open trades keep their stops and exit rules until they close, and its records are kept.',

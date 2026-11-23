@@ -32,6 +32,7 @@ import { evaluateHealth } from './health.ts'
 import type { HealthBands, HealthRecord, StrategyState } from './health.ts'
 import type { BotStore } from './store.ts'
 import { c6Decide } from './c6.ts'
+import { f1fDecide } from './f1f.ts'
 import { experimental } from './experimental.ts'
 
 /** An entry on the close of the signal bar. */
@@ -347,10 +348,33 @@ export const C6_STRATEGY: RuleStrategy = {
   },
 }
 
+// ---- F1F (experimental) ---------------------------------------------------------
+
+/**
+ * F1's entries, taken only when a logistic model on market inputs (BTC,
+ * breadth, the coin vs BTC, funding, the breakout itself) rates the trade more
+ * likely than usual to win (f1f.ts; docs/research/f1-filter-2026-11-21.md).
+ * Research holdout 2025–2026: taken +0.134R vs F1 +0.033R, skipped −0.058R,
+ * not statistically proven. Paper only: no health bands, never promoted.
+ */
+export const F1F_STRATEGY: RuleStrategy = {
+  ...F1_STRATEGY,
+  id: 'f1f',
+  name: 'F1F F1 + market filter (4h, long, experimental)',
+  refs: ['BTCUSDT'],
+  health: undefined,
+  describe: (b, i) => F1_STRATEGY.describe(b, i).replace(/^F1:/, 'F1F (F1 entry):'),
+  async gate(x) {
+    const d = await f1fDecide(x.store, x.symbol, x.b, x.i, x.ref.BTCUSDT, x.stepMs)
+    const signal = d.take ? { ...x.signal, features: { ...x.signal.features, f1fP: d.p!, f1fBase: d.base! } } : null
+    return { signal, note: d.note, quiet: d.quiet }
+  },
+}
+
 export const ML_STRATEGY: ModelStrategy = { kind: 'model', id: 'ml', name: 'Model (MLP, bracket)' }
 
 /** Every strategy the bot knows, by id; x1 / x2 are the experimental ones (experimental.ts, shadow only, no bands). */
-export const STRATEGIES: Record<string, Strategy> = { f1: F1_STRATEGY, c6: C6_STRATEGY, f1x: F1X_STRATEGY, c2: C2_STRATEGY, ml: ML_STRATEGY, ...experimental(F1_STRATEGY) }
+export const STRATEGIES: Record<string, Strategy> = { f1: F1_STRATEGY, c6: C6_STRATEGY, f1f: F1F_STRATEGY, f1x: F1X_STRATEGY, c2: C2_STRATEGY, ml: ML_STRATEGY, ...experimental(F1_STRATEGY) }
 
 /** The rule strategy behind an open trend-mode trade (rows from before 008_bot_strategies.sql have none: F1). */
 export function ruleStrategy(id: string | null | undefined): RuleStrategy | null {
